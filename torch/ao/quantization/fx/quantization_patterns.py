@@ -47,7 +47,7 @@ from .utils import (
 
 from ..qconfig import QConfigAny
 
-from abc import ABC, abstractmethod
+from abc import ABC
 import operator
 import warnings
 
@@ -169,8 +169,6 @@ class QuantizeHandler(ABC):
         """
         return True
 
-
-    @abstractmethod
     def convert(self,
                 node: Node,
                 qconfig: QConfigAny,
@@ -876,7 +874,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
         activation_int8_quantized = activation_is_int8_quantized(qconfig)
         activation_statically_quantized = activation_is_statically_quantized(qconfig)
         weight_dtype = dtypes[1]
-        # TODO: reference_model option for linear module
         if self.linear_node.op == 'call_module':
 
             output_activation_post_process = \
@@ -885,7 +882,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
             # note that relu should already be fused into linear modul in the fusion step
             assert self.relu_node is None, 'linear module and relu fusion is not executed, ' \
                 'please make sure to run fusion before prepare'
-            if is_reference:
+            # we'll always produce reference pattern for torch.nn.Linear,
+            # will remove the else branch after we migrated all use cases
+            if is_reference or \
+               type(self.linear) in [torch.nn.Linear] and dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
@@ -920,7 +920,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # we can have a map from module to reference module
                 # and allow user to register new ones
                 qlinear_cls = get_static_quant_module_class(
-                    type(float_linear), is_reference=is_reference)
+                    type(float_linear), is_reference=True)
                 ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
 
                 # if the parent is a fused linear (Sequential), we can replace the first
@@ -945,6 +945,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         node_name_to_scope,
                         is_input=False)
                 return op_out
+            # non-reference option
             else:
                 # 1. attach output activation post process to linear module
                 if output_activation_post_process:
@@ -1609,15 +1610,12 @@ class CustomModuleQuantizeHandler(QuantizeHandler):
         return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 @register_quant_pattern(torch.nn.Identity)
-@register_quant_pattern(torch.chunk)
 @register_quant_pattern(torch.transpose)
 @register_quant_pattern(torch.repeat_interleave)
 @register_quant_pattern(torch.sort)
 @register_quant_pattern(torch.squeeze)
 @register_quant_pattern(torch.stack)
 @register_quant_pattern(torch.unsqueeze)
-@register_quant_pattern(operator.getitem)
-@register_quant_pattern('chunk')
 @register_quant_pattern('contiguous')
 @register_quant_pattern('detach')
 @register_quant_pattern('detach_')
@@ -1662,7 +1660,31 @@ class GeneralTensorShapeOpQuantizeHandler(QuantizeHandler):
                 load_arg: Callable,
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
-        return quantized_graph.node_copy(node, load_arg(quantized=None))
+        if is_reference:
+            # when activation dtype is torch.float, the node does not require
+            # observation
+            # e.g. dynamic quantization or weight_only quantization
+            act_dtype = activation_dtype(qconfig)
+            if act_dtype == torch.float:
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return op_out
+            else:
+                activation_post_process = \
+                    self._maybe_get_last_node_only_observer(modules)
+                assert activation_post_process is not None
+                # TODO: remove special case for operator.getitem
+                # make sure the input is quantized to act_dtype if it's not operator.getitem
+                if node.target != operator.getitem:
+                    load_arg(quantized={0: act_dtype})(node.args)
+                args = list(load_arg(quantized=torch.float)(node.args))
+                kwargs = load_arg(quantized=torch.float)(node.kwargs)
+                op_out = quantized_graph.node_copy(node, load_arg(quantized=torch.float))
+                return quantize_node(
+                    op_out,
+                    activation_post_process,
+                    node, modules, quantized_graph, node_name_to_scope, is_input=False)
+        else:
+            return quantized_graph.node_copy(node, load_arg(quantized=None))
 
 class StandaloneModuleQuantizeHandler(QuantizeHandler):
     """ Converts an observed standalone module to quantized standalone module
@@ -1707,13 +1729,6 @@ class ConvReLUQuantizeHandlerNew(QuantizeHandler):
             self.conv = modules[str(self.conv_node.target)]
         elif node.op == "call_function":
             self.conv = node.target  # type: ignore[assignment]
-
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
 
     def is_output_quantized(self, qconfig):
         return False
@@ -1861,13 +1876,6 @@ class LinearReLUQuantizeHandlerNew(QuantizeHandler):
         self.linear_node = node
         if node.op == 'call_module':
             self.linear = modules[str(self.linear_node.target)]
-
-    def should_insert_observer_for_output(
-        self,
-        qconfig: Any,
-        model_is_training: bool,
-    ) -> bool:
-        return False
 
     def is_output_quantized(self, qconfig):
         return False

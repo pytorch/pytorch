@@ -1,3 +1,5 @@
+# Owner(s): ["module: serialization"]
+
 import torch
 import unittest
 import io

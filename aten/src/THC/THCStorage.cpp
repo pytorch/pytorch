@@ -4,18 +4,10 @@
 #include <TH/THHalf.h>
 
 #include <new>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <THC/generic/THCStorage.cpp>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCStorage.cpp>
-#include <THC/THCGenerateComplexTypes.h>
-
-#include <THC/generic/THCStorage.cpp>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCStorage.cpp>
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THC/THCGenerateByteType.h>
 
 #include <c10/util/intrusive_ptr.h>
 #include <ATen/native/cuda/Resize.h>

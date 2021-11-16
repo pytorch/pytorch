@@ -2,6 +2,8 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/math_compat.h>
 
 #include <algorithm>
@@ -58,7 +60,7 @@ static void adaptive_avg_pool_single_out_frame(
     int64_t istrideH,
     int64_t istrideW) {
   at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
-    for (auto c = start; c < end; c++) {
+    for (const auto c : c10::irange(start, end)) {
       /* loop over output */
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int64_t od, oh, ow;
@@ -126,7 +128,7 @@ template <int64_t DIM>
 std::vector<int64_t> get_output_shape(
     const Tensor& input,
     IntArrayRef output_size) {
-  for (int64_t i = 1; i < input.dim(); i++) {
+  for (const auto i : c10::irange(1, input.dim())) {
     // Allow for empty batch.
     TORCH_CHECK(
         input.size(i) > 0,
