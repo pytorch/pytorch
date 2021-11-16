@@ -9,8 +9,6 @@
 #define THCudaStorage                       THCStorage
 #define THCudaByteStorage                   THCStorage
 
-TORCH_CUDA_CU_API int THCStorage_(elementSize)(THCState* state);
-
 /* slow access -- checks everything */
 TORCH_CUDA_CU_API void THCStorage_(
     set)(THCState* state, THCStorage*, ptrdiff_t, scalar_t);

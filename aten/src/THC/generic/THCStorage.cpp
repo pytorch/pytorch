@@ -6,11 +6,6 @@
 #include <c10/util/typeid.h>
 
 
-int THCStorage_(elementSize)(THCState *state)
-{
-  return sizeof(scalar_t);
-}
-
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
 {
   THArgCheck(
