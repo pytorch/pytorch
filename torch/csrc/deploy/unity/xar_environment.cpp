@@ -2,13 +2,15 @@
 #include <dlfcn.h>
 #include <fmt/format.h>
 #include <sys/stat.h>
+#include <torch/csrc/deploy/elf_file.h>
 #include <torch/csrc/deploy/unity/xar_environment.h>
 
 namespace torch {
 namespace deploy {
 
-XarEnvironment::XarEnvironment(std::string pythonAppDir)
-    : pythonAppDir_(std::move(pythonAppDir)),
+XarEnvironment::XarEnvironment(std::string exePath, std::string pythonAppDir)
+    : exePath_(std::move(exePath)),
+      pythonAppDir_(std::move(pythonAppDir)),
       pythonAppRoot_(pythonAppDir_ + "/python_app_root") {
   setupPythonApp();
   preloadSharedLibraries();
@@ -46,29 +48,59 @@ bool _dirExists(const std::string& dirPath) {
   }
 }
 
-extern "C" char _binary_python_app_start[];
-extern "C" char _binary_python_app_end[];
+bool _fileExists(const std::string& filePath) {
+  FILE* fp = fopen(filePath.c_str(), "rb");
+  if (fp) {
+    fclose(fp);
+    return true;
+  } else {
+    return false;
+  }
+}
 
 void XarEnvironment::setupPythonApp() {
   TORCH_CHECK(
       !alreadySetupPythonApp_,
       "Already setup the python application. It should only been done once!");
 
-  auto pythonAppPkgSize = _binary_python_app_end - _binary_python_app_start;
+  // must match the section name specified in unity.bzl
+  constexpr const char* SECTION_NAME = ".torch_deploy_payload.unity";
+  ElfFile elfFile(exePath_.c_str());
+  auto payloadSection = elfFile.findSection(SECTION_NAME);
+  TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
+
+  const char* pythonAppPkgStart = payloadSection->start;
+  auto pythonAppPkgSize = payloadSection->len;
   LOG(INFO) << "Embedded binary size " << pythonAppPkgSize;
 
   /*
-   * NOTE, we need set /tmp/torch_deploy_python_app/python_app_root as
-   * LD_LIBRARY_PATH when running this program. Another prerequisite is the path
-   * must exist before running this program. Otherwise the dynamic loader will
-   * remove the path and we get an empty LD_LIBRARY_PATH! That will cause
-   * dynamic library not found issue.
+   * [NOTE about LD_LIBRARY_PATH]
+   * Some python applications uses python extensions that depends on shared
+   * libraries in the XAR file. E.g., scipy depends on MKL libraries shipped
+   * with the XAR. For those cases, we need ensure 2 things before running the
+   * executable:
+   * 1, make sure the path /tmp/torch_deploy_python_app/python_app_root exists.
+   * 2, add /tmp/torch_deploy_python_app/python_app_root to the LD_LIBRRY_PATH.
+   *
+   * If either condition is not met, we fail to load the dependent shared
+   * libraries in the XAR file.
+   *
+   * There are simple cases though. If the use case only relies on the libraries
+   * built into torch::deploy like torch, numpy, pyyaml etc., or if the
+   * extensions used does not rely on extra shared libraries in the XAR file,
+   * then neither of the prerequisites need to be met.
+   *
+   * We used to fatal if the path is not preexisted. But to make (stress)
+   * unit-test and other simple uses cases easier, we change it to a warning. If
+   * you encounter shared library not found issue, it's likely that your use
+   * case are the aforementioned complex case, make sure the two prerequisites
+   * are met and run again.
    */
-  TORCH_CHECK(
-      _dirExists(pythonAppRoot_),
-      fmt::format(
-          "The python app root {} must exist before running the binary. Otherwise there will be issues to find dynamic libraries. Please create the directory and rerun",
-          pythonAppRoot_));
+  LOG_IF(WARNING, !_dirExists(pythonAppRoot_))
+      << "The python app root " << pythonAppRoot_ << " does not exists before "
+      << " running the executable. If you encounter shared libraries not found "
+      << " issue, try create the directory and run the executable again. Check "
+      << "the note in the code for more details";
 
   /*
    * NOTE: we remove the pythonAppDir_ below. Anything under it will be gone.
@@ -85,7 +117,7 @@ void XarEnvironment::setupPythonApp() {
   std::string pythonAppArchive = std::string(pythonAppDir_) + "/python_app.xar";
   auto fp = fopen(pythonAppArchive.c_str(), "wb");
   TORCH_CHECK(fp != nullptr, "Fail to create file: ", strerror(errno));
-  auto written = fwrite(_binary_python_app_start, 1, pythonAppPkgSize, fp);
+  auto written = fwrite(pythonAppPkgStart, 1, pythonAppPkgSize, fp);
   TORCH_CHECK(written == pythonAppPkgSize, "Expected written == size");
   fclose(fp);
 
@@ -105,6 +137,13 @@ void XarEnvironment::preloadSharedLibraries() {
   std::array<const char*, 3> preloadList = {
       "libmkl_core.so", "libmkl_intel_thread.so", nullptr};
   for (int i = 0; preloadList[i]; ++i) {
+    // only preload the library if it exists in pythonAppRoot_
+    auto path = pythonAppRoot_ + "/" + preloadList[i];
+    if (!_fileExists(path)) {
+      LOG(INFO) << "The preload library " << preloadList[i]
+                << " does not exist in the python app root, skip loading it";
+      continue;
+    }
     TORCH_CHECK(
         dlopen(preloadList[i], RTLD_GLOBAL | RTLD_LAZY) != nullptr,
         "Fail to open the shared library ",

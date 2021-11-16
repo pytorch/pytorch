@@ -96,10 +96,19 @@ class TRTModule(torch.nn.Module):
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
             for idx in self.output_binding_indices_in_order
         ]
+        self.output_shapes = [
+            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
+            for idx in self.output_binding_indices_in_order
+        ]
         self.hidden_output_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
             for idx in self.hidden_output_binding_indices_in_order
         ]
+        self.hidden_output_shapes = [
+            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
+            for idx in self.hidden_output_binding_indices_in_order
+        ]
+
 
     def _check_initialized(self):
         if not self.initialized:
@@ -172,7 +181,7 @@ class TRTModule(torch.nn.Module):
 
                     idx = self.input_binding_indices_in_order[i]
                     bindings[idx] = contiguous_inputs[i].data_ptr()
-                    # print(contiguous_inputs[i].shape)
+
                     if not self.engine.has_implicit_batch_dimension:
                         self.context.set_binding_shape(
                             idx, tuple(contiguous_inputs[i].shape)
@@ -186,11 +195,10 @@ class TRTModule(torch.nn.Module):
             with torch.autograd.profiler.record_function("TRTModule:ProcessOutputs"):
                 # create output tensors
                 outputs: List[torch.Tensor] = []
+
                 for i, idx in enumerate(self.output_binding_indices_in_order):
                     if self.engine.has_implicit_batch_dimension:
-                        shape = (batch_size,) + tuple(
-                            self.engine.get_binding_shape(idx)
-                        )
+                        shape = (batch_size,) + self.output_shapes[i]
                     else:
                         shape = tuple(self.context.get_binding_shape(idx))
 
@@ -201,11 +209,10 @@ class TRTModule(torch.nn.Module):
                     )
                     outputs.append(output)
                     bindings[idx] = output.data_ptr()
+
                 for i, idx in enumerate(self.hidden_output_binding_indices_in_order):
                     if self.engine.has_implicit_batch_dimension:
-                        shape = (batch_size,) + tuple(
-                            self.engine.get_binding_shape(idx)
-                        )
+                        shape = (batch_size,) + self.hidden_output_shapes[i]
                     else:
                         shape = tuple(self.context.get_binding_shape(idx))
 
@@ -257,7 +264,7 @@ NO_IMPLICIT_BATCH_DIM_SUPPORT = {}
 NO_EXPLICIT_BATCH_DIM_SUPPORT = {}
 
 
-def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False):
+def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False, enabled=True):
     def register_converter(converter):
         CONVERTERS[key] = converter
         if no_implicit_batch_dim:
@@ -266,7 +273,13 @@ def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=F
             NO_EXPLICIT_BATCH_DIM_SUPPORT[key] = converter
         return converter
 
-    return register_converter
+    def pass_converter(converter):
+        return converter
+
+    if enabled:
+        return register_converter
+    else:
+        return pass_converter
 
 
 class InputTensorSpec(NamedTuple):
