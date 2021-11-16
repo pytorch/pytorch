@@ -42,6 +42,18 @@ class TORCH_CUDA_CU_API ComputeAtMap {
   // IterDomains that could have different parallelization strategies. We also
   // propagate the parallel strategy in parallel mode so all mapped IDs that
   // must have the same parallel type, do.
+  //
+  // MappingMode::PARALLEL
+  //   Only maps leaf axes to left of compute at
+  //   Forward broadcast axes in replay
+  // MappingMode::LOOP
+  //   Forward broadcast axes in replay
+  //   Map all iteration domains
+  //   Always contain root mappings (otherwise they could have been forwarded in
+  //   broadcast)
+  // MappingMode::INDEX
+  //   Don't map any broadcast axes to non-broadcast axes
+  //   Do not forward through any broadcast IDs
   enum class MappingMode { PARALLEL, LOOP, INDEX };
 
   ComputeAtMap() = default;
