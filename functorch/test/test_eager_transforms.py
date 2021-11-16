@@ -1059,6 +1059,18 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_strict_mode(self, device):
+        y = torch.randn(2, 3, device=device)
+
+        def f(x):
+            return x, y
+
+        x = torch.randn(2, 3, device=device)
+        tx = torch.randn(2, 3, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "strict"):
+            jvp(f, (x,), (tx,), strict=True)
+
     def test_multiple_outputs(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
