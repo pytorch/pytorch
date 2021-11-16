@@ -44,6 +44,12 @@ OpConvertInfo = Tuple[
     Optional[str],
     # additional kwargs, such as output scale and zero_point
     Dict[str, Any],
+    # any_arg_quant_or_dequant_needed, if False then we can skip looking at
+    # arg_quant_infos and arg_dequant_infos, for performance
+    bool,
+    # any_arg_kwarg_modification_needed, if False then we can return original
+    # args and kwargs, for performance
+    bool,
 ]
 
 # TODO(future PR): maybe better name
@@ -340,46 +346,52 @@ class AutoQuantizationState(torch.nn.Module):
         #   to
         # q.conv2d(input, packed_params, scale, zero_point)
         orig_op = op
-        maybe_new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
-            self.get_op_convert_info(op)
+        maybe_new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, \
+            additional_kwargs, any_arg_quant_or_dequant_needed, \
+            any_arg_kwarg_modification_needed = self.get_op_convert_info(op)
         if maybe_new_op is not None:
             op = maybe_new_op
+        if not any_arg_kwarg_modification_needed:
+            return op, args, kwargs
         # print(op, arg_quant_infos, packed_param_name, additional_kwargs)
 
         # potentially quantize args, based on arg_quant_infos
         new_args = []
-        tensor_arg_idx = 0
-        # TODO: refactor this to use iterate_and_apply
-        if orig_op is torch.cat:  # torch.cat variants
-            # input tensors
-            new_first_arg = []
-            for arg in args[0]:
-                # TODO: handle non-tensor inputs
-                quant_info = arg_quant_infos[tensor_arg_idx]
-                dequant_info = arg_dequant_infos[tensor_arg_idx]
-                if quant_info is not None:
-                    scale, zp = quant_info
-                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                elif dequant_info is True:
-                    arg = arg.dequantize()
-                new_first_arg.append(arg)
-                tensor_arg_idx += 1
-            new_args = [new_first_arg, *args[1:]]
+        if any_arg_quant_or_dequant_needed:
+            tensor_arg_idx = 0
+            # TODO: refactor this to use iterate_and_apply
+            if orig_op is torch.cat:  # torch.cat variants
+                # input tensors
+                new_first_arg = []
+                for arg in args[0]:
+                    # TODO: handle non-tensor inputs
+                    quant_info = arg_quant_infos[tensor_arg_idx]
+                    dequant_info = arg_dequant_infos[tensor_arg_idx]
+                    if quant_info is not None:
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
+                        arg = arg.dequantize()
+                    new_first_arg.append(arg)
+                    tensor_arg_idx += 1
+                new_args = [new_first_arg, *args[1:]]
+            else:
+                for arg in args:
+                    # TODO: handle non-tensor inputs
+                    # TODO: this is not handling non-tensor tuple args (for example,
+                    # dilation in conv2d) correctly, it just happens to work but
+                    # needs a fix.
+                    quant_info = arg_quant_infos[tensor_arg_idx]
+                    dequant_info = arg_dequant_infos[tensor_arg_idx]
+                    if quant_info is not None:
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
+                        arg = arg.dequantize()
+                    new_args.append(arg)
+                    tensor_arg_idx += 1
         else:
-            for arg in args:
-                # TODO: handle non-tensor inputs
-                # TODO: this is not handling non-tensor tuple args (for example,
-                # dilation in conv2d) correctly, it just happens to work but
-                # needs a fix.
-                quant_info = arg_quant_infos[tensor_arg_idx]
-                dequant_info = arg_dequant_infos[tensor_arg_idx]
-                if quant_info is not None:
-                    scale, zp = quant_info
-                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                elif dequant_info is True:
-                    arg = arg.dequantize()
-                new_args.append(arg)
-                tensor_arg_idx += 1
+            new_args = [*args]
 
         # if there is a packed param, replace the relevant args
         if packed_param_name is not None:
@@ -398,13 +410,14 @@ class AutoQuantizationState(torch.nn.Module):
 
         # potentially extend kwargs with scale and zero_point
         # TODO move op-specific logic out of here
-        if orig_op not in (F.conv2d, F.linear):
-            kwargs.update(**additional_kwargs)
-        else:
-            seen_op_info = self._get_cur_seen_op_info()
-            if seen_op_info.output_tensor_infos[0].inf_dtype == torch.quint8:
-                new_args.append(additional_kwargs['scale'])
-                new_args.append(additional_kwargs['zero_point'])
+        if len(additional_kwargs):
+            if orig_op not in (F.conv2d, F.linear):
+                kwargs.update(**additional_kwargs)
+            else:
+                seen_op_info = self._get_cur_seen_op_info()
+                if seen_op_info.output_tensor_infos[0].inf_dtype == torch.quint8:
+                    new_args.append(additional_kwargs['scale'])
+                    new_args.append(additional_kwargs['zero_point'])
 
         # TODO move op-specific logic out of here
         if op is torch.ops.quantized.linear:
@@ -453,7 +466,7 @@ class AutoQuantizationState(torch.nn.Module):
         maybe_new_op = get_quantized_op(seen_op_info)
 
         # calculate quant infos
-        arg_quant_infos, arg_dequant_infos = \
+        arg_quant_infos, arg_dequant_infos, any_arg_quant_or_dequant_needed = \
             get_input_args_quant_dequant_info(
                 seen_op_info, self.tensor_id_to_scale_zp)
 
@@ -470,8 +483,16 @@ class AutoQuantizationState(torch.nn.Module):
             tensor_id = output_tensor_infos[0].id
             scale, zp = self.tensor_id_to_scale_zp[tensor_id]
             additional_kwargs.update({'scale': scale, 'zero_point': zp})
+
+        any_arg_kwarg_modification_needed = bool(
+            any_arg_quant_or_dequant_needed or
+            packed_param_name is not None or
+            len(additional_kwargs)
+        )  # the cast to bool is to make mypy recognize this as a bool
+
         return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
-            packed_param_name, additional_kwargs
+            packed_param_name, additional_kwargs, any_arg_quant_or_dequant_needed, \
+            any_arg_kwarg_modification_needed
 
     def _get_packed_param_name(self, seen_op_info: SeenOpInfo) -> Optional[str]:
         """
