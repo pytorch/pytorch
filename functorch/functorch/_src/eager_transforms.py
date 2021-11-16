@@ -595,19 +595,31 @@ def jvp(f, primals, tangents):
         _grad_decrement_nesting()
         JVP_NESTING -= 1
 
-def jacfwd(f):
-    # TODO: This should take more than just a single primal...
-    def wrapper_fn(primal):
-        basis = torch.eye(primal.numel(), dtype=primal.dtype, device=primal.device) \
-                     .view(primal.numel(), *primal.shape)
+def jacfwd(f, argnums=0):
+    def wrapper_fn(*args):
+        f_wrapper, primals = _argnums_partial(f, args, argnums)
+        primals_numels = tuple(p.numel() for p in primals)
+        basis = _construct_standard_basis_for(primals, primals_numels)
 
         def push_jvp(basis):
-            _, jvp_out = jvp(f, (primal,), (basis,))
+            _, jvp_out = jvp(f_wrapper, primals, basis)
             return jvp_out
 
-        result = vmap(push_jvp)(basis)
-        result = result.view(*primal.shape, *primal.shape)
-        return result
+        results = vmap(push_jvp)(basis)
+        assert_output_is_tensor_or_tensors(results, 'jacfwd(f, ...)(*args)')
+
+        jac_outs, spec = tree_flatten(results)
+        jac_outs_ins = tuple(
+            tuple(
+                jac_out_in.unflatten(-1, primal.shape)
+                for primal, jac_out_in in zip(primals, jac_out.movedim(0, -1).split(primals_numels, dim=-1))
+            )
+            for jac_out in jac_outs
+        )
+
+        if isinstance(argnums, int):
+            jac_outs_ins = tuple(jac_ins[0] for jac_ins in jac_outs_ins)
+        return tree_unflatten(jac_outs_ins, spec)
     return wrapper_fn
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
