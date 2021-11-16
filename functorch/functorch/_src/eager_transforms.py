@@ -326,7 +326,7 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
         >>>   return x + y ** 2
         >>>
         >>> x, y = torch.randn(5), torch.randn(5)
-        >>> jacobian = jacrev(f, argnums=(0,1))(x, y)
+        >>> jacobian = jacrev(f, argnums=(0, 1))(x, y)
         >>> expectedX = torch.diag(torch.ones_like(x))
         >>> expectedY = torch.diag(2 * y)
         >>> assert torch.allclose(jacobian[0], expectedX)
@@ -356,14 +356,126 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
     def wrapper_fn(*args):
         f_wrapper, primals = _argnums_partial(f, args, argnums)
         output, vjp_fn = vjp(f_wrapper, *primals)
-        assert isinstance(output, torch.Tensor)
-        # TODO: does jacrev compose with vmap...? the eye call should make it so that it doesn't
-        basis = torch.eye(output.numel(), dtype=output.dtype, device=output.device) \
-                     .view(output.numel(), *output.shape)
+
+        # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
+        if not isinstance(output, torch.Tensor) and not isinstance(output, tuple):
+            raise RuntimeError(
+                f'jacrev(f, ...)(*args): expected f to only return Tensors as '
+                f'outputs, got {type(output)}')
+        flat_output, output_spec = tree_flatten(output)
+        for out in flat_output:
+            if isinstance(out, torch.Tensor):
+                continue
+            raise RuntimeError(
+                f'jacrev(f, ...)(*args): expected f to only return Tensors as '
+                f'outputs, got {type(out)}')
+        # NB: vjp already checks that all outputs are tensors
+        # Step 1: Construct grad_outputs by splitting the standard basis
+        flat_output_numels = tuple(out.numel() for out in flat_output)
+        flat_basis = _construct_standard_basis_for(flat_output, flat_output_numels)
+        basis = tree_unflatten(flat_basis, output_spec)
+
         results = vmap(vjp_fn)(basis)
-        results = tuple(r.view(*output.shape, *p.shape) for (r, p) in zip(results, primals))
-        return results if len(results) > 1 else results[0]
+
+        # Step 2: The returned jacobian is one big tensor per input. In this step,
+        # we split each Tensor by output.
+        results = [result.split(flat_output_numels, dim=0) for result in results]
+        results = [
+            tuple(split.view(*out.shape, *primal.shape)
+                  for split, out in zip(splits, flat_output))
+            for splits, primal in zip(results, primals)
+        ]
+
+        # Step 3: Right now, `jacobian` is a List[List[Tensor]].
+        # The outer List corresponds to the number of inputs,
+        # the inner List corresponds to the number of outputs.
+        # We need to:
+        # a. Remove the outer List if argnums is a single int
+        # b. Exchange the order of the outer List and inner List, if
+        #    they still exist at this point.
+        # c. tree_unflatten the outer List (which now refers to the outputs)
+        if isinstance(argnums, int):
+            assert len(results) == 1
+            if isinstance(output, torch.Tensor):
+                assert len(results[0]) == 1
+                return results[0][0]
+            return results[0]
+        results = tuple(zip(*results))
+        if isinstance(output, torch.Tensor):
+            assert len(results) == 1
+            return results[0]
+        return results
     return wrapper_fn
+
+# NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
+#
+# Let's consider f(x) = (x**2, x.sum()) and let x = torch.randn(3).
+# It turns out we can compute the jacobian of this function with a single
+# call to autograd.grad by using vmap over the correct grad_outputs.
+#
+# Firstly, one way to compute the jacobian is to stack x**2 and x.sum()
+# into a 4D vector. E.g., use g(x) = torch.stack([x**2, x.sum()])
+#
+# To get the first row of the jacobian, we call
+# >>> autograd.grad(g(x), x, grad_outputs=torch.tensor([1, 0, 0, 0]))
+# To get the 2nd row of the jacobian, we call
+# >>> autograd.grad(g(x), x, grad_outputs=torch.tensor([0, 1, 0, 0]))
+# and so on.
+#
+# Using vmap, we can vectorize all 4 of these computations into one by
+# passing the standard basis for R^4 as the grad_output.
+# vmap(partial(autograd.grad, g(x), x))(torch.eye(4)).
+#
+# Now, how do we compute the jacobian *without stacking the output*?
+# We can just split the standard basis across the outputs. So to
+# compute the jacobian of f(x), we'd use
+# >>> autograd.grad(f(x), x, grad_outputs=_construct_standard_basis_for(...))
+# The grad_outputs looks like the following:
+# ( torch.tensor([[1, 0, 0],
+#                 [0, 1, 0],
+#                 [0, 0, 1],
+#                 [0, 0, 0]]),
+#   torch.tensor([[0],
+#                 [0],
+#                 [0],
+#                 [1]]) )
+#
+# But we're not done yet!
+# >>> vmap(partial(autograd.grad(f(x), x, grad_outputs=...)))
+# returns a Tensor of shape [4, 3]. We have to remember to split the
+# jacobian of shape [4, 3] into two:
+# - one of shape [3, 3] for the first output
+# - one of shape [   3] for the second output
+
+def _construct_standard_basis_for(tensors, tensor_numels):
+    # This function:
+    # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
+    # - Splits the identity matrix into chunks with each chunk size determined by `tensor_numels`.
+    # - Each chunk corresponds to one tensor. The chunk has the same dtype and
+    #   device as the tensor
+    #
+    # For example, with tensor_numels = [1, 2, 1], this function returns:
+    # ( tensor([[1],     tensor([[0, 0],      tensor([[0],
+    #           [0],             [1, 0],              [0],
+    #           [0],             [0, 1],              [0],
+    #           [0]])  ,         [0, 0]])  ,          [1]])  )
+    #
+    # Precondition: tensor_numels == tuple(tensor.numel() for tensor in tensors)
+    # Precondition: tensors always has at least one element.
+    #
+    # See NOTE: [Computing jacobian with vmap and grad for multiple tensors]
+    # for context behind this function.
+    assert len(tensors) == len(tensor_numels)
+    assert len(tensors) > 0
+    total_numel = sum(tensor_numels)
+    diag_start_indices = (0, *torch.tensor(tensor_numels).cumsum(dim=0)[:-1].neg().unbind())
+    chunks = tuple(tensor.new_zeros(total_numel, tensor_numel)
+                   for tensor, tensor_numel in zip(tensors, tensor_numels))
+    for chunk, diag_start_idx in zip(chunks, diag_start_indices):
+        chunk.diagonal(diag_start_idx).fill_(1)
+    chunks = tuple(chunk.view(total_numel, *tensor.shape)
+                   for chunk, tensor in zip(chunks, tensors))
+    return chunks
 
 def _check_unique_non_empty(argnums):
     if isinstance(argnums, tuple):
