@@ -1337,10 +1337,20 @@ def check_if_enable(test: unittest.TestCase):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
 
+# `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
+# convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
+# `torch.testing._comparison.assert_equal`, used for example by the public testing function
+# `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
+# between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
+# change the supported inputs, but the comparison logic is the same.
+# TODO: Revisit the relaxed pairs and check how much work it is to fix the tests that would fail without the relaxation.
+
 class RelaxedBooleanPair(BooleanPair):
+    """Pair for boolean-like inputs.
+
+    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being a 0d tensor-like.
+    """
     def _process_inputs(self, actual, expected, *, id):
-        # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean or
-        # a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
         if not (
             (
                 isinstance(actual, self._supported_types)
@@ -1372,6 +1382,16 @@ class RelaxedBooleanPair(BooleanPair):
 
 
 class RelaxedNumberPair(NumberPair):
+    """Pair for number-like inputs.
+
+    In contrast to the builtin :class:`NumberPair`, this class also supports one input being a 0d tensor-like or a
+    :class:`enum.Enum`. D(type) checks are disabled, meaning comparing 1 to 1.0 succeeds even when ``check_dtype=True``
+    is passed.
+
+    In addition, this class uses looser default tolerances for :class:`float` and :class:`complex` inputs. Also supports
+    overriding the absolute and relative tolerance through the ``@precisionOverride`` and ``@toleranceOverride``
+    decorators.
+    """
     _TYPE_TO_DTYPE = {
         int: torch.int64,
         float: torch.float32,
@@ -1417,10 +1437,6 @@ class RelaxedNumberPair(NumberPair):
                 number = int(number)
 
             return number
-        # We need this check, because combinations of an int and a bool will not be picked up by the BooleanPair,
-        # but will be picked up here since issubclass(bool, int)
-        elif isinstance(number_like, bool):
-            return int(number_like)
         elif isinstance(number_like, Enum):
             return int(number_like)  # type: ignore[call-overload]
         else:
@@ -1428,6 +1444,16 @@ class RelaxedNumberPair(NumberPair):
 
 
 class TensorOrArrayPair(TensorLikePair):
+    """Pair for tensor-like inputs.
+
+    On the one hand this class is stricter than the builtin :class:`TensorLikePair` since it only allows instances of
+    :class:`torch.Tensor` and :class:`numpy.ndarray` rather than allowing any tensor-like than can be converted into a
+    tensor. On the other hand this class is looser since it converts all inputs into tensors with no regard of their
+    relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray` is fine.
+
+    In addition, this class overriding the absolute and relative tolerance through the ``@precisionOverride`` and
+    ``@toleranceOverride`` decorators.
+    """
     def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
         super().__init__(actual, expected, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
@@ -1443,6 +1469,13 @@ class TensorOrArrayPair(TensorLikePair):
 
 
 class UnittestPair(Pair):
+    """Fallback ABC pair that handles non-numeric inputs.
+
+    To avoid recreating the mismatch messages of :meth:`unittest.TestCase.assertEqual`, this pair simply wraps it in
+    order to use it with the :class:`Pair` "framework" from :func:`assert_equal`.
+
+    Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
+    """
     CLS: Union[Type, Tuple[Type, ...]]
     TYPE_NAME: Optional[str] = None
 
@@ -1459,7 +1492,7 @@ class UnittestPair(Pair):
             msg = str(error)
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        return self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
@@ -1927,6 +1960,7 @@ class TestCase(expecttest.TestCase):
             rtol: Optional[float] = None,
             equal_nan=True,
             exact_dtype=True,
+            # TODO: default this to True
             exact_device=False,
             exact_layout=False,
             exact_stride=False,
@@ -1938,14 +1972,21 @@ class TestCase(expecttest.TestCase):
         if any(
             isinstance(input, np.ndarray) and not has_corresponding_torch_dtype(input.dtype) for input in (x, y)
         ):
+            # numpy's dtypes are a superset of what PyTorch supports. In case we encouter an unsupported dtype, we fall
+            # back to an elementwise comparison. Note that this has to happen here and not for example in
+            # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
+            # multiple comparisons.
             def to_list(input):
                 return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
 
             x = to_list(x)
             y = to_list(y)
+        # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here. Otherwise
+        # the pair orgination of `assert_equal` will fail, because the sequence is recognized as container that should
+        # be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
-        elif isinstance(y, torch.Tensor) and isinstance(x, Sequence):
+        elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
         assert_equal(
