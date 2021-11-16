@@ -54,16 +54,16 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
         batch_sizes: List[int] = self._get_batch_sizes()
         if self.unbatch_level == 0:
             return self.datapipe[index]  # type: ignore[return-value]
-        result_index_map = []
+        result_index_map, batch_index = [], index
         for i in range(self.unbatch_level):
             relevant_batch_sizes = batch_sizes[i + 1:self.unbatch_level + 1]
             if len(relevant_batch_sizes) == 0:
                 raise RuntimeError("Unbatching is not possible because the specified unbatch_level "
                                    f"{self.unbatch_level} exceeds input DataPipe's batch depth.")
             inner_batch_size = reduce(operator.mul, relevant_batch_sizes, 1)
-            result_index_map.append(index // inner_batch_size)
-            index = index % inner_batch_size
-        result_index_map.append(index)
+            result_index_map.append(batch_index // inner_batch_size)
+            batch_index = batch_index % inner_batch_size
+        result_index_map.append(batch_index)
         res = self.datapipe
         for idx in result_index_map:
             try:

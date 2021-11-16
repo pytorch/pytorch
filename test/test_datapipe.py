@@ -1659,6 +1659,14 @@ class TestFunctionalMapDataPipe(TestCase):
         unbatch_dp_last = input_dp_last.unbatch(unbatch_level=-1)
         self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10], list(unbatch_dp_last))
 
+        # Functional Test: incomplete last batches at multiple levels
+        arr_missing = [[[0, 1, 2], [3, 4, 5]], [[6, 7]]]
+        input_dp_missing = dp.map.SequenceWrapper(arr_missing)
+        unbatch_dp_missing_1 = input_dp_missing.unbatch(unbatch_level=1)
+        unbatch_dp_missing_2 = input_dp_missing.unbatch(unbatch_level=-1)
+        self.assertEqual([[0, 1, 2], [3, 4, 5], [6, 7]], list(unbatch_dp_missing_1))
+        self.assertEqual([0, 1, 2, 3, 4, 5, 6, 7], list(unbatch_dp_missing_2))
+
         # Functional Test: large nested input
         arr2 = [[[[0, 0], [1, 100]], [[2, 200], [3, 300]], [[4, 400], [5, 500]]],
                 [[[6, 600], [7, 700]], [[8, 800], [9, 900]], [[10, 1000], [11, 1100]]]]
