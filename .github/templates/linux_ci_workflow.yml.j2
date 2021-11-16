@@ -40,6 +40,9 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
