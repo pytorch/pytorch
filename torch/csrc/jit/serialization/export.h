@@ -56,7 +56,6 @@ export_onnx(
     bool add_node_names = true,
     bool use_external_data_format = false,
     const std::string& onnx_file_path = std::string(),
-    const ValAttrNameMap& val_attr_to_name = {},
     const NodeAttrNameMap& node_attr_to_name = {});
 
 TORCH_API std::string serialize_model_proto_to_string(
@@ -240,5 +239,10 @@ struct TORCH_API BytecodeEmitModeGuard {
 TORCH_API IValue to_tuple(std::vector<IValue> ivalues);
 TORCH_API IValue
 Table(const std::vector<std::pair<std::string, IValue>>& entries);
+
+// TODO remove these switches once interface call is rolled out.
+TORCH_API void enableMobileInterfaceCallExport();
+bool getMobileInterfaceCallExport();
+
 } // namespace jit
 } // namespace torch

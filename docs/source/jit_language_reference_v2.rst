@@ -1883,6 +1883,9 @@ TorchScript provides a set of utilities to facilitate meta programming:
     - When used in an ``assert`` or an ``if`` statement, the scope or branch where ``torch.jit.is_scripting()`` evaluates to ``False`` is not compiled.
     - Its value can be evaluated statically at compile time, thus commonly used in ``if`` statements to stop TorchScript from compiling one of the branches.
     - More details and examples can be found in :meth:`~torch.jit.is_scripting`
+- ``torch.jit.is_tracing()``
+    - Returns a boolean value indicating whether the current program is traced by ``torch.jit.trace`` / ``torch.jit.trace_module`` or not.
+    - More details can be found in :meth:`~torch.jit.is_tracing`
 - ``@torch.jit.ignore``
     - This decorator indicates to the compiler that a function or method should be ignored and left as a Python function.
     - This allows you to leave code in your model that is not yet TorchScript compatible.
