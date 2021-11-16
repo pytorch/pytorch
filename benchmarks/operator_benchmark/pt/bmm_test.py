@@ -9,7 +9,7 @@ class BmmBenchmark(op_bench.TorchBenchmarkBase):
             "batch1": torch.rand((B, M, K), device=device, requires_grad=self.auto_set()),
             "batch2": torch.rand((B, K, N,), device=device, requires_grad=self.auto_set())
         }
-        self.set_module_name(f"bmm (actual {op=}")
+        self.set_module_name(f"bmm (actual op={op}")
         self.op = torch.bmm if op == "bmm" else torch.matmul
 
     def forward(self, batch1, batch2):

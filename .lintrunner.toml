@@ -74,7 +74,9 @@ command = [
 code = 'MYPY'
 include_patterns = [
     'torch/**/*.py',
+    'torch/**/*.pyi',
     'caffe2/**/*.py',
+    'caffe2/**/*.pyi',
     'test/test_bundled_images.py',
     'test/test_bundled_inputs.py',
     'test/test_complex.py',
