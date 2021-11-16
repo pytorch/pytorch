@@ -12,7 +12,6 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 

@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {

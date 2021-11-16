@@ -9,7 +9,6 @@
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/torch_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {

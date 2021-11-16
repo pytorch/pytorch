@@ -6,7 +6,6 @@
 
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensor_core/csrc/torch_util.h"
 
 namespace torch_lazy_tensors {
 namespace bridge {
