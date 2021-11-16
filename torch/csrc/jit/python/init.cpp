@@ -45,6 +45,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/cast_all_constant_to_floating.h>
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
+#include <torch/csrc/jit/passes/onnx/deduplicate_initializers.h>
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
@@ -215,6 +216,20 @@ void initJITBindings(PyObject* module) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
       .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
+      .def(
+          "_jit_pass_onnx_deduplicate_initializers",
+          [](std::shared_ptr<Graph>& graph,
+             std::map<std::string, IValue>& paramsDict,
+             bool is_train,
+             int opset_version) {
+            DeduplicateInitializers(
+                graph,
+                paramsDict,
+                is_train,
+                opset_version); // overload resolution
+            return paramsDict;
+          },
+          pybind11::return_value_policy::move)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,

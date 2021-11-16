@@ -61,7 +61,5 @@ Node* transformToONNXConcatNode(
     bool need_new_input,
     int opset_version);
 
-int GetOpsetVersion();
-
 } // namespace jit
 } // namespace torch
