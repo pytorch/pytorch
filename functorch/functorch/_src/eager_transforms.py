@@ -561,13 +561,18 @@ def assert_output_is_tensor_or_tensors(output, api):
 
 jvp_str = 'jvp(f, primals, tangents)'
 
-def safe_unpack_dual(dual):
+def safe_unpack_dual(dual, strict):
     primal, tangent = fwAD.unpack_dual(dual)
     if tangent is None:
+        if strict:
+            raise RuntimeError(
+                    f'jvp(f, primals, tangents, strict=True): '
+                    f'The output of f is independent of '
+                    f'the inputs. This is not allowed with strict=True.')
         tangent = torch.zeros_like(primal)
     return primal, tangent
 
-def jvp(f, primals, tangents):
+def jvp(f, primals, tangents, *, strict=False):
     assert_flat_tuple_of_tensors(primals, jvp_str, 'primals')
     assert_flat_tuple_of_tensors(tangents, jvp_str, 'tangents')
     if len(primals) != len(tangents):
@@ -591,7 +596,7 @@ def jvp(f, primals, tangents):
             result_duals, spec = tree_flatten(result_duals)
 
             primals_out, tangents_out = \
-                zip(*[safe_unpack_dual(dual) for dual in result_duals])
+                zip(*[safe_unpack_dual(dual, strict) for dual in result_duals])
             primals_out = tree_map(
                 partial(_undo_create_differentiable, level=level), primals_out)
             tangents_out = tree_map(
