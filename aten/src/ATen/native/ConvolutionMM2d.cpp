@@ -6,7 +6,6 @@
 #include <ATen/core/grad_mode.h>
 #include <ATen/div_rtn.h>
 #include <ATen/native/CPUBlas.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/Unfold2d.h>
 #include <c10/util/irange.h>
 
@@ -123,6 +122,17 @@ static inline void slow_conv2d_shape_check(
     }
     check_dim_size(grad_output, ndim, dim_height, output_height);
     check_dim_size(grad_output, ndim, dim_width, output_width);
+  }
+}
+
+static Tensor view_weight_2d(const Tensor& weight_) {
+  Tensor weight = weight_.contiguous();
+  if (weight.dim() == 4) {
+    const int64_t s1 = weight.size(0);
+    const int64_t s2 = weight.size(1) * weight.size(2) * weight.size(3);
+    return weight.view({s1, s2});
+  } else {
+    return weight;
   }
 }
 

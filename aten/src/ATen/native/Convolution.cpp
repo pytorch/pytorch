@@ -1502,9 +1502,9 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
     {
       /* CPU implementation has specialized MM kernels
          for non-dilated case here */
-      Tensor finput = compute_finput2d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor columns = compute_columns2d(input, params, kernel_size);
       return at::_slow_conv2d_backward(
-        grad_output, input, weight, kernel_size, params.stride, params.padding, finput, output_mask);
+        grad_output, input, weight, kernel_size, params.stride, params.padding, columns, output_mask);
     }
     // NB: nnpack backward does not support strided convolutions; use slow impl instead
     case ConvBackend::NnpackSpatial:
@@ -1516,7 +1516,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation, output_mask);
     case ConvBackend::SlowTranspose2d:
     {
-      Tensor columns = compute_finput2d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor columns = compute_columns2d(input, params, kernel_size);
       Tensor ones = at::empty(columns.sizes(), input.options());
       ones.fill_(1.);
       return at::slow_conv_transpose2d_backward(
@@ -1525,11 +1525,11 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
     }
     case ConvBackend::SlowTranspose3d:
     {
-      Tensor finput = compute_finput3d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor columns = compute_columns3d(input, params, kernel_size, /*groups=*/ 1);
       Tensor fgrad_input = at::empty({0}, input.options());
       return at::slow_conv_transpose3d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
-        params.dilation, finput, fgrad_input, output_mask);
+        params.dilation, columns, fgrad_input, output_mask);
     }
     default:
       TORCH_CHECK(false, "Unsupported conv nogroup backend encountered");
@@ -1662,11 +1662,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     case ConvBackend::Slow3d:
     {
-      Tensor finput = compute_finput3d(input, weight, kernel_size, params.stride, params.padding);
+      Tensor columns = compute_columns3d(input, params, kernel_size, params.groups);
       Tensor fgrad_input = at::empty({0}, input.options());
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding,
-          finput, fgrad_input, output_mask);
+          columns, fgrad_input, output_mask);
       break;
     }
     // Handle backends that don't natively support groups > 1.
