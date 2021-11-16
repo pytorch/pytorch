@@ -11,6 +11,7 @@
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkl/SparseCsrLinearAlgebra.h>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 
 #include <algorithm>
 
@@ -278,8 +279,8 @@ Tensor& add_sparse_csr_(Tensor& self, const Tensor& other, const Scalar& alpha) 
   return at::add_out(self, self, other, alpha); // redispatch!
 }
 
-Tensor& add_out_dense_sparse_csr_cpu(
-    Tensor& out,
+void add_out_dense_sparse_csr_cpu(
+    const Tensor& out,
     const Tensor& dense,
     const SparseCsrTensor& src,
     const Scalar& alpha) {
@@ -369,7 +370,6 @@ Tensor& add_out_dense_sparse_csr_cpu(
   if (out.scalar_type() != commonDtype) {
     out.copy_(resultBuffer);
   }
-  return out;
 }
 
 Tensor& add_out_sparse_csr_cpu(
@@ -378,11 +378,16 @@ Tensor& add_out_sparse_csr_cpu(
     const Scalar& alpha,
     SparseCsrTensor& out) {
   if (self.layout() == kStrided) {
-    return add_out_dense_sparse_csr_cpu(out, self, other, alpha);
+    add_out_dense_sparse_csr_cpu(out, self, other, alpha);
   } else {
     TORCH_CHECK(
-        false,
-        "NotImplementedError: Addition of sparse CSR tensors is not yet implemented.")
+        self.sizes().equals(other.sizes()),
+        "torch.add: Expected input tensors to have the same shape, but got tensor `self` with shape ",
+        self.sizes(),
+        " and tensor `other` with shape ",
+        other.sizes());
+    at::native::resize_as_sparse_csr_(out, self);
+    sparse::impl::cpu::add_out_sparse_csr(self, other, alpha, out);
   }
   return out;
 }

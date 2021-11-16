@@ -20,6 +20,8 @@ struct TORCH_API BackendDeviceType {
 
 class TORCH_API BackendDevice {
  public:
+  // The default constructor will set both the device type and ordinal
+  // to backend specific defaults.
   BackendDevice();
   BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int ordinal);
 
