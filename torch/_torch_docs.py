@@ -927,6 +927,12 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
+add_docstr(torch.arctan2,
+           r"""
+arctan2(input, other, *, out=None) -> Tensor
+Alias for :func:`torch.atan2`.
+""")
+
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
@@ -4412,8 +4418,8 @@ Elements lower than min and higher than max are ignored.
 Args:
     {input}
     bins (int): number of histogram bins
-    min (int): lower end of the range (inclusive)
-    max (int): upper end of the range (inclusive)
+    min (Scalar): lower end of the range (inclusive)
+    max (Scalar): upper end of the range (inclusive)
 
 Keyword args:
     {out}

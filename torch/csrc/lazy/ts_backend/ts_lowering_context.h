@@ -27,7 +27,7 @@ class TORCH_API TSNodeLoweringInterface {
 
 class TORCH_API TSComputation : public Computation {
  public:
-  TSComputation(const std::shared_ptr<torch::jit::Graph>& graph)
+  explicit TSComputation(const std::shared_ptr<torch::jit::Graph>& graph)
       : graph_(graph), graph_executor_(graph, "") {
     for (torch::jit::Value* input : graph_->inputs()) {
       parameter_names_.push_back(input->debugName());
