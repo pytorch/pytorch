@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: periodic-linux-xenial-cuda11.1-py3.6-gcc7
+name: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.1-py3.6-gcc7
+  BUILD_ENVIRONMENT: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -29,8 +29,9 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
+  DEBUG: 1
 concurrency:
-  group: periodic-linux-xenial-cuda11.1-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -59,7 +60,7 @@ jobs:
     needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-build
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -298,7 +299,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-test
+      JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -483,7 +484,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-test
+          JOB_BASE_NAME: periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
