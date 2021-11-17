@@ -31,16 +31,17 @@ jobs:
           # TODO lint_paths.txt is unnecessarily complicated. We need it for now
           # because generated .pyi files are .gitignored. In the future it would
           # be simpler to just commit them to the repo and have a lint to tell
-          # us that they are in sync, to avoid any extra step before .pyi is valid.
+          # us that they are in sync, to avoid having a generation step at all.
 
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml" \
+            --print_files \
             >> lint_paths.txt
 
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
-        run: lintrunner -v --paths-from=lint_paths.txt
+        run: lintrunner --paths-from=lint_paths.txt
 
   quick-checks:
     runs-on: ubuntu-18.04
