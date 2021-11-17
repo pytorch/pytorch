@@ -4978,8 +4978,8 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
-    SparseCsrCUDA: addmm_out_sparse_csr_dense_cuda
+    SparseCsrCPU: addmm_out_sparse_csr_cpu
+    SparseCsrCUDA: addmm_out_sparse_csr_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out
@@ -7100,6 +7100,16 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: atan2.out
   variants: method, function
+
+# arctan2, alias of atan2
+- func: arctan2(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: arctan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+
+- func: arctan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

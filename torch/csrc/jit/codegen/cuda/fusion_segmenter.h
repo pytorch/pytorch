@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <deque>
 #include <list>
@@ -91,6 +92,10 @@ class TORCH_CUDA_CU_API SegmentedGroup {
     return segmented_fusion_;
   }
 
+  //! Utility to re-collect the operators included in this
+  //!  segmented group after updating the group boundary.
+  void resetExprList();
+
   //! Try to get a scheduler entry for this group with
   //!  the given runtime info.
   //! Returns a new scheduler with the same heuristics
@@ -149,7 +154,7 @@ class TORCH_CUDA_CU_API SegmentedGroup {
   //! Utility to convert edge vector to value vector
   std::vector<Val*> edgesToVals(const std::vector<SegmentedEdge*>& se_v);
 
-  //! Reset method to call at beginning of each
+  //! Reset method to call at begining of each
   //!  merge node iteration
   void clearTraversalInfo();
 
@@ -315,16 +320,6 @@ class TORCH_CUDA_CU_API SegmentedFusion {
   //! API for adding edges
   SegmentedEdge* newEdge(SegmentedGroup* from, SegmentedGroup* to, Val* val);
 
-  //! Returns the set of potential intermediate tensors that
-  //!  will be cast to fp16 when written to global mem.
-  //!  These are not actual intermediate tensors,
-  //!  just the ones that will need to cast to fp16 if
-  //!  they end up being an intermediate tensor between
-  //!  segmented groups.
-  const auto& getForceToFP16Set() {
-    return force_fp16_tv_set_;
-  }
-
   HeuristicSummary* getCachedHeuristicDataFor(SegmentedGroup* group);
 
  private:
@@ -359,6 +354,8 @@ class TORCH_CUDA_CU_API SegmentedFusion {
 
   //! A set of intermediate tensors that need to be cast to fp16
   std::unordered_set<TensorView*> force_fp16_tv_set_;
+
+  DataType force_half_precision_type_;
 
   //! Static traversal information to be used for fast heuristics lookup
   std::unordered_map<SegmentedGroup*, std::unique_ptr<HeuristicSummary>>
@@ -444,6 +441,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       const at::ArrayRef<IValue>& inputs,
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     auto fusion_copy = std::make_unique<Fusion>(*fusion);
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      std::cout << "Segment the fusion: " << std::endl;
+      fusion_copy->printMath();
+    }
     SegmentCandidateFinder scf(std::move(fusion_copy), inputs, options);
     return std::move(scf.segmented_fusion_);
   }
@@ -454,6 +455,10 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
       const at::ArrayRef<IValue>& inputs,
       SegmentCandidateFinderOptions options = SegmentCandidateFinderOptions()) {
     SegmentCandidateFinder scf(std::move(fusion), inputs, options);
+    if (isDebugDumpEnabled(DebugDumpOption::FusionSegments)) {
+      std::cout << "Segment the fusion: " << std::endl;
+      scf.completeFusion()->printMath();
+    }
     return std::move(scf.segmented_fusion_);
   }
 
@@ -525,6 +530,18 @@ class TORCH_CUDA_CU_API SegmentCandidateFinder {
   //! Duplicate and add all exprs producing the used
   //!  scalar values in group
   void resolveScalarsInGroup(SegmentedGroup* group);
+
+  //! Duplicate and add all exprs from "inputs" in the group, to complete
+  //! inputs. These expressions are simply unary ops of inputs that we want to
+  //! recompute for each segment, instead of computing and producing a segmented
+  //! val. For example if we have:
+  //! tv1 = tv0 * 2;
+  //! tv3 = tv1 + tv2;
+  //! tv4 = tv1 + tv4
+  //! If we segmented on tv1, we would be producing an output for tv1 for 2
+  //! groups that have tv3 or tv4, instead we could easily recompute tv1 from
+  //! tv0.
+  void resolveInputsInGroup(SegmentedGroup* group);
 
   //! Remove all scalar edges in group
   //!  (TODO: need structure better so we don't have to do this)
