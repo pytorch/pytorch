@@ -128,7 +128,7 @@
         [_mlModel predictionFromFeatures:inputFeature
                                  options:options
                                    error:&error];
-    if (error || !outputFeature) {
+    if (error) {
       TORCH_CHECK(
           false,
           "Error running the prediction",

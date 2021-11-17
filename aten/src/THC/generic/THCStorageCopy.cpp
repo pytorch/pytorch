@@ -28,22 +28,7 @@ void THCStorage_(copyCPU)(THCState *state, THCStorage *self, struct THStorage *s
     selfTensor.copy_(srcTensor);                                              \
   }
 
-// TODO: Add cross-dtype storage copy for complex storage
-#if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Byte)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Char)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Short)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Int)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Long)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Float)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Half)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Double)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(Bool)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(BFloat16)
-#else
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(ComplexFloat)
-  TH_CUDA_STORAGE_IMPLEMENT_COPY(ComplexDouble)
-#endif
+TH_CUDA_STORAGE_IMPLEMENT_COPY(Byte)
 
 void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *src)
 {
@@ -69,22 +54,7 @@ void THStorage_(copyCuda)(THCState *state, THStorage *self, struct THCStorage *s
     selfTensor.copy_(srcTensor);                                              \
   }
 
-// TODO: Add cross-dtype storage copy for complex storage
-#if !defined(THC_REAL_IS_COMPLEXFLOAT) && !defined(THC_REAL_IS_COMPLEXDOUBLE)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Byte)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Char)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Short)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Int)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Long)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Float)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Half)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Double)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Bool)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(BFloat16)
-#else
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(ComplexFloat)
-  TH_CUDA_STORAGE_IMPLEMENT_COPYTO(ComplexDouble)
-#endif
+TH_CUDA_STORAGE_IMPLEMENT_COPYTO(Byte)
 
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPY
 #undef TH_CUDA_STORAGE_IMPLEMENT_COPYTO
