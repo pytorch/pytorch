@@ -34,28 +34,7 @@ configure_file(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
 install(FILES
   TH.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
-  THGenerateAllTypes.h
-  THGenerateBFloat16Type.h
-  THGenerateBoolType.h
-  THGenerateDoubleType.h
-  THGenerateFloatType.h
-  THGenerateHalfType.h
-  THGenerateComplexFloatType.h
-  THGenerateComplexDoubleType.h
-  THGenerateLongType.h
-  THGenerateIntType.h
-  THGenerateShortType.h
-  THGenerateCharType.h
   THGenerateByteType.h
-  THGenerateFloatTypes.h
-  THGenerateComplexTypes.h
-  THGenerateIntTypes.h
-  THGenerateQUInt8Type.h
-  THGenerateQUInt4x2Type.h
-  THGenerateQUInt2x4Type.h
-  THGenerateQInt8Type.h
-  THGenerateQInt32Type.h
-  THGenerateQTypes.h
   THStorage.h
   THStorageFunctions.h
   THTensor.h
