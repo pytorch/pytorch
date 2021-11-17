@@ -31,6 +31,7 @@ GENERATED_CPP = [
 
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
@@ -41,6 +42,7 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
     "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/warp.cu",
     "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
     "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
@@ -568,6 +570,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/executor.cpp",
     "torch/csrc/jit/codegen/cuda/executor_kernel_arg.cpp",
     "torch/csrc/jit/codegen/cuda/executor_launch_params.cpp",
+    "torch/csrc/jit/codegen/cuda/evaluator_common.cpp",
     "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
@@ -588,6 +591,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/kernel_ir_builder.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_printer.cpp",
     "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower_allocation.cpp",
     "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
@@ -610,6 +614,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/parallel_dimension_map.cpp",
     "torch/csrc/jit/codegen/cuda/parallel_type_bitmap.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
+    "torch/csrc/jit/codegen/cuda/partial_split_map.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
     "torch/csrc/jit/codegen/cuda/register_interface.cpp",
@@ -617,9 +622,11 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/normalization.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/reduction.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/registry.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/utils.cpp",
-    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/type_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/type_promotion.cpp",
     "torch/csrc/jit/codegen/cuda/fusion_segmenter.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",

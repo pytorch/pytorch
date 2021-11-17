@@ -137,7 +137,9 @@ struct TORCH_API GraphFunction : public Function {
   mutable std::recursive_mutex compile_mutex;
 
   // executor_[0] - autocast off
-  // executor_[1] - autocast on
+  // executor_[1] - autocast cpu on
+  // executor_[2] - autocast gpu on
+  // executor_[3] - autocast cpu & gpu on
   std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
       executors_;
 
