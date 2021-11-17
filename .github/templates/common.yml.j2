@@ -71,11 +71,15 @@ concurrency:
         env:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
+{%- if 'rocm' in test_runner_type %}
+          AWS_ECR_GC_ACCESS_KEY_ID: ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
+          AWS_ECR_GC_SECRET_KEY: ${{ secrets.AWS_ECR_GC_SECRET_KEY }}
+{%- endif %}
         run: |
 {%- if 'rocm' in test_runner_type %}
           AWS_ACCOUNT_ID=308535385114
-          aws configure set aws_access_key_id ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_ECR_GC_SECRET_KEY }}
+          aws configure set aws_access_key_id "$AWS_ECR_GC_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$AWS_ECR_GC_SECRET_KEY"
           aws configure et default.region "$AWS_DEFAULT_REGION"
 {%- else %}
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
