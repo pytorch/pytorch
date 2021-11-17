@@ -377,21 +377,21 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
 
 
-    #         # Case 1: aliasing between relu and t
-    #         # is within a DifferentiableGraph. It should be valid
-    #         # to merge both split_with_sizes in relu in one graph
-    #         input_str = """
-    # graph(%a : Tensor):
-    #     %b : Tensor = aten::relu(%a)
-    #     %2 : Tensor = aten::t(%b)
-    #     return (%2)
-    # """
+            # Case 1: aliasing between relu and t
+            # is within a DifferentiableGraph. It should be valid
+            # to merge both split_with_sizes in relu in one graph
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %2 : Tensor = aten::t(%b)
+        return (%2)
+    """
 
-    #         graph = torch._C.parse_ir(input_str)
-    #         torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-    #         FileCheck().check("with prim::DifferentiableGraph") \
-    #             .check("aten::relu").check("aten::t") \
-    #             .run(graph)
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::t") \
+                .run(graph)
 
             # Case 2: aliasing between relu and split_with_sizes
             # are both outputs of a Diff graph. It should be invalid

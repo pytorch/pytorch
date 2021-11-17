@@ -3,9 +3,9 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 
 #include <ATen/core/interned_strings.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <jit/jit_log.h>
-#include "c10/util/StringUtil.h"
 
 namespace torch {
 namespace jit {
@@ -440,13 +440,6 @@ bool unmergeOutputsAilisingInputs(Node* subgraphNode) {
   std::set<Node*, topo_cmp_node> nodes;
   for (auto o : subgraph->outputs()) {
     if (alias_db.mayContainAlias({o}, subgraph->inputs())) {
-      GRAPH_DEBUG(
-          "Checking %",
-          o->debugName(),
-          " aliases graph inputs:",
-          c10::Join(",", c10::fmap(subgraph->inputs(), [](Value* v) {
-                      return std::string("%") + v->debugName();
-                    })));
       collectNodesToUnfuse(o->node(), nodes);
     }
   }
