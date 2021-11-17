@@ -1118,6 +1118,7 @@ Tensor pinv_jvp(
   const Tensor& pinvA,
   const Tensor& dA
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto dAh = dA.mH();
@@ -1141,6 +1142,7 @@ Tensor pinv_backward(
   const Tensor& pinvA,
   const Tensor& A
 ) {
+  at::NoTF32Guard disable_tf32;
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto pinvAh = pinvA.mH();
@@ -2491,6 +2493,22 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf, page 10
+// see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
+std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
+                                          const Tensor& L,
+                                          const Tensor& V) {
+  const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
+  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
+  const auto Lconj = L.conj();
+  auto FTimesdVfactor = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
+  FTimesdVfactor.diagonal(0, -2, -1).zero_();
+
+  return std::make_tuple(
+    dVfactor.diagonal(0, -2, -1),
+    at::matmul(V, FTimesdVfactor));
+}
+
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
@@ -3128,7 +3146,7 @@ Tensor linalg_solve_triangular_forward_AD(
   const Tensor proj_A_t = upper ? A_t.triu(static_cast<int>(unitriangular))
                                 : A_t.tril(- static_cast<int>(unitriangular));
   const Tensor X_t = B_t - (left ? at::matmul(proj_A_t, X) : at::matmul(X, proj_A_t));
-  return at::native::linalg_solve_triangular(A, X_t, upper, left, unitriangular);
+  return at::linalg_solve_triangular(A, X_t, upper, left, unitriangular);
 }
 
 std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
