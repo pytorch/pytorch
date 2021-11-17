@@ -20,6 +20,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._sharded_tensor import (
+    TEST_GPU_NUM,
     ShardedTensorTestBase,
     with_comms,
 )
@@ -44,8 +45,8 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         sharded_linear = torch.nn.Linear(*linear_size)
 
         # Copy the weights and bias from local linear
-        sharded_linear.weight = local_linear.weight
-        sharded_linear.bias = local_linear.bias
+        sharded_linear.weight = torch.nn.Parameter(local_linear.weight.detach().clone())
+        sharded_linear.bias = torch.nn.Parameter(local_linear.bias)
 
         # Shard the parameter.
         shard_parameter(sharded_linear, "weight", spec)
@@ -72,9 +73,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
 
         # Generate expected for loss calculation.
         expected_result = torch.randint(0, 2, (input_size[0],)).cuda(self.rank)
-        external_grad = (
-            torch.ones(input_size[0], dtype=torch.float32).cuda(self.rank)
-        )
 
         # Compute loss.
         local_loss = expected_result - torch.sum(local_output, dim=1)
@@ -82,8 +80,9 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         self.assertEqual(local_loss, sharded_loss)
 
         # Run backward pass
-        local_loss.backward(gradient=local_loss)
-        sharded_loss.backward(gradient=sharded_loss)
+        local_loss.backward(gradient=local_loss.detach())
+        local_grad = local_linear.weight.grad
+        sharded_loss.backward(gradient=sharded_loss.detach())
 
         # Verify that both weight and bias in the sharded linear has non-None grad.
         sharded_weight = sharded_linear.weight.local_shards()[0].tensor
@@ -92,10 +91,9 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         self.assertNotEqual(sharded_weight.grad, None)
 
         # Shard the local linear's weight grad so that we can compare.
-        local_grad = local_linear.weight.grad
         dist.all_reduce(local_grad)
         sharding_dim_size = local_grad.size(sharded_dim)
-        split_size = get_split_size(sharding_dim_size, 4)
+        split_size = get_split_size(sharding_dim_size, TEST_GPU_NUM)
         current_offsets = 0
         start_pos = current_offsets
         for idx, placement in enumerate(spec.placements):
@@ -114,20 +112,20 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         # Test backward gradient calculation.
         self.assertEqual(sharded_linear.bias.grad, local_linear.bias.grad)
         self.assertEqual(sharded_weight, local_weight_narrowed)
-        self.assertEqual(sharded_weight.grad, local_grad_narrowed * 0.5)
+        self.assertEqual(sharded_weight.grad, local_grad_narrowed)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_colwise(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
-            self._run_sharded_linear(spec, [5, 17], [17, 12], 0)
+            self._run_sharded_linear(spec, [2, 17], [17, 12], 0)
             self._run_sharded_linear(spec, [8, 21], [21, 11], 0)
             self._run_sharded_linear(spec, [7, 23], [23, 13], 0)
             self._run_sharded_linear(spec, [4, 15], [15, 14], 0)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_rowwise(self):
         for spec in generate_chunk_sharding_specs_for_test(1):
