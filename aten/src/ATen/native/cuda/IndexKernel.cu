@@ -7,7 +7,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/core/Array.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/Loops.cuh>
@@ -347,10 +347,8 @@ void masked_scatter_cuda_impl(
   auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
   auto mask_data = mask_cont.data_ptr<mask_t>();
 
-  at::cuda::cub::exclusive_scan(
-    mask_data, maskPrefixSum_data,
-    []__device__(int64_t a, int64_t b) { return a + b; },
-    int64_t(0), mask_numel);
+  at::cuda::cub::exclusive_sum_in_common_type(
+      mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
   // must be <= the number of elements available in `src`.
