@@ -28,7 +28,7 @@ from functorch._src.make_functional import (
     functional_init, functional_init_with_buffers,
 )
 from functorch.experimental import (
-    jvp, jacfwd,
+    jvp, jacfwd, hessian,
 )
 
 # NB: numpy is a testing dependency!
@@ -811,7 +811,7 @@ class TestJac(TestCase):
         assert torch.allclose(y, expected)
 
     @FIXME_jacrev_only
-    def test_hessian_simple(self, device, jacapi):
+    def test_nested_jac_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
 
@@ -1005,6 +1005,14 @@ class TestJac(TestCase):
             z = jacapi(torch.sin, argnums=0.0)(x)
         with self.assertRaisesRegex(RuntimeError, "must be int"):
             z = jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
+
+    @unittest.expectedFailure
+    def test_hessian_simple(self, device):
+        def f(x):
+            return x.sin()
+
+        x = torch.randn(3, device=device)
+        result = hessian(f)(x)
 
 class TestJvp(TestCase):
     def test_inplace_on_captures(self, device):
