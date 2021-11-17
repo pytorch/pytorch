@@ -171,8 +171,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, scalar_type, "addmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
+    using opmath_t = at::opmath_type<scalar_t>;
+    opmath_t alpha_val = alpha.to<opmath_t>();
+    opmath_t beta_val = beta.to<opmath_t>();
     scalar_t* mat1_ptr = mat1_->data_ptr<scalar_t>();
     scalar_t* mat2_ptr = mat2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();
@@ -240,8 +241,9 @@ const Tensor& baddbmm_out_cuda_impl(const Tensor& result, const Tensor& self, co
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!result_->is_conj());
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "baddbmm_cuda", [&] {
-    scalar_t alpha_val = alpha.to<scalar_t>();
-    scalar_t beta_val = beta.to<scalar_t>();
+    using opmath_t = at::opmath_type<scalar_t>;
+    opmath_t alpha_val = alpha.to<opmath_t>();
+    opmath_t beta_val = beta.to<opmath_t>();
     scalar_t* batch1_ptr = batch1_->data_ptr<scalar_t>();
     scalar_t* batch2_ptr = batch2_->data_ptr<scalar_t>();
     scalar_t* result_ptr = result_->data_ptr<scalar_t>();

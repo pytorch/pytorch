@@ -881,7 +881,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    AT_ASSERT(!eptr_);
+    TORCH_INTERNAL_ASSERT(
+      !eptr_,
+      "value() accessor should only be used when future is not completed with ",
+      "an error, but future had the following error: ",
+      tryRetrieveErrorMessageInternal(eptr_)
+    );
     return value_;
   }
 
@@ -1683,7 +1688,7 @@ std::unordered_map<K, V> generic_to(
   std::unordered_map<K, V> specialized_dict;
 
   for (const auto& item : std::move(ivalue).toGenericDict()) {
-    specialized_dict[item.key().to<K>()] = item.value().to<V>();
+    specialized_dict[item.key().template to<K>()] = item.value().template to<V>();
   }
 
   return specialized_dict;
@@ -2139,4 +2144,50 @@ IValue from(T&& x) {
 }
 
 } // namespace ivalue
+
+
+template <>
+struct MaybeOwnedTraits<IValue> {
+  using owned_type = IValue;
+  using borrow_type = IValue;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    if (!from.isPtrType()) {
+      return from;
+    }
+    if (from.isTensor()) {
+      return IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(from.toTensor()));
+    } else {
+      return IValue(from.payload, from.tag, from.is_intrusive_ptr);
+    }
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.clearToNone();
+    if (!rhs.isPtrType()) {
+      lhs = rhs;
+    } else if (rhs.isTensor()) {
+      lhs = IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(rhs.toTensor()));
+    } else {
+      lhs = IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr);
+    }
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.clearToNone();
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type&) {
+    return true;
+  }
+};
+
 } // namespace c10
