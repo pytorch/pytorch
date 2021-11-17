@@ -1302,6 +1302,11 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
 
   TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
 
+  // TODO: We currently expect contiguous memory layout.
+  TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
+  TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
+  TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
+
   dim = dim < 0 ? dim + self.dim() : dim;
 
   out.zero_();
@@ -1319,7 +1324,6 @@ TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
 
     scalar_t value;
     int64_t dim_index;
-    // TODO: We currently expect contiguous memory layout.
     for (int64_t i = 0; i < offset1; i++) {
       for (int64_t j = 0; j < self.size(dim); j++) {
         for (int64_t k = 0; k < offset2; k++) {
