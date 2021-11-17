@@ -136,8 +136,8 @@ class SubgraphSlicer {
           // since autodiff doesn't know how to handle them correctly
           // N.B. Note, |= since we don't want `unfuseAliasedOutputs`
           // to short-circuit
-          any_changed |= SubgraphUtils::unmergeOutputsAilisingInputs(n);
           any_changed |= SubgraphUtils::unmergeAliasedOutputs(n);
+          any_changed |= SubgraphUtils::unmergeOutputsAilisingInputs(n);
           GRAPH_DEBUG(
               "any_changed on ",
               any_changed,
