@@ -57,8 +57,16 @@ class MemoryPlanner {
     return managed_output_tensors_.size();
   }
 
-  size_t total_num_unmanaged() const {
-    return unmanaged_ivalues_.size();
+  C10_NODISCARD size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
+    return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
+    return num_unmanaged_scalar_ivalues_;
   }
 
   size_t total_managed() const {
@@ -113,9 +121,23 @@ class MemoryPlanner {
     return impl_p >= start && impl_p < end;
   }
 
+  bool overlapWithInternalBuffer(void* data_ptr) {
+    return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
+  }
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
+
+  // Special class of unmanaged values: some native ops create IValues
+  // in a "borrowed" state that can and must be cleaned up without a
+  // reference count decrement.
+  std::vector<IValue*> unmanaged_borrowed_ivalues_;
+
+  // Even more special class of unmanaged values: if select_tensor
+  // outputs are outputs of the graph, then they need to be restored
+  // to an ordinary "strong reference" state.
+  std::vector<IValue*> borrowed_ivalues_needing_incref_;
 
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of Tensors' storages that should be backed by that
@@ -134,9 +156,12 @@ class MemoryPlanner {
   // so we have to check the StorageImpls each time we deallocate.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
+  uint8_t* buffer_start_{nullptr};
+  uint8_t* buffer_end_{nullptr};
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
+  size_t num_unmanaged_scalar_ivalues_{0};
 
   // Since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens on the client side).
