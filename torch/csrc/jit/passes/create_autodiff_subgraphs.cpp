@@ -46,6 +46,7 @@ class SubgraphSlicer {
     // un-inlining autodiff subgraphs. We first recursively construct all
     // subgraphs and then recursively cleanup & unmerge the small subgraphs
     buildupSubgraphs();
+    GRAPH_DUMP("before unfuseAliasedOutputs", graph_);
     unfuseAliasedOutputs(block_);
     cleanupSubgraphs();
     // Run CSE globally onceto eliminate duplicates that may have occurred
@@ -287,8 +288,6 @@ std::vector<Node*> CreateAutodiffSubgraphs(
     size_t threshold) {
   std::vector<Node*> diff_nodes;
   AliasDb db(graph);
-  GRAPH_DEBUG("Before removing redundant profiles", *graph);
-  RemoveRedundantProfiles(graph->block(), db);
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);

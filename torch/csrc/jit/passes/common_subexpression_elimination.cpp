@@ -6,6 +6,7 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <unordered_map>
+#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
@@ -27,6 +28,14 @@ struct CommonSubexpressionEliminator {
     bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
       auto node = *it;
+
+      if (node->kind() == prim::profile) {
+        GRAPH_DEBUG(
+            "Profiled nodes shouldn't be CSE'ed there's a separate pass that does dedup and merging:\n",
+            *node);
+        continue;
+      }
+
       if (node->hasSideEffects()) {
         GRAPH_DEBUG("Node was skipped due to side effects:\n", *node);
         continue;
