@@ -1830,8 +1830,8 @@ def sample_inputs_isclose(
         **kwargs,
     )
 
-    rtols = [0., 1e-7] # default is 1e-5
-    atols = [0., 1e-7] # default is 1e-8
+    rtols = [0., 1e-7]
+    atols = [0., 1e-7]
     equal_nans = [False, True]
 
     products = product(rtols, atols, equal_nans)
