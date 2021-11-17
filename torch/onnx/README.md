@@ -1,5 +1,7 @@
-## ONNX
+# torch.onnx
 
-torch/onnx provides a location for torch Aten operators exporting to ONNX operators.
+Torch->ONNX converter / exporter.
 
-Refer [Guide for developing PyTorch ONNX exporter](https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter) to make code contributions.
+[User-facing docs](https://pytorch.org/docs/master/onnx.html).
+
+[Developer docs](https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter).
