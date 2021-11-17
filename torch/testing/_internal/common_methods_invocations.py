@@ -4972,11 +4972,14 @@ class ShapeFuncInfo(OpInfo):
                                             **kwargs)
         self.ref = ref
 
-def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False):
+def sample_inputs_foreach(self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None):
     if same_size:
-        return [make_tensor((N, N), device, dtype, noncontiguous=noncontiguous) for _ in range(N)]
+        return [make_tensor((N, N), device, dtype, noncontiguous=noncontiguous, low=low, high=high) for _ in range(N)]
     else:
-        return [make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous) for i in range(N)]
+        return [
+            make_tensor((N - i, N - i), device, dtype, noncontiguous=noncontiguous, low=low, high=high)
+            for i in range(N)
+        ]
 
 
 def get_foreach_method_names(name):
