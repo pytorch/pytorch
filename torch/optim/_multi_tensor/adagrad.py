@@ -21,7 +21,7 @@ class Adagrad(Optimizer):
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0, eps=1e-10, maximize=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -34,7 +34,7 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid epsilon value: {}".format(eps))
 
         defaults = dict(lr=lr, lr_decay=lr_decay, eps=eps, weight_decay=weight_decay,
-                        initial_accumulator_value=initial_accumulator_value)
+                        initial_accumulator_value=initial_accumulator_value, maximize=maximize)
         super(Adagrad, self).__init__(params, defaults)
 
         for group in self.param_groups:
@@ -92,6 +92,7 @@ class Adagrad(Optimizer):
                       lr=group['lr'],
                       weight_decay=group['weight_decay'],
                       lr_decay=group['lr_decay'],
-                      eps=group['eps'])
+                      eps=group['eps'],
+                      maximize=group['maximize'])
 
         return loss

@@ -21,7 +21,8 @@ def adagrad(
     lr: float,
     weight_decay: float,
     lr_decay: float,
-    eps: float
+    eps: float,
+    maximize: bool
 ):
     r"""Functional API that performs Adagrad algorithm computation.
 
@@ -35,7 +36,7 @@ def adagrad(
             )
         torch._foreach_add_(grads, params, alpha=weight_decay)
 
-    minus_clr = [-lr / (1 + (step - 1) * lr_decay) for step in state_steps]
+    minus_clr = [-lr / (1 + (step - 1) * lr_decay) if not maximize else lr / (1 + (step - 1) * lr_decay) for step in state_steps]
 
     if has_sparse_grad:
         # sparse is not supported by multi_tensor. Fall back to optim.adagrad

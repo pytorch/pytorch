@@ -21,7 +21,8 @@ def adagrad(params: List[Tensor],
             lr: float,
             weight_decay: float,
             lr_decay: float,
-            eps: float):
+            eps: float,
+            maximize: bool):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
@@ -32,9 +33,8 @@ def adagrad(params: List[Tensor],
             if grad.is_sparse:
                 raise RuntimeError("weight_decay option is not compatible with sparse gradients")
             grad = grad.add(param, alpha=weight_decay)
-
         clr = lr / (1 + (step - 1) * lr_decay)
-
+        clr = -clr if maximize else clr
         if grad.is_sparse:
             grad = grad.coalesce()  # the update is non-linear so indices must be unique
             grad_indices = grad._indices()

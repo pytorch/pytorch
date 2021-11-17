@@ -26,6 +26,7 @@ class _FunctionalAdagrad(object):
         warmup_num_iters: float = 0.0,
         eps: float = 1e-10,
         coalesce_grad: bool = True,
+        maximize: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
@@ -37,6 +38,7 @@ class _FunctionalAdagrad(object):
             "warmup_lr_multiplier": warmup_lr_multiplier,
             "warmup_num_iters": warmup_num_iters,
         }
+        self.maximize = maximize
         self.coalesce_grad = coalesce_grad
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
@@ -88,4 +90,5 @@ class _FunctionalAdagrad(object):
                       lr=self.defaults['lr'],
                       weight_decay=self.defaults['weight_decay'],
                       lr_decay=self.defaults['lr_decay'],
-                      eps=self.defaults['eps'])
+                      eps=self.defaults['eps'],
+                      maximize=self.maximize)
