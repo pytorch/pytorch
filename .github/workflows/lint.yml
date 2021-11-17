@@ -36,7 +36,7 @@ jobs:
           python3 -m tools.pyi.gen_pyi \
             --native-functions-path aten/src/ATen/native/native_functions.yaml \
             --deprecated-functions-path "tools/autograd/deprecated.yaml" \
-            --print_files \
+            --print-files \
             >> lint_paths.txt
 
           git grep -Il . >> lint_paths.txt
