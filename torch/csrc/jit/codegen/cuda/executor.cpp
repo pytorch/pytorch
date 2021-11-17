@@ -708,7 +708,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     }
 
     executor_utils::validateVectorizedTensors(
-        &fusion_, inputs, outputs, lowered_, compileTimeDataCache());
+        &fusion_, inputs, outputs, lowered_, compileTimeDataCache(), expr_eval);
 
     auto& fusion = fusion_;
 

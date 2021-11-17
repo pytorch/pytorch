@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/arith.h>
+#include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/index_reference_replay.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
@@ -600,10 +601,9 @@ void IndexCompute::handle(Split* split) {
   } else {
     index_map_[in_id] = ir_builder.addExpr(
         ir_builder.mulExpr(outer_ind, getExtent(inner_id)), inner_ind);
-    // The extent of a root axis should be only updated when its
-    // allocation is partial, i.e., zero_merged_in is true. See issue
-    // #1016 and the FusionIssue1016 test.
-    if (split->in()->definition() != nullptr || zero_merged_in) {
+    // The extent should be updated only when its allocation is
+    // partial, i.e., zero_merged_in is true. See PR #1270.
+    if (zero_merged_in) {
       extent_map_[in_id] =
           ir_builder.mulExpr(getExtent(outer_id), getExtent(inner_id));
     }
@@ -2173,12 +2173,17 @@ kir::TensorIndex* Index::getConsumerIndex(
 
 namespace {
 
-struct PredicateContigInfo {
+struct PredicateDomainInfo {
  public:
-  // Iteration domain that is only comprised of merge transformations
-  IterDomain* contig_id = nullptr;
-  // The set of root iteration domains that make up the contig_id
-  std::unordered_set<IterDomain*> root_ids;
+  // Iteration domain to predicate
+  IterDomain* id = nullptr;
+  // The set of iteration domains that make up the id. If this is for
+  // a non-divisible split, the set only contains the id itself. This
+  // set is used to remove redundant predicates when gathering
+  // unswitch predicates.
+  std::unordered_set<IterDomain*> covered_ids;
+  // True if this predicate is for a non-divisible split
+  bool is_non_divisible_split = false;
 };
 
 // Find iteration domains in the history of reference comprised only of
@@ -2187,10 +2192,10 @@ struct PredicateContigInfo {
 // return every IterDomain that's contiguous, just the one closest to the
 // leaves. Predicates are not associated with physical memory so we can treat
 // all of them as contiguous merges.
-std::vector<PredicateContigInfo> getPredicateContigIds(
+std::vector<PredicateDomainInfo> getPredicateContigIds(
     const ReferenceTensor& reference,
     TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& ref_root_2_consumer) {
+    const std::unordered_map<IterDomain*, IterDomain*>& ref_2_consumer) {
   const auto gpu_lower = GpuLower::current();
 
   std::vector<IterDomain*> reference_predicated_root_domain;
@@ -2218,7 +2223,7 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
   std::vector<IterDomain*> contiguous_ids = reference_predicated_root_domain;
 
   if (contiguous_ids.empty()) {
-    return std::vector<PredicateContigInfo>();
+    return std::vector<PredicateDomainInfo>();
   }
 
   // If root IDs are partial, i.e., start is non-zero and stop is not
@@ -2235,8 +2240,8 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
             .hasHalo()) {
       continue;
     }
-    auto it = ref_root_2_consumer.find(reference_predicated_id);
-    if (it == ref_root_2_consumer.end()) {
+    auto it = ref_2_consumer.find(reference_predicated_id);
+    if (it == ref_2_consumer.end()) {
       continue;
     }
     auto consumer_root_id = it->second;
@@ -2289,7 +2294,7 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
     }
   }
 
-  std::vector<PredicateContigInfo> contig_id_infos;
+  std::vector<PredicateDomainInfo> contig_id_infos;
 
   // Create entries and return them
   for (auto contig_id : contiguous_ids) {
@@ -2300,13 +2305,53 @@ std::vector<PredicateContigInfo> getPredicateContigIds(
         {reference_predicated_root_domain.begin(),
          reference_predicated_root_domain.end()});
     auto contig_root_ids = ir_utils::filterByType<IterDomain>(contig_root_vals);
-    PredicateContigInfo contig_id_info;
-    contig_id_info.contig_id = contig_id;
-    contig_id_info.root_ids = std::unordered_set<IterDomain*>(
+    PredicateDomainInfo contig_id_info;
+    contig_id_info.id = contig_id;
+    contig_id_info.covered_ids = std::unordered_set<IterDomain*>(
         contig_root_ids.begin(), contig_root_ids.end());
     contig_id_infos.push_back(contig_id_info);
   }
   return contig_id_infos;
+}
+
+IterDomain* getMappedReferenceDomain(
+    IterDomain* id,
+    const ReferenceTensor& reference) {
+  // Partially overlaps with getPredicateContigIds()
+  const auto gpu_lower = GpuLower::current();
+  auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(id);
+  auto it = reference.concrete_to_id.find(concrete_id);
+  if (it == reference.concrete_to_id.end()) {
+    return nullptr;
+  }
+  return it->second;
+}
+
+std::vector<PredicateDomainInfo> getNonDivisibleReferenceDomainsToPredicate(
+    TensorView* consumer_tv,
+    const ReferenceTensor& reference) {
+  const auto& non_divisible_split_info =
+      GpuLower::current()->nonDivisibleSplitInfo();
+
+  std::vector<PredicateDomainInfo> pred_info_vec;
+
+  auto it = non_divisible_split_info.splitsToPredicate().find(consumer_tv);
+  if (it == non_divisible_split_info.splitsToPredicate().end()) {
+    return {};
+  }
+
+  const auto& splits_to_predicate = it->second;
+
+  for (auto split : splits_to_predicate) {
+    auto ref_id = getMappedReferenceDomain(split->in(), reference);
+    if (ref_id == nullptr) {
+      continue;
+    }
+    PredicateDomainInfo info{ref_id, {ref_id}, true};
+    pred_info_vec.emplace_back(info);
+  }
+
+  return pred_info_vec;
 }
 
 bool needsPadding(TensorView* tv) {
@@ -2493,7 +2538,8 @@ void adjustStartAndStopOffsetsForGather(
 // shifted.
 std::pair<kir::Val*, kir::Val*> getStartAndStopLimitOffsets(
     IterDomain* consumer_id,
-    bool padding_predicate) {
+    bool padding_predicate,
+    bool non_divisible_pred) {
   const auto gpu_lower = GpuLower::current();
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
@@ -2503,22 +2549,33 @@ std::pair<kir::Val*, kir::Val*> getStartAndStopLimitOffsets(
   kir::Val* stop_limit =
       ir_builder.negExpr(gpu_lower->lowerValue(consumer_id->stopOffset()));
 
-  AxisHaloInfo halo_info = gpu_lower->haloInfo().getRootAxisInfo(consumer_id);
+  if (!non_divisible_pred) {
+    AxisHaloInfo halo_info = gpu_lower->haloInfo().getRootAxisInfo(consumer_id);
 
-  // Below, "left" and "right" halo mean halo at offset zero and
-  // axis extent, respectively.
-  //
-  // The consumer axis looks like this:
-  //
-  // [0, left halo)[start_limit, stop_limit)[0, right halo)
-  //
-  if (!padding_predicate) {
-    start_limit = ir_builder.addExpr(start_limit, halo_info.width(0));
-    stop_limit = ir_builder.addExpr(stop_limit, halo_info.width(0));
+    // Below, "left" and "right" halo mean halo at offset zero and
+    // axis extent, respectively.
+    //
+    // The consumer axis looks like this:
+    //
+    // [0, left halo)[start_limit, stop_limit)[0, right halo)
+    //
+    if (!padding_predicate) {
+      start_limit = ir_builder.addExpr(start_limit, halo_info.width(0));
+      stop_limit = ir_builder.addExpr(stop_limit, halo_info.width(0));
+    } else {
+      // In case of the padding predicate, the whole range, including both left
+      // and right halo regions, is computed.
+      stop_limit = ir_builder.addExpr(stop_limit, halo_info.width());
+    }
   } else {
-    // In case of the padding predicate, the whole range, including both left
-    // and right halo regions, is computed.
-    stop_limit = ir_builder.addExpr(stop_limit, halo_info.width());
+    // For non-divisible predicates, the index must be predicated such
+    // that it is less than the extent of the predicated ID +
+    // halo. Note that getRootAxisInfo doesn't work since consumer_id
+    // isn't a root domain.
+    if (gpu_lower->haloInfo().hasHaloWidth(consumer_id)) {
+      auto halo = gpu_lower->haloInfo().getHaloWidth(consumer_id);
+      stop_limit = ir_builder.addExpr(stop_limit, halo);
+    }
   }
 
   return {start_limit, stop_limit};
@@ -2702,7 +2759,8 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
     const std::unordered_map<kir::IterDomain*, kir::Val*>& ref_start_index_map,
     const std::unordered_map<kir::IterDomain*, kir::Val*>& ref_stop_index_map,
     bool padding_predicate,
-    bool unswitch) {
+    bool unswitch,
+    bool non_divisible_pred) {
   const auto gpu_lower = GpuLower::current();
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
@@ -2717,49 +2775,54 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
 
   auto consumer_def = consumer_tv->definition();
 
-  if (consumer_def->isA<ShiftOp>()) {
-    adjustStartAndStopOffsetsForShift(
-        start_offsets,
-        stop_offsets,
-        consumer_tv,
-        consumer_id,
-        padding_predicate);
-  } else if (consumer_def->isA<GatherOp>()) {
-    adjustStartAndStopOffsetsForGather(
-        start_offsets,
-        stop_offsets,
-        consumer_tv,
-        consumer_id,
-        reference,
-        ref_start_index_map,
-        ref_stop_index_map,
-        padding_predicate);
-  }
+  // These adjustments are not required when predicating non-divisible splits
+  if (!non_divisible_pred) {
+    if (consumer_def->isA<ShiftOp>()) {
+      adjustStartAndStopOffsetsForShift(
+          start_offsets,
+          stop_offsets,
+          consumer_tv,
+          consumer_id,
+          padding_predicate);
+    } else if (consumer_def->isA<GatherOp>()) {
+      adjustStartAndStopOffsetsForGather(
+          start_offsets,
+          stop_offsets,
+          consumer_tv,
+          consumer_id,
+          reference,
+          ref_start_index_map,
+          ref_stop_index_map,
+          padding_predicate);
+    }
 
-  // Adjustment for partial split
-  auto partial_split_offset = getGlobalConsumerOffsetWithPartialSplit(
-      gpu_lower->lowerValue(consumer_id)->as<kir::IterDomain>());
-  for (auto& start_offset : start_offsets) {
-    start_offset = ir_builder.addExpr(start_offset, partial_split_offset);
-  }
-  for (auto& stop_offset : stop_offsets) {
-    stop_offset = ir_builder.addExpr(stop_offset, partial_split_offset);
-  }
-
-  // If generating a predicate for unswitch, adjust the stop offset to
-  // accommodate the addition of halo to the loop stop. See the
-  // comment in getPredicateReferenceIndexing as well.
-  if (unswitch) {
-    TORCH_INTERNAL_ASSERT(
-        !padding_predicate, "Unswitch should not use the padding predicate");
-    auto stop_unswitch_offset = getUnswitchStopOffset(consumer_id, consumer_tv);
+    // Adjustment for partial split
+    auto partial_split_offset = getGlobalConsumerOffsetWithPartialSplit(
+        gpu_lower->lowerValue(consumer_id)->as<kir::IterDomain>());
+    for (auto& start_offset : start_offsets) {
+      start_offset = ir_builder.addExpr(start_offset, partial_split_offset);
+    }
     for (auto& stop_offset : stop_offsets) {
-      stop_offset = ir_builder.addExpr(stop_offset, stop_unswitch_offset);
+      stop_offset = ir_builder.addExpr(stop_offset, partial_split_offset);
+    }
+
+    // If generating a predicate for unswitch, adjust the stop offset to
+    // accommodate the addition of halo to the loop stop. See the
+    // comment in getPredicateReferenceIndexing as well.
+    if (unswitch) {
+      TORCH_INTERNAL_ASSERT(
+          !padding_predicate, "Unswitch should not use the padding predicate");
+      auto stop_unswitch_offset =
+          getUnswitchStopOffset(consumer_id, consumer_tv);
+      for (auto& stop_offset : stop_offsets) {
+        stop_offset = ir_builder.addExpr(stop_offset, stop_unswitch_offset);
+      }
     }
   }
 
   // Get the boundaries of two ends
-  auto limits = getStartAndStopLimitOffsets(consumer_id, padding_predicate);
+  auto limits = getStartAndStopLimitOffsets(
+      consumer_id, padding_predicate, non_divisible_pred);
 
   // At this point, we have everything to create both start and stop
   // predicates as:
@@ -2890,25 +2953,31 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
             loops, reference, unswitch_or_vec_loop, true)
       : ref_stop_index_map;
 
-  // Only root domain mappings are used
-  auto root_ref_2_consumer = indexMapReferenceTo(
-      consumer_tv, gpu_lower->caIndexMap(), reference.concrete_to_id, true);
+  auto ref_2_consumer = indexMapReferenceTo(
+      consumer_tv, gpu_lower->caIndexMap(), reference.concrete_to_id);
 
   // Get the contiguous ids we need to generate predicates for
   auto contig_id_infos =
-      getPredicateContigIds(reference, consumer_tv, root_ref_2_consumer);
+      getPredicateContigIds(reference, consumer_tv, ref_2_consumer);
+
+  auto non_divisible_splits =
+      getNonDivisibleReferenceDomainsToPredicate(consumer_tv, reference);
+  contig_id_infos.insert(
+      contig_id_infos.end(),
+      non_divisible_splits.begin(),
+      non_divisible_splits.end());
 
   std::vector<RootPredicateInfo> pred_info_vec;
 
   for (auto contig_id_entry : contig_id_infos) {
-    auto contig_id = contig_id_entry.contig_id;
+    auto contig_id = contig_id_entry.id;
     // No predicates needed for braodcasted indices.
     if (contig_id->isBroadcast() ||
         gpu_lower->trivialReductionInfo().isDerived(contig_id)) {
       continue;
     }
 
-    auto root_ids = contig_id_entry.root_ids;
+    auto root_ids = contig_id_entry.covered_ids;
     auto kir_contig_id =
         gpu_lower->lowerValue(contig_id)->as<kir::IterDomain>();
 
@@ -2941,13 +3010,14 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     }
 
     // Find a corresponding consumer root id if exists. Used to
-    // supprot shift. If contig_id is not root, nothing is required to
-    // do for shift as shift-related domains are excluded from
-    // contig domains.
+    // support shift. If ca ontig_id is a merged non-root domain, nothing
+    // is required to do for shift as shift-related domains are
+    // excluded from contig domains.
     IterDomain* consumer_id = nullptr;
-    if (contig_id->definition() == nullptr) {
-      auto it = root_ref_2_consumer.find(contig_id);
-      if (it != root_ref_2_consumer.end()) {
+    if (contig_id->definition() == nullptr ||
+        contig_id_entry.is_non_divisible_split) {
+      auto it = ref_2_consumer.find(contig_id);
+      if (it != ref_2_consumer.end()) {
         consumer_id = it->second;
       } else {
         continue;
@@ -2975,7 +3045,8 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
         ref_start_index_map,
         ref_stop_index_map,
         shift_padding,
-        unswitch_or_vec_loop != nullptr);
+        unswitch_or_vec_loop != nullptr,
+        contig_id_entry.is_non_divisible_split);
 
     auto stop_index = ref_stop_indexing_it->second;
     auto start_index = ref_start_index_map.at(kir_contig_id);
@@ -3009,15 +3080,12 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
       info.stop_predicates_.push_back(pred);
     }
 
-    // Transform roots from reference to concrete roots (based on loop compute
-    // at map)
-    std::transform(
-        contig_id_entry.root_ids.begin(),
-        contig_id_entry.root_ids.end(),
-        std::inserter(info.root_ids_, info.root_ids_.begin()),
-        [&reference](IterDomain* root_id) {
-          return reference.id_to_concrete.at(root_id);
-        });
+    // Transform ids from reference to concrete and consumer domains
+    // (based on loop compute at map)
+    for (auto ref_id : contig_id_entry.covered_ids) {
+      info.root_ids_.insert(reference.id_to_concrete.at(ref_id));
+      info.consumer_ids_.insert(ref_2_consumer.at(ref_id));
+    }
     pred_info_vec.emplace_back(info);
   }
 

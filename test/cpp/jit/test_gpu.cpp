@@ -6497,6 +6497,7 @@ TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
   int numel_y = 100;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
   at::Tensor input = at::randn({numel_x, numel_y}, options);
 
   FusionExecutor fe;
@@ -18820,6 +18821,424 @@ TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
 
   testValidate(
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionRfactorPredication2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = min(tv0, {0});
+  fusion.addOutput(tv1);
+
+  // Make TIDx non-exact
+  auto tv2 = makeContigTensor(1);
+  fusion.addInput(tv2);
+
+  auto tv3 = add(tv2, new Double(1));
+  fusion.addOutput(tv3);
+
+  tv1->split(0, 4);
+  auto tv4 = tv1->rFactor({0});
+
+  tv1->split(0, 3);
+
+  // tv0->computeAt(tv1, 3);
+  tv4->reorder({{0, 1}});
+  tv4->split(0, 3);
+  tv4->setMemoryType(MemoryType::Shared);
+
+  // tv0: [I]
+  // tv4: [4/3, 3, I/4]
+  // tv1: [4/3, 3]
+
+  tv1->axis(0)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv1, {tv4});
+
+  tv3->axis(0)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor at_t0 = at::randn({9}, options);
+  at_t0 = at::abs(at_t0);
+  at::Tensor at_t3 = at::randn({128}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({at_t0, at_t3});
+
+  auto at_t2 = std::get<0>(at_t0.min(0));
+  auto at_t4 = at_t3 + 1;
+
+  testValidate(
+      &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {0});
+  fusion.addOutput(tv1);
+
+  // [I]
+  tv1->split(0, 5);
+  // [ceilDiv(I, 5), 5]
+
+  // This second split is non-divisible. The split domain must be predicated.
+  tv1->split(1, 3);
+  // [ceilDiv(I, 5), 2, 3]
+
+  auto tv2 = sum(tv0, {0});
+  fusion.addOutput(tv2);
+
+  // tv2 shouldn't need to have another predicate
+  tv2->split(0, 4);
+  tv2->split(1, 2);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 1,
+      "Only tv1 should have a non-divisible predicate.");
+  for (auto tv : {tv1}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref, ref}, __LINE__, __FILE__);
+}
+
+// Repro of issue #1074
+TEST(NVFuserTest, FusionNonDivisibleSplit2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = add(tv1, new Double(1));
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 2);
+  tv2->split(-1, 4);
+  tv2->reorder({{1, 2}, {2, 1}});
+  tv0->computeAt(tv2, 2);
+
+  tv2->split(-1, 3);
+
+  // To make the sanitizer catch the invalid accesses. Not necessary
+  // to expose the bug.
+  tv1->setMemoryType(MemoryType::Shared);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 1,
+      "Only tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({13, 17}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0 + 2;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Similar to FusionNonDivisibleSplit1 but with unswitch
+TEST(NVFuserTest, FusionNonDivisibleSplit3_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0});
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 5);
+  tv2->split(1, 3);
+
+  tv0->computeAt(tv2, -1);
+
+  tv2->axis(0)->parallelize(ParallelType::Unswitch);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Non-divisible split through merge
+TEST(NVFuserTest, FusionNonDivisibleSplit4_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0, 1});
+  fusion.addOutput(tv2);
+
+  tv2->split(0, 5);
+  tv2->merge(1, 2);
+  tv2->split(1, 3);
+
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24, 2}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Nested splits
+TEST(NVFuserTest, FusionNonDivisibleSplit5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = sum(tv1, {0});
+  fusion.addOutput(tv2);
+
+  // [I]
+  tv2->split(0, 8);
+  // [I/8, 8]
+  tv2->split(1, 2);
+  // [I/8, 4, 2]
+  tv2->split(1, 3); // non-divisible split of outer output
+  // [I/8, 2, 3, 2]
+
+  tv0->computeAt(tv2, -1);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().empty(),
+      "There must be no split to validate");
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToPredicate().size() == 2,
+      "Both tv1 and tv2 should have a non-divisible predicate.");
+  for (auto tv : {tv1, tv2}) {
+    auto it = gpulw.nonDivisibleSplitInfo().splitsToPredicate().find(tv);
+    TORCH_CHECK(
+        it != gpulw.nonDivisibleSplitInfo().splitsToPredicate().end(),
+        "No info found for ",
+        tv);
+    const auto& splits_to_predicate = it->second;
+    TORCH_CHECK(
+        splits_to_predicate.size() == 1,
+        "There must be one split to predicate");
+  }
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+// Vectorized non-divisible split. Must be validated at run time
+TEST(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  fusion.addOutput(tv1);
+
+  tv1->split(0, 8, false);
+  tv1->split(1, 4);
+
+  tv1->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().size() == 1,
+      "There should be one split to validate");
+  for (const auto& kv : gpulw.nonDivisibleSplitInfo().splitsToPredicate()) {
+    const auto& splits_to_predicate = kv.second;
+    TORCH_CHECK(
+        splits_to_predicate.empty(),
+        "There must be no split to predicate, but tensor t",
+        kv.first->name(),
+        " has:",
+        splits_to_predicate);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto t0 = at::randn({32}, options);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0;
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+
+  auto t0_non_divisible = at::randn({8}, options);
+  // Since ceilDiv(8, 8) is not divisible by 4, the vectorization is
+  // illegal. The run-time validation of vectorization should throw an error.
+  ASSERT_ANY_THROW(fe.runFusion({t0_non_divisible}));
+}
+
+// If a split is validated at run time, it's not necessary to predicate.
+TEST(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeContigTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = set(tv0);
+  auto tv2 = add(tv1, new Double(1));
+  auto tv3 = sum(tv2, {0});
+  fusion.addOutput(tv3);
+
+  tv3->split(0, 8, false);
+  tv3->split(1, 4);
+  TransformPropagator::from(tv3);
+
+  tv3->axis(1)->parallelize(ParallelType::TIDx);
+  scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
+
+  tv1->axis(2)->parallelize(ParallelType::Vectorize);
+
+  GpuLower gpulw(&fusion);
+  TORCH_CHECK(
+      gpulw.nonDivisibleSplitInfo().splitsToValidate().size() == 1,
+      "There should be one split to validate");
+  for (const auto& kv : gpulw.nonDivisibleSplitInfo().splitsToPredicate()) {
+    const auto& splits_to_predicate = kv.second;
+    TORCH_CHECK(
+        splits_to_predicate.empty(),
+        "There must be no split to predicate, but tensor t",
+        kv.first->name(),
+        " has:",
+        splits_to_predicate);
+  }
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto t0 = at::randn({1024}, options);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = (t0 + 1).sum();
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 } // namespace jit

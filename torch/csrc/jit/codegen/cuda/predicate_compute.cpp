@@ -388,27 +388,11 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   bool non_zero_start_found = false;
   for (const auto& pred_info : pred_info_vec) {
     if (pred_type == PredicateType::ReductionWrite) {
-      const auto& concrete_root_ids = pred_info.rootIds();
+      const auto& consumer_ids = pred_info.consumerIds();
       bool pred_for_reduction_axis = false;
-      for (auto pred_root_id : concrete_root_ids) {
-        auto kir_pred_root_id =
-            gpu_lower->lowerValue(pred_root_id)->as<kir::IterDomain>();
-        auto it = std::find_if(
-            out_tv->domain()->rootDomain().begin(),
-            out_tv->domain()->rootDomain().end(),
-            [&](const auto& out_root_id) {
-              return gpu_lower->caIndexMap().areMapped(
-                  kir_pred_root_id, out_root_id);
-            });
-        TORCH_INTERNAL_ASSERT(
-            it != out_tv->domain()->rootDomain().end(),
-            "No corresponding root ID found for ",
-            pred_root_id,
-            " when generating inline predicate for ",
-            kir::toString(expr));
-        auto out_root_id = *it;
-        if (out_root_id->isReduction()) {
-          if (!out_root_id->start()->isZeroInt()) {
+      for (auto consumer_id : consumer_ids) {
+        if (consumer_id->isReduction()) {
+          if (!consumer_id->start()->isZeroInt()) {
             non_zero_start_found = true;
           }
           pred_for_reduction_axis = true;

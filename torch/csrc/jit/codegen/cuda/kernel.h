@@ -65,6 +65,9 @@ struct KernelSummary {
   //! List of dynamic local memory buffers.
   //! Only used for debugging.
   std::vector<const kir::Allocate*> dynamic_lmem_allocations;
+
+  //! ceilDiv extents that must be divisible
+  std::vector<std::pair<const kir::Val*, const kir::Val*>> splits_to_validate;
 };
 
 //! Container for a lowered Kernel IR

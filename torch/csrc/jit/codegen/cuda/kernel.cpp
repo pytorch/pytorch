@@ -23,6 +23,12 @@ class KernelIrScanner : private kir::IrVisitor {
     for (const auto& ir_node : kernel->irNodes()) {
       ir_node->accept(this);
     }
+    const auto gpu_lower = GpuLower::current();
+    for (auto split : gpu_lower->nonDivisibleSplitInfo().splitsToValidate()) {
+      auto extent = gpu_lower->lowerValue(split->in()->extent());
+      auto factor = gpu_lower->lowerValue(split->factor());
+      summary_.splits_to_validate.emplace_back(extent, factor);
+    }
   }
 
   const auto& summary() const {

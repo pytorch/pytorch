@@ -466,6 +466,8 @@ void GpuLower::lower() {
   // Detects all exprssions that don't need predicates
   predicateElimination().build(fusion_);
 
+  nonDivisibleSplitInfo().build(fusion_);
+
   // Set the kernel inputs & outputs
   for (auto input : fusion_->inputs()) {
     kernel_->addInput(GpuLower::lowerValue(input));

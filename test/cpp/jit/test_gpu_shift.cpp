@@ -4534,6 +4534,97 @@ TEST(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, FusionNonDivisibleHalo1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+
+  auto tv1 = add(tv0, new Double(1));
+  auto tv2 = shift(tv1, {-1});
+  fusion.addOutput(tv2);
+
+  // [I]
+  tv2->split(0, 8);
+  // [I/8, 8]
+  tv2->split(1, 3);
+  // [I/8, 3, 3]
+
+  tv0->computeAt(tv2, -2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({24}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = shift((t0 + 1), {-1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionNonDivisibleHalo2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tv1 = gather(tv0, {3, 3}, {{1, 1}, {1, 1}});
+  auto tv2 = sum(tv1, {-2, -1});
+  auto tv3 = add(tv0, tv2);
+  auto tv4 = sum(tv3, {0, 1});
+  fusion.addOutput(tv4);
+
+  const int gy = 50;
+  const int gx = 50;
+  const int by = 8;
+  const int bx = 16;
+
+  auto tv5 = tv0->cache_after();
+
+  // [I, J]
+  tv4->split(0, gy);
+  // [I/gy, gy, J]
+  tv4->split(1, by);
+  // [I/gy, gy/by, by, J]
+  tv4->split(-1, gx);
+  // [I/gy, gy/by, by, J/gx, gx]
+  tv4->split(-1, bx);
+  // [I/gy, gy/by, by, J/gx, gx/bx, bx]
+  tv4->reorder({{3, 1}, {1, 2}, {4, 3}, {2, 4}});
+  // [I/gy, J/gx, gy/by, gx/bx, by, bx]
+
+  auto tv6 = tv4->rFactor({2, 3});
+
+  tv0->computeAt(tv6, 4);
+
+  tv4->axis(0)->parallelize(ParallelType::BIDy);
+  tv4->axis(1)->parallelize(ParallelType::BIDx);
+  tv4->axis(2)->parallelize(ParallelType::TIDy);
+  tv4->axis(3)->parallelize(ParallelType::TIDx);
+
+  scheduler_utils::parallelizeAllLike(tv4, {tv1, tv2, tv3, tv5, tv6});
+
+  tv5->setMemoryType(MemoryType::Shared);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({111, 222}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto t1 = gather(t0, {3, 3}, {{1, 1}, {1, 1}});
+  auto t2 = t1.sum({-2, -1});
+  auto t3 = t0 + t2;
+  auto t4 = t3.sum({-2, -1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {t4}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
