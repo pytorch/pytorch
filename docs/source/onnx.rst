@@ -604,3 +604,7 @@ Classes
     :template: classtemplate.rst
 
     SymbolicContext
+
+Guide for developing PyTorch ONNX exporter
+--------------------------------------------
+`A wiki for developing PyTorch ONNX exporter <https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter>`_.
