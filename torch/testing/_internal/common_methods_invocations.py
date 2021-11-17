@@ -1851,8 +1851,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
         sample_inputs.append(
             SampleInput(make_tensor(shape, device, dtype, requires_grad=requires_grad),
                         args=(
-                            make_tensor(shape, device, dtype)
-                                .mH.requires_grad_(requires_grad),
+                            make_tensor(shape, device, dtype).mH.requires_grad_(requires_grad),
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad)),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
@@ -1861,8 +1860,7 @@ def sample_inputs_addmm(op_info, device, dtype, requires_grad, **kwargs):
                         args=(
                             make_tensor(shape, device, dtype,
                                         requires_grad=requires_grad),
-                            make_tensor(shape, device, dtype)
-                                        .mH.requires_grad_(requires_grad)),
+                            make_tensor(shape, device, dtype).mH.requires_grad_(requires_grad)),
                         kwargs={'alpha': alpha_val, 'beta': beta_val},))
     return sample_inputs
 
