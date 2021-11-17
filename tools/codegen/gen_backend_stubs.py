@@ -199,7 +199,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
 
     # TODO: handle cases when yaml contains zero ops properly in a later PR.
-    if backend_key is not None and autograd_key is not None:
+    if backend_key is not None or autograd_key is not None:
         backend_dispatch_key: DispatchKey = backend_key
         autograd_dispatch_key: DispatchKey = autograd_key
         class_name = backend_indices[backend_dispatch_key].native_function_class_name()
@@ -226,6 +226,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         })
 
         for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
+            if dispatch_key is None:
+                continue
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
