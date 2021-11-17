@@ -3,6 +3,7 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/LinalgBackend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -10,7 +11,6 @@
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/util/Exception.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <c10/core/LinalgBackend.h>
 #include <c10/core/QEngine.h>
 #include <c10/util/irange.h>
 

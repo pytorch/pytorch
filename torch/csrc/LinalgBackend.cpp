@@ -1,10 +1,10 @@
 #include <torch/csrc/LinalgBackend.h>
 
+#include <ATen/LinalgBackend.h>
+
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
-
-#include <c10/core/LinalgBackend.h>
 
 #include <structmember.h>
 #include <cstring>

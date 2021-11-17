@@ -1,9 +1,10 @@
 #include <torch/csrc/utils/linalg_backends.h>
 
+#include <ATen/LinalgBackend.h>
+
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/LinalgBackend.h>
-#include <c10/core/LinalgBackend.h>
 
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>

@@ -5,7 +5,7 @@
 #include <ostream>
 #include <string>
 
-namespace c10 {
+namespace at {
 
 enum class LinalgBackend : int8_t { Default, Cusolver, Magma };
 

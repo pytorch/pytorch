@@ -1,8 +1,8 @@
 #pragma once
 
-#include <torch/csrc/python_headers.h>
+#include <ATen/LinalgBackend.h>
 
-#include <c10/core/LinalgBackend.h>
+#include <torch/csrc/python_headers.h>
 
 #include <string>
 
