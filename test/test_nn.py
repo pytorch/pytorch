@@ -6683,6 +6683,20 @@ class TestNN(NNTestCase):
         bad_input = torch.randn(3, 1)
         test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_native_dropout_corner_case(self):
+        for train in [True, False]:
+            for p in [0.0, 1.0]:
+                for device in ["cuda", "cpu"]:
+                    x = torch.randn(5).to(device=device).requires_grad_()
+                    x_ref = x.detach().requires_grad_()
+                    o = torch.native_dropout(x, p, train)[0]
+                    o_ref = torch.dropout(x_ref, p, train)
+                    o.sum().backward()
+                    o_ref.sum().backward()
+                    assert(o.equal(o_ref))
+                    assert(x.grad.equal(x_ref.grad))
+
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))

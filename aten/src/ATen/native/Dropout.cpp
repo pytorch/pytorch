@@ -92,17 +92,19 @@ native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
 
-  Tensor mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor mask;
   Tensor output;
 
   if (!train.has_value() || *train) {
     double p1m = 1. - p;
     // Check for probability of zero to avoid divide by zero and NaN results
     double scale = p1m == 0 ? 0. : 1. / p1m;
+    mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     mask.bernoulli_(p1m);
     output = input.mul(mask).mul_(scale);
   } else {
-    output = input;
+    mask = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    output = input.clone();
   }
   return std::make_tuple(output, mask);
 }

@@ -321,12 +321,12 @@ inline void launcher(
 
 template <typename mask_t>
 std::tuple<Tensor,Tensor>
-dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, bool train){
+dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p){
   Tensor mask = at::empty_like(self, self.options().dtype(c10::CppTypeToScalarType<mask_t>::value));
   const int64_t nelem = self.numel();
   // empty tensors should not get here, but just in case, avoid FPE
   // non-training shot-cut
-  if (nelem==0 || !train) return std::tuple<Tensor,Tensor>(self, mask);
+  if (nelem==0) return std::tuple<Tensor,Tensor>(self.clone(), mask);
 
   Tensor ret = at::empty_like(self);
   const int64_t block_size = 256;
@@ -354,28 +354,29 @@ dropout_cuda(CUDAGeneratorImpl* gen, const Tensor& self, double p, bool train){
 
 std::tuple<Tensor,Tensor>
 native_dropout_cuda(const Tensor& self, double p, c10::optional<bool> train){
+  // short-cut for train == false
+  if (train.has_value() && !train.value()) {
+    return std::make_tuple(self.clone(), at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)));
+  }
   // short-cut
   if (p == 1) {
-    // Technically we don't need to short-cut for inference
-    //
     // native_dropout_cuda is in derivatives.yaml, so we don't need to add data
     // dependency from output to input for autograd
-    auto ret = at::zeros_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    auto mask = (!train.has_value() || *train) ? at::ones_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value)) : at::empty_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value));
+    auto ret = at::zeros_like(self);
+    auto mask = at::zeros_like(self, self.options().dtype(c10::CppTypeToScalarType<bool>::value));
     return std::tuple<Tensor,Tensor>(ret, mask);
   }
 
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(c10::nullopt, cuda::detail::getDefaultCUDAGenerator());
   double p1m = 1. - p;
-  // Check for probability of zero to avoid divide by zero and NaN results
-  return dropout_cuda<bool>(gen, self, p1m, train.has_value() ? *train : true);
+  return dropout_cuda<bool>(gen, self, p1m);
 }
 
 // TODO: _fused_dropout_cuda is to be removed, see PR #63937
 std::tuple<Tensor,Tensor>
 fused_dropout_cuda(const Tensor& self, double p, c10::optional<Generator> gen_){
   auto gen = get_generator_or_default<CUDAGeneratorImpl>(gen_, cuda::detail::getDefaultCUDAGenerator());
-  return dropout_cuda<uint8_t>(gen, self, p, true);
+  return dropout_cuda<uint8_t>(gen, self, p);
 }
 
 template <typename mask_t>
