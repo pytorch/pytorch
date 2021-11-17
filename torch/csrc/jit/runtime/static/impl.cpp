@@ -707,8 +707,32 @@ StaticModule::StaticModule(
     }
   }
 
+  int nodes_size = 0;
+  for (Node* node : graph_->nodes()) {
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    ++nodes_size;
+  }
+  functions_.reserve(nodes_size);
+  nodes_.reserve(nodes_size);
+
+  // Create ProcessedFunction instances first to freeze their addresses to pass
+  // to ProcessedNode.
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+
+  for (Node* node : graph_->nodes()) {
+    if (node->kind() == prim::Constant) {
+      continue;
+    }
+    // see [Check and correct bad schema alias info at runtime]
+    bool check_outputs_for_overlap =
+        !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
+        containTensorsOnly(node->outputs());
+    functions_.emplace_back(
+        node, opts.enable_out_variant, check_outputs_for_overlap);
+  }
 
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
@@ -775,17 +799,14 @@ StaticModule::StaticModule(
       input_indices[input_idx] = input_ivalue_idx;
     }
 
+    ProcessedFunction* fn = &functions_[node_idx];
     // create a new ProcessedNode
     // see [Check and correct bad schema alias info at runtime]
     bool check_outputs_for_overlap =
         !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
         containTensorsOnly(node->outputs());
     nodes_.emplace_back(
-        node,
-        std::move(input_indices),
-        node_output_idx_map[node_idx],
-        opts.enable_out_variant,
-        check_outputs_for_overlap);
+        node, fn, std::move(input_indices), node_output_idx_map[node_idx]);
 
     node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
     for (const auto i : c10::irange(node->outputs().size())) {
@@ -1697,13 +1718,61 @@ void StaticRuntime::disableManageOutputTensors() {
   planner_.reset();
 }
 
+ProcessedFunction::ProcessedFunction(
+    Node* node,
+    bool enable_out_variant,
+    bool check_memory_overlap) {
+  if (enable_out_variant) {
+    f_ = getOutOfPlaceOperation(node);
+    if (f_) {
+      kind_ = ProcessedFunction::Kind::kOutVariant;
+      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
+      return;
+    }
+  }
+  {
+    f_ = getNativeOperation(node);
+    if (f_) {
+      kind_ = ProcessedFunction::Kind::kNativeFunction;
+      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
+      return;
+    }
+  }
+  {
+    const Operator& op = node->getOperator();
+    f_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+      std::vector<IValue> stack;
+      Node* node = pnode->node();
+      const size_t size = node->inputs().size();
+      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+      for (const auto i : c10::irange(size)) {
+        stack.emplace_back(pnode->Input(i));
+      }
+      // Need to store the number of inputs in stack for variadic ops.
+      if (hasVarArgs(node)) {
+        stack.emplace_back(static_cast<int>(size));
+      }
+
+      node_op(stack);
+
+      DCHECK_EQ(stack.size(), node->outputs().size());
+      for (const auto i : c10::irange(node->outputs().size())) {
+        pnode->Output(i) = std::move(stack[i]);
+      }
+    };
+    kind_ = ProcessedFunction::Kind::kInterpreterFallback;
+    check_memory_overlap_ = check_memory_overlap;
+    VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
+  }
+}
+
 ProcessedNode::ProcessedNode(
     Node* node,
+    ProcessedFunction* fn,
     ProcessedNodeInputs inputs,
-    uint16_t outputs_offset,
-    bool enable_out_variant,
-    bool check_memory_overlap)
+    uint16_t outputs_offset)
     : node_(node),
+      fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset)
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -1718,49 +1787,6 @@ ProcessedNode::ProcessedNode(
       node->kind().toQualString(),
       " is too many to use 2-byte indexing");
   num_outputs_ = node->outputs().size();
-
-  if (enable_out_variant) {
-    std::function<void(ProcessedNode*)> f = getOutOfPlaceOperation(node);
-    if (f) {
-      fn_ = {f, FunctionKind::kOutVariant};
-      VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
-      return;
-    }
-  }
-  {
-    std::function<void(ProcessedNode*)> f = getNativeOperation(node);
-    if (f) {
-      fn_ = {f, FunctionKind::kNativeFunction};
-      VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
-      return;
-    }
-  }
-  {
-    const Operator& op = node->getOperator();
-    std::function<void(ProcessedNode*)> f =
-        [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
-          std::vector<IValue> stack;
-          Node* node = pnode->node_;
-          const size_t size = node->inputs().size();
-          stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
-          for (const auto i : c10::irange(size)) {
-            stack.emplace_back(pnode->Input(i));
-          }
-          // Need to store the number of inputs in stack for variadic ops.
-          if (hasVarArgs(node)) {
-            stack.emplace_back(static_cast<int>(size));
-          }
-
-          node_op(stack);
-
-          DCHECK_EQ(stack.size(), node->outputs().size());
-          for (const auto i : c10::irange(node->outputs().size())) {
-            pnode->Output(i) = std::move(stack[i]);
-          }
-        };
-    fn_ = {f, FunctionKind::kInterpreterFallback, check_memory_overlap};
-    VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
-  }
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
@@ -1784,12 +1810,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_.f(this);
+    fn_->f()(this);
   } else {
-    fn_.f(this);
+    fn_->f()(this);
   }
 #else
-  fn_.f(this);
+  fn_->f()(this);
 #endif
 #ifndef NDEBUG
   verify_no_memory_overlap();
