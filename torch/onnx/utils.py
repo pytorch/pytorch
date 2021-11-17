@@ -368,8 +368,7 @@ def _trace(func, args, operator_export_type, return_outs=False):
     if isinstance(args, torch.Tensor):
         args = (args, )
 
-    trace_graph, torch_out, inputs_states = \
-        torch.jit._get_trace_graph(func, args, strict=False, _force_outplace=False, _return_inputs_states=True)
+    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(func, args)
     warn_on_static_input_change(inputs_states)
 
     trace_graph = _optimize_graph(trace_graph, operator_export_type, params_dict={})
@@ -384,8 +383,7 @@ def _trace_and_get_graph_from_model(model, args):
     # before and after running the model.  Fail fast!
     orig_state_dict_keys = _unique_state_dict(model).keys()
 
-    trace_graph, torch_out, inputs_states = \
-        torch.jit._get_trace_graph(model, args, strict=False, _force_outplace=False, _return_inputs_states=True)
+    trace_graph, torch_out, inputs_states = torch.jit._get_trace_graph(model, args)
     warn_on_static_input_change(inputs_states)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():

@@ -191,8 +191,8 @@ void initPythonTracerBindings(PyObject* module) {
       py::arg("func"),
       py::arg("inputs"),
       py::arg("var_name_lookup_fn"),
-      py::arg("strict"),
-      py::arg("force_outplace"),
+      py::arg("strict") = false,
+      py::arg("force_outplace") = false,
       py::arg("self") = nullptr,
       py::arg("argument_names") = std::vector<std::string>());
   m.def("_get_tracing_state", []() { return getTracingState(); });

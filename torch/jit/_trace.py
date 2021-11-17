@@ -73,23 +73,12 @@ def _unique_state_dict(module, keep_vars=False):
 
 
 class ONNXTracedModule(torch.nn.Module):
-    def __init__(
-        self,
-        inner,
-        strict=True,
-        force_outplace=False,
-        return_inputs=False,
-        return_inputs_states=False,
-    ):
+    def __init__(self, inner):
         super(ONNXTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
-        self.strict = strict
-        self._force_outplace = force_outplace
-        self._return_inputs = return_inputs
-        self._return_inputs_states = return_inputs_states
 
     def forward(self, *args: torch.Tensor):
         in_vars, in_desc = _flatten(args)
@@ -97,7 +86,6 @@ class ONNXTracedModule(torch.nn.Module):
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
 
-        ret_inputs = []
         inputs_states = []
         outs = []
 
@@ -109,15 +97,9 @@ class ONNXTracedModule(torch.nn.Module):
                 in_args.append(args[i])
 
             trace_inputs = _unflatten(in_args, in_desc)
-
-            ret_inputs.append(
-                tuple(x.clone(memory_format=torch.preserve_format) for x in args)
-            )
-            if self._return_inputs_states:
-                inputs_states.append(_unflatten(in_args, in_desc))
+            inputs_states.append(_unflatten(in_args, in_desc))
             outs.append(self.inner(*trace_inputs))
-            if self._return_inputs_states:
-                inputs_states[0] = (inputs_states[0], trace_inputs)
+            inputs_states[0] = (inputs_states[0], trace_inputs)
             out_vars, _ = _flatten(outs)
             if len(out_vars) == 1:
                 return out_vars[0]
@@ -128,16 +110,9 @@ class ONNXTracedModule(torch.nn.Module):
             wrapper,
             in_vars + module_state,
             _create_interpreter_name_lookup_fn(),
-            self.strict,
-            self._force_outplace,
         )
 
-        if self._return_inputs:
-            return graph, outs[0], ret_inputs[0]
-        if self._return_inputs_states:
-            return graph, outs[0], inputs_states[0]
-        else:
-            return graph, outs[0]
+        return graph, outs[0], inputs_states[0]
 
 
 def _clone_inputs(args):
@@ -1126,8 +1101,7 @@ def _script_if_tracing(fn):
     return wrapper
 
 
-def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False,
-                     return_inputs=False, _return_inputs_states=False):
+def _get_trace_graph(f, args=(), kwargs=None):
     """
     .. warning::
         This function is internal-only and should only be used by the ONNX
@@ -1163,5 +1137,5 @@ def _get_trace_graph(f, args=(), kwargs=None, strict=True, _force_outplace=False
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    outs = ONNXTracedModule(f, strict, _force_outplace, return_inputs, _return_inputs_states)(*args, **kwargs)
+    outs = ONNXTracedModule(f)(*args, **kwargs)
     return outs
