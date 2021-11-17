@@ -9920,7 +9920,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypesIfCPU=floating_types(),
+           dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
@@ -9939,7 +9939,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           dtypesIfCPU=floating_types(),
+           dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
