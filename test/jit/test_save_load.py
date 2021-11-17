@@ -812,7 +812,7 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script
+        @torch.jit.script  # noqa: F811
         class ImplementInterface(object):  # noqa: F811
             def __init__(self):
                 pass
