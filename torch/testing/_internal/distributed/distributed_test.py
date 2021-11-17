@@ -6742,7 +6742,6 @@ class DistributedTest:
 
             verify_ddp_error_logged(model, expected_err)
 
-            print("testing errors")
             # used parameter in the first iteration got unused
             # in second iteration.
             with self.assertRaisesRegex(
