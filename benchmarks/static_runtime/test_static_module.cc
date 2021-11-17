@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
@@ -674,6 +675,88 @@ TEST(StaticRuntime, ManageOutputTensorsWithoutDeallocateOutputTensors) {
   runtime(input_tensors, {});
 }
 
+TEST(StaticRuntime, DisableManageOutputTensors) {
+  const std::string test_graph = R"IR(
+    graph(%0 : Tensor):
+      # With manage_output_tensor enabled, this tensor is managed.
+      %1 : Tensor = aten::abs(%0)
+      # The output container object is never managed.
+      %2 : (Tensor) = prim::TupleConstruct(%1)
+      return (%2)
+  )IR";
+  auto g = std::make_shared<torch::jit::Graph>();
+  torch::jit::parseIR(test_graph, g.get());
+  torch::jit::StaticModuleOptions opts{
+      /*cleanup_activations=*/true,
+      /*enable_out_variant=*/true,
+      /*optimize_memory=*/true,
+      /*manage_output_tensors=*/true};
+  auto a = at::randn({2, 2});
+  std::vector<at::IValue> args{a};
+  torch::jit::StaticModule smod(g, opts);
+  torch::jit::StaticRuntime runtime(smod);
+  // Profile run.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Second run that manages output tensors.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_TRUE(runtime.isManagedOutputTensor(element));
+    tuple = IValue();
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+
+  // Reset the runtime and start profiling again.
+  runtime.disableManageOutputTensors();
+
+  IValue copied_output_tensor;
+  IValue original_output_tensor;
+  // New profile run.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    copied_output_tensor = element.deepcopy();
+    original_output_tensor = element;
+    tuple = IValue();
+    // No-op since manage_output_tensor is disabled now.
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Ensure that `original_output_tensor` is no longer managed: even after
+  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
+  // contains a valid value.
+  EXPECT_TRUE(
+      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
+
+  // Ensure that the second optimized run does not manage the output tensor
+  // either.
+  {
+    IValue tuple = runtime(args, {});
+    IValue element = tuple.toTupleRef().elements()[0];
+    EXPECT_FALSE(runtime.isManagedOutputTensor(element));
+    copied_output_tensor = element.deepcopy();
+    original_output_tensor = element;
+    tuple = IValue();
+    // No-op since manage_output_tensor is disabled now.
+    runtime.deallocateOutputTensors();
+    runtime.checkOutputTensorMemoryLeaks();
+  }
+  // Ensure that `original_output_tensor` is no longer managed: even after
+  // calling `runtime.deallocateOutputTensors();` `original_output_tensor` still
+  // contains a valid value.
+  EXPECT_TRUE(
+      original_output_tensor.toTensor().equal(copied_output_tensor.toTensor()));
+}
+
 TEST(StaticRuntime, FusionPass) {
   const int embedding_size = 32;
   const int num_features = 50;
@@ -704,6 +787,15 @@ TEST(StaticRuntime, FusionPass) {
   }
 }
 
+static ProcessedNodeInputs createProcessedNodeInputs(
+    c10::ArrayRef<uint16_t> inputs) {
+  ProcessedNodeInputs result(inputs.size());
+  for (const auto idx : c10::irange(inputs.size())) {
+    result[idx] = inputs[idx];
+  }
+  return result;
+}
+
 TEST(
     ProcessedNode,
     VerifyNoMemoryOverlapWithImmutableInputsWithImmutableArguments) {
@@ -717,17 +809,16 @@ TEST(
   module.define(sigmoid_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
-
-  pnode.Output(0) = b;
+  std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  pnode.set_values(values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
@@ -739,17 +830,18 @@ TEST(
   module.define(sigmoid_inplace_script);
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
-  const at::IValue a = torch::randn({2, 3});
-  at::IValue b = torch::randn({3, 1});
-  std::unique_ptr<const IValue*[]> ivalue_inputs =
-      std::make_unique<const IValue*[]>(1);
-  ivalue_inputs[0] = &a;
-  ProcessedNode pnode(sigmoid_node, std::move(ivalue_inputs), 1, true);
+  std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
+  pnode.set_values(values.data());
 
-  pnode.Output(0) = b;
+  ASSERT_EQ(&pnode.Output(0), &values[1]);
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
-  pnode.Output(0) = a;
+  pnode.Output(0) = values[0];
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 }
 
@@ -764,27 +856,131 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   torch::jit::StaticModule smodule(g);
   Node* list_unpack_node = getNodeWithKind(smodule, "prim::ListUnpack");
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    std::array<IValue, 3> values = {
+        at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
+    ProcessedFunction fn(
+        list_unpack_node,
+        /*enable_out_variant=*/true,
+        /*check_memory_overlap */ false);
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
+    list_unpack_pnode.set_values(values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
-    auto a = at::randn({2, 3});
-    IValue ivalue(a);
-    std::unique_ptr<const IValue*[]> inputs =
-        std::make_unique<const IValue*[]>(1);
-    inputs[0] = &ivalue;
+    std::array<IValue, 3> values = {
+        at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
+    ProcessedFunction fn(
+        list_unpack_node,
+        /*enable_out_variant=*/true,
+        /*check_memory_overlap */ false);
     ProcessedNode list_unpack_pnode(
-        list_unpack_node, std::move(inputs), 1, /*enable_out_variant=*/true);
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
+    list_unpack_pnode.set_values(values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
     EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
   }
+}
+
+namespace test {
+at::Tensor bad_add(const at::Tensor& self, int64_t b) {
+  if (b == 0) {
+    return self;
+  }
+  return at::native::add(self, b);
+}
+
+at::Tensor good_add(const at::Tensor& self, int64_t b) {
+  if (b == 0) {
+    return self;
+  }
+  return at::native::add(self, b);
+}
+} // namespace test
+
+// test::bad_add has the schema with incorrect alias annotation.
+// test::good_add has the correct alias annotation.
+TORCH_LIBRARY_FRAGMENT(test, m) {
+  m.def("bad_add(Tensor self, int b=0) -> Tensor");
+  m.def("good_add(Tensor(a) self, int b=0) -> Tensor(a)");
+}
+TORCH_LIBRARY_IMPL(test, CPU, m) {
+  m.impl("bad_add", ::test::bad_add);
+  m.impl("good_add", ::test::good_add);
+}
+
+TEST(StaticRuntime, BadSchemaAliasInfo) {
+  const std::string src = R"IR(
+      graph(%x: Tensor, %s: int):
+          %c0 : int = prim::Constant[value=0]()
+          %c1 : int = prim::Constant[value=1]()
+          %a = aten::add(%x, %x, %c1)
+          %b1 = test::bad_add(%a, %s) # b1 aliases a
+          %t : (Tensor) = prim::TupleConstruct(%b1)
+          return (%t)
+  )IR";
+
+  const auto x1 = at::randn({2, 2});
+  // big enough to trigger resize of the internal buffer
+  const auto x2 = at::randn({3, 6});
+  testStaticRuntime(src, {x1, 0}, {x2, 10});
+  // This test doesn't pass yet. This is the corner case mentioned in Step 2 of
+  // [Check and correct bad schema alias info at runtime]
+  // testStaticRuntime(src, {x1, 10}, {x2, 0});
+}
+
+// This test repeats the last test, but with the correct schema alias
+// annotations
+TEST(StaticRuntime, GoodSchemaAliasInfo) {
+  // comment out the prim::TupleConstruct repro the failure of
+  // DCHECK(!isManagedOutputTensor(*outputs_[0]));
+  const std::string src = R"IR(
+      graph(%x: Tensor, %s: int):
+          %c0 : int = prim::Constant[value=0]()
+          %c1 : int = prim::Constant[value=1]()
+          %a = aten::add(%x, %x, %c1)
+          %b1 = test::good_add(%a, %s) # b1 aliases a
+          # return (%b1)
+          %t : (Tensor) = prim::TupleConstruct(%b1)
+          return (%t)
+  )IR";
+
+  const auto x1 = at::randn({2, 2});
+  // big enough to trigger resize of the internal buffer
+  const auto x2 = at::randn({3, 6});
+  testStaticRuntime(src, {x1, 0}, {x2, 10});
+  testStaticRuntime(src, {x1, 10}, {x2, 0});
+}
+
+TEST(ProcessedFunction, ProcessedFunction) {
+  const auto script = R"JIT(
+    def forward(self, inp: Tensor):
+        b = torch.sigmoid(inp).clone()
+        c = torch.transpose(b, 0, 1)
+        return (c)
+  )JIT";
+  script::Module module("module");
+  module.define(script);
+  torch::jit::StaticModule smodule(module);
+
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  ProcessedFunction sigmoid_fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(sigmoid_fn.f());
+  EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
+  EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
+
+  Node* transpose_node = getNodeWithKind(smodule, "aten::transpose");
+  ProcessedFunction transpose_fn(
+      transpose_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(transpose_fn.f());
+  EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
+  EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
 }
