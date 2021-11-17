@@ -412,6 +412,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
             FileCheck().check("Tensor = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
 
@@ -433,6 +434,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
             FileCheck().check("Tensor = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
                 .check_not("aten::split_with_sizes") \
                 .run(graph)
 
@@ -454,6 +456,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
             FileCheck().check("Tensor = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
 
@@ -477,5 +480,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
             FileCheck().check("Tensor = prim::DifferentiableGraph") \
                 .check("with prim::DifferentiableGraph") \
+                .check("Tensor = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
