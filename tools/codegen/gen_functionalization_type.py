@@ -6,7 +6,7 @@ from tools.codegen.api.translate import translate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
     Argument, NativeFunction, SchemaKind, BackendIndex,
-    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments
+    Tag, FunctionSchema, SelfArgument, TensorOptionsArguments, BaseType, BaseTy
 )
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from typing import List, Optional, Union, Tuple
@@ -80,6 +80,23 @@ def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding
     unwrap_tensor_args_str = '\n        '.join(unwrapped_tensor_args)
     return unwrap_tensor_args_str, context
 
+# The functionalization codegen currently expects view op schemas to have this form:
+# foo(Tensor(a), ...) -> Tensor(a) (e.g. transpose)
+# foo(Tensor(a!), ...) -> Tensor(a!) (e.g. transpose_)
+def assert_view_op_properties(func: FunctionSchema) -> None:
+    def is_alias(a: Argument) -> bool:
+        return a.annotation is not None
+
+    args = func.arguments.flat_non_out
+    # The first argument is a tensor with an alias semantics (annotations)
+    assert len(args) > 0 and args[0].type == BaseType(BaseTy.Tensor), \
+        f"""In the functionalization codegen, we expect the first argument of every view operator to be a tensor,
+but found an argument of type {str(args[0].type)} for operator: {str(func.name)}."""
+    # No other arguments have aliasing semantics
+    assert is_alias(args[0]) and not any(is_alias(a) for a in args[1:]), \
+        """In the functionalization codegen, we expect the first argument of every view operator to alias the output.
+View operators with multiple aliasing inputs aren't supported yet. Found an operator that doesn't satisfy this constraint"""
+
 # Generates the Functionalization kernel for:
 # - ops that create aliases (e.g. transpose())
 # - ops that are views AND mutations (e.g. transpose_())
@@ -109,6 +126,8 @@ def emit_view_functionalization_body(
         call_sig = DispatcherSignature.from_schema(f.func)
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
+    assert_view_op_properties(f.func)
+    view_tensor_name = dispatcher_sig.arguments()[0].name
 
     keyset = 'dispatchKeySet & c10::after_func_keyset'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
@@ -134,7 +153,7 @@ def emit_view_functionalization_body(
           return {reverse_lambda.inner_call()}
         }}
       );
-      at::functionalization::impl::mutate_view_meta(self, view_meta);
+      at::functionalization::impl::mutate_view_meta({view_tensor_name}, view_meta);
       {unwrap_tensor_args_str}
       {return_type} reference_tensor_output;
       {{
@@ -143,8 +162,8 @@ def emit_view_functionalization_body(
         reference_tensor_output = at::_ops::{api_name}::call({', '.join(meta_call_args)});
       }}
       // See  Note [Propagating strides in the functionalization pass]
-      at::functionalization::impl::set_sizes_strides_offset(self, reference_tensor_output);
-      return self;
+      at::functionalization::impl::set_sizes_strides_offset({view_tensor_name}, reference_tensor_output);
+      return {view_tensor_name};
 """
 
     else:
@@ -168,7 +187,7 @@ def emit_view_functionalization_body(
           return {reverse_lambda.inner_call()}
         }}
       );
-      auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, view_meta);
+      auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
       at::functionalization::impl::set_sizes_strides_offset(out, reference_tensor_output);
       return out;
