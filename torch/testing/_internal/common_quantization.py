@@ -12,10 +12,15 @@ from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
+from torch.ao.quantization import (
+    QuantType,
+    default_dynamic_qat_qconfig,
+    default_embedding_qat_qconfig,
+)
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType, quantize
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, quantize
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -49,7 +54,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any, Union, Type
+from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -106,6 +111,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     train_loss, correct, total = 0, 0, 0
     for i in range(10):
         model.train()
+
         for data, target in train_data:
             optimizer.zero_grad()
             output = model(data)
@@ -782,7 +788,8 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node=None,
                 prepare_expected_node_occurrence=None,
                 prepare_expected_node_list=None,
-                prepare_custom_config_dict=None):
+                prepare_custom_config_dict=None,
+                backend_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -846,7 +853,8 @@ class QuantizationTestCase(TestCase):
                 qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
-                prepare_custom_config_dict=prepare_custom_config_dict)
+                prepare_custom_config_dict=prepare_custom_config_dict,
+                backend_config_dict=backend_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -1641,6 +1649,20 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualLinearDynamicQATModel(torch.nn.Module):
+    r"""A Module that uses a dynamic QAT by default.
+    """
+    def __init__(self, qconfig=None):
+        super().__init__()
+        self.qconfig = qconfig or default_dynamic_qat_qconfig
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
 class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
@@ -1662,6 +1684,22 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualEmbeddingBagLinear(nn.Module):
+    def __init__(self):
+        super(ManualEmbeddingBagLinear, self).__init__()
+        self.emb = nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
+
+    def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
+                per_sample_weights: Optional[torch.Tensor] = None):
+        x = self.emb(input, offsets, per_sample_weights)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
 
 class SubModelForFusion(nn.Module):
     def __init__(self):
@@ -1937,16 +1975,23 @@ class EmbeddingModule(torch.nn.Module):
     def forward(self, indices):
         return self.emb(indices)
 
-class EmbeddingWithLinear(torch.nn.Module):
+class EmbeddingWithStaticLinear(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
-        self.fc = torch.nn.Linear(5, 5)
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12)
+        self.fc = torch.nn.Linear(4, 2)
         self.emb.qconfig = float_qparams_weight_only_qconfig
         self.qconfig = default_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
-    def forward(self, indices, linear_in):
-        return self.emb(indices), self.fc(linear_in)
+    def forward(self, indices, offsets, linear_in):
+        emb = self.emb(indices, offsets)
+        q_x = self.quant(linear_in)
+        fc = self.fc(q_x)
+        fc = self.dequant(fc)
+        features = torch.cat([fc] + [emb], dim=1)
+        return features
 
 class DenseTopMLP(nn.Module):
 

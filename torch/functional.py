@@ -1,6 +1,8 @@
 from typing import (
     Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
+from collections import namedtuple
+import itertools
 
 import torch
 import torch.nn.functional as F
@@ -26,6 +28,7 @@ __all__ = [
     'cdist',
     'chain_matmul',
     'einsum',
+    'histogramdd',
     'istft',
     'lu',
     'norm',
@@ -326,14 +329,135 @@ def einsum(*args):
 
     return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
 
+# Wrapper around _histogramdd and _histogramdd_bin_edges needed due to (Tensor, Tensor[]) return type.
+if TYPE_CHECKING:
+    # The JIT doesn't understand Union, so only add type annotation for mypy
+    def histogramdd(input: Tensor,
+                    bins: Union[List[Tensor], List[int], int],
+                    range: Optional[List[float]] = None,
+                    weight: Optional[Tensor] = None,
+                    density: bool = False):
+        pass
+else:
+    def histogramdd(input, bins, range=None, weight=None, density=False):
+        r"""
+        histogramdd(input, bins, *, range=None, weight=None, density=False, out=None) -> (Tensor, Tensor[])
+
+        Computes a multi-dimensional histogram of the values in a tensor.
+
+        Interprets the elements of an input tensor whose innermost dimension has size N
+        as a collection of N-dimensional points. Maps each of the points into a set of
+        N-dimensional bins and returns the number of points (or total weight) in each bin.
+
+        :attr:`input` must be a tensor with at least 2 dimensions.
+        If input has shape (M, N), each of its M rows defines a point in N-dimensional space.
+        If input has three or more dimensions, all but the last dimension are flattened.
+
+        Each dimension is independently associated with its own strictly increasing sequence
+        of bin edges. Bin edges may be specified explicitly by passing a sequence of 1D
+        tensors. Alternatively, bin edges may be constructed automatically by passing a
+        sequence of integers specifying the number of equal-width bins in each dimension.
+
+        For each N-dimensional point in input:
+            - Each of its coordinates is binned independently among the bin edges
+              corresponding to its dimension
+            - Binning results are combined to identify the N-dimensional bin (if any)
+              into which the point falls
+            - If the point falls into a bin, the bin's count (or total weight) is incremented
+            - Points which do not fall into any bin do not contribute to the output
+
+        :attr:`bins` can be a sequence of N 1D tensors, a sequence of N ints, or a single int.
+
+        If :attr:`bins` is a sequence of N 1D tensors, it explicitly specifies the N sequences
+        of bin edges. Each 1D tensor should contain a strictly increasing sequence with at
+        least one element. A sequence of K bin edges defines K-1 bins, explicitly specifying
+        the left and right edges of all bins. Every bin is exclusive of its left edge. Only
+        the rightmost bin is inclusive of its right edge.
+
+        If :attr:`bins` is a sequence of N ints, it specifies the number of equal-width bins
+        in each dimension. By default, the leftmost and rightmost bin edges in each dimension
+        are determined by the minimum and maximum elements of the input tensor in the
+        corresponding dimension. The :attr:`range` argument can be provided to manually
+        specify the leftmost and rightmost bin edges in each dimension.
+
+        If :attr:`bins` is an int, it specifies the number of equal-width bins for all dimensions.
+
+        .. note::
+            See also :func:`torch.histogram`, which specifically computes 1D histograms.
+            While :func:`torch.histogramdd` infers the dimensionality of its bins and
+            binned values from the shape of :attr:`input`, :func:`torch.histogram`
+            accepts and flattens :attr:`input` of any shape.
+
+        Args:
+            {input}
+            bins: Tensor[], int[], or int.
+                  If Tensor[], defines the sequences of bin edges.
+                  If int[], defines the number of equal-width bins in each dimension.
+                  If int, defines the number of equal-width bins for all dimensions.
+        Keyword args:
+            range (sequence of float): Defines the leftmost and rightmost bin edges
+                                       in each dimension.
+            weight (Tensor): By default, each value in the input has weight 1. If a weight
+                             tensor is passed, each N-dimensional coordinate in input
+                             contributes its associated weight towards its bin's result.
+                             The weight tensor should have the same shape as the :attr:`input`
+                             tensor excluding its innermost dimension N.
+            density (bool): If False (default), the result will contain the count (or total weight)
+                            in each bin. If True, each count (weight) is divided by the total count
+                            (total weight), then divided by the volume of its associated bin.
+        Returns:
+            hist (Tensor): N-dimensional Tensor containing the values of the histogram.
+            bin_edges(Tensor[]): sequence of N 1D Tensors containing the bin edges.
+
+        Example::
+            >>> torch.histogramdd(torch.tensor([[0., 1.], [1., 0.], [2., 0.], [2., 2.]]), bins=[3, 3],
+            ...                   weight=torch.tensor([1., 2., 4., 8.]))
+                histogramdd_return_type(hist=tensor([[0., 1., 0.],
+                                                     [2., 0., 0.],
+                                                     [4., 0., 8.]]),
+                                        bin_edges=(tensor([0.0000, 0.6667, 1.3333, 2.0000]),
+                                                   tensor([0.0000, 0.6667, 1.3333, 2.0000])))
+
+            >>> torch.histogramdd(torch.tensor([[0., 0.], [1., 1.], [2., 2.]]), bins=[2, 2],
+            ...                   range=[0., 1., 0., 1.], density=True)
+                histogramdd_return_type(hist=tensor([[2., 0.],
+                                                     [0., 2.]]),
+                                        bin_edges=(tensor([0.0000, 0.5000, 1.0000]),
+                                                   tensor([0.0000, 0.5000, 1.0000])))
+
+        """
+        if isinstance(bins, int):
+            # If a single int is passed, repeat it for all dimensions
+            bins = list(itertools.repeat(bins, input.size()[-1]))
+
+        if bins and isinstance(bins[0], int):
+            """
+            If bins is int[], the histogram kernel runs faster knowing that the bin edges form
+            a linear progression (see comments in aten/src/ATen/native/cpu/HistogramKernel.cpp).
+            However, we end up constructing the bin edge tensors twice because
+            _histogramdd_from_bin_cts cannot pass back (Tensor, Tensor[]).
+            """
+            bin_edges = _VF._histogramdd_bin_edges(input, bins, range=range, weight=weight, density=density)
+            hist = _VF._histogramdd_from_bin_cts(input, bins, range=range, weight=weight, density=density)
+        else:
+            """
+            If bins is Tensor[] we simply return it back.
+            """
+            bin_edges = bins
+            hist = _VF._histogramdd_from_bin_tensors(input, bin_edges, weight=weight, density=density)
+
+        # TODO: figure out how to return torch.return_types.histogramdd
+        histogramdd_return_type = namedtuple('histogramdd_return_type', 'hist bin_edges')
+        return histogramdd_return_type(hist, bin_edges)
 
 # This wrapper exists to support variadic args.
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
-    def meshgrid(*tensors: Union[Tensor, List[Tensor]]) -> Tuple[Tensor, ...]:
-        return _meshgrid(*tensors)
+    def meshgrid(*tensors: Union[Tensor, List[Tensor]],
+                 indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
+        return _meshgrid(*tensors, indexing=indexing)
 else:
-    def meshgrid(*tensors):
+    def meshgrid(*tensors, indexing: Optional[str] = None) -> Tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -351,10 +475,11 @@ else:
             single element.
 
         .. warning::
-            `torch.meshgrid` has the same behavior as calling
-            `numpy.meshgrid(..., indexing='ij')`, and in the future
-            `torch.meshgrid` will also support the `indexing`
-            argument.
+            `torch.meshgrid(*tensors)` currently has the same behavior
+            as calling `numpy.meshgrid(*arrays, indexing='ij')`.
+
+            In the future `torch.meshgrid` will transition to
+            `indexing='xy'` as the default.
 
             https://github.com/pytorch/pytorch/issues/50276 tracks
             this issue with the goal of migrating to NumPy's behavior.
@@ -367,6 +492,17 @@ else:
         Args:
             tensors (list of Tensor): list of scalars or 1 dimensional tensors. Scalars will be
                 treated as tensors of size :math:`(1,)` automatically
+
+            indexing: (str, optional): the indexing mode, either "xy"
+                or "ij", defaults to "ij". See warning for future changes.
+
+                If "xy" is selected, the first dimension corresponds
+                to the cardinality of the second input and the second
+                dimension corresponds to the cardinality of the first
+                input.
+
+                If "ij" is selected, the dimensions are in the same
+                order as the cardinality of the inputs.
 
         Returns:
             seq (sequence of Tensors): If the input has :math:`N`
@@ -382,7 +518,7 @@ else:
             Observe the element-wise pairings across the grid, (1, 4),
             (1, 5), ..., (3, 6). This is the same thing as the
             cartesian product.
-            >>> grid_x, grid_y = torch.meshgrid(x, y)
+            >>> grid_x, grid_y = torch.meshgrid(x, y, indexing='ij')
             >>> grid_x
             tensor([[1, 1, 1],
                     [2, 2, 2],
@@ -403,7 +539,7 @@ else:
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)
-            >>> x, y = torch.meshgrid(xs, ys)
+            >>> x, y = torch.meshgrid(xs, ys, indexing='xy')
             >>> z = torch.sin(torch.sqrt(x * x + y * y))
             >>> ax = plt.axes(projection='3d')
             >>> ax.plot_surface(x.numpy(), y.numpy(), z.numpy())
@@ -414,16 +550,22 @@ else:
             :width: 512
 
         """
-        return _meshgrid(*tensors)
+        return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors):
+def _meshgrid(*tensors, indexing: Optional[str]):
     if has_torch_function(tensors):
-        return handle_torch_function(meshgrid, tensors, *tensors)
+        return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
         # the old interface of passing the operands as one list argument
         tensors = tensors[0]  # type: ignore[assignment]
-    return _VF.meshgrid(tensors)  # type: ignore[attr-defined]
+
+    # Continue allowing call of old method that takes no indexing
+    # kwarg for forward compatibility reasons.
+    #
+    # Remove this two weeks after landing.
+    kwargs = {} if indexing is None else {'indexing': indexing}
+    return _VF.meshgrid(tensors, **kwargs)  # type: ignore[attr-defined]
 
 
 def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
@@ -629,9 +771,6 @@ def istft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
                      normalized, onesided, length, return_complex)
 
 
-del torch.unique_dim
-
-
 if TYPE_CHECKING:
     # These _impl functions return a variable number of tensors as output with
     # __torch_function__; tuple unpacking is done already rather than being
@@ -644,7 +783,9 @@ else:
 def _unique_impl(input: Tensor, sorted: bool = True,
                  return_inverse: bool = False, return_counts: bool = False,
                  dim: Optional[int] = None) -> _unique_impl_out:
-    r"""Returns the unique elements of the input tensor.
+    r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> Tuple[Tensor, Tensor, Tensor]
+
+    Returns the unique elements of the input tensor.
 
     .. note:: This function is different from :func:`torch.unique_consecutive` in the sense that
         this function also eliminates non-consecutive duplicate values.
@@ -918,15 +1059,15 @@ else:
     def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
@@ -1280,17 +1421,17 @@ else:
         # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass

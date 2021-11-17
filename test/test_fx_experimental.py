@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
@@ -8,11 +10,11 @@ from typing import Callable, Dict, Union, List, Optional
 import torch
 import torch.fx.experimental.optimization as optimization
 from torch.fx._symbolic_trace import symbolic_trace
-from torch.fx.experimental import graph_manipulation
 from torch.fx.experimental import merge_matmul
 from torch.fx.experimental.accelerator_partitioner import Partitioner
 from torch.fx.experimental.normalize import NormalizeOperators, NormalizeArgs
-from torch.fx.experimental.param_fetch import lift_lowering_attrs_to_nodes
+from torch.fx.passes import graph_manipulation
+from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.experimental.partitioner_utils import (
     NodeLatency,
     get_partition_to_latency_mapping,
@@ -1057,10 +1059,11 @@ class {test_classname}(torch.nn.Module):
         for node in traced_modules_annotated.graph.nodes:
             if node.type is None:
                 check = (node.op, node.target)
-                self.assertTrue(
-                    check
-                    in {
+                self.assertIn(
+                    check,
+                    {
                         ("placeholder", "x"),
+                        ("call_module", "maxpool"),
                         ("call_function", operator.add),
                         ("call_function", torch.flatten),
                         ("output", "output"),
@@ -1096,7 +1099,7 @@ class {test_classname}(torch.nn.Module):
                     ("call_function", torch.flatten),
                     ("output", "output"),
                 }
-                self.assertTrue(check in excluded_nodes)
+                self.assertIn(check, excluded_nodes)
 
         # Smoke test torchscript compilation since now we're emitting type annotations
         torch.jit.script(traced_functionals_annotated)
@@ -1459,15 +1462,27 @@ class TestNormalizeOperators(JitTestCase):
     def test_normalize_operator_exhaustive(self, device, dtype, op):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
+            # See: https://github.com/pytorch/pytorch/issues/64997
+            "block_diag",
+            "broadcast_tensors",
             "contiguous",
             "einsum",
             "expand",
             "expand_as",
             "fill_",
+            "T",   # Implemented with a lambda
+            "H",   # Implemented with a lambda
+            "mT",  # Implemented with a lambda
+            "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
+            "nn.functional.conv2d",
+            "nn.functional.dropout",
+            "nn.functional.embedding",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1476,11 +1491,34 @@ class TestNormalizeOperators(JitTestCase):
             "resize_as_",
             "special.zeta",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
             "where",
             "zero_",
+            'bfloat16',
+            'bool',
+            'byte',
+            'char',
+            'double',
+            'float',
+            'half',
+            'int',
+            'long',
+            'short',
+            'empty_like',
+            'ones_like',
+            'randn_like',
+            'zeros_like',
+            'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1496,6 +1534,9 @@ class TestNormalizeOperators(JitTestCase):
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)

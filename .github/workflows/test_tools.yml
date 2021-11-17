@@ -8,12 +8,13 @@ on:
 
 jobs:
   test:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     steps:
       - name: Setup Python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.x
+          python-version: '3.6 - 3.9'
           architecture: x64
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -27,7 +28,7 @@ jobs:
           pip install -r requirements.txt
           pip install boto3==1.16.34
           make setup_lint
-      - name: Run tests
+      - name: Test tools
         run: python -m unittest discover -vs tools/test -p 'test_*.py'
 
 concurrency:

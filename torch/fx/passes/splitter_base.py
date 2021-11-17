@@ -5,12 +5,13 @@ from typing import List, Dict, Optional, Tuple
 import logging
 
 import torch
-from torch.fx.experimental.graph_manipulation import get_size_of_node
+from torch.fx.passes.graph_manipulation import get_size_of_node
 from torch.fx.node import map_arg
+from torch.fx._compatibility import compatibility
 
 from .operator_support import (
     get_node_target,
-    OperatorSupport,
+    OperatorSupportBase,
 )
 from .graph_drawer import FxGraphDrawer
 from .shape_prop import ShapeProp
@@ -63,6 +64,7 @@ class _SplitterSettingBase:
 
 
 # TODO: this can probably be optimized
+@compatibility(is_backward_compatible=False)
 class FxNetAccNodesFinder:
     """
     Finds a set of nodes that can be supported on ACC, excluding nodes that have non-tensor
@@ -80,7 +82,7 @@ class FxNetAccNodesFinder:
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         allow_non_tensor: bool,
     ):
         self.module = module
@@ -163,11 +165,11 @@ class FxNetAccNodesFinder:
 
         return self.acc_nodes
 
-
+@compatibility(is_backward_compatible=False)
 class FxNetSplitterInternalError(Exception):
     pass
 
-
+@compatibility(is_backward_compatible=False)
 @dataclass
 class Subgraph:
     is_acc: bool
@@ -224,7 +226,7 @@ class _SplitterBase:
         self,
         module: torch.fx.GraphModule,
         sample_input: Tensors,
-        operator_support: OperatorSupport,
+        operator_support: OperatorSupportBase,
         settings: _SplitterSettingBase,
     ):
         """
@@ -653,13 +655,17 @@ class _SplitterBase:
         current_cpu_nodes, current_acc_nodes = self.starter_nodes()
         visited_nodes: NodeSet = set()
 
-        # If there are CPU nodes, start with them
-        acc_subgraph: bool = not current_cpu_nodes
+        # Determine which subgraph to start from based on node dependency
+        acc_subgraph: bool = True
+        for n in current_cpu_nodes:
+            if self.deps[n] <= visited_nodes:
+                acc_subgraph = False
+                break
+
         current_subgraph_nodes: NodeList = []
 
         # Result accumulator
         subgraphs: List[Subgraph] = []
-
         while current_cpu_nodes or current_acc_nodes:
             # Find the first node that should belong to the current subgraph and has all dependencies resolved
             current_nodes = current_acc_nodes if acc_subgraph else current_cpu_nodes
@@ -686,7 +692,10 @@ class _SplitterBase:
 
             # Add fusion buddies
             if node in self.fusions:
-                current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                if node in self.acc_nodes:
+                    current_acc_nodes.update(self.fusions[node] - visited_nodes)
+                else:
+                    current_cpu_nodes.update(self.fusions[node] - visited_nodes)
 
             # Put depending nodes into the queue
             for user in node.users:

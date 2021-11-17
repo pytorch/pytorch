@@ -31,7 +31,10 @@ struct TORCH_API Object {
       std::shared_ptr<CompilationUnit> cu,
       bool shouldMangle = false);
 
-  ObjectPtr _ivalue() const;
+  ObjectPtr _ivalue() const {
+    TORCH_INTERNAL_ASSERT(_ivalue_);
+    return _ivalue_;
+  }
 
   c10::ClassTypePtr type() const {
     return _ivalue()->type();
@@ -54,7 +57,7 @@ struct TORCH_API Object {
     } else if (auto slot = _ivalue()->type()->findAttributeSlot(name)) {
       const c10::TypePtr& expected = _ivalue()->type()->getAttribute(*slot);
       TORCH_CHECK(
-          v.type()->isSubtypeOf(expected),
+          v.type()->isSubtypeOf(*expected),
           "Expected a value of type '",
           expected->repr_str(),
           "' for field '",

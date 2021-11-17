@@ -20,13 +20,7 @@ export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
 if [ -z "${IN_CI}" ]; then
-  if [[ "${BUILD_ENVIRONMENT}" == *cuda9.2* ]]; then
-    # Eigen gives "explicit specialization of class must precede its first use" error
-    # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
-    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
-  else
-    export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
-  fi
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 # Download torch binaries in the test jobs
@@ -159,19 +153,8 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  test_python_all
-  test_libtorch
-  test_custom_script_ops
-  test_jit_hooks
-  test_custom_backend
-else
-  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
-    test_python_all
-  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
-    test_libtorch
-    test_custom_script_ops
-    test_jit_hooks
-    test_custom_backend
-  fi
-fi
+test_python_all
+test_libtorch
+test_custom_script_ops
+test_jit_hooks
+test_custom_backend

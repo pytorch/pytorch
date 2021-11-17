@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import textwrap
 
 from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.utils import Target, mapMaybe, assert_never
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument, assert_never,
+                                 DeviceCheckType, Argument,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,
@@ -88,11 +88,32 @@ void resize_out(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const
 }
 """]
 
+def gen_check_inplace_helper(backend_index: BackendIndex) -> List[str]:
+    return ["""
+void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &options) {
+  // These checks are needed on those operators that:
+  //   1) don't use 'TensorIterator' (e.g. 'addmm' and 'baddbmm')
+  //   2) have particular typing rules (e.g. 'cumsum' and 'cumprod')
+  // For other operators (e.g. 'add'), 'TensorIterator' already checks
+  // these things separately.
+  TORCH_CHECK(options.dtype() == self.dtype(),
+      "Bad in-place call: ",
+      "input tensor dtype ", self.dtype(), " and output tensor dtype ", options.dtype(), " should match");
+  TORCH_CHECK(options.device() == self.device(),
+      "Bad in-place call: ",
+      "input tensor device ", self.device(), " and output tensor device ", options.device(), " should match");
+  TORCH_CHECK(sizes == self.sizes(),
+      "Bad in-place call: ",
+      "input tensor size ", self.sizes(), " and output tensor size ", sizes, " should match");
+}
+"""]
+
 
 def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
     return [
         *gen_create_out_helper(backend_index),
-        *gen_resize_out_helper(backend_index)
+        *gen_resize_out_helper(backend_index),
+        *gen_check_inplace_helper(backend_index)
     ]
 
 
@@ -423,7 +444,9 @@ if (C10_UNLIKELY(current_device.has_value())) {
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
         elif k is SchemaKind.inplace:
-            return maybe_set_guard
+            return f"""{maybe_set_guard_line}
+const auto& out = outputs_[output_idx].get();
+check_inplace(out, sizes, options);"""
         elif k is SchemaKind.out:
             return f"""{maybe_set_guard_line}
 const auto& out = outputs_[output_idx].get();

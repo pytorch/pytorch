@@ -5,6 +5,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Bitset.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
 
@@ -171,14 +172,14 @@ private:
         "The function schema has ", schema.arguments().size(),
         " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
-    for (size_t index = 0; index < schema.arguments().size(); ++index) {
-      if (schema.arguments()[index].type()->isSubtypeOf(TensorType::get()) ||
+    for (const auto index : c10::irange(schema.arguments().size())) {
+      if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              ListType::ofTensors()) ||
+              *ListType::ofTensors()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              ListType::ofOptionalTensors()) ||
+              *ListType::ofOptionalTensors()) ||
           schema.arguments()[index].type()->isSubtypeOf(
-              OptionalType::ofTensor())) {
+              *OptionalType::ofTensor())) {
         dispatch_arg_indices_reverse.set(schema.arguments().size() - 1 - index);
       }
     }

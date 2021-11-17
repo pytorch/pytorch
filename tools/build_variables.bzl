@@ -31,13 +31,18 @@ GENERATED_CPP = [
 
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
     "torch/csrc/jit/codegen/cuda/runtime/broadcast.cu",
     "torch/csrc/jit/codegen/cuda/runtime/fp16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/grid_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/helpers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/warp.cu",
     "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
     "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
@@ -109,11 +114,16 @@ core_sources_common = [
     "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
     "torch/csrc/jit/runtime/register_ops_utils.cpp",
     "torch/csrc/jit/runtime/vararg_functions.cpp",
+    "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
+    "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+]
+
+torch_unpickler_common = [
     "torch/csrc/jit/serialization/import_read.cpp",
     "torch/csrc/jit/serialization/unpickler.cpp",
 ]
 
-libtorch_sources_common = core_sources_common
+libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 
 # The profilers are not needed in the lite interpreter build.
 libtorch_profiler_sources = [
@@ -142,6 +152,7 @@ core_trainer_sources = [
     "torch/csrc/autograd/record_function_ops.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/variable.cpp",
+    "torch/csrc/autograd/utils/warnings.cpp",
     "torch/csrc/jit/frontend/name_mangler.cpp",
     "torch/csrc/jit/ir/type_hashing.cpp",
     "torch/csrc/jit/serialization/pickler.cpp",
@@ -183,6 +194,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/ir/subgraph_matcher.cpp",
     "torch/csrc/jit/jit_log.cpp",
     "torch/csrc/jit/jit_opt_limit.cpp",
+    "torch/csrc/jit/mobile/nnc/aot_compiler.cpp",
     "torch/csrc/jit/mobile/nnc/backend.cpp",
     "torch/csrc/jit/mobile/nnc/context.cpp",
     "torch/csrc/jit/mobile/nnc/registry.cpp",
@@ -200,9 +212,11 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/restore_mutation.cpp",
     "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
+    "torch/csrc/jit/passes/eliminate_no_ops.cpp",
     "torch/csrc/jit/passes/remove_redundant_profiles.cpp",
     "torch/csrc/jit/passes/remove_exceptions.cpp",
     "torch/csrc/jit/passes/decompose_ops.cpp",
+    "torch/csrc/jit/passes/dtype_analysis.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/fixup_trace_scope_blocks.cpp",
     "torch/csrc/jit/passes/freeze_module.cpp",
@@ -235,8 +249,10 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/remove_mutation.cpp",
     "torch/csrc/jit/passes/prepack_folding.cpp",
     "torch/csrc/jit/passes/fold_conv_bn.cpp",
+    "torch/csrc/jit/passes/frozen_concat_linear.cpp",
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion.cpp",
     "torch/csrc/jit/passes/frozen_conv_folding.cpp",
+    "torch/csrc/jit/passes/frozen_linear_transpose.cpp",
     "torch/csrc/jit/passes/frozen_ops_to_mkldnn.cpp",
     "torch/csrc/jit/passes/frozen_graph_optimizations.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
@@ -245,6 +261,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/integer_value_refinement.cpp",
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
+    "torch/csrc/jit/passes/symbolic_shape_runtime_fusion.cpp",
     "torch/csrc/jit/passes/specialize_autogradzero.cpp",
     "torch/csrc/jit/passes/update_differentiable_graph_requires_grad.cpp",
     "torch/csrc/jit/passes/variadic_ops.cpp",
@@ -252,6 +269,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/tensorexpr_fuser.cpp",
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
+    "torch/csrc/jit/passes/utils/optimization_utils.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/vulkan_rewrite.cpp",
     "torch/csrc/jit/passes/metal_rewrite.cpp",
@@ -275,6 +293,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
     "torch/csrc/jit/serialization/import_export_helpers.cpp",
@@ -304,13 +323,16 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/tensorexpr/llvm_codegen.cpp",
     "torch/csrc/jit/tensorexpr/llvm_jit.cpp",
     "torch/csrc/jit/tensorexpr/loopnest.cpp",
+    "torch/csrc/jit/tensorexpr/lowerings.cpp",
     "torch/csrc/jit/tensorexpr/mem_dependency_checker.cpp",
     "torch/csrc/jit/tensorexpr/operators/conv2d.cpp",
     "torch/csrc/jit/tensorexpr/operators/matmul.cpp",
+    "torch/csrc/jit/tensorexpr/operators/misc.cpp",
     "torch/csrc/jit/tensorexpr/operators/norm.cpp",
+    "torch/csrc/jit/tensorexpr/operators/pointwise.cpp",
+    "torch/csrc/jit/tensorexpr/operators/quantization.cpp",
     "torch/csrc/jit/tensorexpr/operators/reduction.cpp",
     "torch/csrc/jit/tensorexpr/operators/softmax.cpp",
-    "torch/csrc/jit/tensorexpr/operators/unary.cpp",
     "torch/csrc/jit/tensorexpr/reduction.cpp",
     "torch/csrc/jit/tensorexpr/registerizer.cpp",
     "torch/csrc/jit/tensorexpr/tensor.cpp",
@@ -330,6 +352,7 @@ core_sources_full_mobile = core_sources_full_mobile_no_backend_interface + [
 core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/runtime/static/fusion.cpp",
     "torch/csrc/jit/runtime/static/impl.cpp",
+    "torch/csrc/jit/runtime/static/memory_planner.cpp",
     "torch/csrc/jit/runtime/static/native_ops.cpp",
     "torch/csrc/jit/runtime/static/ops.cpp",
     "torch/csrc/jit/runtime/static/passes.cpp",
@@ -338,28 +361,51 @@ core_sources_full = core_sources_full_mobile + [
     "torch/csrc/jit/tensorexpr/external_functions_codegen.cpp",
 ]
 
-libtorch_core_sources = sorted(core_sources_common + core_sources_full + core_trainer_sources + libtorch_profiler_sources)
+lazy_tensor_core_sources = [
+    "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/lowering_context.cpp",
+    "torch/csrc/lazy/core/config.cpp",
+    "torch/csrc/lazy/core/hash.cpp",
+    "torch/csrc/lazy/core/ir.cpp",
+    "torch/csrc/lazy/core/ir_metadata.cpp",
+    "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/permutation_util.cpp",
+    "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ts_node.cpp",
+]
+
+libtorch_core_sources = sorted(
+    core_sources_common +
+    torch_unpickler_common +
+    core_sources_full +
+    core_trainer_sources +
+    libtorch_profiler_sources +
+    lazy_tensor_core_sources,
+)
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
-    "torch/csrc/distributed/c10d/frontend.cpp",
-    "torch/csrc/distributed/c10d/comm.cpp",
-    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
-    "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupGloo.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
-    "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
+    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
+    "torch/csrc/distributed/c10d/exception.cpp",
+    "torch/csrc/distributed/c10d/frontend.cpp",
+    "torch/csrc/distributed/c10d/logger.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
+    "torch/csrc/distributed/c10d/reducer.cpp",
+    "torch/csrc/distributed/c10d/sequence_num.cpp",
+    "torch/csrc/distributed/c10d/socket.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -418,9 +464,19 @@ jit_sources_full = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
     "torch/csrc/jit/passes/remove_inplace_ops.cpp",
     "torch/csrc/jit/passes/utils/check_alias_annotation.cpp",
+    "torch/csrc/jit/passes/autocast.cpp",
 ]
 
 libtorch_core_jit_sources = sorted(jit_sources_full)
+
+torch_mobile_tracer_sources = [
+    "torch/csrc/jit/mobile/model_tracer/tracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TensorUtils.cpp",
+    "torch/csrc/jit/mobile/model_tracer/TracerRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/MobileModelRunner.cpp",
+    "torch/csrc/jit/mobile/model_tracer/OperatorCallTracer.cpp",
+    "torch/csrc/jit/mobile/model_tracer/KernelDTypeTracer.cpp",
+]
 
 torch_mobile_core = [
     # backend_debug_info.cpp provides
@@ -435,6 +491,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
@@ -453,7 +510,12 @@ libtorch_lite_eager_symbolication = [
 ]
 
 # TODO: core_trainer_sources is not necessary for libtorch lite
-libtorch_lite_cmake_sources = sorted(core_trainer_sources + core_sources_common + torch_mobile_core)
+libtorch_lite_cmake_sources = sorted(
+    core_trainer_sources +
+    core_sources_common +
+    torch_unpickler_common +
+    torch_mobile_core,
+)
 
 libtorch_cmake_sources = libtorch_core_sources + libtorch_core_jit_sources
 
@@ -476,12 +538,14 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/module.cpp",
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
+    "torch/csrc/jit/mobile/parse_operators.cpp",
     "torch/csrc/jit/mobile/train/export_data.cpp",
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
     "torch/csrc/jit/mobile/train/sequential.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
+    "torch/csrc/jit/serialization/export_bytecode.cpp",
     "torch/csrc/jit/serialization/export_module.cpp",
     "torch/csrc/jit/serialization/import_legacy.cpp",
     "torch/csrc/utils/byte_order.cpp",
@@ -499,50 +563,77 @@ libtorch_cuda_core_sources = [
     "torch/csrc/autograd/functions/comm.cpp",
     "torch/csrc/jit/codegen/cuda/arith.cpp",
     "torch/csrc/jit/codegen/cuda/compute_at.cpp",
+    "torch/csrc/jit/codegen/cuda/compute_at_map.cpp",
     "torch/csrc/jit/codegen/cuda/codegen.cpp",
     "torch/csrc/jit/codegen/cuda/dispatch.cpp",
     "torch/csrc/jit/codegen/cuda/expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/executor.cpp",
     "torch/csrc/jit/codegen/cuda/executor_kernel_arg.cpp",
     "torch/csrc/jit/codegen/cuda/executor_launch_params.cpp",
+    "torch/csrc/jit/codegen/cuda/evaluator_common.cpp",
     "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
     "torch/csrc/jit/codegen/cuda/index_compute.cpp",
+    "torch/csrc/jit/codegen/cuda/index_reference_replay.cpp",
     "torch/csrc/jit/codegen/cuda/instrumentation.cpp",
     "torch/csrc/jit/codegen/cuda/ir_base_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_cloner.cpp",
     "torch/csrc/jit/codegen/cuda/ir_graphviz.cpp",
     "torch/csrc/jit/codegen/cuda/ir_nodes.cpp",
     "torch/csrc/jit/codegen/cuda/ir_iostream.cpp",
+    "torch/csrc/jit/codegen/cuda/ir_utils.cpp",
     "torch/csrc/jit/codegen/cuda/iter_visitor.cpp",
     "torch/csrc/jit/codegen/cuda/kernel.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_cache.cpp",
+    "torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_builder.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_printer.cpp",
-    "torch/csrc/jit/codegen/cuda/lower_index.cpp",
-    "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
     "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_allocation.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_index.cpp",
     "torch/csrc/jit/codegen/cuda/lower_insert_syncs.cpp",
-    "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_loops.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_magic_zero.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_misaligned_vectorization.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_shift.cpp",
     "torch/csrc/jit/codegen/cuda/lower_thread_predicate.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_trivial_reductions.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_unroll.cpp",
     "torch/csrc/jit/codegen/cuda/lower_utils.cpp",
     "torch/csrc/jit/codegen/cuda/lower_validation.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
+    "torch/csrc/jit/codegen/cuda/ops/composite.cpp",
+    "torch/csrc/jit/codegen/cuda/ops/normalization.cpp",
+    "torch/csrc/jit/codegen/cuda/parallel_dimension_map.cpp",
+    "torch/csrc/jit/codegen/cuda/parallel_type_bitmap.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
+    "torch/csrc/jit/codegen/cuda/partial_split_map.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
     "torch/csrc/jit/codegen/cuda/register_interface.cpp",
-    "torch/csrc/jit/codegen/cuda/scheduler.cpp",
-    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/root_domain_map.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/normalization.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/reduction.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/registry.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/utils.cpp",
+    "torch/csrc/jit/codegen/cuda/type_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/type_promotion.cpp",
+    "torch/csrc/jit/codegen/cuda/fusion_segmenter.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
     "torch/csrc/jit/codegen/cuda/transform_replay.cpp",
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
+    "torch/csrc/jit/codegen/cuda/utils.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
@@ -667,8 +758,10 @@ libtorch_python_core_sources = [
     "torch/csrc/api/src/python/init.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/autograd/init.cpp",
+    "torch/csrc/autograd/profiler_python.cpp",
     "torch/csrc/autograd/python_anomaly_mode.cpp",
     "torch/csrc/autograd/python_saved_variable_hooks.cpp",
+    "torch/csrc/autograd/python_mode.cpp",
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_function.cpp",
@@ -688,7 +781,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.cpp",
     "torch/csrc/jit/passes/onnx/list_model_parameters.cpp",
     "torch/csrc/jit/passes/onnx/function_substitution.cpp",
-    "torch/csrc/jit/passes/onnx/fold_if_node.cpp",
     "torch/csrc/jit/passes/onnx/helper.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/preprocess_for_onnx.cpp",
@@ -697,6 +789,7 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/passes/onnx/unpack_quantized_weights.cpp",
     "torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.cpp",
     "torch/csrc/jit/passes/onnx/shape_type_inference.cpp",
+    "torch/csrc/jit/passes/onnx/function_extraction.cpp",
     "torch/csrc/jit/python/pybind_utils.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/common.cpp",
     "torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.cpp",
@@ -788,6 +881,10 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/ExpandUtils.cpp",
+    "aten/src/ATen/FunctionalInverses.cpp",
+    "aten/src/ATen/FunctionalStorageImpl.cpp",
+    "aten/src/ATen/FunctionalTensorWrapper.cpp",
+    "aten/src/ATen/FunctionalizeFallbackKernel.cpp",
     "aten/src/ATen/MemoryOverlap.cpp",
     "aten/src/ATen/MapAllocator.cpp",
     "aten/src/ATen/NamedTensorUtils.cpp",
@@ -836,6 +933,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/op_registration/infer_schema.cpp",
     "aten/src/ATen/core/op_registration/op_registration.cpp",
     "aten/src/ATen/core/operator_name.cpp",
+    "aten/src/ATen/core/PythonModeTLS.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/cpu/FlushDenormal.cpp",
@@ -849,6 +947,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/DispatchStub.cpp",
     "aten/src/ATen/native/UpSample.cpp",
     "aten/src/ATen/native/mkl/LinearAlgebra.cpp",
+    "aten/src/ATen/native/mkl/SparseBlasImpl.cpp",
     "aten/src/ATen/native/mkl/SparseCsrLinearAlgebra.cpp",
     "aten/src/ATen/native/mkl/SpectralOps.cpp",
     "aten/src/ATen/native/mkldnn/BinaryOps.cpp",
@@ -868,13 +967,16 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/native/mkldnn/TensorShape.cpp",
     "aten/src/ATen/native/mkldnn/UnaryOps.cpp",
     "aten/src/ATen/native/mkldnn/Utils.cpp",
+    "aten/src/ATen/native/mkldnn/Matmul.cpp",
     "aten/src/ATen/native/quantized/cpu/init_qnnpack.cpp",
     "aten/src/ATen/record_function.cpp",
+    "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SavedTensorHooks.cpp",
     "aten/src/ATen/vulkan/Context.cpp",
     "aten/src/ATen/nnapi/nnapi_bind.cpp",
     "aten/src/ATen/nnapi/nnapi_wrapper.cpp",
     "aten/src/ATen/nnapi/nnapi_model_loader.cpp",
+    "aten/src/ATen/native/prim_native_functions.cpp",
 ]
 
 aten_cpu_source_codegen_list = [
@@ -901,6 +1003,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
     "aten/src/ATen/native/cpu/DistanceOpsKernel.cpp",
+    "aten/src/ATen/native/cpu/DistributionKernels.cpp",
     "aten/src/ATen/native/cpu/FillKernel.cpp",
     "aten/src/ATen/native/cpu/FunctionOfAMatrixUtilsKernel.cpp",
     "aten/src/ATen/native/cpu/GridSamplerKernel.cpp",
@@ -966,6 +1069,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qhardswish.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp",
+    "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_unpack.cpp",
     "aten/src/ATen/native/quantized/cpu/qmul.cpp",
@@ -1115,6 +1219,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/layer_norm.cpp",
     "aten/src/ATen/native/sparse/ParamUtils.cpp",
     "aten/src/ATen/native/sparse/SoftMax.cpp",
+    "aten/src/ATen/native/sparse/SparseBlas.cpp",
+    "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",
     "aten/src/ATen/native/sparse/SparseMatMul.cpp",
     "aten/src/ATen/native/sparse/SparseTensor.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",

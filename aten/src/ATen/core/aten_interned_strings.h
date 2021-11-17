@@ -27,7 +27,6 @@ _(aten, _amp_update_scale_) \
 _(aten, _arange) \
 _(aten, _argmax) \
 _(aten, _argmin) \
-_(aten, _baddbmm_mkl) \
 _(aten, _cast_Byte) \
 _(aten, _cast_Char) \
 _(aten, _cast_Double) \
@@ -194,10 +193,11 @@ _(aten, amin) \
 _(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
+_(aten, _autocast_to_reduced_precision) \
+_(aten, _autocast_to_full_precision) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -208,6 +208,8 @@ _(aten, avg_pool3d_forward) \
 _(aten, baddbmm) \
 _(aten, bartlett_window) \
 _(aten, batch_norm) \
+_(aten, _batch_norm_impl_index) \
+_(aten, _batch_norm_impl_index_backward) \
 _(aten, bernoulli) \
 _(aten, bilinear) \
 _(aten, binary_cross_entropy) \
@@ -349,6 +351,7 @@ _(aten, full_like) \
 _(aten, gather) \
 _(aten, gcd) \
 _(aten, gelu) \
+_(aten, gelu_backward) \
 _(aten, geometric) \
 _(aten, geqrf) \
 _(aten, get_device) \
@@ -377,6 +380,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, histogram) \
+_(aten, histogramdd) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
@@ -518,6 +522,8 @@ _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_layer_norm) \
+_(aten, native_layer_norm_backward) \
 _(aten, native_clone) \
 _(aten, native_get_device) \
 _(aten, native_norm) \
@@ -543,7 +549,6 @@ _(aten, nll_loss2d_backward) \
 _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
-_(aten, nonzero) \
 _(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
@@ -632,6 +637,7 @@ _(aten, set) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, silu_backward) \
 _(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
@@ -646,7 +652,6 @@ _(aten, smooth_l1_loss_forward) \
 _(aten, soft_margin_loss) \
 _(aten, soft_margin_loss_backward) \
 _(aten, soft_margin_loss_forward) \
-_(aten, softmax) \
 _(aten, _softmax) \
 _(aten, _softmax_backward_data) \
 _(aten, softplus) \
@@ -695,8 +700,8 @@ _(aten, th_resize_as) \
 _(aten, th_tensor) \
 _(aten, th_zero) \
 _(aten, thnn_conv2d) \
-_(aten, thnn_conv2d_backward) \
-_(aten, thnn_conv2d_forward) \
+_(aten, _slow_conv2d_backward) \
+_(aten, _slow_conv2d_forward) \
 _(aten, tile) \
 _(aten, slow_conv3d) \
 _(aten, slow_conv3d_backward) \
@@ -741,14 +746,23 @@ _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \
 _(aten, upsample_nearest1d) \
+_(aten, _upsample_nearest_exact1d) \
 _(aten, upsample_nearest1d_backward) \
+_(aten, _upsample_nearest_exact1d_backward) \
 _(aten, upsample_nearest1d_forward) \
+_(aten, _upsample_nearest_exact1d_forward) \
 _(aten, upsample_nearest2d) \
+_(aten, _upsample_nearest_exact2d) \
 _(aten, upsample_nearest2d_backward) \
+_(aten, _upsample_nearest_exact2d_backward) \
 _(aten, upsample_nearest2d_forward) \
+_(aten, _upsample_nearest_exact2d_forward) \
 _(aten, upsample_nearest3d) \
+_(aten, _upsample_nearest_exact3d) \
 _(aten, upsample_nearest3d_backward) \
+_(aten, _upsample_nearest_exact3d_backward) \
 _(aten, upsample_nearest3d_forward) \
+_(aten, _upsample_nearest_exact3d_forward) \
 _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \

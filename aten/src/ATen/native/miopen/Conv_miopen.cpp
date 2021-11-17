@@ -105,8 +105,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 
 #else  // AT_ROCM_ENABLED
 
-#include <aten/src/THH/THH.h>
-
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
@@ -114,6 +112,9 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 
 #include <ATen/TensorUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <c10/util/irange.h>
+
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <functional>
 #include <iterator>
@@ -255,7 +256,7 @@ struct ParamsHash {
   std::size_t operator()(const ConvolutionParams& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
     uint32_t value = 0x811C9DC5;
-    for (int i = 0; i < (int)sizeof(ConvolutionParams); ++i) {
+    for (const auto i : c10::irange((int)sizeof(ConvolutionParams))) {
       value ^= ptr[i];
       value *= 0x01000193;
     }
@@ -302,14 +303,14 @@ BenchmarkCache<size_t> bwd_filter_wssizes;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
+    data = c10::hip::HIPCachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
   Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
-      THCudaFree(globalContext().lazyInitCUDA(), data);
+      c10::hip::HIPCachingAllocator::raw_delete(data);
     }
   }
 

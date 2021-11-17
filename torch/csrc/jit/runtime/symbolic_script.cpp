@@ -479,6 +479,24 @@ const std::vector<std::string> functions = {
                 return grad_output._grad_sum_to_size(self_size), grad_tensor1, grad_tensor2, None
             return result, backward
 
+        def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None
+
+            return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
+
+        def _autocast_to_reduced_precision(self,
+                                          cuda_enabled : bool,
+                                          cpu_enabled : bool,
+                                          cuda_dtype : int,
+                                          cpu_dtype : int):
+            self_dtype = self.dtype
+            def backward(grad_output):
+                return grad_output.to(self_dtype), None, None, None, None
+
+            return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
+
         def _dim_arange(like,
                         dim: int):
             def backward(grad_output):
@@ -612,7 +630,7 @@ const std::vector<std::string> functions = {
             size = len(tensors)
             split_sizes = [0] * size
             for i in range(size):
-                if tensors[i].numel() > 0:
+                if tensors[i].size() != [0]:
                     split_sizes[i] = tensors[i].size()[dim]
 
             def backward(grad_output):
@@ -1208,7 +1226,7 @@ const std::vector<std::string> functions = {
         def log_softmax(self, dim: int, dtype: Optional[int]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1222,7 +1240,7 @@ const std::vector<std::string> functions = {
         def softmax(self, dim: int, dtype: Optional[int]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
-                grad_self = torch._softmax_backward_data(grad_output, result, dim, self)
+                grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)
                 return grad_self, None, None
 
             return result, backward
@@ -1367,6 +1385,15 @@ const std::vector<std::string> functions = {
                 mask = (self >= threshold).type_as(self)
                 return grad_output * mask, None, None
             return torch.threshold(self, threshold, value), backward
+
+        def softplus(self,
+                      beta: number,
+                      threshold: number):
+            result = torch.softplus(self, beta, threshold)
+            def backward(grad_output):
+                z = torch.exp(result * beta)
+                return torch.where((result * beta) > threshold, grad_output, grad_output * (z - 1.) / z), None, None
+            return result, backward
 
         def fmod(self,
                  other: number):
@@ -1537,7 +1564,7 @@ void loadModule(const CompilationUnit& module) {
       continue;
 
     GradientPair pair;
-    pair.forward = method->graph();
+    pair.forward = toGraphFunction(*method).graph();
 
     // lookup the backward function
     Node* forward_tuple = pair.forward->outputs().at(0)->node();

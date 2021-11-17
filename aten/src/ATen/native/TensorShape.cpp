@@ -616,7 +616,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
-    for (size_t offset = 0; offset < numel; offset++) {
+    for (const auto offset : c10::irange(numel)) {
       // indices tensor could be non-contiguous
       indices[offset] = *(indices_data + offset * stride);
     }
@@ -1421,7 +1421,7 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
   inputs[0] = tensors[0].unsqueeze(dim);
-  for (size_t i = 1; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
@@ -1449,7 +1449,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
   if (result.dtype() != firstTensor.dtype()) return false;
 
   // Inputs cannot alias the output tensor
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -1471,7 +1471,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
 
   // check remainder of inputs
   auto const &first_tensor_shape = firstTensor.sizes();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     auto const &tensor = tensors[i];
     TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
       "stack expects each tensor to be equal size, but got ", first_tensor_shape,
@@ -2153,30 +2153,85 @@ std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
+  TORCH_WARN_ONCE("torch.meshgrid: in an upcoming release, it will be required to pass the "
+                  "indexing argument.");
+  return native::meshgrid(tensors, /*indexing=*/"ij");
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors,
+                             c10::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+
+  for(const auto i: c10::irange(size - 1)){
+    TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+    TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+  }
+
+  // Input tensors is of type TensorList, which is an alias to a
+  // constant array slice, which doesn't allow for mutations. We may
+  // need to swap our first two elements if indexing is "ij", so we
+  // unconditionally create a vector that we can reorder to keep the
+  // implementation simple.
+  //
+  // We are not concerned with the performance of this relative to
+  // constructor a grid for each input.
+  std::vector<std::reference_wrapper<const Tensor>> tensor_refs(tensors.begin(),
+                                                                tensors.end());
+
+  // Whether or not to swap the first two tensors.
+  //
+  // We only swap if there are at least two* input tensors (obviously)
+  // and if indexing is "xy".
+  //
+  // A reminder about "xy" semantics: "xy" semantics implies that the
+  // output grids are in the cartesian coordinate system. Thus the
+  // first dimension is the "x" axis (corresponding to column) and the
+  // second dimension is the "y" axis (corresponding to row). Tensors,
+  // however, generally consider the first axis to be the row and the
+  // second axis to be the columns. Thus we flip the two dimensions in
+  // contrast to "ij" indexing.
+  //
+  // It turns out that it's easiest to implement this by just swapping
+  // the first two inputs. However, the order of the outputs still
+  // must correspond to the order of the inputs. Thus we also must
+  // swap the outputs if we swapped the inputs.
+  //
+  // * Why do we even support this function for exactly one input?
+  bool swap_first_and_second_tensors;
+
+  if (indexing == "xy") {
+    // We can only swap if there are multiple tensors.
+    swap_first_and_second_tensors = size >= 2;
+    if (swap_first_and_second_tensors) {
+      std::swap(tensor_refs[0], tensor_refs[1]);
+    }
+  } else {
+    // Only "xy" and "ij" are supported, and we already checked for
+    // "xy" above. Only "ij" remains as a valid mode.
+    TORCH_CHECK(indexing == "ij",
+                "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
+                "but received: ", indexing);
+    swap_first_and_second_tensors = false;
+  }
+
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
-    switch (tensors[i].dim()) {
-    case 0:
-      shape[i] = 1;
-      break;
-    case 1:
-      shape[i] = tensors[i].size(0);
-      break;
-    default:
-      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
-    }
-  }
-  for(const auto i: c10::irange(size - 1)){
-      TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
-      TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+    TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
+                "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
+    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
-    grids.push_back(tensors[i].view(view_shape).expand(shape));
+    view_shape[i] = -1;  // select this dimension to infer
+    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
+  }
+
+  // Remember we need to also swap the outputs if we swapped the inputs.
+  if (swap_first_and_second_tensors) {
+    std::swap(grids[0], grids[1]);
   }
   return grids;
 }
@@ -2184,12 +2239,56 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 // Numpy-style `a.T`: returns the tensor
 // with dims reversed
 Tensor numpy_T(const Tensor &self) {
-  int64_t n = self.dim();
+  const auto n = self.dim();
+  if (n != 2 && n != 0) {
+    TORCH_WARN_ONCE(
+        "The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated ",
+        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices",
+        "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
+    );
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
   }
   return self.permute(transpose_dims);
+}
+
+Tensor matrix_H(const Tensor &self) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == 2 || ndim == 0,
+      "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
+      ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
+  if (self.is_complex()) {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  } else {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  }
+}
+
+namespace {
+Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim != 1,
+      "tensor.", name, " is only supported on matrices or batches of matrices. Got 1-D tensor.");
+  if (transpose || !self.is_complex()) {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  } else {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  }
+}
+} // anonymous namespace
+
+Tensor mT(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/true, "mT");
+}
+
+Tensor mH(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "mH");
+}
+
+Tensor adjoint(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "adjoint()");
 }
 
 Tensor view(const Tensor& self,
@@ -2312,10 +2411,7 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
+  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -2465,4 +2561,27 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    auto output = self.clone();
+    auto slice = output.slice(dim, start, end, step);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+    auto output = self.clone();
+    auto slice = output.select(dim, index);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64_t offset, int64_t dim1, int64_t dim2) {
+    auto output = self.clone();
+    auto slice = output.diagonal(offset, dim1, dim2);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+
+} // namespace native
+} // namespace at

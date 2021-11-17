@@ -1,4 +1,6 @@
+#include <ATen/ArrayRef.h>
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
@@ -79,17 +81,28 @@ QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(int64_t size_bytes, at::ScalarType t) {
+int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  int64_t new_size_bytes;
+  int64_t element_per_byte;
   switch(t) {
     case at::ScalarType::QUInt4x2:
-      new_size_bytes = std::ceil(size_bytes * 0.5);
+      element_per_byte = 2;
+      break;
+    case at::ScalarType::QUInt2x4:
+      element_per_byte = 4;
       break;
     default:
-      new_size_bytes = size_bytes;
+      element_per_byte = 1;
   }
-  return new_size_bytes;
+  // zero dim tensor
+  if (sizes.size() == 0) {
+    return c10::multiply_integers(sizes) * dtype_itemsize;
+  }
+  // Consider most inner dim as cols
+  int64_t cols = sizes.at(sizes.size()-1);
+  int64_t bytes_per_row = cols * dtype_itemsize;
+  // align qtensor most inner dim, compute ceil (bytes_per_row / element_per_byte)
+  return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
 }
 
 inline Tensor new_qtensor(
@@ -109,13 +122,12 @@ inline Tensor new_qtensor(
 
   at::DispatchKey tensorDispatchKey = options.computeDispatchKey();
   native::check_size_nonnegative(sizes);
-  int64_t nelements = c10::multiply_integers(sizes);
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
       "ScalarType is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
-  int64_t size_bytes = get_sub_byte_tensor_size(nelements * dtype.itemsize(), scalar_type);
+  int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
@@ -132,7 +144,8 @@ inline Tensor new_qtensor(
 
 Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+      rtensor.scalar_type() == kFloat,
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -189,7 +202,8 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
  TORCH_CHECK(
-      rtensor.scalar_type() == kFloat, "quantize only works on Float Tensor.");
+      rtensor.scalar_type() == kFloat,
+      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
@@ -217,6 +231,7 @@ C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) 
 Tensor from_blob_quantized_per_tensor_affine(
     void* data,
     IntArrayRef sizes,
+    IntArrayRef strides,
     std::function<void(void*)> deleter,
     const float scale,
     const int64_t zeroPoint,
@@ -246,10 +261,38 @@ Tensor from_blob_quantized_per_tensor_affine(
       at::DispatchKeySet(options.computeDispatchKey()),
       options.dtype(),
       quantizer);
-  get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
+  get_qtensorimpl(qtensor)->set_sizes_and_strides(sizes, strides);
   return qtensor;
 }
 
+Tensor from_blob_quantized_per_tensor_affine(
+    void* data,
+    IntArrayRef sizes,
+    std::function<void(void*)> deleter,
+    const float scale,
+    const int64_t zeroPoint,
+    const TensorOptions& options) {
+  std::vector<int64_t> strides;
+  const auto ndim = sizes.size();
+  if (ndim > 0) {
+    strides.resize(ndim);
+    // NOLINTNEXTLINE
+    int32_t i = ndim - 1;
+    // NOLINTNEXTLINE
+    strides[i] = 1;
+    while (--i >= 0) {
+      strides[i] = sizes[i] * strides[i + 1];
+    }
+  }
+  return from_blob_quantized_per_tensor_affine(
+      data,
+      sizes,
+      strides,
+      deleter,
+      scale,
+      zeroPoint,
+      options);
+}
 
 Tensor from_blob_quantized_per_channel_affine(
     void* data,

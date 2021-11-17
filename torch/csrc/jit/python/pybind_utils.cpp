@@ -270,7 +270,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       // check if the classType conform with the interface or not
       std::stringstream why_not;
-      if (!classType->isSubtypeOfExt(interfaceType, &why_not)) {
+      if (!classType->isSubtypeOfExt(*interfaceType, &why_not)) {
         throw py::cast_error(c10::str(
             "Object of type ",
             classType->repr_str(),

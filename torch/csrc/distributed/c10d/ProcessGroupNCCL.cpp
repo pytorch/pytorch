@@ -12,15 +12,18 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10d/ParamCommsUtils.hpp>
+#include <c10d/Utils.hpp>
+#include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10d/ParamCommsUtils.hpp>
+
 #include <torch/csrc/cuda/nccl.h>
 
-#include <c10d/Utils.hpp>
 
 namespace c10d {
 
@@ -48,12 +51,20 @@ struct AutoNcclGroup {
   }
 };
 
+#if defined(NCCL_MAJOR) && ((NCCL_MAJOR > 2) || \
+                            (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#define NCCL_HAS_AVG 1
+#endif
+
 // NCCL op mapping
 const std::map<ReduceOp, ncclRedOp_t> ncclOp = {
     {ReduceOp::MIN, ncclMin},
     {ReduceOp::MAX, ncclMax},
     {ReduceOp::SUM, ncclSum},
     {ReduceOp::PRODUCT, ncclProd},
+#ifdef NCCL_HAS_AVG
+    {ReduceOp::AVG, ncclAvg},
+#endif
 };
 
 // NCCL type typing
@@ -66,7 +77,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
-#if defined(ENABLE_NCCL_BF16_DATATYPE)
+#if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
 };
@@ -83,15 +94,27 @@ ncclDataType_t getNcclDataType(at::ScalarType type) {
 
 ncclRedOp_t getNcclReduceOp(const ReduceOp reduceOp, at::Tensor& input) {
   try {
-    if (reduceOp == ReduceOp::SUM && input.scalar_type() == at::kBool) {
-      // For bool tensors, map sum to max, which both represent a bitwise or.
-      // This is to prevent overflow issues with sum, since we use uint8 to
-      // represent a bool (see ncclDataType mapping).
-      return ncclMax;
+    if (input.scalar_type() == at::kBool) {
+      if (reduceOp == ReduceOp::SUM) {
+        // For bool tensors, map sum to max, which both represent a bitwise or.
+        // This is to prevent overflow issues with sum, since we use uint8 to
+        // represent a bool (see ncclDataType mapping).
+        return ncclMax;
+      }
+#ifdef NCCL_HAS_AVG
+      if (reduceOp == ReduceOp::AVG) {
+        TORCH_CHECK(false, "Cannot use ReduceOp.AVG with boolean inputs");
+      }
+#endif
     }
     return ncclOp.at(reduceOp);
   } catch (const std::out_of_range& e) {
     switch (reduceOp) {
+      case ReduceOp::AVG:
+        TORCH_CHECK(false,
+                    "AVG requires NCCL 2.10+. The current version is ",
+                    NCCL_MAJOR, ".", NCCL_MINOR);
+        break;
       case ReduceOp::BAND:
         TORCH_CHECK(false, "Cannot use ReduceOp.BAND with NCCL");
         break;
@@ -137,6 +160,14 @@ std::vector<at::Device> getDeviceList(const std::vector<at::Tensor>& tensors) {
     res.push_back(tensor.device());
   }
   return res;
+}
+
+// Return CUDA device with ordinal given by input rank.
+at::Device getDeviceForRank(int rank) {
+  TORCH_CHECK(rank >= 0, "Invalid rank ", rank);
+  auto numGPUs = at::cuda::getNumGPUs();
+  int16_t deviceIdx = static_cast<int16_t>(rank % numGPUs);
+  return at::Device(at::DeviceType::CUDA, deviceIdx);
 }
 
 // [Sync Streams] Helper that lets the input ncclStreams to wait for the current
@@ -482,6 +513,15 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     asyncErrorHandling_ = false;
   }
 
+  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+    // Perform health check by initializing dummy communicators and destroying
+    // them. This will help indicate any NCCL-related issues prior to the first
+    // collective.
+    // Run it in a separate thread and wait on CV to handle timeouts, since
+    // majority of getNCCLComm failures are hangs.
+    runHealthCheck();
+  }
+
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
@@ -505,6 +545,64 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
+}
+
+void ProcessGroupNCCL::runHealthCheck() {
+  // Run health check in a separate thread and wait on CV to handle timeouts,
+  // since majority of getNCCLComm failures are hangs.
+
+  struct HealthCheckData {
+    std::mutex healthCheckMutex;
+    std::condition_variable healthCheckCv;
+    bool healthCheckSuccess = false;
+    std::exception_ptr healthCheckException;
+  };
+
+  HealthCheckData healthCheckData;
+  auto t = std::thread([&healthCheckData, this]() {
+    try {
+      std::vector<at::Device> rankDevice = {getDeviceForRank(rank_)};
+      const auto key = getKeyFromDevices(rankDevice);
+      // OpType does not matter, only need to set to not go through send/recv
+      // path.
+      getNCCLComm(key, rankDevice, OpType::ALLREDUCE);
+      // Now destroy the communicators and remove them from cache so we don't
+      // use destroyed communicators.
+      destroyNCCLComms(key);
+      // Notify main thread the health check is complete.
+      {
+        std::lock_guard<std::mutex> lk(healthCheckData.healthCheckMutex);
+        healthCheckData.healthCheckSuccess = true;
+      }
+      healthCheckData.healthCheckCv.notify_one();
+    } catch (const std::exception& e) {
+      // Populate exception ptr.
+      healthCheckData.healthCheckException = std::current_exception();
+      // Unblock waiting main thread which will report exception.
+      healthCheckData.healthCheckCv.notify_one();
+    } // Unknown exceptions will just cause the program to terminate.
+  });
+  // We don't need to join the thread, just need to verify health check via the
+  // CV. Hence we detach the thread here.
+  t.detach(); // NOLINT
+  LOG(INFO) << "[Rank " << rank_ << "]"
+            << " will wait up to " << options_->timeout.count()
+            << " msec for NCCL health check to complete.";
+  std::unique_lock<std::mutex> lock(healthCheckData.healthCheckMutex);
+  healthCheckData.healthCheckCv.wait_for(
+      lock, options_->timeout, [&healthCheckData]() {
+        return healthCheckData.healthCheckSuccess;
+      });
+
+  if (healthCheckData.healthCheckException) {
+    std::rethrow_exception(healthCheckData.healthCheckException);
+  }
+  // If there is no exception, the likely culprit is a timeout/hang which is how
+  // most communicator init issues manifest themselves.
+  TORCH_CHECK(
+      healthCheckData.healthCheckSuccess,
+      "ProcessGroupNCCL: Health check failure: Failed to initialize NCCL communicator on rank ",
+      rank_);
 }
 
 void ProcessGroupNCCL::setSequenceNumberForGroup() {
@@ -854,6 +952,30 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   }
 }
 
+
+void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (devNCCLCommMap_.find(devNCCLCommMapKey) == devNCCLCommMap_.end()) {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Expected to find key ",
+        devNCCLCommMapKey,
+        " in NCCL communicator map.");
+  }
+  std::vector<std::shared_ptr<NCCLComm>>& ncclComms =
+      devNCCLCommMap_[devNCCLCommMapKey];
+  // Loop through communicators and call ncclCommAbort.
+  for (const auto& comm : ncclComms) {
+    // ncclCommDestroy(comm->getNcclComm()) results in segfault when PG is being
+    // destroyed, so using ncclCommAbort here.
+    comm->ncclCommAbort();
+  }
+  // Remove communicators from the cache.
+  devNCCLCommMap_.erase(devNCCLCommMapKey);
+  // Clear used device indices.
+  usedDeviceIdxs_.clear();
+}
+
 std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     const std::string& devicesKey,
     const std::vector<at::Device>& devices,
@@ -919,6 +1041,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // created before encountering any communication calls. This is why we need
   // the following for loop.
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
 
@@ -958,6 +1081,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
 
   // See [Group Start/End Note]
   for (const auto i : c10::irange(ncclActiveGroupCounter_)) {
+    (void)i;
     C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
   }
 
@@ -1675,7 +1799,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::barrier(
         "This can potentially cause a hang if this rank to GPU mapping is incorrect.",
         "Specify device_ids in barrier() to force use of a particular device."
     );
-    devices.emplace_back(at::DeviceType::CUDA, deviceIdx);
+    devices.emplace_back(getDeviceForRank(rank_));
   } else {
     for (auto usedDeviceIdx : usedDeviceIdxs_) {
       devices.emplace_back(at::DeviceType::CUDA, usedDeviceIdx);

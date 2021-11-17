@@ -75,7 +75,7 @@ rest of the components that PyTorch provides:
 Acknowledgements
 ----------------
 
-The implementation for pipeline parallelism is based on `fairscale's pipe implementation <https://github.com/facebookresearch/fairscale/tree/master/fairscale/nn/pipe>`__ and
+The implementation for pipeline parallelism is based on `fairscale's pipe implementation <https://github.com/facebookresearch/fairscale/tree/main/fairscale/nn/pipe>`__ and
 `torchgpipe <https://github.com/kakaobrain/torchgpipe>`__. We would like to
 thank both teams for their contributions and guidance towards bringing pipeline
 parallelism into PyTorch.

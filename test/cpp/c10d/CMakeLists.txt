@@ -1,5 +1,5 @@
 if(USE_CUDA)
-  cuda_add_library(c10d_cuda_test CUDATest.cu)
+  add_library(c10d_cuda_test CUDATest.cu)
   target_include_directories(c10d_cuda_test PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   target_link_libraries(c10d_cuda_test torch_cuda)
   add_dependencies(c10d_cuda_test torch_cuda)

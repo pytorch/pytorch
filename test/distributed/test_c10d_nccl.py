@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import copy
 import math
 import os
@@ -292,6 +294,20 @@ class ProcessGroupNCCLTest(TestCase):
                 torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
                 tensors[i],
             )
+
+        # Avg (only available for NCCL 2.10+)
+        if torch.cuda.nccl.version() >= (2, 10, 0):
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
+
+            allreduce(tensors, c10d.ReduceOp.AVG)
+
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
 
         # Product
         tensors = []
@@ -643,11 +659,13 @@ class DistributedDataParallelTest(
         # otherwise process will be taken down and we can't check for errors.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
         os.environ["NCCL_BLOCKING_WAIT"] = "1"
-        timeout = timedelta(seconds=2)
+        # TODO: smaller timeout can fail since PG NCCl does health check in
+        # constructor. Look into reducing this test's runtime.
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timeout)
+        # provide sufficient timeout to initialize NCCL comm.
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, timeout=timedelta(seconds=15))
         pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
-        pg.barrier().wait()
+        pg.barrier().wait(timedelta(seconds=5))
         # Simulate stuckness in rank 0.
         if self.rank == 0:
             pg_gloo.barrier().wait()
@@ -656,7 +674,7 @@ class DistributedDataParallelTest(
         if self.rank != 0:
             # Time out due to rank 0 not calling into allreduce.
             with self.assertRaises(RuntimeError):
-                pg.allreduce([inp]).wait()
+                pg.allreduce([inp]).wait(timedelta(seconds=5))
 
             # Now when nonzero rank attempts to use communicator, original failure reason should be logged.j
             try:
@@ -1608,7 +1626,7 @@ class DistributedDataParallelTest(
             not TEST_WITH_ROCM
             and BFLOAT16_AVAILABLE
             and c10d.is_nccl_available()
-            and torch.cuda.nccl.version() >= (2, 9, 7)
+            and torch.cuda.nccl.version() >= (2, 10)
         ):
             hook_options.append(default.bf16_compress_hook)
         for hook in hook_options:
@@ -1779,7 +1797,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper()
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
@@ -1889,7 +1907,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
@@ -2003,7 +2021,7 @@ class DistributedDataParallelTest(
     # A list of tests for ddp with activation checkpointing
     # when gradient_as_bucket_view=True, False.
     # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/master/tests/nn/pipe/test_checkpoint_ddp.py
+    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
         def __init__(self):
             super().__init__()
@@ -2214,6 +2232,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(3)
     @skip_if_rocm
+    @sandcastle_skip("Test does not pass when run locally")
     def test_nccl_errors_nonblocking(self):
         # Note: we unset and restore NCCL_ASYNC_ERROR_HANDLING for this test
         # since test_c10d_common runs with async error handling by default, but this
@@ -2249,14 +2268,14 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store,
             self.rank,
             self.world_size,
-            timeout=timedelta(seconds=self.op_timeout_sec),
+            timeout=timedelta(seconds=10),
         )
         process_group.allreduce(torch.rand(10).cuda(self.rank))
         if self.rank == 0:
             work = process_group.allreduce(torch.rand(10).cuda(self.rank))
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # Operation would time out in blocking mode.
-                work.wait()
+                work.wait(timeout=timedelta(seconds=self.op_timeout_sec))
             # Run some GPU operations to make sure cuda has not gotten stuck.
             # It was observed cuda could get stuck if NCCL communicators were
             # not properly aborted before throwing RuntimeError.
@@ -2325,13 +2344,13 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             store,
             self.rank,
             self.world_size,
-            timeout=timedelta(seconds=self.op_timeout_sec),
+            timeout=timedelta(seconds=10),
         )
         process_group.barrier().wait()
         if self.rank == 0:
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
                 # This should timeout
-                process_group.barrier().wait()
+                process_group.barrier().wait(timeout=timedelta(seconds=self.op_timeout_sec))
 
     def _run_invalid_nccl_blocking_wait_env(self, val):
         os.environ["NCCL_BLOCKING_WAIT"] = val
@@ -2368,21 +2387,19 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         store = c10d.FileStore(self.file_name, self.world_size)
 
         # Initialize process_group.
-        timeout = 1
         process_group = c10d.ProcessGroupNCCL(
-            store, self.rank, self.world_size, timeout=timedelta(seconds=timeout)
+            store, self.rank, self.world_size, timeout=timedelta(seconds=10)
         )
-        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
+        process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=5))
 
         if self.rank == 0:
             # This should timeout in about 1 second.
-            start = time.time()
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
-                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
         else:
             # Sleep to ensure timeout.
-            time.sleep(2 * timeout)
+            time.sleep(10)
 
             self._wait_for_comm_abort(process_group)
 
@@ -2529,34 +2546,36 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         if self.rank == 0:
             with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
+                RuntimeError, "Health check failure"
             ):
                 c10d.init_process_group(
                     backend="nccl",
                     rank=self.rank,
                     world_size=self.world_size,
                     store=store,
-                    timeout=timedelta(seconds=1),
+                    timeout=timedelta(seconds=10),
                 )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout_new_group(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl",
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=1),
+            timeout=timedelta(seconds=10),
         )
 
         if self.rank == 0:
             with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
+                RuntimeError, "Health check failure"
             ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
@@ -2568,18 +2587,19 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
     def test_nccl_barrier_timeout_new_group_non_member(self):
+        os.environ["ENABLE_NCCL_HEALTH_CHECK"] = "1"
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl",
             rank=self.rank,
             world_size=self.world_size,
             store=store,
-            timeout=timedelta(seconds=1),
+            timeout=timedelta(seconds=10),
         )
 
         if self.rank == 1:
             with self.assertRaisesRegex(
-                RuntimeError, "Timed out initializing process group"
+                RuntimeError, "Health check failure"
             ):
                 c10d.new_group([0, 1], timeout=timedelta(seconds=1))
 
@@ -2609,6 +2629,23 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "Invalid function argument"):
             c10d.barrier(device_ids=self.rank)
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["DETAIL"])
+    def test_nccl_warn_not_in_group_debug_detail(self):
+        self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["INFO"])
+    def test_nccl_warn_not_in_group_debug_info(self):
+        self._test_warn_not_in_group(backend="nccl")
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @with_dist_debug_levels(levels=["OFF"])
+    def test_nccl_warn_not_in_group_debug_off(self):
+        self._test_warn_not_in_group(backend="nccl")
 
 if __name__ == "__main__":
     assert (

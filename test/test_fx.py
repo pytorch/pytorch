@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import builtins
 import contextlib
 import copy
@@ -244,6 +246,16 @@ class TestFX(JitTestCase):
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x << 3, x >> 3
+
+        input = torch.LongTensor(10).random_(0, 1024)
+
+        m = MyModule()
+        self.checkGraphModule(m, (input,))
+
+    def test_fx_and_or(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return x & x, x | x
 
         input = torch.LongTensor(10).random_(0, 1024)
 
@@ -705,6 +717,34 @@ class TestFX(JitTestCase):
         traced2 = symbolic_trace(wfq)
         traced2.graph.lint()
         traced2(torch.rand(4, 4))
+
+    def test_tensor_attribute_coalseced(self):
+
+        def count_attrs(fx_module):
+            targets = set()
+            for node in traced.graph.nodes:
+                if node.op == 'get_attr':
+                    targets.add(node.target)
+            return len(targets)
+
+        val = torch.tensor(5)
+
+        def f(x):
+            return x + val + val
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 1)
+
+        val2 = torch.tensor(5)
+
+        def f(x):
+            val = torch.tensor(5)
+            return x + val + val2
+
+        traced = symbolic_trace(f)
+        traced.graph.lint()
+        self.assertEqual(count_attrs(traced), 2)
+
 
     def test_symbolic_trace_sequential(self):
         class Simple(torch.nn.Module):
@@ -1697,6 +1737,18 @@ class TestFX(JitTestCase):
 
         self.assertTrue('typing.List[float]' in str(graph))
 
+    def test_layout(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return torch.empty_like(x, layout=torch.strided, pin_memory=False).fill_(0)
+
+        traced = symbolic_trace(M())
+        x = torch.rand(5, 9, 3, 4)
+        self.assertEqual(traced(x), torch.zeros_like(x))
+
     def test_ellipsis(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1855,6 +1907,16 @@ class TestFX(JitTestCase):
 
         input = torch.randn(33, 44)
         self.assertEqual(gm(input), torch.relu(torch.neg(input)))
+
+    def test_prepend_self(self):
+        graph : torch.fx.Graph = torch.fx.Graph()
+        x : torch.fx.Node = graph.create_node('placeholder', 'x')
+        b : torch.fx.Node = graph.create_node('call_function', target=torch.relu, args=(x,))
+        output : torch.fx.Node = graph.output(b)
+
+        b.prepend(b)
+        x.append(b)
+        self.assertEqual(len(graph.nodes), 3)
 
     def test_erase_node_error(self):
         st = SimpleTest()
@@ -2456,6 +2518,27 @@ class TestFX(JitTestCase):
         self.assertEqual(27, traced(2))
         self.assertIs(a_lifted_leaf2, real_a_lifed_leaf2)
 
+    def test_profiler_ranges_side_effect(self):
+        g = torch.fx.Graph()
+        handle = g.call_function(torch.ops.profiler._record_function_enter, ('test_range',))
+        g.call_function(torch.ops.profiler._record_function_exit, (handle,))
+        g.output(None)
+
+        found_targets = {}
+        for node in g.nodes:
+            if node.op == 'call_function':
+                found_targets.setdefault(node.target)
+        self.assertEqual(
+            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
+
+        g.eliminate_dead_code()
+        found_targets = {}
+        for node in g.nodes:
+            if node.op == 'call_function':
+                found_targets.setdefault(node.target)
+        self.assertEqual(
+            found_targets.keys(), [torch.ops.profiler._record_function_enter, torch.ops.profiler._record_function_exit])
+
     def test_ast_rewriter_wrapped_via_decorator(self):
         class F(torch.nn.Module):
             def forward(self, x):
@@ -2655,6 +2738,39 @@ class TestFX(JitTestCase):
         self.assertTrue(buffer_exists(a, "net_b.buf"))
 
         a.graph.lint()
+
+    def test_delete_unused_submodules_leaf(self):
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                return x
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod = SubModule()
+
+            def forward(self, x):
+                x = self.submod(x)
+                return x
+
+        model = Model()
+
+        class MyCustomTracer(torch.fx.Tracer):
+            def is_leaf_module(self, m: torch.nn.Module, module_qualified_name : str) -> bool:
+                return module_qualified_name == "submod"
+
+        inputs = torch.randn(1, 10)
+        traced_graph = MyCustomTracer().trace(model)
+        gm2 = torch.fx.GraphModule(model, traced_graph)
+        gm2.delete_all_unused_submodules()
+        torch.testing.assert_allclose(gm2(inputs), model(inputs))
 
     def test_tracing_graphmodules_as_leaf_submodules(self):
         class A(torch.nn.Module):
@@ -3071,68 +3187,26 @@ class TestOperatorSignatures(JitTestCase):
     @onlyCPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_get_torch_func_signature_exhaustive(self, device, dtype, op):
-        # Sorted and one entry on each line to minimize merge conflicts.
-        known_no_schema = {'cdist',
-                           'contiguous',
-                           'dstack',
-                           'einsum',
-                           'expand',
-                           'expand_as',
-                           'fill_',
-                           'hstack',
-                           'igamma',
-                           'igammac',
-                           'linalg.multi_dot',
-                           'lu',
-                           'norm',
-                           'polygamma',
-                           'special.polygamma',
-                           'repeat',
-                           'reshape_as',
-                           'resize_',
-                           'resize_as_',
-                           'special.zeta',
-                           'stack',
-                           'to_sparse',
-                           'view',
-                           'view_as',
-                           'nn.functional.hardshrink',
-                           'vstack',
-                           'where',
-                           'zero_',
-                           '__getitem__',
-                           '__radd__',
-                           '__rsub__',
-                           '__rmul__',
-                           '__rdiv__',
-                           '__rmod__',
-                           '__rpow__',
-                           '__rand__',
-                           '__ror__',
-                           '__rxor__',
-                           '__rmatmul__'}
+        if not isinstance(op.op, types.BuiltinFunctionType):
+            raise unittest.SkipTest("This path doesn't work on Python functions")
+        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+        schemas = get_signature_for_torch_op(op.op)
+        if not schemas:
+            raise RuntimeError('No Schemas Returned')
+        for sample_input in sample_inputs_itr:
+            # Iterate through overloads until we hit a match. If we exit this
+            # loop via `else`, we haven't found a match
+            for schema in schemas:
+                try:
+                    bound_args = schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs)
+                    bound_args.apply_defaults()
+                    op(*bound_args.args, **bound_args.kwargs)
+                    break
+                except TypeError as e:
+                    pass
+            else:
+                raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
-        try:
-            sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-            schemas = get_signature_for_torch_op(op.op)
-            if not schemas:
-                raise RuntimeError('No Schemas Returned')
-            for sample_input in sample_inputs_itr:
-                # Iterate through overloads until we hit a match. If we exit this
-                # loop via `else`, we haven't found a match
-                for schema in schemas:
-                    try:
-                        bound_args = schema.bind(sample_input.input, *sample_input.args, **sample_input.kwargs)
-                        bound_args.apply_defaults()
-                        op(*bound_args.args, **bound_args.kwargs)
-                        break
-                    except TypeError as e:
-                        pass
-                else:
-                    raise RuntimeError(f'Did not match any schemas for op {op.name}!')
-
-        except Exception as e:
-            assert op.name in known_no_schema or "nn.functional" in op.name
 
 
 class TestFXAPIBackwardCompatibility(JitTestCase):
@@ -3345,8 +3419,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
             raise AssertionError(msg)
 
     def test_public_api_surface(self):
-        mod = torch.fx
-
         non_back_compat_objects = {}
 
         def check_symbols_have_bc_designation(m, prefix):
@@ -3365,8 +3437,8 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                     if v not in _MARKED_WITH_COMATIBLITY:
                         non_back_compat_objects.setdefault(v)
 
-        check_symbols_have_bc_designation(mod, ['torch', 'fx'])
-
+        check_symbols_have_bc_designation(torch.fx, ['torch', 'fx'])
+        check_symbols_have_bc_designation(torch.fx.passes, ['torch', 'fx', 'passes'])
 
         non_back_compat_strs = [torch.typename(obj) for obj in non_back_compat_objects.keys()]
         # Only want objects in torch.fx
@@ -3467,9 +3539,6 @@ class TestFunctionalTracing(JitTestCase):
         "hardshrink": ARG_TYPE_MISMATCH,
         "layer_norm": ARG_TYPE_MISMATCH,
         "lp_pool1d": ARG_TYPE_MISMATCH,
-        "max_pool1d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool2d_with_indices": ARG_TYPE_MISMATCH,
-        "max_pool3d_with_indices": ARG_TYPE_MISMATCH,
         "pairwise_distance": ARG_TYPE_MISMATCH,
 
         "affine_grid": CONTROL_FLOW,
@@ -3504,6 +3573,9 @@ class TestFunctionalTracing(JitTestCase):
         "leaky_relu": CONTROL_FLOW,
         "local_response_norm": CONTROL_FLOW,
         "margin_ranking_loss": CONTROL_FLOW,
+        "max_pool1d_with_indices": CONTROL_FLOW,
+        "max_pool2d_with_indices": CONTROL_FLOW,
+        "max_pool3d_with_indices": CONTROL_FLOW,
         "mse_loss": CONTROL_FLOW,
         "multi_head_attention_forward": CONTROL_FLOW,
         "multi_margin_loss": CONTROL_FLOW,
