@@ -101,7 +101,10 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
       sccache --show-stats
       sccache --stop-server || true
     }
-    trap_add sccache_epilogue EXIT
+
+    if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+      trap_add sccache_epilogue EXIT
+    fi
   fi
 
   if which ccache > /dev/null; then
