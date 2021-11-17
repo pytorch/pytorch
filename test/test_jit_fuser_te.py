@@ -2037,6 +2037,9 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
@@ -2074,6 +2077,15 @@ works_list = [
     'int',
     'long',
     'short',
+    'bool.channels_last',
+    'byte.channels_last',
+    'char.channels_last',
+    'double.channels_last',
+    'float.channels_last',
+    'half.channels_last',
+    'int.channels_last',
+    'long.channels_last',
+    'short.channels_last',
 ]
 
 known_failures = [

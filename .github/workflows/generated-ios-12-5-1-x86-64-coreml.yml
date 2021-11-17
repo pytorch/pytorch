@@ -21,10 +21,12 @@ env:
   IN_CI: 1
   IS_GHA: 1
 
+
 jobs:
 
   ciflow_should_run:
     runs-on: ubuntu-18.04
+    timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
       LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/ios') || contains(github.event.pull_request.labels.*.name, 'ciflow/macos') }}
@@ -44,6 +46,7 @@ jobs:
   build:
     runs-on: macos-10.15
     needs: [ciflow_should_run]
+    timeout-minutes: 240
     env:
       JOB_BASE_NAME: ios-12-5-1-x86-64-coreml-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
