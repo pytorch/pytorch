@@ -64,8 +64,18 @@ void unary_op_out(F op_out, const Tensor& self, const Tensor& result, Args&&... 
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
+  if (!result.is_same(self)) {
+    if (result.numel() == 0) {
+      at::native::resize_as_sparse_csr_(result, self);
+    }
+    result.copy_(self);
+  }
+
+  TORCH_INTERNAL_ASSERT(result.sizes() == self.sizes());
+
   auto self_values = self.values();
   auto result_values = result.values();
+
   op_out(self_values, std::forward<Args>(args)..., result_values);
 }
 
