@@ -74,6 +74,7 @@ inline void _call_caffe2_op_from_c10(
   } else {
     AT_ASSERT(preallocated_outputs.isTensorList());
     outputs = std::move(preallocated_outputs).toTensorList();
+    TORCH_INTERNAL_ASSERT(num_outputs == outputs.size());
   }
 
   // TODO Avoid vector allocation. One idea would be to keep the std::vector
@@ -87,6 +88,7 @@ inline void _call_caffe2_op_from_c10(
   }
 
   outputs_c2 = (*call_op)(schema, std::move(inputs), std::move(outputs_c2));
+  TORCH_INTERNAL_ASSERT(num_outputs == outputs_c2.size());
 
   bool return_tensor_list = false;
   if (schema.returns().size() == 1) {

@@ -153,7 +153,12 @@ void ComputeAtMap::mapIds(IterDomain* id0, IterDomain* id1) {
       if (id0->isParallelized() && id1->isParallelized()) {
         // Both are parallelized, make sure they're the same, set entry for
         // parallel map
-        TORCH_INTERNAL_ASSERT(id0->getParallelType() == id1->getParallelType());
+        TORCH_INTERNAL_ASSERT(
+            id0->getParallelType() == id1->getParallelType(),
+            "Parallel type of ",
+            id0,
+            " should match ",
+            id1);
         parallel_type_map_[new_set] = id0->getParallelType();
       } else if (id0->isParallelized() || id1->isParallelized()) {
         // Only one is parallelized, set entry for parallel map
@@ -264,7 +269,8 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             "Only supported case is welford op where all outputs tvs have idential domains.");
         // p->f, c->c
         std::unordered_map<IterDomain*, IterDomain*> c2f_root_map;
-        for (size_t i = 0; i < first_output_tv->getRootDomain().size(); i++) {
+        for (const auto i :
+             c10::irange(first_output_tv->getRootDomain().size())) {
           c2f_root_map.insert(std::make_pair(
               c_tv->getRootDomain()[i], first_output_tv->getRootDomain()[i]));
         }
@@ -319,6 +325,21 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
         auto c2p_root_map =
             pairwise_map.mapConsumerToProducer(c_tv->domain(), p_tv->domain());
 
+        // For index map do not map any broadcast dimensions to non-broadcast
+        // dimensions
+        if (mapping_mode_ == MappingMode::INDEX) {
+          // Prevent any broadcasted axes being mapped to non-broadcasted axes.
+          for (auto it = c2p_root_map.begin(); it != c2p_root_map.end();) {
+            auto c_id = it->first;
+            auto p_id = it->second;
+            if (p_id->isBroadcast() != c_id->isBroadcast()) {
+              it = c2p_root_map.erase(it);
+            } else {
+              ++it;
+            }
+          }
+        }
+
         // Look for matching ID transformations in producer and consumer, replay
         // producer as consumer. We want to replay producer as consumer instead
         // of the other way around since consumer may have some broadcasted axes
@@ -364,6 +385,17 @@ void ComputeAtMap::build(Fusion* fusion, GpuLower* gpu_lower) {
             auto p_id = entry.second;
             // Map the id's together
             mapIds(p_id, c_id);
+          }
+
+          // Make sure we always get root mapping for the loop map. Because of
+          // forwarding we could otherwise miss some root mappings.
+          if (mapping_mode_ == MappingMode::LOOP) {
+            for (auto entry : c2p_root_map) {
+              auto c_id = entry.first;
+              auto p_id = entry.second;
+              // Map the id's together
+              mapIds(p_id, c_id);
+            }
           }
         }
       }

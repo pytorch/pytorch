@@ -1175,7 +1175,6 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
-    case prim::SetAttr:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -1562,6 +1561,14 @@ void Node::removeAllInputs() {
     dropInput(i);
   }
   inputs_.clear();
+}
+
+void Node::removeAllOutputs() {
+  op_ = nullptr;
+  size_t init_osize = outputs_.size();
+  for (auto i : c10::irange(init_osize)) {
+    eraseOutput(init_osize - i - 1);
+  }
 }
 
 void Node::permuteInputs(const std::vector<size_t>& new_order) {
@@ -2090,7 +2097,6 @@ std::vector<Value*> inlineCallTo(
     GraphFunction* callee,
     bool inline_optimized_graph /*=true*/) {
   WithInsertPoint guard(to_replace);
-  TORCH_INTERNAL_ASSERT(callee->isGraphFunction());
   std::unordered_map<Value*, Value*> value_map;
   std::vector<torch::jit::Value*> new_outputs;
 
