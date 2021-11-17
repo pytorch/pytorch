@@ -19,10 +19,13 @@ concurrency:
           retry docker pull "!{{ image }}"
 {%- endmacro -%}
 
-{%- macro display_ec2_information() -%}
+{%- macro display_ec2_information(test_runner_type="") -%}
       - name: Display EC2 information
         shell: bash
         run: |
+{%- if 'rocm' in test_runner_type %}
+          echo "no ec2 info for rocm"
+{%- else %}
           set -euo pipefail
           function get_ec2_metadata() {
             # Pulled from instance metadata endpoint for EC2
@@ -33,6 +36,7 @@ concurrency:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
+{%- endif %}
 {%- endmacro -%}
 
 {%- macro parse_ref() -%}
@@ -62,9 +66,7 @@ concurrency:
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux(test_runner_type="") -%}
-{%- if 'rocm' not in test_runner_type -%}
-      !{{ display_ec2_information() }}
-{%- endif %}
+      !{{ display_ec2_information(test_runner_type) }}
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard

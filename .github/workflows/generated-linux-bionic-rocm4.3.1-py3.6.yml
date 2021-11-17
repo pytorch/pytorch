@@ -306,7 +306,10 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      
+      - name: Display EC2 information
+        shell: bash
+        run: |
+          echo "no ec2 info for rocm"
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
