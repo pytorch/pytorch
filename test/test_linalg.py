@@ -1638,7 +1638,12 @@ class TestLinalg(TestCase):
         a = torch.eye(3, dtype=dtype, device=device)
         a[-1, -1] = 0  # make 'a' singular
         for p in norm_types:
-            run_test_case(a, p)
+            try:
+                run_test_case(a, p)
+            except np.linalg.LinAlgError:
+                # Numpy may fail to converge for some BLAS backends (although this is very rare)
+                # See the discussion in https://github.com/pytorch/pytorch/issues/67675
+                pass
 
         # test for 0x0 matrices. NumPy doesn't work for such input, we return 0
         input_sizes = [(0, 0), (2, 5, 0, 0)]
@@ -6208,6 +6213,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     @dtypes(torch.half)
     @onlyCUDA
     def test_addmm_baddbmm_overflow(self, device, dtype):
+        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
         inp = torch.zeros(128, 128, dtype=torch.half, device=device)
         mat1 = torch.ones(128, 1000, dtype=torch.half, device=device) * 100
         mat2 = torch.ones(1000, 128, dtype=torch.half, device=device) * 100
@@ -6217,7 +6224,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertFalse(out.isinf().any())
         else:
             self.assertTrue((out == 10000.).all())
-
         inp = torch.zeros(3, 128, 128, dtype=torch.half, device=device)
         mat1 = torch.ones(3, 128, 1000, dtype=torch.half, device=device) * 100
         mat2 = torch.ones(3, 1000, 128, dtype=torch.half, device=device) * 100
@@ -6226,6 +6232,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertFalse(out.isinf().any())
         else:
             self.assertTrue((out == 10000.).all())
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
