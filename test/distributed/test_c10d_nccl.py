@@ -2375,7 +2375,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 "Caught collective operation timeout"
         ]
         return any(exc in exception_str for exc in valid_exceptions)
-    
+
     def _wait_for_comm_abort(self, process_group, timeout=None):
         """
         Waits for the watchdog thread to abort communicators for the process group.
