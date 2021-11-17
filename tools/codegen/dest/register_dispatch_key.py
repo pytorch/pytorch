@@ -339,7 +339,8 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 args_exprs_str = ', '.join(a.name for a in args)
 
                 device_check = '  // No device check\n'
-                if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                # Backends that require device guards presumably also require device checks.
+                if self.backend_index.device_guard:
                     device_check_args = itertools.chain(
                         f.func.arguments.out,
                         f.func.arguments.flat_positional
@@ -347,12 +348,16 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                if f.device_guard and self.backend_index.device_guard:
                     has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                     if has_tensor_options:
                         # kernel is creating a tensor
-                        device_guard = """globalContext().lazyInitCUDA();
+                        device_guard = """
   const DeviceGuard device_guard(device_or_default(device));"""
+
+                        # CUDA requires special handling
+                        if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+                            device_guard = f"globalContext().lazyInitCUDA();\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -583,7 +588,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
 
-            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
+            if self.backend_index.device_guard:
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional

@@ -105,7 +105,13 @@ def parse_native_yaml(path: str) -> ParsedYaml:
             dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
         for k, v in bs.items():
             # All structured in-tree operators are implemented in terms of their out operator.
-            indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
+            indices[k] = BackendIndex(
+                dispatch_key=k,
+                use_out_as_primary=True,
+                external=False,
+                # Only cuda-like devices in tree require device guards
+                device_guard=is_cuda_dispatch_key(k),
+                index=v)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
