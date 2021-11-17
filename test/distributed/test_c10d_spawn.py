@@ -86,6 +86,17 @@ class AbstractProcessGroupShareTensorTest(object):
         p2c.get()
 
     @classmethod
+    def _test_reduce_scatter_process(
+            cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
+        pg = init_pg(rank, filename, world_size)
+        xs = [shared_tensors[rank].clone() * (2 ** r) for r in range(world_size)]
+        y = torch.ones_like(xs[0])
+        pg.reduce_scatter(y, xs, op=c10d.ReduceOp.SUM).wait()
+        x = torch.ones_like(xs[0]) * world_size * (2 ** rank)
+        c2p.put((rank, x, y.to("cpu")))
+        p2c.get()
+
+    @classmethod
     def _test_allgather_process(
             cls, rank, filename, shared_tensors, world_size, init_pg, c2p, p2c):
         pg = init_pg(rank, filename, world_size)

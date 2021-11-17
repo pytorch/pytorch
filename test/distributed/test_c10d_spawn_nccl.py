@@ -59,6 +59,15 @@ if sys.version_info < (3, 9):
 
         @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         @sandcastle_skip_if(NO_NCCL, "NCCL needed")
+        def test_shared_reduce_scatter_nccl(self):
+            self._test_multiprocess(
+                ProcessGroupShareTensorTest._test_reduce_scatter_process,
+                [torch.ones(2, 2).to(i) for i in range(self.world_size)],
+                ProcessGroupShareTensorTest._init_pg_nccl,
+                1)
+
+        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @sandcastle_skip_if(NO_NCCL, "NCCL needed")
         def test_shared_allgather_nccl(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allgather_process,
