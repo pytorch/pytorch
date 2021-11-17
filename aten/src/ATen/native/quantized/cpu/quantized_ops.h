@@ -55,7 +55,7 @@ using qmaxpool_2d_fn = void (*)(
 using qadaptive_avg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
@@ -68,7 +68,7 @@ using qadaptive_avg_pool2d_fn = void (*)(
 using qadaptive_avg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeD,
     int64_t isizeH,
@@ -84,7 +84,7 @@ using qadaptive_avg_pool3d_fn = void (*)(
 using qavg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -102,7 +102,7 @@ using qavg_pool2d_fn = void (*)(
 using qavg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,

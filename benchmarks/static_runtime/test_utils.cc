@@ -194,13 +194,7 @@ at::Tensor getTensor(const at::IValue& ival) {
 }
 
 Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
-  const auto kind_symbol = fromQualString(kind);
-  for (auto& pnode : smodule.nodes()) {
-    if (pnode.node()->kind() == kind_symbol) {
-      return pnode.node();
-    }
-  }
-  return nullptr;
+  return smodule.findNodeWithKindForTesting(kind);
 }
 
 bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
@@ -252,7 +246,7 @@ void testStaticRuntime(
       StaticRuntime runtime(smodule);
       auto actual = runtime(args, {});
       if (actual.isTensor()) {
-        EXPECT_GE(smodule.nodes().size(), 2)
+        EXPECT_GE(smodule.num_nodes(), 2)
             << "If we only have one node, the output of the op we are testing is "
             << "not being managed by the memory planner! A failure here "
             << "can typically be fixed by clone()ing the output of the test script.";
@@ -333,13 +327,7 @@ void testStaticRuntime(
 bool hasProcessedNodeWithName(
     torch::jit::StaticModule& smodule,
     const char* name) {
-  for (torch::jit::ProcessedNode& pnode : smodule.runtime().nodes()) {
-    auto op_name = pnode.node()->kind().toQualString();
-    if (strcmp(op_name, name) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return smodule.findNodeWithKindForTesting(name) != nullptr;
 }
 
 } // namespace test

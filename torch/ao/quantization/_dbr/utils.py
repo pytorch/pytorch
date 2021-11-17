@@ -9,7 +9,6 @@ toq = torch.ops.quantized
 from .mappings import (
     functions_supported_by_quantization,
     module_types_supported_by_quantization,
-    q_mod_to_float_mod_mapping,
     module_types_supported_by_quantization_preserves_dtype,
     functions_supported_by_quantization_preserves_dtype,
     fp32_to_int8_fun_mapping,
@@ -497,6 +496,8 @@ def get_torch_function_hook_type(
     parent_module: Optional[torch.nn.Module],
     func: Callable,
 ) -> HookType:
+    # the direct __dict__ accesses are for performance, because
+    # the default `torch.nn.Module.__getattr__` has overhead.
     parent_module_has_qstate = parent_module is not None and \
         '_modules' in parent_module.__dict__ and \
         '_auto_quant_state' in parent_module.__dict__['_modules']
