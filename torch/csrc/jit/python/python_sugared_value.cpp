@@ -3,7 +3,6 @@
 #include <pybind11/pytypes.h>
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/Layout.h>
-#include <torch/csrc/LinalgBackend.h>
 #include <torch/csrc/MemoryFormat.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/python/module_python.h>
@@ -1083,10 +1082,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     } else if (THPMemoryFormat_Check(obj.ptr())) {
       auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
       const auto v = static_cast<int64_t>(memory_format->memory_format);
-      return toSimple(g.insertConstant(v, loc));
-    } else if (THPLinalgBackend_Check(obj.ptr())) {
-      auto linalg_backend = reinterpret_cast<THPLinalgBackend*>(obj.ptr());
-      const auto v = static_cast<int64_t>(linalg_backend->linalg_backend);
       return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
