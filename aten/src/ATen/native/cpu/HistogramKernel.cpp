@@ -113,14 +113,10 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     int64_t GRAIN_SIZE = std::max(int64_t(1), HISTOGRAM_GRAIN_SIZE / D);
 
     /* Parallelizes processing of input using at::parallel_for.
-     * Each thread accumulates a local result for some range of the input in hist_local
-     * before locking hist_mutex and adding its accumulated results to the hist tensor.
+     * Each thread accumulates a local result into their own slice of
+     * thread_histograms which get summed together at the end.
      */
-    std::mutex hist_mutex;
-
-
     const auto num_threads = at::get_num_threads();
-    // Allocate one histogram per thread, and sum together at the end
     const auto hist_sizes = hist.sizes();
     DimVector thread_hist_sizes(hist_sizes.size() + 1);
     thread_hist_sizes[0] = num_threads;
