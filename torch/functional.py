@@ -1701,12 +1701,13 @@ def unravel_index(
     if shape.numel() == 0:
         raise ValueError(f"Empty shape tensor passed, expected shape tensor of minimum size {indices.shape}.")
 
-    shape = torch.cat((shape, torch.tensor((1,))), dim=0)
     if torch.max(indices) >= torch.prod(shape):
         raise ValueError("Given indices should be representible for the given shape.")
 
     coefs = shape[1:].flipud().cumprod(dim=0).flipud()
-    coords = torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape[:-1]
+    coefs = torch.cat((coefs, coefs.new_tensor((1,))), dim=0)
+    coords = torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape
+
     if as_tuple:
         return tuple(coords[..., i] for i in range(coords.size(-1)))
     return coords
