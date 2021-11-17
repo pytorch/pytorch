@@ -4417,6 +4417,62 @@ class SpectralFuncInfo(OpInfo):
         self.ndimensional = ndimensional
 
 
+def sample_inputs_stft(op_info, device, dtype, requires_grad):
+    def mt(shape, **kwargs):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           requires_grad=requires_grad, **kwargs)
+    yield SampleInput(mt(100), kwargs=dict(n_fft=10))
+
+    for center in [False, True]:
+        yield SampleInput(mt(10), kwargs=dict(n_fft=7, center=center))
+        yield SampleInput(mt((10, 100)), kwargs=dict(n_fft=16, hop_length=4, center=center))
+
+    window = make_tensor(16, low=.5, high=2.0, dtype=dtype, device=device)
+    yield SampleInput(
+        mt((2, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
+    yield SampleInput(
+        mt((3, 100)), kwargs=dict(n_fft=16, window=window, return_complex=True, center=center))
+    if not dtype.is_complex:
+        yield SampleInput(
+            mt((10, 100)), kwargs=dict(n_fft=16, window=window, onesided=False))
+
+
+def sample_inputs_istft(op_info, device, dtype, requires_grad):
+    def mt(shape, **kwargs):
+        real_shape = shape if dtype.is_complex else shape + (2,)
+        return make_tensor(real_shape, device=device, dtype=dtype,
+                           requires_grad=requires_grad, **kwargs)
+
+    yield SampleInput(mt((10, 2)), kwargs=dict(n_fft=10))
+    yield SampleInput(mt((6, 3)), kwargs=dict(n_fft=6, onesided=False))
+    yield SampleInput(mt((6, 4)), kwargs=dict(n_fft=10, onesided=True))
+
+    for center in [False, True]:
+        yield SampleInput(mt((10, 10, 6)), kwargs=dict(n_fft=10, center=center))
+        yield SampleInput(mt((1, 9, 10)), kwargs=dict(n_fft=16, hop_length=4, center=center))
+
+    window = make_tensor(10, low=.5, high=2.0, dtype=dtype, device=device)
+    yield SampleInput(mt((10, 10, 6)), kwargs=dict(
+        n_fft=10, window=window, center=center, return_complex=dtype.is_complex))
+    yield SampleInput(mt((10, 10, 10)), kwargs=dict(
+        n_fft=10, window=window[:8], win_length=8, center=center, return_complex=True))
+
+    real_window = window if not dtype.is_complex else window.real
+    yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
+
+
+def sample_inputs_fftshift(op_info, device, dtype, requires_grad):
+    def mt(shape, **kwargs):
+        return make_tensor(shape, device=device, dtype=dtype,
+                           requires_grad=requires_grad, **kwargs)
+
+    yield SampleInput(mt((9, 10)))
+    yield SampleInput(mt((50,)), kwargs=dict(dim=0))
+    yield SampleInput(mt((5, 11)), kwargs=dict(dim=(1,)))
+    yield SampleInput(mt((5, 6)), kwargs=dict(dim=(0, 1)))
+    yield SampleInput(mt((5, 6, 2)), kwargs=dict(dim=(0, 2)))
+
+
 class ShapeFuncInfo(OpInfo):
     """Early version of a specialized OpInfo for Shape manipulating operations like tile and roll"""
     def __init__(self,
@@ -8598,6 +8654,45 @@ op_db: List[OpInfo] = [
                              precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
                              'TestFFT', 'test_reference_nd')],
                      ),
+    OpInfo('fft.fftshift',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=lambda *a, **kw: list(sample_inputs_fftshift(*a, **kw)),
+           supports_out=False,
+           supports_forward_ad=True,
+           ),
+    OpInfo('fft.ifftshift',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=lambda *a, **kw: list(sample_inputs_fftshift(*a, **kw)),
+           supports_out=False,
+           supports_forward_ad=True,
+           ),
+    OpInfo('stft',
+           decorators=[
+               skipCPUIfNoFFT,
+               DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
+                            'TestJit', 'test_variant_consistency_jit'),
+           ],
+           dtypes=floating_and_complex_types(),
+           sample_inputs_func=lambda *a, **kw: list(sample_inputs_stft(*a, **kw)),
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_out=False,
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           ),
+    OpInfo('istft',
+           decorators=[
+               skipCPUIfNoFFT,
+               DecorateInfo(unittest.skip("Skipped! istft does not match the native function"),
+                            'TestJit', 'test_variant_consistency_jit'),
+           ],
+           dtypes=floating_and_complex_types(),
+           # FIXME: col2im does not support automatic differentiation for outputs with complex dtype.
+           supports_autograd=False,
+           sample_inputs_func=lambda *a, **kw: list(sample_inputs_istft(*a, **kw)),
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_out=False,
+           ),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
                    dtypes=floating_types_and(torch.bfloat16),
