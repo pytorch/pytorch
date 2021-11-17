@@ -227,6 +227,7 @@ def build_constructor_arg_db():
         torch.nn.quantized.FloatFunctional: ((), {}),
         torch.nn.quantized.FXFloatFunctional: ((), {}),
         torch.nn.quantized.QFunctional: ((), {}),
+        torch.nn.Bias: ((5,), {}),
     }
 
 
