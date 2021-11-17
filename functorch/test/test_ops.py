@@ -360,6 +360,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.poisson_nll_loss'),
         xfail('nn.functional.conv1d', device_type='cuda'),
         xfail('fft.rfft2'),
+        xfail('masked_select'),
         xfail('_masked.prod'), # calls aten::item
     })
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -560,6 +561,7 @@ class TestOperators(TestCase):
         xfail('view_as_complex'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('double', 'channels_last'),
+        xfail('masked_select'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
