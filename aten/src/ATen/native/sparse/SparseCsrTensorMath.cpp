@@ -60,23 +60,26 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
 }
 
 template <typename F, typename ...Args>
-void unary_op_out(F op_out, const Tensor& self, const Tensor& result, Args&&... args) {
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... args) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
   if (!result.is_same(self)) {
+    // For the case of (0x0) result tensor, manually resize `result` tensor
+    // to the size of `self` tensor
     if (result.numel() == 0) {
       at::native::resize_as_sparse_csr_(result, self);
     }
-    result.copy_(self);
+    // copy_sparse_csr_ internally checks the sizes of result and self tensors
+    // Hence no external size check required
+    at::native::copy_sparse_csr_(result, self);
   }
-
-  TORCH_INTERNAL_ASSERT(result.sizes() == self.sizes());
 
   auto self_values = self.values();
   auto result_values = result.values();
 
   op_out(self_values, std::forward<Args>(args)..., result_values);
+  return result;
 }
 
 } // end anonymous namespace
@@ -129,8 +132,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 }
 
 Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
-  unary_op_out(&at::sin_outf, self, result);
-  return result;
+  return unary_op_out(&at::sin_outf, self, result);
 }
 
 Tensor sin_sparse_csr(const Tensor& self) {
