@@ -195,7 +195,8 @@ LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const 
 
 // Section 2: LazyTensor => at::Tensor.
 // Creates an ATen tensor from an LazyTensor.
-at::Tensor CreateAtenFromLtcTensor(LazyTensor ltc_tensor);
+at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor);
+at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
 template <size_t... Indices>
 auto TupleAtenFromLtcTensorsImpl(const std::vector<LazyTensor>& tensors, std::index_sequence<Indices...>) {

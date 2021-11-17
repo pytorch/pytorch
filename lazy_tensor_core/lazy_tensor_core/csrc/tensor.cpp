@@ -498,10 +498,14 @@ LazyTensor GetLtcTensorOrCreateForWrappedNumber(const at::Tensor& tensor, const 
       GetOrCreateLtcTensor(tensor, device) : GetLtcTensor(tensor);
 }
 
-at::Tensor CreateAtenFromLtcTensor(LazyTensor ltc_tensor) {
+at::Tensor CreateAtenFromLtcTensor(const LazyTensor& ltc_tensor) {
   return ltc_tensor.is_null() ? at::Tensor()
-                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(
-                                    std::move(ltc_tensor)));
+                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(ltc_tensor));
+}
+
+at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor) {
+  return ltc_tensor.is_null() ? at::Tensor()
+                              : at::Tensor(c10::make_intrusive<LTCTensorImpl>(std::move(ltc_tensor)));
 }
 
 }  // namespace torch_lazy_tensors
