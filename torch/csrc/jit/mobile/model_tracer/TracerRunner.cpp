@@ -18,28 +18,31 @@ namespace torch {
 namespace jit {
 namespace mobile {
 
-// Fetched from caffe2/aten/src/ATen/native/metal/MetalAten.mm
-// Diffusion Link: https://fburl.com/diffusion/atwwmax2
-const std::vector<std::string> gpu_metal_operators = {
-    "aten::conv2d",
-    "aten::add.Tensor",
-    "aten::add_.Tensor",
-    "aten::addmm",
+// Metal ops from aten/native/metal/...
+// These 2 are likely called outside of the model to set up the inputs
+const std::vector<std::string> always_included_metal_ops = {
     "aten::empty.memory_format",
     "aten::empty_strided",
-    "aten::log_softmax.int",
-    "aten::max_pool2d",
+    "aten::__getitem__.t",
+    "aten::_set_item.str",
+    "aten::add.Tensor",
+    "aten::contiguous",
+    "aten::len.t",
     "aten::mul.Tensor",
-    "aten::relu",
-    "aten::relu_",
     "aten::sigmoid",
     "aten::sub.Tensor",
     "aten::upsample_nearest2d.vec",
-    "aten::view",
-    "aten::adaptive_avg_pool2d",
-    "aten::hardtanh_",
-    "aten::reshape",
-    "aten::flatten.using_ints",
+    "prim::TupleIndex",
+};
+
+// Mapping from non leaf metal gpu root ops to their dependencies
+std::unordered_map<std::string, std::vector<std::string>>
+    metal_gpu_ops_dependencies = {
+        {"aten::addmm",
+         {
+             "aten::reshape",
+             "aten::view",
+         }},
 };
 
 /**
@@ -186,12 +189,22 @@ void run_model(
   root_ops = module_runner.get_root_operators();
   std::cout << "Got " << root_ops.size() << " Root Operators." << std::endl;
 
-  if (torch::jit::mobile::MobileModelRunner::set_has_metal_gpu_operators(
-          root_ops)) {
+  if (MobileModelRunner::set_has_metal_gpu_operators(root_ops)) {
     std::cout << "Inferred Metal GPU Model." << std::endl;
-    root_ops.insert(gpu_metal_operators.begin(), gpu_metal_operators.end());
+    root_ops.insert(
+        always_included_metal_ops.begin(), always_included_metal_ops.end());
     called_kernel_tags["__unused__"] = {"Float"};
     enabled_backends.insert("Metal GPU");
+
+    // For the limited number of metal ops that are not leafs manually get their
+    // dependencies from a lookup table
+    for (auto& root_op : root_ops) {
+      if (metal_gpu_ops_dependencies.find(root_op) !=
+          metal_gpu_ops_dependencies.end()) {
+        auto dependencies = metal_gpu_ops_dependencies.at(root_op);
+        root_ops.insert(dependencies.begin(), dependencies.end());
+      }
+    }
 
     // When we encounter a GPU model, we should call .cpu().copy_() on the
     // tensors in the bundled inputs, since this is what will happen when
