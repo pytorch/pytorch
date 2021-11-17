@@ -63,6 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
+  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/tools/codegen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -71,7 +72,7 @@ if(INTERN_BUILD_ATEN_OPS)
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
-  ATEN_CPU_FILES_GEN_TARGET
+  ${all_python}
   ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
@@ -465,7 +466,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_GENERATED_CODE}
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -473,7 +473,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --force_schema_registration
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
@@ -995,11 +994,13 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
