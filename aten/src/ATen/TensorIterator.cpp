@@ -19,7 +19,7 @@
 #include <array>
 #include <algorithm>
 #include <cmath>
-
+#include <iostream>
 namespace at {
 
 using DimMask = TensorIteratorBase::DimMask;
@@ -1180,6 +1180,8 @@ void TensorIteratorBase::compute_shape(const TensorIteratorConfig& config) {
       shape_ = infer_size_dimvector(shape_, shape);
     }
   }
+  auto testshape = shape_.size();
+  std::cout << testshape << std::endl;
 }
 
 void TensorIteratorBase::compute_strides(const TensorIteratorConfig& config) {

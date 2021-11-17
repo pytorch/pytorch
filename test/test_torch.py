@@ -352,6 +352,27 @@ class AbstractTestCases:
                 copied_dtype = copy.deepcopy(dtype)
                 self.assertIs(dtype, copied_dtype)
 
+        def test_copy_bfloat16_float(self):
+            x = torch.randn(10 * 10 * 100 * 100, dtype=torch.float).reshape(10, 10, 100, 100).to(memory_format=torch.channels_last)
+            y = torch.empty(10, 10, 100, 100, dtype=torch.bfloat16)
+            y.copy_(x)
+            self.assertEqual(x, y, exact_dtype=False)
+
+            x = torch.randn(10 * 10 * 100 * 100, dtype=torch.bfloat16).reshape(10, 10, 100, 100).to(memory_format=torch.channels_last)
+            y = torch.empty(10, 10, 100, 100, dtype=torch.float)
+            y.copy_(x)
+            self.assertEqual(x, y, exact_dtype=False)
+
+            x = torch.randn(10 * 10 * 100 * 100, dtype=torch.float).reshape(10, 10, 100, 100)
+            y = torch.empty(10, 10, 100, 100, dtype=torch.bfloat16)
+            y.copy_(x)
+            self.assertEqual(x, y, exact_dtype=False)
+
+            x = torch.randn(10 * 10 * 100 * 100, dtype=torch.bfloat16).reshape(10, 10, 100, 100)
+            y = torch.empty(10, 10, 100, 100, dtype=torch.float)
+            y.copy_(x)
+            self.assertEqual(x, y, exact_dtype=False)
+
         def test_copy_transpose(self):
             x = torch.arange(100 * 100, dtype=torch.float).reshape(100, 100).t()
             y = torch.empty(100, 100, dtype=torch.float)
