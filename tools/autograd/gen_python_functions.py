@@ -52,11 +52,11 @@ from tools.codegen.api.python import (PythonArgument, PythonSignature,
                                       dispatch_lambda_return_str,
                                       has_tensor_options,
                                       namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params, YamlLoader
+from tools.codegen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -94,6 +94,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
     '_reshape_alias',
+    'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))

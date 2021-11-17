@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: r2p"]
+
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -18,6 +20,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
+    TestCase
 )
 
 
@@ -32,8 +35,9 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
                 func2(n - 1, None)
                 time.sleep(0.2)
 
-    class LocalTimerTest(unittest.TestCase):
+    class LocalTimerTest(TestCase):
         def setUp(self):
+            super().setUp()
             self.ctx = mp.get_context("spawn")
             self.mp_queue = self.ctx.Queue()
             self.max_interval = 0.01
@@ -41,6 +45,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             self.server.start()
 
         def tearDown(self):
+            super().tearDown()
             self.server.stop()
 
         def test_exception_propagation(self):
@@ -127,7 +132,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
-    class MultiprocessingRequestQueueTest(unittest.TestCase):
+    class MultiprocessingRequestQueueTest(TestCase):
         def test_get(self):
             mp_queue = mp.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
@@ -195,13 +200,15 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 # timer is not supported on windows or macos
 if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
-    class LocalTimerServerTest(unittest.TestCase):
+    class LocalTimerServerTest(TestCase):
         def setUp(self):
+            super().setUp()
             self.mp_queue = mp.Queue()
             self.max_interval = 0.01
             self.server = timer.LocalTimerServer(self.mp_queue, self.max_interval)
 
         def tearDown(self):
+            super().tearDown()
             self.server.stop()
 
         def test_watchdog_call_count(self):
