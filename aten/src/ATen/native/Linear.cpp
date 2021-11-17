@@ -708,4 +708,9 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
+Tensor bias(const Tensor& input, const Tensor& bias) {
+  auto output = at::add(input, bias);
+  return output;
+}
+
 }}  // namespace at::native

@@ -147,6 +147,7 @@ torch::nn::utils::rnn::pad_packed_sequence|Yes|No
 torch::nn::utils::rnn::pad_sequence|Yes|No
 torch::nn::utils::rnn::pack_sequence|Yes|No
 torch::nn::SampleModule|Yes|Yes
+torch::nn::Bias|Yes|No
 
 ## torch::nn::functional
 
@@ -243,3 +244,4 @@ F::interpolate|Yes|No
 F::grid_sample|Yes|No
 F::affine_grid|Yes|No
 F::sample_functional|Yes|No
+F::bias|Yes|No

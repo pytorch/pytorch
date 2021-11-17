@@ -358,6 +358,20 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
         ),
     ]
 
+def module_inputs_torch_nn_Bias(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(5),
+                    forward_input=FunctionInput(input=make_input((10, 5))),
+                    reference_fn=lambda m, p, input: input + p[0].view(1, -1).expand(10, 5)),
+        ModuleInput(constructor_input=FunctionInput(5),
+                    forward_input=FunctionInput(make_input((3, 10, 5))),
+                    reference_fn=lambda m, p, input: input + p[0].view(1, -1).expand(3, 10, 5)),
+    ]
+
+    return module_inputs
+
 
 def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, **kwargs):
     make_empty = partial(torch.empty, device=device, dtype=torch.long, requires_grad=False)
@@ -396,4 +410,6 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Embedding),
     ModuleInfo(torch.nn.ReLU,
                module_inputs_func=module_inputs_torch_nn_ReLU),
+    ModuleInfo(torch.nn.Bias,
+               module_inputs_func=module_inputs_torch_nn_Bias),
 ]

@@ -5219,3 +5219,18 @@ def multi_head_attention_forward(
         return attn_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return attn_output, None
+
+def bias(input: Tensor, biass: Tensor) -> Tensor:
+    r"""
+    Adds a bias to the incoming data: :math:`y = x + b`
+
+    Shape:
+
+        - Input: :math:`(*, num\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Bias: :math:`(num\_features)`
+        - Output: :math:`(*, num\_features)`
+    """
+    if has_torch_function_variadic(input, biass):
+        return handle_torch_function(bias, (input, biass), input, biass)
+    return torch._C._nn.bias(input, biass)

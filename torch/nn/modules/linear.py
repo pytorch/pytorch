@@ -251,3 +251,47 @@ class LazyLinear(LazyModuleMixin, Linear):
                     self.bias.materialize((self.out_features,))
                 self.reset_parameters()
 # TODO: PartialLinear - maybe in sparse?
+
+class Bias(Module):
+    r"""Adds a bias to the incoming data: :math:`y = x + b`
+
+    Args:
+        num_features: size of each input sample
+
+    Shape:
+        - Input: :math:`(*, H_{in})` where :math:`*` means any number of
+          dimensions including none and :math:`H_{in} = \text{num\_features}`.
+        - Output: :math:`(*, H_{in})`
+
+    Attributes:
+        bias:   the learnable bias of the module of shape :math:`(\text{num\_features})`.
+                The values are initialized from
+                :math:`\mathcal{N}(0, 1)`
+
+    Examples::
+
+        >>> m = nn.Bias(5)
+        >>> input = torch.randn(10, 5)
+        >>> output = m(input)
+        >>> print(output.size())
+        torch.Size([10, 5])
+    """
+    __constants__ = ['num_features']
+    num_features: int
+    bias: Tensor
+
+    def __init__(self, num_features: int, device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super(Bias, self).__init__()
+        self.num_features = num_features
+        self.bias = Parameter(torch.empty(num_features, **factory_kwargs))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        init.normal_(self.bias)
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.bias(input, self.bias)
+
+    def extra_repr(self) -> str:
+        return 'num_features={}'.format(self.num_features)

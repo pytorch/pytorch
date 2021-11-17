@@ -2980,3 +2980,26 @@ TEST_F(FunctionalTest, BCEWithLogitsLoss) {
     ASSERT_TRUE(torch::isfinite(out2).all().item<bool>());
   }
 }
+
+TEST_F(FunctionalTest, Bias) {
+  {
+    const auto x = torch::arange(100., 118).resize_({3, 3, 2});
+    const auto b = torch::arange(300., 302);
+    const auto y = F::bias(x, b);
+    ASSERT_EQ(y.ndimension(), 3);
+    ASSERT_EQ(y.sizes(), torch::IntArrayRef({3, 3, 2}));
+    const auto y_exp = torch::tensor(
+      {{{400, 402},
+        {402, 404},
+        {404, 406}},
+      {{406, 408},
+        {408, 410},
+        {410, 412}},
+      {{412, 414},
+        {414, 416},
+        {416, 418}}},
+      torch::kFloat
+    );
+    ASSERT_TRUE(torch::allclose(y, y_exp));
+  }
+}
