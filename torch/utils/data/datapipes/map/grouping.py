@@ -97,7 +97,7 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
 
     def _get_batch_sizes(self) -> List[int]:
         sizes = [len(self.datapipe)]
-        curr = self.datapipe.__getitem__(0)
+        curr = self.datapipe[0]
         while isinstance(curr, list) or isinstance(curr, DataChunk):
             sizes.append(len(curr))
             curr = curr[0]
@@ -116,8 +116,6 @@ class UnBatcherMapDataPipe(MapDataPipe[T]):
 
     def __getitem__(self, index) -> T:
         batch_sizes: List[int] = self._get_batch_sizes()
-        if self.unbatch_level == 0:
-            return self.datapipe[index]  # type: ignore[return-value]
         result_index_map, batch_index = [], index
         for i in range(self.unbatch_level):
             relevant_batch_sizes = batch_sizes[i + 1:self.unbatch_level + 1]
