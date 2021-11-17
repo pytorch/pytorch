@@ -33,7 +33,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           use_external_data_format=None, export_modules_as_functions=False):
+           export_modules_as_functions=False):
     r"""
     Exports a model into ONNX format. If ``model`` is not a
     :class:`torch.jit.ScriptModule` nor a :class:`torch.jit.ScriptFunction`, this runs
@@ -283,9 +283,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
             the opset version is set to 1. Only custom opset domain name and version should be
             indicated through this argument.
 
-        use_external_data_format (bool, default False): Deprecated and ignored. Will be removed in
-            next Pytorch release.
-        export_modules_as_functions (bool or set of type of nn.Module, default False): Flag to enable
+        export_modules_as_functions (bool or set of str, type or nn.Module, default False): Flag to enable
             exporting all ``nn.Module`` forward calls as local functions in ONNX. Or a set to indicate the
             particular modules to export as local functions in ONNX.
 
@@ -304,7 +302,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                         input_names, output_names, operator_export_type, opset_version,
                         do_constant_folding, dynamic_axes,
                         keep_initializers_as_inputs, custom_opsets,
-                        use_external_data_format, export_modules_as_functions)
+                        export_modules_as_functions)
 
 
 def export_to_pretty_string(*args, **kwargs) -> str:
