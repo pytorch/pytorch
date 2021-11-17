@@ -3049,11 +3049,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('rand_like'),
         xfail('randint_like'),
-
-        # This is not a bug: testing for empty_like is flaky because the
-        # tensor has garbage values
-        skip('new_empty'),
-        skip('empty_like'),
     }
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
@@ -3064,6 +3059,10 @@ class TestVmapOperatorsOpInfo(TestCase):
             kwarg_values = sample_input.kwargs
             try:
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
+                    # empty_like and new_empty produce garbage values so we just check the shapes.
+                    if op.name == 'empty_like' or op.name == 'new_empty':
+                        self.assertEqual(loop_out.shape, batched_out.shape)
+                        continue
                     self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
                 for a_op in op.aliases:
                     for loop_out, batched_out in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values):
@@ -3120,9 +3119,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_select'),
         xfail('nanquantile'),
         xfail('nn.functional.conv_transpose2d'),
-        xfail('nn.functional.cross_entropy', 'mean'),
-        xfail('nn.functional.cross_entropy', 'none'),
-        xfail('nn.functional.cross_entropy', 'sum'),
         xfail('nn.functional.pad', 'circular'),
         xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
@@ -3204,7 +3200,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.adaptive_max_pool3d'),
         xfail('nn.functional.conv1d'),
         xfail('nn.functional.cosine_embedding_loss'),
-        xfail('nn.functional.cross_entropy'),
+        # xfail('nn.functional.cross_entropy'),
         xfail('nn.functional.ctc_loss'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.group_norm'),
@@ -3222,6 +3218,10 @@ class TestVmapOperatorsOpInfo(TestCase):
                 arg_values = [sample_input.input] + list(sample_input.args)
                 kwarg_values = sample_input.kwargs
                 for loop_out, batched_out in get_fallback_and_vmap_exhaustive(op.op, arg_values, kwarg_values):
+                    # empty_like and new_empty produce garbage values so we just check the shapes.
+                    if op.name == 'empty_like' or op.name == 'new_empty':
+                        self.assertEqual(loop_out.shape, batched_out.shape)
+                        continue
                     self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
                 for a_op in op.aliases:
                     for loop_out, batched_out in get_fallback_and_vmap_exhaustive(a_op, arg_values, kwarg_values):
