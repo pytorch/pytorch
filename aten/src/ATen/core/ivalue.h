@@ -4,6 +4,7 @@
 #include <ATen/core/blob.h>
 #include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
@@ -466,6 +467,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Tuple> toTuple() &&;
   c10::intrusive_ptr<ivalue::Tuple> toTuple() const&;
+  C10_NODISCARD ivalue::Tuple& toTupleRef() const;
 
   // Double
   IValue(double d) : tag(Tag::Double), is_intrusive_ptr(false) {
@@ -1012,6 +1014,8 @@ struct TORCH_API IValue final {
     }
   }
 
+  friend MaybeOwnedTraits<IValue>;
+
   Payload payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -1225,9 +1229,7 @@ template <typename T>
 c10::ClassTypePtr getCustomClassTypeImpl() {
   auto& tmap = c10::getCustomClassTypeMap();
   auto res = tmap.find(std::type_index(typeid(T)));
-  if (res == tmap.end()) {
-    throw c10::Error("Can't find class id in custom class type map", "");
-  }
+  TORCH_CHECK(res != tmap.end(), "Can't find class id in custom class type map", "");
   return res->second;
 }
 
