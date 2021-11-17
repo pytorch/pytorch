@@ -30,6 +30,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("conj_physical_", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
+  m.impl("repeat_interleave", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("dot", torch::CppFunction::makeFallthrough());
