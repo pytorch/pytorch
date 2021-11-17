@@ -193,7 +193,6 @@ _(aten, amin) \
 _(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
