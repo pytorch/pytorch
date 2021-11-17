@@ -351,7 +351,7 @@ module_tests = [
     ),
     dict(
         module_name='Bias',
-        constructor_args=(5),
+        constructor_args=(5,),
         cpp_constructor_args='torch::nn::BiasOptions(5)',
         input_size=(10, 5),
         reference_fn=lambda i, p, _: i + p[0].view(1, -1).expand(10, 5),
@@ -360,10 +360,11 @@ module_tests = [
     ),
     dict(
         module_name='Bias',
-        constructor_args=(5),
+        constructor_args=(5,),
         cpp_constructor_args='torch::nn::BiasOptions(5)',
         input_size=(5, 10, 5),
         reference_fn=lambda i, p, _: i + p[0].view(1, -1).expand(5, 10, 5),
+        desc='3d_input',
         with_tf32=True,
         tf32_precision=0.005,
     ),
