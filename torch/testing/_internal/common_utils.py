@@ -2427,10 +2427,6 @@ def noncontiguous_like(t):
     if zero_dim:
         t = t.unsqueeze(0)
 
-    # Handle conj bit. repeat_interleave resolves the conj, which is a bit annoying.
-    is_conj = t.is_conj()
-    if is_conj:
-        t = t.conj()
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
 
     # Choose a "weird" value that won't be accessed
@@ -2450,9 +2446,6 @@ def noncontiguous_like(t):
         strides[-1] *= 2
         result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
     result.requires_grad_(t.requires_grad)
-    # At the end so that the conj() is tracked by the autograd
-    if is_conj:
-        result = result.conj()
     return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)
