@@ -219,6 +219,7 @@ def _constant_fill(g, sizes, dtype, const_value):
 
 @parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    print("[EMPTY_DEBUG] 36")
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 

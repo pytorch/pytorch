@@ -18,6 +18,7 @@
 #include <cstring>
 #include <iterator>
 #include <list>
+#include <iostream>
 
 namespace c10 {
 
@@ -86,6 +87,7 @@ struct SparseBitVectorElement {
   }
 
   bool empty() const {
+	  cout<<"[EMPTY_DEBUG] 17"<<endl;
     for (unsigned i = 0; i < BITWORDS_PER_ELEMENT; ++i)
       if (Bits[i])
         return false;

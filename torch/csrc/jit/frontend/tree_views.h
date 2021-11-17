@@ -176,6 +176,7 @@ struct List : public TreeView {
     return iterator(tree_->trees().end());
   }
   bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 26"<<std::endl;
     return tree_->trees().begin() == tree_->trees().end();
   }
   T operator[](size_t i) const {

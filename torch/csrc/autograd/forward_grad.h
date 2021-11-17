@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <iostream>
 
 
 namespace torch { namespace autograd {
@@ -180,6 +181,7 @@ struct TORCH_API ForwardGrad : std::enable_shared_from_this<ForwardGrad> {
   }
 
   bool empty() const {
+  std::cout<<"[EMPTY_DEBUG] 23"<<std::endl;"
       return content_.empty();
   }
 

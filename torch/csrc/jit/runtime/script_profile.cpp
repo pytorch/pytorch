@@ -4,6 +4,7 @@
 #include <chrono>
 #include <mutex>
 #include <unordered_set>
+#include <iostream>
 
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
@@ -17,6 +18,7 @@ namespace {
 class ProfilesRegistry {
  public:
   bool empty() {
+	  std::cout<<"[EMPTY_DEBUG] 27"<<std::endl;
     return empty_.load(std::memory_order_relaxed);
   }
 

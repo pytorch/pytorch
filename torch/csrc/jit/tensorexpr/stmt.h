@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <iostream>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 namespace torch {
@@ -82,6 +83,7 @@ class TORCH_API Block : public StmtNode<Block> {
     return stmts_.size();
   }
   bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 34"<<std::endl;
     return stmts_.empty();
   }
 

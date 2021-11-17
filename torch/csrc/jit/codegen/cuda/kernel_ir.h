@@ -16,6 +16,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -1328,6 +1329,7 @@ class TORCH_CUDA_CU_API Scope {
   }
 
   bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 24"<<std::endl;
     return exprs_.empty();
   }
 

@@ -1749,6 +1749,7 @@ for k, v in sym_help.cast_pytorch_to_onnx.items():
 
 @parse_args("v", "i", "v", "v", "v", "v")
 def empty(g, sizes, dtype, layout, device, pin_memory=False, memory_format=None):
+    print("[EMPTY_DEBUG] 37")
     return zeros(g, sizes, dtype, layout, device, pin_memory)
 
 

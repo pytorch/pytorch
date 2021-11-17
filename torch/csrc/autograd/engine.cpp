@@ -225,6 +225,7 @@ auto ReadyQueue::pop() -> NodeTask {
 
 bool ReadyQueue::empty() const {
   // Lock mutex for accesses to heap_
+  std::cout<<"[EMPTY_DEBUG] 22"<<std::endl;"
   std::unique_lock<std::mutex> lock(mutex_);
   return heap_.empty();
 }

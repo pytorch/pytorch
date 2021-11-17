@@ -9,6 +9,7 @@
 #include <torch/csrc/jit/tensorexpr/ir_mutator.h>
 #include <torch/csrc/jit/tensorexpr/ir_visitor.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -106,6 +107,7 @@ class TORCH_API ExprHandle {
   }
 
   bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 33"<<std::endl;
     return base_expr_node_ == nullptr;
   }
 

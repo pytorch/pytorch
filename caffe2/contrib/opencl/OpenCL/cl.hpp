@@ -226,6 +226,7 @@
 #endif // linux
 
 #include <cstring>
+#include <iostream>
 
 
 /*! \namespace cl
@@ -822,6 +823,7 @@ public:
     //! \brief Tests whether this instance has any elements.
     bool empty (void) const
     {
+	  cout<<"[EMPTY_DEBUG] 18"<<endl;
         return size_==0;
     }
   

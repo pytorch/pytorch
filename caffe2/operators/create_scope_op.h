@@ -5,6 +5,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <iostream>
+#include <fstream>
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
@@ -119,6 +121,7 @@ class TORCH_API WorkspaceStack {
   }
 
   bool empty() const {
+	  cout<<"[EMPTY_DEBUG] 21"<<endl;
     return top_ < 0;
   }
 

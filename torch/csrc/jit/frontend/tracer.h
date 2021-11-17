@@ -104,6 +104,7 @@ struct ArgumentStash {
   };
 
   static bool empty() {
+	  std::cout<<"[EMPTY_DEBUG] 25"<<std::endl;
     return stash.intlists.empty();
   }
 

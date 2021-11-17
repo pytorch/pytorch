@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <iostream>
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -120,6 +121,7 @@ class GPUMetaVarRewriter : public IRMutator {
     }
 
     bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 30"<<std::endl;
       return stmts_.empty();
     }
 

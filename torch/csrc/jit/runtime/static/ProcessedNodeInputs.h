@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <iostream>
 
 #include <memory>
 
@@ -52,6 +53,7 @@ class ProcessedNodeInputs {
   }
 
   C10_NODISCARD bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 29"<<std::endl;
     return size() == 0;
   }
 
@@ -94,6 +96,7 @@ class ProcessedNodeInputs {
     HeapArrayPtr& operator=(HeapArrayPtr&&) noexcept = default;
 
     C10_NODISCARD bool empty() const {
+	  std::cout<<"[EMPTY_DEBUG] 28"<<std::endl;
       return size() != 0;
     }
 

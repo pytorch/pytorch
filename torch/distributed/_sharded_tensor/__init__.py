@@ -66,6 +66,7 @@ def empty(sharding_spec: ShardingSpec,
     Returns:
         A :class:`ShardedTensor` object on each rank
     """
+    print("[EMPTY_DEBUG] 35")
     tensor_properties = TensorProperties(dtype=dtype, layout=layout,
                                          requires_grad=requires_grad,
                                          pin_memory=pin_memory, memory_format=memory_format, )

@@ -8,6 +8,7 @@
 #include <ATen/core/grad_mode.h>
 #include "ATen/core/Tensor.h"
 #endif
+#include<iostream>
 
 namespace caffe2 {
 
@@ -145,6 +146,7 @@ void TensorVectorResize(
 
 Tensor empty(at::IntArrayRef dims, at::TensorOptions options) {
   // TODO: merge this with at::empty after Tensor is merged
+	  cout<<"[EMPTY_DEBUG] 19"<<endl;
   auto tensor = Tensor(dims, options.device());
   tensor.raw_mutable_data(options.dtype());
   return tensor;
