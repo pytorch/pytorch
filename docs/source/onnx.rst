@@ -605,6 +605,6 @@ Classes
 
     SymbolicContext
 
-Guide for developing PyTorch ONNX exporter
+Contributing / developing
 --------------------------------------------
-`A wiki for developing PyTorch ONNX exporter <https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter>`_.
+`Developer docs <https://github.com/pytorch/pytorch/wiki/Guide-for-developing-PyTorch-ONNX-exporter>`_.
