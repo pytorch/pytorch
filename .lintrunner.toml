@@ -110,6 +110,7 @@ init_command = [
     'mypy==0.812',
     'junitparser==2.1.1',
     'rich==10.9.0',
+    'pyyaml==6.0',
 ]
 
 [[linter]]
