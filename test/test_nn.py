@@ -14837,9 +14837,7 @@ class TestNNDeviceType(NNTestCase):
         # Checks https://github.com/pytorch/pytorch/issues/62237
         isize = 20
         in_t = torch.arange(isize, dtype=torch.float, device=device).unsqueeze(0).unsqueeze(0)
-        # for s in [1.00001, 0.99999]:  # 0.9999 case is broken
-        # See issue: https://github.com/pytorch/pytorch/issues/62396
-        for s in [1.00001, ]:
+        for s in [1.00001, 0.99999]:
             out_t = F.interpolate(
                 in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
@@ -14847,9 +14845,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out_t, expected_out, msg=f"scale: {s}")
 
         # checks data duplication if output_size == 2 * input_size
-        # for s in [2.00001, 1.99999]:  # 1.99999 case is broken
-        # See issue: https://github.com/pytorch/pytorch/issues/62396
-        for s in [2.00001, ]:
+        for s in [2.00001, 1.99999]:
             out_t = F.interpolate(
                 in_t, scale_factor=s, recompute_scale_factor=False, mode="nearest-exact"
             )
