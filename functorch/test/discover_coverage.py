@@ -339,19 +339,36 @@ method_only_ops = get_method_only_ops_we_care_about()
 #    print(f'{op}, {top_ops.usage_count[op]}')
 
 #print("top ops not covered by opinfo: ")
-top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(999, 999)
-for op in top_ops_not_covered_by_opinfo:
-    print(f'{op}, {top_ops.usage_count[op]}')
+# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(999, 999)
+# for op in top_ops_not_covered_by_opinfo:
+#     print(f'{op}, {top_ops.usage_count[op]}')
+
+def remove_from_set(parent, to_remove):
+    for to_remove_elt in to_remove:
+        if to_remove_elt in parent:
+            parent.remove(to_remove_elt)
 
 def print_coverage_info(th=100, nn=25):
     print('=' * 80)
     print(f"top {th}, {nn} coverage")
     statuses = transpose_statuses(get_top_ops(th, nn), invert=True)
     top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(th, nn)
+
+    # Allowed exemptions
+    vmap_exemptions = {
+        'torch.nn.functional.dropout', # randomness
+        'torch.randn_like', # randomness
+        'torch.allclose', # number output
+    }
+    remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
+    remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)
+    remove_from_set(statuses['test_vmapvjp_has_batch_rule'], vmap_exemptions)
+    remove_from_set(statuses['test_op_has_batch_rule'], vmap_exemptions)
+
     print(f"total ops in set: {th + nn}")
     print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
     for test in tests:
         print(f'{test} failing coverage {len(statuses[test])}')
 
-# print_coverage_info(100, 25)
+print_coverage_info(100, 25)
 # print_coverage_info(200, 50)
