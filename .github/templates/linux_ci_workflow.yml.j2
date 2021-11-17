@@ -191,7 +191,7 @@ jobs:
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
     steps:
-      !{{ common.setup_ec2_linux() }}
+      !{{ common.setup_ec2_linux(test_runner_type) }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
