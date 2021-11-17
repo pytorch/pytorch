@@ -2367,6 +2367,15 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("2147483647")
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
+    def _check_valid_comm_exception(self, e):
+        exception_str = str(e)
+        valid_exceptions = [
+                "NCCL communicator was aborted",
+                "NCCL communicator encountered error",
+                "Caught collective operation timeout"
+        ]
+        return any(exc in exception_str for exc in valid_exceptions)
+    
     def _wait_for_comm_abort(self, process_group, timeout=None):
         """
         Waits for the watchdog thread to abort communicators for the process group.
@@ -2379,7 +2388,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                     assert isinstance(timeout, timedelta)
                     process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
             except Exception as e:
-                if "NCCL communicator was aborted" in str(e) or "NCCL communicator encountered error" in str(e):
+                if self._check_valid_comm_exception(e):
                     return
                 else:
                     raise e
