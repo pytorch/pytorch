@@ -2370,9 +2370,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
     def _check_valid_comm_exception(self, e):
         exception_str = str(e)
         valid_exceptions = [
-                "NCCL communicator was aborted",
-                "NCCL communicator encountered error",
-                "Caught collective operation timeout"
+            "NCCL communicator was aborted",
+            "NCCL communicator encountered error",
+            "Caught collective operation timeout"
         ]
         return any(exc in exception_str for exc in valid_exceptions)
 
