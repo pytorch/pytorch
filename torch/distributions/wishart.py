@@ -34,7 +34,13 @@ class Wishart(Distribution):
         Using :attr:`scale_tril` will be more efficient: all computations internally
         are based on :attr:`scale_tril`. If :attr:`covariance_matrix` or
         :attr:`precision_matrix` is passed instead, it is only used to compute
-        the corresponding lower triangular matrices using a Cholesky decomposition.        
+        the corresponding lower triangular matrices using a Cholesky decomposition.
+        'torch.distributions.LKJCholesky' is a restricted Wishart distribution.[1]
+
+    **References**
+
+    [1] `On equivalence of the LKJ distribution and the restricted Wishart distribution`,
+    Zhenxun Wang, Yunan Wu, Haitao Chu.
     """
     arg_constraints = {
         'covariance_matrix': constraints.stack([constraints.symmetric, constraints.positive_definite]),
@@ -130,9 +136,9 @@ class Wishart(Distribution):
             device=self._unbroadcasted_scale_tril.device,
             dtype=self._unbroadcasted_scale_tril.dtype,
         )
-        # TODO: use cholesky_inverse when its batching is supported
-        return torch.cholesky_solve(identity, self._unbroadcasted_scale_tril).expand(
-            self._batch_shape + self._event_shape)
+        return torch.cholesky_solve(
+            identity, self._unbroadcasted_scale_tril
+        ).expand(self._batch_shape + self._event_shape)
 
     @property
     def mean(self):
