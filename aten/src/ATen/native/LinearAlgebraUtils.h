@@ -36,7 +36,7 @@ template<class Vec>
 static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
   static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
                 "Incompatible integral type of sizes and strides");
-  // f_contig chooses between Fortran (F-contiguous) and C-contiguous strides
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
   using Int = IntArrayRef::value_type;
   constexpr auto one = Int{1};
   const auto n = sizes.size();
