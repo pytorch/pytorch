@@ -2712,6 +2712,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued

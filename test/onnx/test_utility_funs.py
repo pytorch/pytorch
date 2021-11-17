@@ -4,8 +4,14 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
-from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
+from torch.onnx import (utils,
+                        OperatorExportTypes,
+                        TrainingMode,
+                        register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
+from torch.onnx.symbolic_helper import (_set_opset_version,
+                                        _set_operator_export_type,
+                                        _set_onnx_shape_inference)
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -19,7 +25,6 @@ import onnx
 import io
 import copy
 import unittest
-
 
 skip = unittest.skip
 
@@ -126,27 +131,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                            dynamic_axes={"x": [0, 1], "y": [0, 1], "t": [0, 1]})
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::SplitToSequence")
-
-    def test_output_list(self):
-        class PaddingLayer(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input_t, n):
-                # type: (Tensor, int) -> Tensor
-                for i in range(n):
-                    input_t = input_t * 2
-                return input_t
-
-        input_t = torch.ones(size=[10], dtype=torch.long)
-        n = 2
-        model = torch.jit.script(PaddingLayer())
-        example_output = model(input_t, n)
-
-        with self.assertRaises(RuntimeError):
-            torch.onnx._export(model,
-                               (input_t, n),
-                               "test.onnx",
-                               opset_version=self.opset_version,
-                               example_outputs=[example_output])
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -662,7 +646,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                 self.celu2 = torch.nn.CELU(2.0)
                 self.dropout = N(0.5)
 
-            def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor) -> torch.Tensor:
+            def forward(self, x, y, z):
                 res1 = self.celu1(x)
                 res2 = self.celu2(y)
                 for ln in self.lns:
@@ -673,9 +657,10 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
 
-        """
-        Export specified modules, containing non-existed dropout.
-        """
+        # Export specified modules. Test against specifying modules that won't
+        # exist in the exported model.
+        # Model export in inference mode will remove dropout node,
+        # thus the dropout module no longer exist in graph.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions={torch.nn.CELU, torch.nn.Dropout, torch.nn.LayerNorm})
@@ -704,21 +689,17 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(ln_ns[0].domain, "torch.nn.modules.normalization")
         self.assertEqual(len(ln_ns[0].attribute), 1)
 
-        """
-        Export specified modules.
-        """
+        # Export specified modules.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
-                          export_modules_as_functions={"torch.nn.modules.activation.CELU"})
+                          export_modules_as_functions={torch.nn.CELU})
 
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 1)
         self.assertEqual(funcs[0].name, "CELU")
 
-        """
-        Export with empty specified modules. Normal export.
-        """
+        # Export with empty specified modules. Normal export.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions=set())
@@ -727,9 +708,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 0)
 
-        """
-        Export all modules. Should contain {M, CELU, LayerNorm}.
-        """
+        # Export all modules. Should contain {M, CELU, LayerNorm}.
         f = io.BytesIO()
         torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
                           export_modules_as_functions=True)
@@ -737,6 +716,40 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
         funcs = onnx_model.functions
         self.assertEqual(len(funcs), 3)
+
+    def test_local_function_overloads(self):
+        class NWithOverloads(torch.nn.Module):
+            def forward(self, x, y=None, z=None):
+                if y is None:
+                    return x + 1
+                elif z is None:
+                    return x + y
+                else:
+                    return x + y, x + z
+
+        class M(torch.nn.Module):
+            def __init__(self, num_layers):
+                super().__init__()
+                self.n = NWithOverloads()
+
+            def forward(self, x, y, z):
+                return self.n(x), self.n(x, y), self.n(x, y, z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        z = torch.randn(2, 3)
+
+        f = io.BytesIO()
+        torch.onnx.export(M(3), (x, y, z), f, opset_version=self.opset_version,
+                          export_modules_as_functions={NWithOverloads})
+
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        funcs = onnx_model.functions
+        self.assertEqual(len(funcs), 3)
+        func_names = [f.name for f in funcs]
+        self.assertIn("NWithOverloads", func_names)
+        self.assertIn("NWithOverloads.1", func_names)
+        self.assertIn("NWithOverloads.2", func_names)
 
     def test_aten_fallthrough(self):
         # Test aten export of op with no symbolic
@@ -788,6 +801,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
     def test_custom_opsets_gelu(self):
+        self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
+
         def gelu(g, self):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
@@ -803,6 +818,23 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.opset_import[0].version, self.opset_version)
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
+
+
+    def test_register_aten_custom_op_symbolic(self):
+        self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
+
+        def gelu(g, self):
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
+
+        register_custom_op_symbolic("aten::gelu", gelu, 1)
+        model = torch.nn.GELU()
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f, opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+
+        self.assertEqual(graph.graph.node[0].op_type, "Gelu")
+        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
