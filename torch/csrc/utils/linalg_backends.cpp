@@ -34,5 +34,7 @@ void initializeLinalgBackends() {
   _ADD_LINALG_BACKEND(at::LinalgBackend::Magma);
 }
 
+#undef _ADD_LINALG_BACKEND
+
 } // namespace utils
 } // namespace torch
