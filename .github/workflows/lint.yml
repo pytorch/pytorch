@@ -27,10 +27,9 @@ jobs:
           python3 -mtools.generate_torch_version --is_debug=false
           python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
-          cat torch/_C/__init__.pyi
-          cat .lintrunner.toml
+          cat torch/_VF.pyi
       - name:  lint
-        run: lintrunner --paths-cmd='git grep -Il .' --skip CLANGTIDY
+        run: lintrunner torch/autograd/forward_ad.py
 
   quick-checks:
     runs-on: ubuntu-18.04
