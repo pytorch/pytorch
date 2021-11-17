@@ -40,7 +40,7 @@ jobs:
 
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
-        run: lintrunner --paths-from=lint_paths.txt
+        run: lintrunner -v --paths-from=lint_paths.txt
 
   quick-checks:
     runs-on: ubuntu-18.04
