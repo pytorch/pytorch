@@ -50,16 +50,14 @@ void ComputeMulGradient(
     const TIn* B,
     TGrad* dA,
     TGrad* dB,
-    CPUContext* context,
-    bool allow_broadcast_fastpath) {
+    CPUContext* context) {
   const auto A_size = c10::multiply_integers(A_dims, A_dims + ndim);
   const auto B_size = c10::multiply_integers(B_dims, B_dims + ndim);
   const auto C_size = c10::multiply_integers(C_dims, C_dims + ndim);
   math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
   if (
-      allow_broadcast_fastpath
-      && math::can_use_broadcast_fastpath(ndim, A_dims)
+      math::can_use_broadcast_fastpath(ndim, A_dims)
       && math::can_use_broadcast_fastpath(ndim, B_dims)) {
     ComputeMulGradientFastpath(A_size, B_size, C_size, dC, A, B, dA, dB);
     return;
@@ -270,8 +268,7 @@ bool MulFunctor<CPUContext>::Backward(
         B,
         dA,
         dB,
-        context,
-        allow_broadcast_fastpath_);
+        context);
   }
 
   return true;
@@ -324,7 +321,7 @@ template bool MulFunctor<CPUContext>::Backward<int64_t, int64_t, int64_t>(
 
 REGISTER_CPU_OPERATOR(
     MulGradient,
-    BinaryElementwiseGradientBroadcastOp<
+    BinaryElementwiseGradientOp<
         NumericTypes,
         CPUContext,
         MulFunctor<CPUContext>>);

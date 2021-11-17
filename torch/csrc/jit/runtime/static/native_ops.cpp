@@ -12,6 +12,10 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
+namespace {
+constexpr auto createBorrowedIValue =
+    c10::MaybeOwnedTraits<c10::IValue>::createBorrow;
+} // namespace
 namespace torch {
 namespace jit {
 
@@ -37,7 +41,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -78,7 +82,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -99,13 +103,13 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime_dict_unpack,
     [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
+        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
-          auto key = p_node->Input(i);
+        for (size_t i = 1; i < p_node->num_inputs(); ++i) {
+          const auto& key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
-          p_node->Output(i - 1) = value->value();
+          p_node->Output(i - 1) = createBorrowedIValue(value->value());
         }
       };
     });
@@ -121,14 +125,14 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       if (n->input(0)->type()->castRaw<DictType>()) {
         return [](ProcessedNode* p_node) {
           auto dict = p_node->Input(0).toGenericDict();
-          auto key = p_node->Input(1);
+          const auto& key = p_node->Input(1);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
           p_node->Output(0) = value->value();
         };
       } else if (n->input(0)->type()->castRaw<ListType>()) {
         return [](ProcessedNode* p_node) {
-          auto list = p_node->Input(0).toList();
+          const auto& list = p_node->Input(0).toList();
           auto idx = p_node->Input(1).toInt();
           p_node->Output(0) = getItem(list, idx);
         };
@@ -145,7 +149,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -154,7 +158,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         listConstruct(
             stack,
             p_node->node()->output()->type()->expectRef<ListType>(),
-            p_node->inputs().size());
+            p_node->num_inputs());
         // put output back
         p_node->Output(0) = std::move(stack[0]);
       };
@@ -167,7 +171,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -200,9 +204,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         auto module = p_node->Input(0).toObject();
         Node* node = p_node->node();
-        const auto type = node->input()->type()->expect<ClassType>();
+        const auto& type = node->input()->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
-        const auto slot = type->getAttributeSlot(field);
+        const auto slot = type.getAttributeSlot(field);
         p_node->Output(0) = module->getSlot(slot);
       };
     });
@@ -214,9 +218,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         auto module = p_node->Input(0).toObject();
         Node* node = p_node->node();
-        const auto type = node->inputs()[0]->type()->expect<ClassType>();
+        const auto& type = node->inputs()[0]->type()->expectRef<ClassType>();
         const auto& field = node->s(attr::name);
-        const auto slot = type->getAttributeSlot(field);
+        const auto slot = type.getAttributeSlot(field);
         module->setSlot(slot, p_node->Input(1));
       };
     });
@@ -430,7 +434,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         auto input_type = p_node->Input(0).type();
 
         auto* node = p_node->node();
-        std::vector<TypePtr> candidates = node->tys(attr::types);
+        const std::vector<TypePtr>& candidates = node->tys(attr::types);
         for (const auto& candidate_type : candidates) {
           if (input_type->isSubtypeOf(*candidate_type)) {
             p_node->Output(0) = true;
@@ -452,7 +456,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         TORCH_INTERNAL_ASSERT(
             num_inputs && num_inputs + 1 == node->outputs().size());
 
-        auto expected_types = node->tys(attr::types);
+        const auto& expected_types = node->tys(attr::types);
 
         for (size_t i = 0; i < num_inputs; i++) {
           p_node->Output(i) = p_node->Input(i);
@@ -478,9 +482,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
-        for (const auto& tuple : pnode->inputs()) {
-          for (auto& elem : tuple->toTupleRef().elements()) {
-            pnode->Output(output_idx) = elem;
+        for (const auto idx : c10::irange(pnode->num_inputs())) {
+          const auto& tuple = pnode->Input(idx);
+          for (auto& elem : tuple.toTupleRef().elements()) {
+            pnode->Output(output_idx) = createBorrowedIValue(elem);
             ++output_idx;
           }
         }
@@ -540,6 +545,21 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         p_node->Output(0) = at::native::squeeze(self, dim);
       };
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+
+  return [](ProcessedNode* p_node) {
+    const auto& self = p_node->Input(0).toTensor();
+    const auto split_size = p_node->Input(1).toInt();
+    const auto dim = p_node->Input(2).toInt();
+    p_node->Output(0) = at::native::split(self, split_size, dim);
+  };
+});
 
 } // namespace jit
 } // namespace torch
