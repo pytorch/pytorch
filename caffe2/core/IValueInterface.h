@@ -13,6 +13,12 @@ namespace detail {
 
 TORCH_API caffe2::Tensor contiguous(caffe2::Tensor);
 
+/* This class represents input arguments to a caffe2 operator when
+ * called from c10. It's purpose is to act as a compilation barrier
+ * between caffe2 and ATen, so that caffe2 operators don't depend on
+ * ATen operators implicitly through c10::IValue.
+ */
+
 class TORCH_API IValueInterface {
 public:
   IValueInterface(): values_(nullptr), size_(0) {}
@@ -30,9 +36,14 @@ public:
   }
 
   const c10::IValue& at(size_t idx) const;
+
+  // Expects isTensorList(idx)
   std::vector<caffe2::Tensor> toTensorVector(size_t idx) const;
+  // Expects isTensor(idx)
   caffe2::Tensor toTensor(size_t idx) const;
 
+  // Returns the number of tensor inputs, handling the case where the
+  // inputs are passed as a TensorList.
   int compute_input_size() const;
 
   // These template functions are not defined in the header,
