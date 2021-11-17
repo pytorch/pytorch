@@ -196,6 +196,10 @@ namespace c10 {
   _(aten, atan_)                     \
   _(aten, arctan)                    \
   _(aten, arctan_)                   \
+  _(aten, atan2)                     \
+  _(aten, atan2_)                    \
+  _(aten, arctan2)                   \
+  _(aten, arctan2_)                  \
   _(aten, atanh)                     \
   _(aten, atanh_)                    \
   _(aten, arctanh)                   \
@@ -204,6 +208,7 @@ namespace c10 {
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
+  _(aten, linalg_cross)              \
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
