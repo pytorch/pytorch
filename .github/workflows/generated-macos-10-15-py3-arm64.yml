@@ -21,6 +21,7 @@ env:
   COMPACT_JOB_NAME: macos-10-15-py3-arm64
   IN_CI: 1
   IS_GHA: 1
+  PYTORCH_RETRY_TEST_CASES: 1
 
 
 jobs:
