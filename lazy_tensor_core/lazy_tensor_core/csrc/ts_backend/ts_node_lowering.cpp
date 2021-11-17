@@ -6,7 +6,6 @@
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/jit.h>
 
-#include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"

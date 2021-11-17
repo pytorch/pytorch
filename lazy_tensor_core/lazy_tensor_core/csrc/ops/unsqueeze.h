@@ -6,6 +6,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
+std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
+                                              int64_t dim);
+
 class Unsqueeze : public TsNode {
  public:
   // Insert a dimension of size one at the specified position.

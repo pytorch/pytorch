@@ -1,12 +1,20 @@
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 
-#include "lazy_tensor_core/csrc/data_ops.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
+
+std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
+                                              int64_t dim) {
+  CHECK_LE(dim, dimensions.size());
+  std::vector<int64_t> unsqueeze_dimensions(dimensions.begin(), dimensions.end());
+  unsqueeze_dimensions.insert(unsqueeze_dimensions.begin() + dim, 1);
+  return unsqueeze_dimensions;
+}
+
 namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
