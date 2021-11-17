@@ -24,13 +24,13 @@ jobs:
       - name: Generate some code
         run: |
           set -eux
+          python3 -m tools.linter.clang_tidy.generate_build_files
+
           python3 -mtools.generate_torch_version --is_debug=false
           python3 -mtools.codegen.gen -s aten/src/ATen -d build/aten/src/ATen
           python3 -mtools.pyi.gen_pyi --native-functions-path aten/src/ATen/native/native_functions.yaml --deprecated-functions-path "tools/autograd/deprecated.yaml"
-          python3 -m tools.linter.clang_tidy.generate_build_files
-
       - name:  lint
-        run: lintrunner --paths-cmd='git grep -Il .' --verbose
+        run: lintrunner --paths-cmd='git grep -Il .'
 
   quick-checks:
     runs-on: ubuntu-18.04
