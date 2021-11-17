@@ -1835,7 +1835,7 @@ def sample_inputs_isclose(
 
     for rtol, atol, equal_nan in product([0., 1e-7], [0., 1e-7], [False, True]):
         sample_inputs.append(SampleInput(lhs, args=(rhs,),
-            kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan)))
+                             kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan)))
 
     return sample_inputs
 
