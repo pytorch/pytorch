@@ -141,9 +141,60 @@ def call_model_with(model, inputs):
         return model(inputs)
     raise RuntimeError("invalid example inputs ", inputs)
 
-def timed(model, example_inputs, times=1, iter_sync_fn=lambda:(), final_sync_fn=lambda:()):
-    
-    final_sync_fn()
+#1 make sync function interface capable of doing a .to (so it accepts args)
+#2 fix delta between .to sync function vs wait_device_ops
+#3 see if bert vs bart data makes sense
+#4 see if divaddmul is getting fused into a single kernel or not
+#5 how much do my 'overhead fixes' from last night help?
+class CudaSync:
+    def __init__(self, sync_every_iter=False, to_dev_sync=None):
+        self.sync_every_iter = sync_every_iter
+        self.to_dev_sync = to_dev_sync
+
+    def iter_sync(self, inputs):
+        if self.sync_every_iter:
+            if self.to_dev_sync == 'cpu':
+                to_device(inputs, self.to_dev_sync)
+            else:
+                torch.cuda.synchronize()
+
+    def final_sync(self, inputs):
+        if self.to_dev_sync == 'cpu':
+            to_device(inputs, self.to_dev_sync)
+        else:
+            torch.cuda.synchronize()
+
+class NoOpSync:
+    def iter_sync(self, inputs):
+        pass
+
+    def final_sync(self, inputs):
+        pass
+
+class LazySync:
+    def __init__(self, sync_every_iter=False, to_dev_sync=None):
+        self.sync_every_iter = sync_every_iter
+        self.to_dev_sync = to_dev_sync
+
+    def iter_sync(self, inputs):
+        if self.to_dev_sync:
+            # this would sync just the computations needed by the provided tensors
+            # unclear how it would interact with calling mark_step right before?
+            to_device(inputs, self.to_dev_sync)
+        else:
+            ltm.mark_step()
+            if self.sync_every_iter:
+                ltm.wait_device_ops()
+
+    def final_sync(self, inputs):
+        if self.to_dev_sync:
+            to_device(inputs, self.to_dev_sync)
+        else:
+            ltm.mark_step()
+            ltm.wait_device_ops()
+
+def timed(model, example_inputs, sync, times=1):
+    sync.final_sync(None)
     gc.collect()
     torch.manual_seed(1337)
     # keep the lazy tensor results alive until the final sync
@@ -152,17 +203,20 @@ def timed(model, example_inputs, times=1, iter_sync_fn=lambda:(), final_sync_fn=
     for _ in range(times):
         results.append(call_model_with(model, example_inputs))
         # may be just an async 'mark_step' for lazy, or no-op for cuda
-        # iter_sync_fn()
-        to_device(results[-1], 'cpu')
+        sync.iter_sync(results[-1])
+        # to_device(results[-1], 'cpu')
     
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
-    to_device(results[-1], 'cpu')
-    # final_sync_fn()
+    # to_device(results[-1], 'cpu')
+    sync.final_sync(results[-1])
     t1 = time.perf_counter()
     return results[-1], t1 - t0
 
 def to_device(inputs, device):
+    if inputs is None:
+        return None
+
     try:
         import transformer
         if isinstance(inputs, transformers.modeling_outputs.MaskedLMOutput) \
@@ -183,14 +237,12 @@ def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, l
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.warmup):
         # interleave the runs to handle frequency scaling and load changes
-        timed(model, example_inputs, iter_sync_fn=torch.cuda.synchronize, final_sync_fn=torch.cuda.synchronize)
-        timed(lazy_model, lazy_inputs)
-# lazy_inputs = to_device(example_inputs, 'lazy')
-    # lazy_model = model.to('lazy')
+        timed(model, example_inputs, sync=CudaSync(sync_every_iter=True))
+        timed(lazy_model, lazy_inputs, sync=LazySync(sync_every_iter=True))
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs, iter_sync_fn=torch.cuda.synchronize, final_sync_fn=torch.cuda.synchronize)
-        _, timings[rep, 1] = timed(lazy_model, lazy_inputs)
+        _, timings[rep, 0] = timed(model, example_inputs, sync=CudaSync(sync_every_iter=True))
+        _, timings[rep, 1] = timed(lazy_model, lazy_inputs, sync=NoOpSync())
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     overhead = median[1] / median[0]
@@ -201,26 +253,27 @@ def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, l
     ).writerow([current_device, current_name, f"{overhead:.4f}"])
     return (overhead, pvalue)
 
-def lazy_compute_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs, times=10):
+def lazy_compute_experiment(experiment, results, args, model, example_inputs, lazy_model, lazy_inputs, times=10, sync_every_iter=False, to_dev_sync=None):
     timings = np.zeros((args.repeat, 2), np.float64)
     for rep in range(args.warmup):
         # interleave the runs to handle frequency scaling and load changes
-        timed(model, example_inputs, final_sync_fn=torch.cuda.synchronize)
+        timed(model, example_inputs, sync=CudaSync(sync_every_iter=True))
         with fuser('fuser2'):
-            timed(lazy_model, lazy_inputs, iter_sync_fn=ltm.mark_step, final_sync_fn=ltm.wait_device_ops)
+            timed(lazy_model, lazy_inputs, sync=LazySync(sync_every_iter=True))
     
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs, times=times, final_sync_fn=torch.cuda.synchronize)
-        _, timings[rep, 1] = timed(lazy_model, lazy_inputs, times=times, iter_sync_fn=ltm.mark_step, final_sync_fn=ltm.wait_device_ops)
+        _, timings[rep, 0] = timed(model, example_inputs, times=times, sync=CudaSync(sync_every_iter=sync_every_iter, to_dev_sync=to_dev_sync))
+        _, timings[rep, 1] = timed(lazy_model, lazy_inputs, times=times, sync=LazySync(sync_every_iter=sync_every_iter, to_dev_sync=to_dev_sync))
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
     results.append(speedup)
     output_csv(
         "lazy_compute.csv",
-        ("dev", "name", "speedup"),
-    ).writerow([current_device, current_name, f"{speedup:.4f}"])
+        ("experiment", "dev", "name", "speedup"),
+    ).writerow([experiment, current_device, current_name, f"{speedup:.4f}"])
+    print(f"experiment: {experiment}, model: {name},  {speedup}, pvalue: {pvalue} (using {args.fuser})")
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
@@ -266,10 +319,13 @@ if __name__ == "__main__" :
             print(f"name: {name},  trace overhead: {overhead}, pvalue: {pvalue}")
 
             with fuser(args.fuser): 
-                speedup, pvalue = lazy_compute_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs)
-                print(f"name: {name},  amortized compute speedup: {speedup}, pvalue: {pvalue} (using {args.fuser})")
-            
-            with fuser(args.fuser): 
-                speedup, pvalue = lazy_compute_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs, times=1)
-                print(f"name: {name},  unamortized compute speedup: {speedup}, pvalue: {pvalue} (using {args.fuser})")
-        
+                speedup, pvalue = lazy_compute_experiment("amortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs)
+                speedup, pvalue = lazy_compute_experiment("unamortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True)
+
+                # using to_cpu sync
+                speedup, pvalue = lazy_compute_experiment("to_cpu amortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cpu')
+                speedup, pvalue = lazy_compute_experiment("to_cpu unamortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cpu')
+
+                # using to_cuda sync
+                speedup, pvalue = lazy_compute_experiment("to_cuda amortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
+                speedup, pvalue = lazy_compute_experiment("to_cuda unamortized compute speedup", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
