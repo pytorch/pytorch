@@ -633,6 +633,9 @@ def jacfwd(f, argnums=0):
         return tree_unflatten(jac_outs_ins, spec)
     return wrapper_fn
 
+def hessian(f, argnums=0):
+    return jacfwd(jacrev(f, argnums), argnums)
+
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
     Returns a function to compute a tuple of the gradient and primal, or
