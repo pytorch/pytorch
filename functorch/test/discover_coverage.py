@@ -4,6 +4,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from enum import Enum
 from functorch_lagging_op_db import functorch_lagging_op_db
 import functorch._src.top_operators_github_usage as top_ops
+import pprint
 
 # Importing these files make modifications to the op_db that we need
 import test_ops
@@ -359,6 +360,9 @@ def print_coverage_info(th=100, nn=25):
         'torch.nn.functional.dropout', # randomness
         'torch.randn_like', # randomness
         'torch.allclose', # number output
+        'torch.unique', # dynamic
+        'torch.nonzero', # dynamic
+        'torch.masked_select', # dynamic
     }
     remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)
@@ -369,6 +373,7 @@ def print_coverage_info(th=100, nn=25):
     print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
     for test in tests:
         print(f'{test} failing coverage {len(statuses[test])}')
+    pprint.pprint(statuses)
 
 print_coverage_info(100, 25)
 # print_coverage_info(200, 50)
