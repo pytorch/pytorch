@@ -10053,6 +10053,38 @@ op_db: List[OpInfo] = [
         ],
     ),
     UnaryUfuncInfo(
+        'nn.functional.rrelu',
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.rrelu, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+        sample_kwargs=lambda device, dtype, input: ({'lower': 0., 'upper': 1.}, {'lower': 0., 'upper': 1.}),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(partial(torch.nn.functional.rrelu, inplace=True), input, *args, **kwargs),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-03, rtol=1.2e-03),
+                    torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
+            ),
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestJit', 'test_variant_consistency_jit'
+            ),
+        ],
+    ),
+    UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
         ref=reference_hardsigmoid,
         dtypes=floating_types(),
