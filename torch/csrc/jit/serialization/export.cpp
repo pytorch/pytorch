@@ -360,9 +360,9 @@ class GraphEncoder {
   NodeAttrNameMap node_attr_to_name_;
   // For large models, the parameters can be stored in separate binary files.
   // This parameter sets a threshold on the number of elements in the parameter
-  // tensor, beyond which the parameter is stored in a separate file (if API
-  // argument use_external_data_format is set to True). This threshold is in
-  // place so as not to create too many external files.
+  // tensor, beyond which the parameter is stored in a separate file (if
+  // use_external_data_format_ is True). This threshold is in place
+  // so as not to create too many external files.
   const size_t ParamSizeThresholdForExternalStorage = 1024;
 };
 
@@ -471,7 +471,7 @@ GraphEncoder::GraphEncoder(
 
   // If graph proto size exceed maximum protobuf size of 2GB, set
   // use_external_data_format to true.
-  if (!use_external_data_format && !onnx_file_path.empty() &&
+  if (!use_external_data_format &&
       GetGraphProtoSize(model_proto_.mutable_graph(), graph, initializers) >
           INT_MAX) {
     GRAPH_DEBUG(
@@ -485,8 +485,9 @@ GraphEncoder::GraphEncoder(
   if (use_external_data_format) {
     TORCH_CHECK(
         !onnx_file_path.empty(),
-        "For large model export, f in torch.onnx.export must be a non-empty string "
-        "specifying the location of the model.");
+        "The serialized model is larger than the 2GiB limit imposed by the protobuf library. ",
+        "Therefore the output file must be a file path, so that the ONNX external data can ",
+        "be written to the same directory. Please specify the output file name.");
   }
 
   auto* imp = model_proto_.add_opset_import();
@@ -1237,11 +1238,6 @@ export_onnx(
 
 std::string serialize_model_proto_to_string(
     const std::shared_ptr<::ONNX_NAMESPACE::ModelProto>& model_proto) {
-  const size_t proto_size = model_proto->ByteSizeLong();
-  TORCH_CHECK(
-      proto_size <= INT_MAX,
-      "Exporting model exceed maximum protobuf size of 2GB. "
-      "Please call torch.onnx.export without setting use_external_data_format parameter.");
   return model_proto->SerializeAsString();
 }
 
