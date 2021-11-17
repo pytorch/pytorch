@@ -346,7 +346,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
 #endif
       } else {
         if (unlink(filename_.c_str()) == -1)
-          TORCH_CHECK(false, "could not unlink file ", filename_m, " : ", strerror(errno), " (", errno, ")");
+          TORCH_CHECK(false, "could not unlink file ", filename_, " : ", strerror(errno), " (", errno, ")");
       }
     }
 
