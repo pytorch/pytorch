@@ -379,13 +379,15 @@ class {module_name}(torch.nn.Module):
         blobified_modules = []
         for module_name, module in self.named_children():
             module_str = _gen_model_repr(module_name, module)
+            comment_str = ""
             if module_str is None:
                 module_file = folder / f'{module_name}.pt'
                 torch.save(module, module_file)
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace('\r', ' ').replace('\n', ' ')
                 module_str = f"torch.load(r'{module_file}') # {module_repr}"
-            model_str += f"{tab*2}self.{module_name} = {module_str}\n"
+                comment_str = f" # {module_repr}"
+            model_str += f"{tab*2}setattr(self, '{module_name}', {module_str}){comment_str}\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
