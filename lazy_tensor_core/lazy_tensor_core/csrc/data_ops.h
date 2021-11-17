@@ -4,8 +4,6 @@
 
 #include <vector>
 
-#include "lazy_tensors/computation_client/types.h"
-
 // Collection of lowerings for operations which only involve some form of data
 // movement and no computation.
 namespace torch_lazy_tensors {
