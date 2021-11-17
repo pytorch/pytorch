@@ -372,27 +372,29 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             .check_next("aten::add_").check("Differentiable").run(graph)
         self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
 
+    @unittest.skip("run CI without this test")
     def test_aliased_outputs(self):
 
         with enable_profiling_mode_for_profiling_tests():
 
-    #         # Case 1: aliasing between relu and split_with_sizes
-    #         # is within a DifferentiableGraph. It should be valid
-    #         # to merge both split_with_sizes in relu in one graph
-    #         input_str = """
-    # graph(%a : Tensor):
-    #     %b : Tensor = aten::relu(%a)
-    #     %0 : int[] = prim::Constant[value=[2, 2, 1]]()
-    #     %1 : int = prim::Constant[value=0]()
-    #     %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
-    #     return (%2)
-    # """
 
-    #         graph = torch._C.parse_ir(input_str)
-    #         torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-    #         FileCheck().check("with prim::DifferentiableGraph") \
-    #             .check("aten::relu").check("aten::split_with_sizes") \
-    #             .run(graph)
+            # Case 1: aliasing between relu and split_with_sizes
+            # is within a DifferentiableGraph. It should be valid
+            # to merge both split_with_sizes in relu in one graph
+            input_str = """
+    graph(%a : Tensor):
+        %b : Tensor = aten::relu(%a)
+        %0 : int[] = prim::Constant[value=[2, 2, 1]]()
+        %1 : int = prim::Constant[value=0]()
+        %2 : Tensor[] = aten::split_with_sizes(%b, %0, %1)
+        return (%2)
+    """
+
+            graph = torch._C.parse_ir(input_str)
+            torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
+            FileCheck().check("with prim::DifferentiableGraph") \
+                .check("aten::relu").check("aten::split_with_sizes") \
+                .run(graph)
 
 #             # Case 2: aliasing between relu and split_with_sizes
 #             # are both outputs of a Diff graph. It should be invalid
