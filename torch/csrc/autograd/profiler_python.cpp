@@ -3,13 +3,6 @@
 #include <iostream>
 #include <limits>
 #include <memory>
-
-#if CAFFE2_HAVE_RE2
-#include <re2/re2.h>
-#else
-#include <regex>
-#endif
-
 #include <string>
 #include <utility>
 #include <vector>
@@ -303,7 +296,7 @@ class PythonTracer final {
 
     bool active_;
     PyObject* module_call_code_;
-    std::string path_prefixes_;
+    std::vector<std::string> path_prefixes_;
     std::vector<TraceContext*> trace_contexts_;
 
     std::vector<RawEvent> events_;
@@ -311,6 +304,7 @@ class PythonTracer final {
 
     using DescriptionKey = std::pair</*f_code=*/PyCodeObject*, /*f_lasti=*/int>;
     ska::flat_hash_map<DescriptionKey, CodeDescription, hash_pair> code_descriptions_;
+    ska::flat_hash_map<PyObject*, std::string> c_function_reprs_;
 };
 
 PythonTracer& PythonTracer::singleton() {
@@ -320,7 +314,7 @@ PythonTracer& PythonTracer::singleton() {
 
 PythonTracer::PythonTracer() : active_(false) {
     path_prefixes_ = py::module::import("torch.profiler.python_tracer")
-        .attr("_prefix_regex")().cast<std::string>();
+        .attr("_prefix_regex")().cast<std::vector<std::string>>();
 
     module_call_code_ = py::module::import("torch.nn")
         .attr("Module")
@@ -422,6 +416,7 @@ void PythonTracer::clear() {
     trace_contexts_.clear();
     events_.clear();
     code_descriptions_.clear();
+    c_function_reprs_.clear();
     for (auto& i : module_calls_) {
         Py_DECREF(i.self_);
     }
@@ -436,6 +431,10 @@ void PythonTracer::recordPyCall(TraceContext* ctx, PyFrameObject* frame) {
 
 void PythonTracer::recordCCall(TraceContext* ctx, PyFrameObject* frame, PyObject* arg) {
     events_.emplace_back(TraceTag::kC_Call, frame->f_lasti, ctx, arg);
+    const auto& it = c_function_reprs_.find(arg);
+    if C10_UNLIKELY(it == c_function_reprs_.end()) {
+        c_function_reprs_[arg] = py::repr(arg);
+    }
 }
 
 void PythonTracer::recordReturn(TraceContext* ctx, PyFrameObject* frame, TraceTag tag) {
@@ -506,11 +505,9 @@ class PyTraceReplay {
 
     ska::flat_hash_map<size_t, PyObject*> module_self_map_;
     ska::flat_hash_map<size_t, std::string> module_name_map_;
-    std::regex filename_prune_;
 };
 
-PyTraceReplay::PyTraceReplay()
-        : filename_prune_(PythonTracer::singleton().path_prefixes_) {
+PyTraceReplay::PyTraceReplay() {
     ska::flat_hash_map<PyObject*, std::string> module_names;
     for (const auto& call : PythonTracer::singleton().module_calls_) {
         if (module_names.find(call.self_) == module_names.end()) {
@@ -528,6 +525,17 @@ PyTraceReplay::PyTraceReplay()
 }
 
 
+// TODO: Use re2.
+void trimPrefix(std::string& s, const std::vector<std::string>& prefixes) {
+    for (const auto& p : prefixes) {
+        if (s.compare(0, p.size(), p) == 0) {
+            s.erase(0, p.size());
+            return;
+        }
+    }
+}
+
+
 std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     const auto& tracer = PythonTracer::singleton();
 
@@ -537,7 +545,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
     ska::flat_hash_map<std::string, std::string> filename_map;
     for (const auto& i : tracer.code_descriptions_) {
         if (filename_map.find(i.second.filename_) == filename_map.end()) {
-            auto s = std::regex_replace(i.second.filename_, filename_prune_, "");
+            std::string s(i.second.filename_);
+            trimPrefix(s, tracer.path_prefixes_);
             filename_map[i.second.filename_] = s;
         }
     }
@@ -595,7 +604,7 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
                 break;
 
             case TraceTag::kC_Call:
-                push_frame(py::repr(raw_event.misc_.arg_), CallType::kCCall);
+                push_frame(tracer.c_function_reprs_.at(raw_event.misc_.arg_), CallType::kCCall);
                 break;
 
             case TraceTag::kPy_Return:
@@ -633,9 +642,8 @@ std::vector<std::unique_ptr<PyTraceEvent>> PyTraceReplay::replayStack() const {
 
     // Link parents to children.
     for (int i = 0; i < results.size(); i++) {
-        out[i]->parent_ = event_id_map[results[i].parent_id_];
+        out[i]->parent_ = event_id_map.at(results[i].parent_id_);
     }
-
     return out;
 }
 
