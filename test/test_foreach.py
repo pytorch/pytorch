@@ -11,8 +11,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, TEST_WITH_SLOW
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, skipCUDAIfRocm, skipMeta, ops)
-from torch.testing._internal.common_methods_invocations import \
-    (foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db)
+from torch.testing._internal.common_methods_invocations import (
+    foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db, foreach_minmax_op_db,
+    foreach_reduce_op_db)
 from torch.testing._internal.common_dtype import (
     get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
 )
@@ -417,6 +418,26 @@ class TestForeach(TestCase):
             ],
         )
         self._minmax_test(op, inputs, True, 1)
+
+    def _reduce_test(self, opinfo, inputs, ord, is_fastpath, n_expected_cudaLaunchKernels):
+        op, ref, _, _ = self._get_funcs(opinfo, n_expected_cudaLaunchKernels)
+        self.assertEqual(ref(inputs, ord=ord), op(inputs, self.is_cuda, is_fastpath, ord=ord))
+
+    @ops(foreach_reduce_op_db)
+    def test_reduce_fastpath(self, device, dtype, op):
+        for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
+            if ord in (1, 2) and dtype in torch.testing.get_all_fp_dtypes():
+                n_expected_cudaLaunchKernels = 3
+            else:
+                n_expected_cudaLaunchKernels = N
+            inputs = op.sample_inputs(device, dtype, N, noncontiguous=False),
+            self._reduce_test(op, inputs, ord, True, n_expected_cudaLaunchKernels)
+
+    @ops(foreach_reduce_op_db)
+    def test_reduce_slowpath(self, device, dtype, op):
+        for N, ord in itertools.product(N_values, (0, 1, 2, -1, -2)):
+            inputs = op.sample_inputs(device, dtype, N, noncontiguous=True),
+            self._reduce_test(op, inputs, ord, False, 1)
 
     @dtypes(*get_all_dtypes())
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):

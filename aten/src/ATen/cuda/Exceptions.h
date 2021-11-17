@@ -2,6 +2,7 @@
 
 #include <cublas_v2.h>
 #include <cusparse.h>
+#include <c10/macros/Export.h>
 
 #ifdef CUDART_VERSION
 #include <cusolver_common.h>
@@ -39,7 +40,7 @@ class CuDNNError : public c10::Error {
   } while (0)
 
 namespace at { namespace cuda { namespace blas {
-const char* _cublasGetErrorEnum(cublasStatus_t error);
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error);
 }}} // namespace at::cuda::blas
 
 #define TORCH_CUDABLAS_CHECK(EXPR)                              \
@@ -66,7 +67,7 @@ const char *cusparseGetErrorString(cusparseStatus_t status);
 #ifdef CUDART_VERSION
 
 namespace at { namespace cuda { namespace solver {
-const char* cusolverGetErrorMessage(cusolverStatus_t status);
+C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
 #define TORCH_CUSOLVER_CHECK(EXPR)                                              \
