@@ -18,6 +18,56 @@ common_notes = {
 # Note: This not only adds doc strings for functions in the linalg namespace, but
 # also connects the torch.linalg Python namespace to the torch._C._linalg builtins.
 
+cross = _add_docstr(_linalg.linalg_cross, r"""
+linalg.cross(input, other, *, dim=-1, out=None) -> Tensor
+
+
+Computes the cross product of two 3-dimensional vectors.
+
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs broadcast to
+a common shape.
+
+Args:
+    input (Tensor): the first input tensor.
+    other (Tensor): the second input tensor.
+    dim  (int, optional): the dimension along which to take the cross-product. Default: `-1`.
+
+Keyword args:
+    out (Tensor, optional): the output tensor. Ignored if `None`. Default: `None`.
+
+Raises:
+    RuntimeError: If after broadcasting :attr:`input`\ `.size(\ `:attr:`dim`\ `) != 3`
+                  or :attr:`other`\ `.size(\ `:attr:`dim`\ `) != 3`.
+Example:
+    >>> a = torch.randn(4, 3)
+    >>> a
+    tensor([[-0.3956,  1.1455,  1.6895],
+            [-0.5849,  1.3672,  0.3599],
+            [-1.1626,  0.7180, -0.0521],
+            [-0.1339,  0.9902, -2.0225]])
+    >>> b = torch.randn(4, 3)
+    >>> b
+    tensor([[-0.0257, -1.4725, -1.2251],
+            [-1.1479, -0.7005, -1.9757],
+            [-1.3904,  0.3726, -1.1836],
+            [-0.9688, -0.7153,  0.2159]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.0844, -0.5281,  0.6120],
+            [-2.4490, -1.5687,  1.9792],
+            [-0.8304, -1.3037,  0.5650],
+            [-1.2329,  1.9883,  1.0551]])
+    >>> a = torch.randn(1, 3)  # a is broadcast to match shape of b
+    >>> a
+    tensor([[-0.9941, -0.5132,  0.5681]])
+    >>> torch.linalg.cross(a, b)
+    tensor([[ 1.4653, -1.2325,  1.4507],
+            [ 1.4119, -2.6163,  0.1073],
+            [ 0.3957, -1.9666, -1.0840],
+            [ 0.2956, -0.3357,  0.2139]])
+""")
+
 cholesky = _add_docstr(_linalg.linalg_cholesky, r"""
 linalg.cholesky(A, *, upper=False, out=None) -> Tensor
 
@@ -689,26 +739,26 @@ householder_product(A, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices.
 
-Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-for a matrix :math:`V \in \mathbb{K}^{m \times n}` with columns :math:`v_i \in \mathbb{K}^m`
-with :math:`m \geq n` and a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`,
-this function computes the first :math:`n` columns of the matrix
+Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
+let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
+for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
+zeroing out the first :math:`i-1` compontents of :math:`v_i` and setting to `1` the :math:`i`-th.
+For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
+first :math:`n` columns of the matrix
 
 .. math::
 
-    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i v_i v_i^{\text{H}}
+    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i w_i w_i^{\text{H}}
 
-where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and
-:math:`v^{\text{H}}` is the conjugate transpose when :math:`v` is complex, and the transpose when :math:`v` is real-valued.
+where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`w^{\text{H}}` is the
+conjugate transpose when :math:`w` is complex, and the transpose when :math:`w` is real-valued.
+The output matrix is the same size as the input matrix :attr:`A`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
-
-.. note:: This function only uses the values strictly below the main diagonal of :attr:`A`.
-          The other values are ignored.
 
 .. seealso::
 
@@ -720,7 +770,7 @@ the output has the same batch dimensions.
         However, that function is not supported by autograd.
 
 .. warning::
-    Gradient computations are only well-defined if :math:`tau_i ||v_i||^2 \neq 1`.
+    Gradient computations are only well-defined if :math:`tau_i \neq \frac{1}{||v_i||^2}`.
     If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
@@ -1893,6 +1943,10 @@ This function computes a compact representation of the decomposition given by :f
 If the matrix is square, this representation may be used in :func:`torch.linalg.lu_solve`
 to solve system of linear equations that share the matrix :attr:`A`.
 
+The returned decomposition is represented as a named tuple `(LU, pivots)`.
+The ``LU`` matrix has the same shape as the input matrix ``A``. Its upper and lower triangular
+parts encode the non-constant elements of ``L`` and ``U`` of the LU decomposition of ``A``.
+
 The returned permutation matrix is represented by a 1-indexed vector. `pivots[i] == j` represents
 that in the `i`-th step of the algorithm, the `i`-th row was permuted with the `j-1`-th row.
 
@@ -1962,7 +2016,6 @@ lu_factor_ex = _add_docstr(_linalg.linalg_lu_factor_ex, r"""
 linalg.lu_factor_ex(A, *, pivot=True, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
 
 This is a version of :func:`~lu_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
-
 It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 
 """ + fr"""
@@ -1971,44 +2024,18 @@ It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
 .. warning:: {common_notes["experimental_warning"]}
 """ + r"""
 
-.. warning:: The LU decomposition is almost never unique, as often there are different permutation
-             matrices that can yield different LU decompositions.
-             As such, different platforms, like SciPy, or inputs on different devices,
-             may produce different valid decompositions.
-
-.. warning:: Gradient computations are only supported if the input matrix is full-rank.
-             If this condition is not met, no error will be thrown, but the gradient may not be finite.
-             This is because the LU decomposition with pivoting is not differentiable at these points.
-
-.. seealso::
-        :func:`~lu_factor` is a variant that always checks for errors.
-
 Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
-    pivot (bool, optional): [Only on CUDA] Whether to compute the LU decomposition with partial pivoting,
-                            or the regular LU decomposition. Default: `True`.
-    check_errors (bool, optional): controls whether to check the content of ``infos``. Default: `False`.
+    pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                            decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
+    check_errors (bool, optional): controls whether to check the content of ``infos`` and raise
+                                   an error if it is non-zero. Default: `False`.
     out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
 
 Returns:
     A named tuple `(LU, pivots, info)`.
-
-Examples::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> B1 = torch.randn(2, 3, 4)
-    >>> B2 = torch.randn(2, 3, 7)
-    >>> LU, pivots, info = torch.linalg.lu_factor(A)
-    >>> info
-    tensor([0, 0, 0], dtype=torch.int32)
-    >>> X1 = torch.linalg.lu_solve((LU, pivots), B1)
-    >>> X2 = torch.linalg.lu_solve((LU, pivots), B2)
-    >>> torch.allclose(A @ X1, B1)
-    True
-    >>> torch.allclose(A @ X2, B2)
-    True
 
 .. _LAPACK's getrf:
     https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html

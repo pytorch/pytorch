@@ -14,7 +14,6 @@
 
 #include <algorithm>
 #include <iostream>
-#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1176,7 +1175,6 @@ bool Node::hasSideEffects() const {
     case prim::IgnoredPythonOp:
     case prim::Print:
     case prim::RaiseException:
-    case prim::SetAttr:
     case aten::warn:
     case aten::save:
     case aten::manual_seed:
@@ -2302,15 +2300,6 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
-}
-
-std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
-  std::vector<std::shared_ptr<Operator>> result;
-  for (const auto& kv : ops) {
-    auto ops_for_symbol = kv.second;
-    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
-  }
-  return result;
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {
