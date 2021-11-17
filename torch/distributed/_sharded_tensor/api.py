@@ -322,6 +322,7 @@ class ShardedTensor(object):
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata
+        gathered_metadatas: List[Optional[ShardedTensorMetadata]] = []
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
