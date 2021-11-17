@@ -100,6 +100,10 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
+  void clear_optimized_graphs() {
+    optimized_graphs_.fill(c10::nullopt);
+  }
+
  private:
   enum SpecializationKey {
     AutocastOff,
