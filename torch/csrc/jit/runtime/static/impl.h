@@ -366,6 +366,11 @@ class TORCH_API StaticRuntime {
       IValueList&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
+  template <typename IValueList>
+  c10::IValue run_impl_record_functions(
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
   // helper method for copying input args/kwargs into inputs_
   void set_inputs(
       const std::vector<c10::IValue>& args,
@@ -501,7 +506,7 @@ class TORCH_API ProcessedNode {
     return c10::ArrayRef<const IValue*>(inputs_.get(), inputs_size_);
   }
 
-  std::vector<IValue> clone_inputs() const;
+  std::vector<IValue> inputs_ivalue_vec() const;
 
   bool has_out_variant() const {
     return fn_.kind == FunctionKind::kOutVariant;
