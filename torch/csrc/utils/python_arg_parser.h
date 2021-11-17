@@ -49,7 +49,6 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/LinalgBackend.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -81,7 +80,7 @@ namespace torch {
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, COMPLEX, TENSOR_LIST, INT_LIST, GENERATOR,
   BOOL, STORAGE, PYOBJECT, SCALARTYPE, LAYOUT, MEMORY_FORMAT, DEVICE, STREAM, STRING,
-  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST, LINALG_BACKEND
+  DIMNAME, DIMNAME_LIST, QSCHEME, FLOAT_LIST, SCALAR_LIST
 };
 
 struct FunctionParameter;
@@ -195,9 +194,7 @@ struct PythonArgs {
   inline std::vector<at::Dimname> dimnamelist(int i);
   inline c10::optional<std::vector<at::Dimname>> toDimnameListOptional(int i);
   inline at::MemoryFormat memoryformat(int i);
-  inline at::LinalgBackend linalgbackend(int i);
   inline c10::optional<at::MemoryFormat> memoryformatOptional(int i);
-  inline c10::optional<at::LinalgBackend> linalgbackendOptional(int i);
   inline at::QScheme toQScheme(int i);
   inline std::string string(int i);
   inline std::string stringWithDefault(int i, const std::string& default_str);
@@ -584,19 +581,6 @@ inline c10::optional<at::MemoryFormat> PythonArgs::memoryformatOptional(int i) {
   if (!args[i])
     return c10::nullopt;
   return memoryformat(i);
-}
-
-inline at::LinalgBackend PythonArgs::linalgbackend(int i) {
-  if (!args[i]) return at::LinalgBackend::Default;
-  TORCH_CHECK(THPLinalgBackend_Check(args[i]), "linalg_backend arg must be an instance of the torch.linalg_backend");
-  const auto linalg_backend = reinterpret_cast<THPLinalgBackend*>(args[i]);
-  return linalg_backend->linalg_backend;
-}
-
-inline c10::optional<at::LinalgBackend> PythonArgs::linalgbackendOptional(int i) {
-  if (!args[i])
-    return c10::nullopt;
-  return linalgbackend(i);
 }
 
 inline at::QScheme PythonArgs::toQScheme(int i) {
