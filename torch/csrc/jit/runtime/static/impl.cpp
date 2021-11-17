@@ -1803,7 +1803,7 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
     return false;
   }
   if (status == at::MemOverlapStatus::TOO_HARD) {
-    LOG(WARNING) << "Detected TOO_HARD memory overlap status";
+    VLOG(1) << "Detected TOO_HARD memory overlap status";
   }
   return true;
 }
