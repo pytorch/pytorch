@@ -1830,10 +1830,16 @@ def sample_inputs_isclose(
         **kwargs,
     )
 
-    lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
-    rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
+    rtols = [0., 1e-7] # default is 1e-5
+    atols = [0., 1e-7] # default is 1e-8
+    equal_nans = [False, True]
 
-    for rtol, atol, equal_nan in product([0., 1e-7], [0., 1e-7], [False, True]):
+    products = product(rtols, atols, equal_nans)
+
+    for rtol, atol, equal_nan in products:
+        lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
+        rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
+
         sample_inputs.append(SampleInput(lhs, args=(rhs,),
                              kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan)))
 
