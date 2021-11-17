@@ -2,16 +2,13 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/quantized_ops.h>
-#ifdef USE_FBGEMM
-#include <fbgemm/Fbgemm.h>
-#endif
+#include <ATen/native/cpu/utils.h>
 
 #include <c10/util/irange.h>
 
 namespace at {
 namespace native {
 
-#ifdef USE_FBGEMM
 namespace {
 
 Tensor quantized_pixel_shuffle_impl(
@@ -19,18 +16,16 @@ Tensor quantized_pixel_shuffle_impl(
     int64_t upscale_factor) {
 
   TORCH_CHECK(
-      fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
-  TORCH_CHECK(
       upscale_factor > 0,
       "Number of upscale_factor to divide channels in must be positive.",
       " Value of upscale_factor:", upscale_factor);
   TORCH_CHECK(
       self.dim() == 4,
-      "pixel_shuffle expects 4D input, but got input with sizes ",
+      "quantized_pixel_shuffle expects 4D input, but got input with sizes ",
       self.sizes());
   TORCH_CHECK(
       self.scalar_type() == kQUInt8,
-      "Quantized pixel shuffle works only on uint8_t.",
+      "quantized_pixel_shuffle works only on uint8_t.",
       "But got:", self.scalar_type());
 
   int64_t S = upscale_factor;
@@ -41,7 +36,7 @@ Tensor quantized_pixel_shuffle_impl(
   int64_t out_channels = channels / (S * S);
   TORCH_CHECK(
       channels % (S * S) == 0,
-      "pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
+      "quantized_pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
       "upscale_factor, but input.size(-3)=", channels, " is not divisible by ", (S * S));
 
   const Tensor self_nhwc = self.contiguous(MemoryFormat::ChannelsLast);
@@ -84,7 +79,7 @@ Tensor quantized_pixel_shuffle_impl(
         // step 1: transpose each channel lane
         //   src: input channel view as [oc, s1*s2]
         //   dst: buffer view as [s1*s2, oc]
-        fbgemm::transpose_simd<uint8_t>(
+        utils::transpose<uint8_t>(
             out_channels,
             S * S,
             reinterpret_cast<uint8_t*>(qx_ptr),
@@ -110,18 +105,11 @@ Tensor quantized_pixel_shuffle_impl(
 }
 
 } // namespace
-#endif
 
-// at::native functions for the native_functions.yaml
-Tensor pixel_shuffle_quantized_cpu(
+Tensor quantized_pixel_shuffle(
     const Tensor& self,
     int64_t upscale_factor) {
-#ifdef USE_FBGEMM
   return quantized_pixel_shuffle_impl(self, upscale_factor);
-#endif
-  // If FBGEMM is not available then fall back to the
-  // non quantized path.
-  return at::native::pixel_shuffle(self, upscale_factor);
 }
 
 } // namespace native

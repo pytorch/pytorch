@@ -1040,7 +1040,7 @@ class TestQuantizedOps(TestCase):
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=4, max_dims=4,
                                               min_side=2, max_side=32, max_numel=10**5),
                        qparams=hu.qparams(dtypes=[torch.quint8])),
-           upscale_factor=st.integers(2, 6))
+           upscale_factor=st.integers(2, 3))
     def test_pixel_shuffle(self, X, upscale_factor):
         X, (scale, zero_point, torch_type) = X
         channels = X.shape[-3]

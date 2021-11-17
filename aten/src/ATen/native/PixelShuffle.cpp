@@ -29,6 +29,11 @@ Tensor pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
   TORCH_CHECK(c % upscale_factor_squared == 0,
               "pixel_shuffle expects its input's 'channel' dimension to be divisible by the square of "
               "upscale_factor, but input.size(-3)=", c, " is not divisible by ", upscale_factor_squared);
+
+  if (self.is_quantized() && self.is_contiguous(MemoryFormat::ChannelsLast)) {
+    return at::quantized_pixel_shuffle(self, upscale_factor);
+  }
+
   int64_t oc = c / upscale_factor_squared;
   int64_t oh = h * upscale_factor;
   int64_t ow = w * upscale_factor;

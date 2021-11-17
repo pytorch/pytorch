@@ -1823,10 +1823,6 @@
 - name: _upsample_nearest_exact3d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> Tensor
   input: _upsample_nearest_exact3d_backward(grad, output_size, input.sizes(), scale_factors)
 
-- name: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
-  self: pixel_unshuffle(grad, upscale_factor)
-  result: auto_linear
-
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
 
