@@ -1804,7 +1804,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
   // with k = min(m, n)
 
   if (unpack_lu) {
-    if (m > n || (m == n && LU.is_same(L))) {
+    if (m > n || LU.is_same(L)) {
       // The order of triu and tril is important as we may have LU.is_same(L)
       at::triu_out(const_cast<Tensor&>(U), m == n ? LU : LU.narrow(-2, 0, n), 0);
       at::tril_out(const_cast<Tensor&>(L), LU, -1);
@@ -2936,6 +2936,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued

@@ -132,7 +132,7 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
     }
   };
 
-  _launch_kernel<num_threads, thread_work_size>(iter.numel(), loop);
+  _launch_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
 }
 } // anonymous namespace
 
