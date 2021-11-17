@@ -9436,7 +9436,10 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_isclose,
                     supports_autograd=False,
                     supports_out=False,
-                    ),
+                    # FIXME: isclose does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo('softmax',
