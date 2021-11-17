@@ -344,12 +344,9 @@ class TestDependencyAPI(PackageTestCase):
 
     def test_selective_intern(self):
         # smoke test for selective intern
-        filename_selective_intern = str(Path(__file__).parent / "package_d/test_selective_intern.py")
-        filename_extern= str(Path(__file__).parent / "package_d/test_extern.py")
-
         buffer = BytesIO()
         with PackageExporter(buffer) as he:
-            he.extern(["package_d.*"])
+            he.extern(["package_d.**"])
             he._selective_intern("package_d.test_selective_intern","package_d.test_selective_intern.**")
             # pdb.set_trace()
             he.save_source_string("foo", "import package_d.test_selective_intern as test_selective_intern; import package_d.test_extern as test_extern")
@@ -374,8 +371,40 @@ class TestDependencyAPI(PackageTestCase):
         # test external dependencies are still externed
         self.assertIs(foo.test_extern.test_selective_intern, package_d.test_selective_intern)
 
+    def test_selective_intern_toplevel(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.extern(["package_d.**"])
+            he._selective_intern("package_d.test_selective_intern","package_d.test_selective_intern.**")
+            # pdb.set_trace()
+            he.save_source_string("foo", "import package_d; import package_d.test_selective_intern as test_selective_intern; import package_d.test_extern as test_extern")
+            # pdb.set_trace()
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        # pdb.set_trace()
+        foo = hi.import_module("foo")
+
+        # number is not getting overwritten
+        import package_d.test_selective_intern
+        import package_d.test_extern
+
+        # test access
+        self.assertEqual(foo.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(foo.test_selective_intern.test_number, package_d.test_selective_intern.test_number)
+        self.assertEqual(foo.package_d.extern_package.test_number, package_d.extern_package.test_number)
+        self.assertEqual(foo.package_d.selective_intern_package.test_number, package_d.selective_intern_package.test_number)
+
+
+        # test that that test_selective_intern is actually interned properly
+        self.assertIs(foo.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.test_selective_intern, package_d.test_selective_intern)
+        self.assertIs(foo.package_d.extern_package, package_d.extern_package)
+        self.assertIsNot(foo.package_d.selective_intern_package, package_d.selective_intern_package)
+
+        # test external dependencies are still externed
+        self.assertIs(foo.test_extern.test_selective_intern, package_d.test_selective_intern)
+
     def test_selective_intern_subpackage(self):
-        # buffer = BytesIO()
         buffer = "/tmp/a.out"
         with PackageExporter(buffer) as he:
             he.extern("package_b.**")
@@ -392,10 +421,12 @@ class TestDependencyAPI(PackageTestCase):
 
         # subpackage_0 should be interned, subpackage_1 should not.
         self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
+        self.assertIsNot(foo.subpackage_0.subsubpackage_0, package_b.subpackage_0.subsubpackage_0)
         # self.assertIs(package_b.subpackage_1, foo.subpackage_1)
 
         # Check that attribute access still works on selectively interned module.
         self.assertEqual(foo.subpackage_0.subpackage_0_li[0], package_b.subpackage_0.subpackage_0_li[0])
+        self.assertEqual(foo.subpackage_0.subsubpackage_0.subsubpackage_0_li[0], package_b.subpackage_0.subsubpackage_0.subsubpackage_0_li[0])
         self.assertIsNot(foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li)
         self.assertEqual(foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li)
 
