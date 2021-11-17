@@ -498,6 +498,8 @@ def get_torch_function_hook_type(
     parent_module: Optional[torch.nn.Module],
     func: Callable,
 ) -> HookType:
+    # the direct __dict__ accesses are for performance, because
+    # the default `torch.nn.Module.__getattr__` has overhead.
     parent_module_has_qstate = parent_module is not None and \
         '_modules' in parent_module.__dict__ and \
         '_auto_quant_state' in parent_module.__dict__['_modules']
