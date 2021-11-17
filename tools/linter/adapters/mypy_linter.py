@@ -171,7 +171,9 @@ def main() -> None:
         stream=sys.stderr,
     )
 
-    filenames = set(args.filenames)
+    # Use a dictionary here to preserve order. mypy cares about order,
+    # tragically, e.g. https://github.com/python/mypy/issues/2015
+    filenames = {f: True for f in args.filenames}
 
     # If a stub file exists, do not call mypy on the "real" file, in accordance
     # with PEP-484 (see https://www.python.org/dev/peps/pep-0484/#stub-files)
@@ -179,7 +181,7 @@ def main() -> None:
     for stub in stubs:
         real = stub[:-1]
         if real in filenames:
-            filenames.remove(real)
+            del filenames[real]
 
     lint_messages = check_files(list(filenames), args.config, args.binary, args.retries)
     for lint_message in lint_messages:
