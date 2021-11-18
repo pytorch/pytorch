@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -32,6 +33,14 @@ std::vector<kir::ForLoop*> getLoops(kir::Expr* scope);
 //!
 void insertBefore(kir::Expr* scope, kir::Expr* ref, kir::Expr* expr);
 
+//! Create an **empty** Forloop and copy the metadata.
+kir::ForLoop* cloneForLoop(kir::IrBuilder& ir_builder, kir::ForLoop* for_loop);
+
+//! Create an **empty** IfThenElse and copy the metadata.
+kir::IfThenElse* cloneIfThenElse(
+    kir::IrBuilder& ir_builder,
+    kir::IfThenElse* ite);
+
 } // namespace scope_utils
 
 namespace ir_utils {
@@ -52,8 +61,12 @@ class TVDomainGuard {
   ~TVDomainGuard();
 };
 
-// Return inputs of provided IterDomains that are IterDomains
-std::vector<IterDomain*> iterDomainInputsOf(const std::vector<IterDomain*>&);
+//! Return inputs of provided IterDomains that are IterDomains. A list
+//! of input IterDomain can be optionally given. Otherwise,
+//! IterDomains with no defining expression are returned.
+std::vector<IterDomain*> iterDomainInputsOf(
+    const std::vector<IterDomain*>& input_ids,
+    const std::vector<IterDomain*>& all_inputs = {});
 
 // Return inputs of provided IterDomains that are IterDomains, order as the
 // second provided vector.
@@ -78,6 +91,19 @@ Expr* asExpr(Statement*);
 // TODO(kir): Remove in favor of ->as<TensorView>()
 TensorView* asTV(Val*);
 
+//! Get kir::TensorView potentially via kir::TensorIndex. Returns nullptr if
+//! cast fails.
+kir::TensorView* getTv(kir::Val*);
+
+//! Get only kir::TensorView potentially via kir::TensorIndex.
+std::vector<kir::TensorView*> getTvs(const std::vector<kir::Val*>& vals);
+
+//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
+kir::TensorView* asTv(kir::Val*);
+
+//! Get kir::TensorView potentially via kir::TensorIndex. Error if cast fails.
+std::vector<kir::TensorView*> asTvs(const std::vector<kir::Val*>& vals);
+
 bool hasBlockSync(const Expr* expr, const ThreadPredicateMap& pred_map);
 bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
 
@@ -98,6 +124,18 @@ bool hasBlockSync(const kir::Expr* expr, const ThreadPredicateMap& pred_map);
 kir::Expr* applyReplacements(
     const std::unordered_map<kir::Expr*, kir::Expr*>& expr_replacement_map,
     kir::Expr* expr);
+
+//! Returns the Fuser iterdomain that maps to the thread dimension grouped
+//!  to warps. Returns nullopt if the reduction is not to be lowered to
+//!  a warp reduction.
+c10::optional<IterDomain*> getMaybeWarpReductionDim(
+    const kir::ReductionOp* node);
+
+c10::optional<IterDomain*> getMaybeWarpReductionDim(const ReductionOp* node);
+
+//! Return true if axis is derived from a root axis that is an input
+//! to a CA leaf axis.
+bool derivedFromRootCAAxes(const TensorView* tv, IterDomain* axis);
 
 } // namespace ir_utils
 
@@ -124,6 +162,17 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
     const TensorView* tv,
     const std::vector<kir::ForLoop*>& loops);
 } // namespace loop_utils
+
+// Replace value pass on Kernel IR.
+//  Replace each use of any kir::Val* that apears in the given `replacement_map`
+//  Keeps the predicate carried by each expr
+//
+// Warning: Blindly replaces all use based on pointer
+// Warning: May invalidate indexing if replacing uses of allocated values
+std::vector<kir::Expr*> replaceInputsInExpr(
+    const std::vector<kir::Expr*>& exprs,
+    const std::unordered_map<kir::Val*, kir::Val*>& replacement_map);
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
