@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, List, Union
+from typing import Optional, Tuple, List, Union, Any
 
 import torch
 from torch import Tensor
@@ -178,18 +178,21 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
     operation_names = dict()
     operation_names.update(reduction_names)
     operation_names.update(normalization_names)
-    operation_args = ('dim',)
 
     # Default example data:
     example_dim = 1
     example_input = torch.tensor([[-3, -2, -1], [0, 1, 2]])
     example_mask = torch.tensor([[True, False, True], [False, False, False]])
-    example_args = (example_dim,)
 
+    example_args: Tuple[Any, ...]
+    operation_args: Tuple[str, ...]
     if func.__name__ == 'norm':
-        example_args = (2.0,) + example_args
-        operation_args = ('p',) + operation_args
+        example_args = (2.0, example_dim)
+        operation_args = ('p', 'dim')
         example_input = example_input.to(dtype=torch.float32)
+    else:
+        example_args = (example_dim,)
+        operation_args = ('dim',)
 
     if func.__name__ in reduction_names:
         op_kind = 'reduction'
@@ -335,10 +338,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
             if op.__name__ == 'norm':
                 if args:
                     args = args[1:]  # lstrip p argument
-                if args:
-                    dim = args[0]
-                else:
-                    dim = kwargs.get('dim')
+            dim = args[0] if args else kwargs.get('dim')
             outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
             dim_ = _canonical_dim(dim, input.ndim)
