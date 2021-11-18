@@ -29,6 +29,10 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
 
+  // linear algebra functions
+  m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
+
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
 }
