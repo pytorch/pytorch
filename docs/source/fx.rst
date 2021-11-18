@@ -247,7 +247,7 @@ multiplication after the ``F.relu``, and then clean up the original
 objects to automatically record operations into the :class:`Graph`.
 
 To use this method, we write the operations that we want inserted as regular
-PyTorch code and invoke that code with :class:`Proxy` objects as arugments.
+PyTorch code and invoke that code with :class:`Proxy` objects as arguments.
 These :class:`Proxy` objects will capture the operations that are performed
 on them and append them to the :class:`Graph`.
 
@@ -415,6 +415,21 @@ process of transformations that led to the generated code.
 
 If you’re not familiar with debuggers, please see the auxiliary section
 :ref:`Available Debuggers`.
+
+
+Common Pitfalls in Transform Authoring
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* Nondeterministic ``set`` iteration order. In Python, the ``set`` datatype is
+  unordered. Using ``set`` to contain collections of objects like ``Node``\ s,
+  for example, can cause unexpected nondeterminism. An example is iterating
+  over a set of ``Node``\ s to insert them into a ``Graph``. Because the
+  ``set`` data type is unordered, the ordering of the operations in the output
+  program will be nondeterministic and can change across program invocations.
+  The recommended alternative is to use a ``dict`` data type, which is
+  `insertion ordered <https://mail.python.org/pipermail/python-dev/2017-December/151283.html>`_
+  as of Python 3.7 (and as of cPython 3.6). A ``dict`` can be used equivalently
+  to a set by storing values to be deduplicated in the keys of the ``dict``.
 
 Checking Correctness of Modules
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -602,28 +617,31 @@ examine our traced module:
     # The generated `forward` function is:
     """
     def forward(self, x, y):
-        add_1 = x + y;  x = y = None
-        return add_1
+        add = x + y;  x = y = None
+        return add
     """
 
     # Print the internal Graph.
     print(traced.graph)
     # This print-out returns:
     """
-    graph(x, y):
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
-        return add_1
+    graph():
+        %x : [#users=1] = placeholder[target=x]
+        %y : [#users=1] = placeholder[target=y]
+        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        return add
     """
 
     # Print a tabular representation of the internal Graph.
     traced.graph.print_tabular()
     # This gives us:
     """
-    opcode         name    target                   args      kwargs
-    -------------  ------  -----------------------  --------  --------
-    placeholder    x       x                        ()        {}
-    placeholder    y       y                        ()        {}
-    call_function  add_1   <built-in function add>  (x, y)    {}
+    opcode         name    target                   args    kwargs
+    -------------  ------  -----------------------  ------  --------
+    placeholder    x       x                        ()      {}
+    placeholder    y       y                        ()      {}
+    call_function  add     <built-in function add>  (x, y)  {}
+    output         output  output                   (add,)  {}
     """
 
 Using the utility functions above, we can compare our traced Module

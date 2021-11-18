@@ -11,12 +11,11 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType) {
   RegisterOperators reg({
       Operator(
           "aten::test_vartype(t[] a, t b) -> (t)",
-          [](Stack* stack) {
+          [](Stack& stack) {
             c10::List<double> list;
             // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             double a;
@@ -51,12 +50,11 @@ TEST(SchemaMatchingTest, VarType) {
       err.find("previously matched to type") != std::string::npos);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SchemaMatchingTest, VarType2) {
   RegisterOperators reg({
       Operator(
           "aten::test_vartype2(t a, t[] b) -> (t[])",
-          [](Stack* stack) {
+          [](Stack& stack) {
             // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
             double a;
             c10::List<double> list;

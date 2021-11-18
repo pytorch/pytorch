@@ -1,9 +1,10 @@
+# Owner(s): ["oncall: quantization"]
 
 import torch
 import torch.nn as nn
 import torch.nn.quantized as nnq
 from torch.nn.utils.rnn import PackedSequence
-from torch.quantization import (
+from torch.ao.quantization import (
     quantize,
     prepare,
     convert,
@@ -41,7 +42,8 @@ from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     EmbeddingBagModule,
     EmbeddingModule,
-    EmbeddingWithLinear,
+    EmbeddingWithStaticLinear,
+    LinearReluLinearModel,
 )
 
 # annotated models
@@ -78,7 +80,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         """
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                qconfig = torch.quantization.get_default_qconfig(qengine)
+                qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = AnnotatedSingleLayerLinearModel(qengine)
                 model.qconfig = qconfig
                 model = prepare(model)
@@ -334,7 +336,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         """
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
-                qconfig = torch.quantization.get_default_qconfig(qengine)
+                qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = ResNetBase().float().eval()
                 model.fuse_model()
                 model = QuantWrapper(model)
@@ -361,7 +363,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Test quantization of normalization layers
         """
         model = NormalizationTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         prepare(model, inplace=True)
         self.checkObservers(model)
         test_only_eval_fn(model, self.calib_data)
@@ -396,8 +398,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
         for qengine in supported_qengines:
             with override_quantized_engine(qengine):
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
 
                 model = prepare(model)
                 # calibrate
@@ -410,8 +412,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
                 # Create model again for eval
                 model = TwoLayerLinearModel()
-                model = torch.quantization.QuantWrapper(model)
-                model.qconfig = torch.quantization.get_default_qconfig(qengine)
+                model = torch.ao.quantization.QuantWrapper(model)
+                model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                 model = prepare(model)
                 model = convert(model)
                 new_state_dict = model.state_dict()
@@ -430,7 +432,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Test quantization of activations
         """
         model = ActivationsTestModel()
-        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        model.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         prepare(model, inplace=True)
         self.checkObservers(model)
         test_only_eval_fn(model, self.calib_data)
@@ -472,7 +474,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model.fc.register_forward_pre_hook(fw_pre_hook)
         model.fc.register_forward_hook(fw_hook)
 
-        model.qconfig = torch.quantization.get_default_qconfig(qengine)
+        model.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
         model = prepare(model)
 
         def checkHooksIsPresent(model, before_convert=True):
@@ -495,7 +497,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
 
         checkHooksIsPresent(model, True)
         test_only_eval_fn(model, self.calib_data)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
         checkHooksIsPresent(model, False)
 
     @skipIfNoFBGEMM
@@ -513,35 +515,16 @@ class TestPostTrainingStatic(QuantizationTestCase):
         self.assertEqual(type(model.emb), torch.nn.quantized.Embedding)
         self.checkScriptable(model, [[indices]], check_save_load=True)
 
-        model = EmbeddingWithLinear().eval()
+        idx = torch.LongTensor([1, 2, 4, 5, 4, 3, 2, 9])
+        offsets = torch.LongTensor([0, 4])
+        x = torch.randn(2, 4)
+        model = EmbeddingWithStaticLinear().eval()
         prepare(model, inplace=True)
         convert(model, inplace=True)
         self.assertTrue('QuantizedEmbedding' in str(model))
         self.assertTrue('QuantizedLinear' in str(model))
         self.checkQuantizedLinear(model.fc)
-
-    @skipIfNoFBGEMM
-    def test_embedding_linear_dynamic(self):
-        class EmbeddingWithLinearDynamic(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
-                self.fc = torch.nn.Linear(5, 5)
-
-            def forward(self, indices, linear_in):
-                return self.emb(indices), self.fc(linear_in)
-
-        model = EmbeddingWithLinearDynamic()
-        qconfig_dict = {'fc' : default_dynamic_qconfig}
-        model = EmbeddingWithLinear()
-        quantize_dynamic(model, qconfig_dict, inplace=True)
-
-        model.emb.qconfig = float_qparams_weight_only_qconfig
-        prepare(model, inplace=True)
-        convert(model, inplace=True)
-        self.assertTrue('QuantizedEmbedding' in str(model))
-        self.assertTrue('DynamicQuantizedLinear' in str(model))
-
+        model(idx, offsets, x)
 
     @skipIfNoFBGEMM
     def test_dequant_stub(self):
@@ -749,9 +732,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         weight observers fails in the prepare step, as opposed to the convert step.
         """
         m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
-        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         with self.assertRaises(AssertionError) as context:
-            mp = torch.quantization.prepare(m)
+            mp = torch.ao.quantization.prepare(m)
         self.assertTrue(
             str(context.exception) ==
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.')
@@ -762,9 +745,9 @@ class TestPostTrainingStatic(QuantizationTestCase):
         Verifies that having qconfig==None for conv transpose does not crash
         """
         m = torch.nn.Sequential(torch.nn.ConvTranspose2d(1, 1, 1))
-        m.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        m.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
         m[0].qconfig = None
-        mp = torch.quantization.prepare(m)
+        mp = torch.ao.quantization.prepare(m)
 
 
 @skipIfNoFBGEMM
@@ -995,6 +978,23 @@ class TestPostTrainingDynamic(QuantizationTestCase):
         model = quantize_dynamic(NestedModel().eval(), qconfig_dict)
         checkQuantized(model)
 
+    def test_linear_relu_fusion(self):
+        dtype = torch.qint8
+        model = LinearReluLinearModel().eval()
+        qconfig = default_dynamic_qconfig
+        qconfig_dict = {'' : qconfig}
+        torch.ao.quantization.fuse_modules(model, [['fc1', 'relu']], inplace=True)
+        prepare_dynamic(model, qconfig_dict)
+        convert_dynamic(model)
+
+        def checkQuantized(model):
+            self.checkDynamicQuantizedLinearRelu(model.fc1, dtype)
+            self.checkDynamicQuantizedLinear(model.fc2, dtype)
+            self.checkScriptable(model, self.calib_data, check_save_load=True)
+            self.checkNoQconfig(model)
+
+        checkQuantized(model)
+
     @given(qconfig=st.sampled_from([per_channel_dynamic_qconfig, default_dynamic_qconfig]),
            dtype=st.sampled_from([torch.qint8, torch.float16]))
     def test_quantized_rnn(self, qconfig, dtype):
@@ -1141,6 +1141,32 @@ class TestPostTrainingDynamic(QuantizationTestCase):
             convert_dynamic(model)
             checkHooksIsPresent(model)
 
+    @skipIfNoFBGEMM
+    def test_embedding_ops_dynamic(self):
+        class EmbeddingBagWithLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12,
+                                                 include_last_offset=True, scale_grad_by_freq=False, mode='sum')
+                self.fc = torch.nn.Linear(5, 5)
+
+            def forward(self, indices, offsets, linear_in):
+                return self.emb(indices, offsets), self.fc(linear_in)
+        model = EmbeddingBagWithLinear().eval()
+
+        qconfig_dict = {
+            torch.nn.EmbeddingBag : float_qparams_weight_only_qconfig,
+            torch.nn.Linear: default_dynamic_qconfig
+        }
+        indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
+        offsets = torch.tensor([0, 19, 20, 28, 28, 32])
+        q_model = quantize_dynamic(model, qconfig_dict)
+
+        q_model(indices, offsets, torch.randn(5, 5))
+        self.assertTrue('QuantizedEmbedding' in str(q_model))
+        self.assertTrue('DynamicQuantizedLinear' in str(q_model))
+
+
 class TestEagerModeActivationOps(QuantizationTestCase):
     def _test_activation_op_impl(
             self, float_module_class, quantized_module_class, extra_module_kwargs):
@@ -1183,10 +1209,10 @@ class TestFunctionalModule(QuantizationTestCase):
         xq = torch.quantize_per_tensor(x, 0.01, 30, torch.quint8)
         self.checkScriptable(model, [[x]], check_save_load=True)
         if train_mode:
-            model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+            model.qconfig = torch.ao.quantization.get_default_qat_qconfig('fbgemm')
             model = prepare_qat(model)
         else:
-            model.qconfig = torch.quantization.get_default_qconfig('qnnpack')
+            model.qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
             model = prepare(model)
         # Check if observers and quant/dequant nodes are inserted
         self.checkNoPrepModules(model)
@@ -1207,16 +1233,14 @@ class TestFunctionalModule(QuantizationTestCase):
 
 class TestQuantizeONNXExport(JitTestCase):
     def _test_lower_graph_impl(self, model, data):
-        model.qconfig = torch.quantization.default_qconfig
-        model = torch.quantization.prepare(model)
-        model = torch.quantization.convert(model)
+        model.qconfig = torch.ao.quantization.default_qconfig
+        model = torch.ao.quantization.prepare(model)
+        model = torch.ao.quantization.convert(model)
 
         outputs = model(data)
         input_names = ["x"]
 
         def export_to_onnx(model, input, input_names):
-            outputs = model(input)
-
             traced = torch.jit.trace(model, input)
             buf = io.BytesIO()
             torch.jit.save(traced, buf)
@@ -1224,20 +1248,20 @@ class TestQuantizeONNXExport(JitTestCase):
 
             model = torch.jit.load(buf)
             f = io.BytesIO()
-            torch.onnx.export(model, input, f, input_names=input_names, example_outputs=outputs,
+            torch.onnx.export(model, input, f, input_names=input_names,
                               operator_export_type=torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK)
         onnx_model = export_to_onnx(model, data, input_names)
 
     @skipIfNoFBGEMM
     def test_lower_graph_linear(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Linear(5, 10, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 2, 5).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
 
     @skipIfNoFBGEMM
     def test_lower_graph_conv2d(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv2d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)
@@ -1246,7 +1270,7 @@ class TestQuantizeONNXExport(JitTestCase):
     @unittest.skip("onnx opset9 does not support quantize_per_tensor and caffe2 \
     does not support conv3d")
     def test_lower_graph_conv3d(self):
-        model = torch.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
+        model = torch.ao.quantization.QuantWrapper(torch.nn.Conv3d(3, 5, 2, bias=True)).to(dtype=torch.float)
         data_numpy = np.random.rand(1, 3, 6, 6, 6).astype(np.float32)
         data = torch.from_numpy(data_numpy).to(dtype=torch.float)
         self._test_lower_graph_impl(model, data)

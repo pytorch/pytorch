@@ -1,9 +1,6 @@
 .. _launcher-api:
 
-Elastic Launch
-============================
-
-torch.distributed.run
-----------------------
+torchrun (Elastic Launch)
+======================================
 
 .. automodule:: torch.distributed.run

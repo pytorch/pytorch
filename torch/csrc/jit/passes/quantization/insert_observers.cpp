@@ -1,3 +1,4 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/quantization/insert_observers.h>
 
 #include <torch/csrc/jit/frontend/schema_matching.h>
@@ -124,7 +125,7 @@ class ModuleCloneHelper {
     }
     // Copy slots. If a slot is a module - recursively clone it.
     size_t N = type->numAttributes();
-    for (size_t i = 0; i < N; ++i) {
+    for (const auto i : c10::irange(N)) {
       IValue s = module._ivalue()->getSlot(i);
       std::string attr_name = type->getAttributeName(i);
       TypePtr attr_type = type->getAttribute(i);
@@ -262,7 +263,7 @@ class ModuleCloneHelper {
       }
       return type_ptr;
     };
-    auto graph = method.graph()->copy();
+    auto graph = toGraphFunction(method).graph()->copy();
     remapTypes(graph.get(), source, target, module_qconfig_map, type_remap_fn);
     // remap self
     graph->inputs()[0]->setType(target.type());
@@ -1184,8 +1185,8 @@ bool InsertObserversHelper::valueNeedsToBeQuantized(
     Value* v,
     const QConfig& qconfig) {
   if (isBiasOfConvOrLinear(v) ||
-      !(v->type()->isSubtypeOf(TensorType::get()) ||
-        v->type()->isSubtypeOf(ListType::ofTensors())) ||
+      !(v->type()->isSubtypeOf(*TensorType::get()) ||
+        v->type()->isSubtypeOf(*ListType::ofTensors())) ||
       isEmbeddingBagNonInput(v)) {
     return false;
   }

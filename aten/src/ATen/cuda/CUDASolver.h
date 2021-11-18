@@ -31,7 +31,7 @@ void getrf<c10::complex<float>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<float>));
 
 
 #define CUDASOLVER_GETRS_ARGTYPES(Dtype)  \
-    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info
+    cusolverDnHandle_t handle, int n, int nrhs, Dtype* dA, int lda, int* ipiv, Dtype* ret, int ldb, int* info, cublasOperation_t trans
 
 template<class Dtype>
 void getrs(CUDASOLVER_GETRS_ARGTYPES(Dtype)) {
@@ -47,9 +47,62 @@ template<>
 void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
 
+#define CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()  \
+    cusolverDnHandle_t handle, int m, int n, int *lwork
+
+template<class Dtype>
+void gesvd_buffersize(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
+  TORCH_CHECK(false, "at::cuda::solver::gesvd_buffersize: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES());
+template<>
+void gesvd_buffersize<double>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES());
+template<>
+void gesvd_buffersize<c10::complex<float>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES());
+template<>
+void gesvd_buffersize<c10::complex<double>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES());
+
+
+#define CUDASOLVER_GESVD_ARGTYPES(Dtype, Vtype)  \
+    cusolverDnHandle_t handle, signed char jobu, signed char jobvt, int m, int n, Dtype *A, int lda, \
+    Vtype *S, Dtype *U, int ldu, Dtype *VT, int ldvt, Dtype *work, int lwork, Vtype *rwork, int *info
+
+template<class Dtype, class Vtype>
+void gesvd(CUDASOLVER_GESVD_ARGTYPES(Dtype, Vtype)) {
+  TORCH_CHECK(false, "at::cuda::solver::gesvd: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvd<float>(CUDASOLVER_GESVD_ARGTYPES(float, float));
+template<>
+void gesvd<double>(CUDASOLVER_GESVD_ARGTYPES(double, double));
+template<>
+void gesvd<c10::complex<float>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<float>, float));
+template<>
+void gesvd<c10::complex<double>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<double>, double));
+
+
+#define CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(Dtype, Vtype)  \
+    cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, Dtype *A, int lda, Vtype *S, \
+    Dtype *U, int ldu, Dtype *V, int ldv, int *lwork, gesvdjInfo_t params
+
+template<class Dtype, class Vtype>
+void gesvdj_buffersize(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(Dtype, Vtype)) {
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj_buffersize: not implemented for ", typeid(Dtype).name());
+}
+template<>
+void gesvdj_buffersize<float>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(float, float));
+template<>
+void gesvdj_buffersize<double>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(double, double));
+template<>
+void gesvdj_buffersize<c10::complex<float>>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(c10::complex<float>, float));
+template<>
+void gesvdj_buffersize<c10::complex<double>>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(c10::complex<double>, double));
+
+
 #define CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)  \
     cusolverDnHandle_t handle, cusolverEigMode_t jobz, int econ, int m, int n, Dtype* A, int lda, Vtype* S, Dtype* U, \
-    int ldu, Dtype *V, int ldv, int *info, gesvdjInfo_t params
+    int ldu, Dtype* V, int ldv, Dtype* work, int lwork, int *info, gesvdjInfo_t params
 
 template<class Dtype, class Vtype>
 void gesvdj(CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)) {

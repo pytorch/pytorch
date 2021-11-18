@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
@@ -335,7 +336,7 @@ static inline Tensor scalarToTensor(const Scalar& v, const TensorOptions& option
 // strip away unit dimensions from the left of 'src'
 static inline IntArrayRef slicePrefix1sSize(const IntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
-  for (size_t i = 0; i < sizes.size(); ++i) {
+  for (const auto i : c10::irange(sizes.size())) {
     if (sizes[i] != 1) {
       first_non1_src = i;
       break;
@@ -351,6 +352,9 @@ static inline void copy_to(const Tensor& dst, const Tensor& src) {
     // This is not a perfect solution: when src & dst have different shapes, constants will still
     // appear. Users can workaround that case by dst[index..] = src.reshape(..)
     dst.copy_(src);
+    return;
+  } else if (src.sizes().size() == 0 && src.device().type() == at::kCPU) {
+    dst.fill_(src.item());
     return;
   }
   auto src_view = src.view(slicePrefix1sSize(src.sizes()));
@@ -436,7 +440,7 @@ static inline Tensor applySlicing(
     "too many indices for tensor of dimension ", (int)self_sizes.size());
 
   Tensor result = self;
-  for (size_t i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     result = handleDimInMultiDimIndexing(
       /*prev_dim_result=*/result,

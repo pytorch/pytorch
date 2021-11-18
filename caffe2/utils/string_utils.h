@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "caffe2/core/common.h"
+#include <c10/macros/Export.h>
 
 namespace caffe2 {
 

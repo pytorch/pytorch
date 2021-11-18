@@ -2,6 +2,7 @@
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
@@ -10,15 +11,13 @@
 #include <ATen/native/Resize.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAUtils.h>
 
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCGeneral.h>
-#include <THC/THCTensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
-#include <THC/THCAtomics.cuh>
+#include <c10/core/QScheme.h>
 
 #include <limits>
 
@@ -210,15 +209,28 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
-  auto value_ = value.contiguous();
-  Tensor linearIndex, expandedValue, src;
+  if (!self.is_contiguous()) {
+    self = self.contiguous();
+  }
+  Tensor linearIndex, src, expandedValue = value;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
   std::tie(linearIndex, src, nElemBefore, strideBefore, sliceSize, inversePerm) = makeLinearIndex(self, indices, !unsafe);
   int64_t num_indices = linearIndex.numel();
 
-  TORCH_CHECK(num_indices <= std::numeric_limits<int>::max(),
-    "index_put of tensors larger than INT_MAX is not supported yet in pytorch");
+  if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
+    expandedValue = expandedValue.expand(expanded_size);
+  }
+  expandedValue = expandedValue.contiguous();
 
   if (num_indices > 0 && sliceSize > 0) {
       const bool permuted = !src.is_contiguous();
@@ -233,7 +245,7 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // cub on CUDA <= 11.2 have a bug that for small sizes
       // cub's sort can be much slower than thrust's merge sort
       // this bug is fixed in CUDA 11.3
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11030
+#if (defined(CUDA_VERSION) && CUDA_VERSION < 11030) || defined(USE_ROCM)
       if (num_indices < 50000) {
         index_put_with_sort_kernel_thrust_helper(linearIndex, orig_indices, sorted_indices, num_indices);
       } else
@@ -244,26 +256,29 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
       // linearIndex can not be negative, and we take advantage of this
       // fact to sort on less bits for better performance.
       int64_t nbits = cuda::cub::get_num_bits(largestIndex(self) / sliceSize);
-      cuda::cub::sort_pairs(
+      cuda::cub::radix_sort_pairs(
         linearIndex.data_ptr<int64_t>(), sorted_indices.data_ptr<int64_t>(),
         range.data_ptr<int64_t>(), orig_indices.data_ptr<int64_t>(),
         num_indices, false, 0, nbits);
       }
 
-      TORCH_INTERNAL_ASSERT(linearIndex.numel()*sliceSize*nElemBefore == value.numel(), "number of flattened indices did not match number of elements in the value tensor", linearIndex.numel()*sliceSize*nElemBefore, value.numel());
+      TORCH_INTERNAL_ASSERT(
+          linearIndex.numel()*sliceSize*nElemBefore == expandedValue.numel(),
+          "number of flattened indices did not match number of elements in the value tensor: ",
+          linearIndex.numel()*sliceSize*nElemBefore, " vs ", expandedValue.numel());
       const int UNROLL = 4;
       const int indices_per_block = 4;
-      dim3 grid(THCCeilDiv(num_indices, (int64_t) indices_per_block),
-           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], THCCeilDiv(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
+      dim3 grid(ceil_div(num_indices, (int64_t) indices_per_block),
+           std::min<int>(at::cuda::getCurrentDeviceProperties()->maxGridSize[1], ceil_div(sliceSize, (int64_t) (C10_WARP_SIZE*UNROLL))),
            std::min(std::max<int>(1,nElemBefore), at::cuda::getCurrentDeviceProperties()->maxGridSize[2]));
       dim3 block(C10_WARP_SIZE, indices_per_block);
 
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      value_.scalar_type(), "indexing_backward", [&] {
+      expandedValue.scalar_type(), "indexing_backward", [&] {
         indexing_backward_kernel<scalar_t, UNROLL><<<grid, block, 0, stream>>>(
           sorted_indices.data_ptr<int64_t>(),
           orig_indices.data_ptr<int64_t>(),
-          value_.data_ptr<scalar_t>(),
+          expandedValue.data_ptr<scalar_t>(),
           src_.data_ptr<scalar_t>(),
           num_indices,
           sliceSize,
@@ -273,8 +288,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
-      if (permuted)
-          self.copy_(src_.permute(inversePerm));
+      if (permuted) {
+        self.copy_(src_.permute(inversePerm));
+      }
   }
 }
 
@@ -369,7 +385,7 @@ __global__ void indexAddSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
           cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
-      gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+      gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
     }
   }
 }
@@ -419,7 +435,7 @@ __global__ void indexAddLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
-    gpuAtomicAdd(&dst.data[dstOffset], src.data[srcOffset] * alpha);
+    gpuAtomicAddNoReturn(&dst.data[dstOffset], src.data[srcOffset] * alpha);
   }
 }
 
@@ -481,9 +497,9 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
   Tensor self_ = (self.dim() == 0) ? self.view(1) : self;
   Tensor source_ = (source.dim() == 0) ? source.view(1) : source;
 
-  TORCH_CHECK(self.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  TORCH_CHECK(source.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
-  TORCH_CHECK(index.dim() <= MAX_CUTORCH_DIMS, CUTORCH_DIM_WARNING);
+  TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
+  TORCH_CHECK(source.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims" );
+  TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, "tensor has too many (>", MAX_TENSORINFO_DIMS, ") dims");
 
   at::assert_no_internal_overlap(self);
   at::assert_no_partial_overlap(self, index);
@@ -535,10 +551,10 @@ Tensor& index_add_cuda_(Tensor & self, int64_t dim, const Tensor & index, const 
       selfAddDimSize, alpha_value);                                         \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(sourceTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(sourceTotalSize, (ptrdiff_t)128));
 
   if (cuda::detail::canUse32BitIndexMath(self) &&
@@ -730,24 +746,31 @@ tensorInfoLegacyIfScalar(cuda::detail::TensorInfo<T, IndexType> ti) {
 
 }
 
-template<typename scalar_t>
-void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
-                                const Tensor& index) {
+template <typename scalar_t>
+void index_select_out_cuda_impl(
+    Tensor& out,
+    const Tensor& self,
+    long dim,
+    const Tensor& index) {
   ptrdiff_t numIndices = index.numel();
-
   int selfDims = self.dim() == 0 ? 1 : self.dim();
 
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  TORCH_CHECK(index.dim() <= 1,
-             "Index is supposed to be an empty tensor or a vector");
+  TORCH_CHECK(
+      index.dim() <= 1, "Index is supposed to be an empty tensor or a vector");
   TORCH_CHECK(dim < selfDims, "Indexing dim is out of bounds");
 
   std::vector<int64_t> newSize = self.sizes().vec();
   if (self.dim() > 0) {
     newSize[dim] = numIndices;
   }
-  at::native::resize_output(out, newSize);
+
+  if (self.is_quantized()){
+      out = at::empty_quantized(newSize, out);
+  } else {
+    at::native::resize_output(out, newSize);
+  }
 
   ptrdiff_t outTotalSize = out.numel();
   if (outTotalSize == 0) {
@@ -785,10 +808,10 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
       selfSelectDimSize);                                                      \
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-  dim3 smallIndexGrid(std::min(THCCeilDiv(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 smallIndexGrid(std::min(ceil_div(sliceSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 smallIndexBlock(std::min(sliceSize, (ptrdiff_t)128));
 
-  dim3 largeIndexGrid(std::min(THCCeilDiv(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
+  dim3 largeIndexGrid(std::min(ceil_div(outTotalSize, (ptrdiff_t)128), (ptrdiff_t)(mpc * 8)));
   dim3 largeIndexBlock(std::min(outTotalSize, (ptrdiff_t)128));
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
@@ -859,13 +882,16 @@ void index_select_out_cuda_impl(Tensor& out, const Tensor& self, long dim,
 }
 } // anonymous namespace
 
-Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
-                              const Tensor& index, Tensor& out) {
+Tensor& index_select_out_cuda(
+    const Tensor& self,
+    int64_t dim,
+    const Tensor& index,
+    Tensor& out) {
   static constexpr string_view DIM_WARNING =
-    "Tensor too large or too many (> 25) dimensions";
-
-  TORCH_CHECK(at::cuda::check_device({out, self, index}),
-              "Input, output and indices must be on the current device");
+      "Tensor too large or too many (> 25) dimensions";
+  TORCH_CHECK(
+      at::cuda::check_device({out, self, index}),
+      "Input, output and indices must be on the current device");
   at::assert_no_internal_overlap(out);
   at::assert_no_overlap(out, self);
   at::assert_no_overlap(out, index);
@@ -873,17 +899,36 @@ Tensor& index_select_out_cuda(const Tensor& self, int64_t dim,
   dim = at::maybe_wrap_dim(dim, self);
   TORCH_CHECK(self.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
   TORCH_CHECK(index.dim() <= MAX_TENSORINFO_DIMS, DIM_WARNING);
-
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-      out.scalar_type(), "index_select_cuda",
-      [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+  if (self.is_quantized()){
+    TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per_tensor quantized quantized tensors are supported by index_select.")
+    AT_DISPATCH_QINT_TYPES(out.scalar_type(), "index_select_quant_cuda", [&] {
+      index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
+    });
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+        at::ScalarType::Half,
+        at::ScalarType::Bool,
+        at::ScalarType::BFloat16,
+        out.scalar_type(),
+        "index_select_cuda",
+        [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+  }
 
   return out;
 }
 
 Tensor index_select_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  Tensor out = at::empty({0}, self.options());
+  Tensor out;
+  if (self.is_quantized()){
+    TORCH_CHECK(
+      self.qscheme() == kPerTensorAffine,
+      "Only per_tensor quantized quantized tensors are supported by index_select.")
+    out = at::empty_quantized({0}, self);
+  } else {
+    out = at::empty({0}, self.options());
+  }
   at::native::index_select_out_cuda(self, dim, index, out);
   return out;
 }

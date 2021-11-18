@@ -34,9 +34,7 @@ bool InferenceLSTMOp::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(InferenceLSTM, InferenceLSTMOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(InferenceLSTM)
     .NumInputs(1, INT_MAX)
     .NumOutputs(3)
@@ -47,7 +45,6 @@ OPERATOR_SCHEMA(InferenceLSTM)
     .Arg("has_biases", "(*bool*): whether the cells have biases or not")
     .Arg("batch_first", "(*bool*): whether the batch is at dim 0")
     .Arg("bidirectional", "(*bool*): if bidirectional");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(InferenceLSTM);
 } // namespace
 } // namespace caffe2

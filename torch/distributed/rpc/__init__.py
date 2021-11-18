@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 import threading
 import warnings
@@ -49,15 +50,12 @@ if is_available():
         enable_gil_profiling,
         RpcBackendOptions,
         _TensorPipeRpcBackendOptionsBase,
-        ProcessGroupRpcBackendOptions,
         RpcAgent,
         PyRRef,
-        ProcessGroupAgent,
         TensorPipeAgent,
         RemoteProfilerManager,
         WorkerInfo,
         _DEFAULT_INIT_METHOD,
-        _DEFAULT_NUM_SEND_RECV_THREADS,
         _DEFAULT_NUM_WORKER_THREADS,
         _UNSET_RPC_TIMEOUT,
         _DEFAULT_RPC_TIMEOUT_SEC,
@@ -95,10 +93,9 @@ if is_available():
                 Name can only contain number, alphabet, underscore, colon,
                 and/or dash, and must be shorter than 128 characters.
             backend (BackendType, optional): The type of RPC backend
-                implementation. Supported values include
-                ``BackendType.TENSORPIPE`` (the default) and
-                ``BackendType.PROCESS_GROUP``. See :ref:`rpc-backends` for more
-                information.
+                implementation. Supported values is
+                ``BackendType.TENSORPIPE`` (the default).
+                See :ref:`rpc-backends` for more information.
             rank (int): a globally unique id/rank of this node.
             world_size (int): The number of workers in the group.
             rpc_backend_options (RpcBackendOptions, optional): The options
@@ -113,7 +110,7 @@ if is_available():
                 :ref:`rpc-backends` for more information and find which options
                 are available.
         """
-
+        torch._C._log_api_usage_once("torch.distributed.init_rpc")
         if backend is not None and not isinstance(
             backend, backend_registry.BackendType
         ):
@@ -126,10 +123,7 @@ if is_available():
                 "Argument rpc_backend_options must be an instance of RpcBackendOptions"
             )
 
-        # To avoid breaking users that passed a ProcessGroupRpcBackendOptions
-        # without specifying the backend as PROCESS_GROUP when that was the
-        # default, we try to detect the backend from the options when only the
-        # latter is passed.
+        # Try to detect the backend from the options
         if backend is None and rpc_backend_options is not None:
             for candidate_backend in BackendType:
                 if isinstance(
@@ -158,16 +152,6 @@ if is_available():
         if backend is None:
             backend = BackendType.TENSORPIPE  # type: ignore[attr-defined]
 
-        if backend == BackendType.PROCESS_GROUP:  # type: ignore[attr-defined]
-            warnings.warn(
-                "RPC was initialized with the PROCESS_GROUP backend which is "
-                "deprecated and slated to be removed and superseded by the TENSORPIPE "
-                "backend. It is recommended to migrate to the TENSORPIPE backend. "
-                "PyTorch v1.9 will be the last release that carries PROCESS_GROUP "
-                "RPC backend. If you have concerns or suggestions please comment in "
-                "https://github.com/pytorch/pytorch/issues/55615"
-            )
-
         if rpc_backend_options is None:
             # default construct a set of RPC backend options.
             rpc_backend_options = backend_registry.construct_rpc_backend_options(
@@ -183,6 +167,9 @@ if is_available():
             rpc_backend_options.init_method, rank=rank, world_size=world_size
         )
         store, _, _ = next(rendezvous_iterator)
+
+        # Use same timeout as RPC.
+        store.set_timeout(timedelta(seconds=rpc_backend_options.rpc_timeout))
 
         # Use a PrefixStore to distinguish multiple invocations.
         with _init_counter_lock:

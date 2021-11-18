@@ -120,10 +120,10 @@ struct AutogradZeroSpecializer {
   void replaceBlockInputsWithGraphInputs(Block* b) {
     TORCH_INTERNAL_ASSERT(graph_->inputs().size() == b->inputs().size());
     size_t num_inputs = graph_->inputs().size();
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->inputs().at(i)->replaceAllUsesWith(graph_->inputs().at(i));
     }
-    for (size_t i = 0; i < num_inputs; ++i) {
+    for (const auto i : c10::irange(num_inputs)) {
       b->eraseInput(num_inputs - (1 + i));
     }
   }
@@ -142,8 +142,8 @@ struct AutogradZeroSpecializer {
           state_[input] = State::Unknown;
         }
       } else if (
-          tp->isSubtypeOf(TensorType::get()) ||
-          tp->isSubtypeOf(ListType::ofTensors())) {
+          tp->isSubtypeOf(*TensorType::get()) ||
+          tp->isSubtypeOf(*ListType::ofTensors())) {
         state_[input] = State::Nonzero;
       } else {
         state_[input] = State::Unknown;
@@ -446,7 +446,15 @@ struct AutogradZeroSpecializer {
     for (auto it = b->nodes().begin(); it != b->nodes().end(); ++it) {
       Node* n = *it;
       if (n->kind() == aten::_grad_sum_to_size) {
-        if (n->input(1)->mustBeNone() || profiled_none_.count(n->input(1))) {
+        bool profiled_none_flag = profiled_none_.count(n->input(1));
+        const Node* node = n->input(1)->node();
+        // propagate profiled none through other profile_ivalue nodes;
+        while (!profiled_none_flag && node->kind() == prim::profile_ivalue) {
+          profiled_none_flag =
+              profiled_none_flag || profiled_none_.count(node->input(0));
+          node = node->input(0)->node();
+        }
+        if (n->input(1)->mustBeNone() || profiled_none_flag) {
           n->output()->replaceAllUsesWith(n->input(0));
           it.destroyCurrent();
         }

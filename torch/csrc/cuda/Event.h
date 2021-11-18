@@ -5,6 +5,7 @@
 #include <torch/csrc/python_headers.h>
 #include <THC/THC.h>
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THCPEvent {
   PyObject_HEAD
   at::cuda::CUDAEvent cuda_event;

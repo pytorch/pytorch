@@ -7,7 +7,6 @@ using c10::QualifiedName;
 
 namespace torch {
 namespace jit {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(QualifiedNameTest, PrefixConstruction) {
   // Test prefix construction
   auto foo = QualifiedName("foo");
@@ -22,7 +21,6 @@ TEST(QualifiedNameTest, PrefixConstruction) {
   ASSERT_EQ(nullstate.name(), "");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(QualifiedNameTest, DottedConstruction) {
   // Test dotted construction
   auto foo = QualifiedName("foo.bar.baz");
@@ -36,7 +34,6 @@ TEST(QualifiedNameTest, DottedConstruction) {
   ASSERT_EQ(bar.name(), "bar");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(QualifiedNameTest, BadInputRaises) {
   // throw some bad inputs at it
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
@@ -49,7 +46,6 @@ TEST(QualifiedNameTest, BadInputRaises) {
   ASSERT_ANY_THROW(QualifiedName(""));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(QualifiedNameTest, Equality) {
   // test equality api
   auto foo1 = QualifiedName("foo.bar.baz");
@@ -62,7 +58,6 @@ TEST(QualifiedNameTest, Equality) {
   ASSERT_EQ(foo1, foo2);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(QualifiedNameTest, IsPrefixOf) {
   // test prefix api
   auto foo1 = QualifiedName("foo.bar.baz");

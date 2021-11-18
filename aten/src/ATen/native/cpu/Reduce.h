@@ -3,6 +3,8 @@
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/Parallel.h>
 #include <c10/util/TypeList.h>
+#include <c10/core/Scalar.h>
+#include <c10/util/irange.h>
 
 #include <sstream>
 
@@ -32,14 +34,15 @@ static inline bool is_outer_reduction(const int64_t* strides) {
 }
 
 template <typename func_t, typename vec_func_t>
-static inline void reduction128(char** data, int64_t n, int64_t stride, func_t op, vec_func_t vop, bool reduce) {
+static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
+                                        func_t op, vec_func_t vop, bool reduce) {
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
   Vec acc[4];
-  for  (int j = 0; j < 4; j++) {
+  for (const auto j : c10::irange(4)) {
     acc[j] = Vec::loadu(in1_ptr + j * Vec::size() * sizeof(scalar_t));
   }
-  for (int64_t i = 1; i < n; i++) {
+  for (const auto i : c10::irange(1, n)) {
     const char* ptr = in1_ptr + stride * i;
     acc[0] = vop(acc[0], Vec::loadu(ptr + (0 * Vec::size() * sizeof(scalar_t))));
     acc[1] = vop(acc[1], Vec::loadu(ptr + (1 * Vec::size() * sizeof(scalar_t))));
@@ -56,7 +59,7 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
     auto dst = (scalar_t*)out_ptr;
     *dst = op(*dst, buffer[0]);
   } else {
-    for (int j = 0; j < 4; j++) {
+    for (const auto j : c10::irange(4)) {
       auto dst = out_ptr + j * Vec::size() * sizeof(scalar_t);
       acc[j] = vop(acc[j], Vec::loadu(dst));
       acc[j].store(dst);
@@ -66,7 +69,8 @@ static inline void reduction128(char** data, int64_t n, int64_t stride, func_t o
 
 template <typename F>
 static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
-  for (int j = 0; j < n; j++) {
+  for (const auto j : c10::irange(n)) {
+    (void)j; //Suppress unused variable warning
     f();
     data[0] += strides[0];
     data[1] += strides[1];
@@ -80,7 +84,7 @@ static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op,
   int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
   if (count > 0) {
-    reduction128(data, count, vector_stride, op, vop, /*reduce=*/true);
+    vectorized_reduction(data, count, vector_stride, op, vop, /*reduce=*/true);
   }
   char* ptrs[3] = { data[0], data[0], data[1] };
   int64_t strides[] = { 0, 0, sizeof(scalar_t) };
@@ -92,10 +96,14 @@ template <typename func_t, typename vec_func_t>
 static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
 
-  // reduce down each column of 4 * Vec::size() elements (128 bytes)
+  // reduce down each column of 4 * Vec::size() elements (128 or 256 bytes)
+#if defined(CPU_CAPABILITY_AVX512)
+  int64_t outer_stride[2] = { 256, 256 };
+#else
   int64_t outer_stride[2] = { 128, 128 };
+#endif
   UNARY_OUTER_LOOP(data, outer_stride, size1 / (4 * Vec::size()), [&] {
-    reduction128(data, size0, inner_stride, op, vop, /*reduce=*/false);
+    vectorized_reduction(data, size0, inner_stride, op, vop, /*reduce=*/false);
   });
 
   // reduce down the remaining columns
@@ -209,7 +217,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
         AT_ASSERT(ntensors - num_outputs == 1);
         char *in = data[ntensors - 1];
         int64_t stride = strides[ntensors - 1];
-        for (int64_t i = 0; i < size; ++i) {
+        for (const auto i : c10::irange(size)) {
           acc = ops.reduce(acc, *(data_t*)in, begin + i);
           in += stride;
         }
@@ -235,7 +243,7 @@ void binary_kernel_reduce(TensorIteratorBase& iter, ops_t ops, init_t init) {
           acc = reduction_body(acc, begin, end);
         }
       );
-      for (int i = 0; i < max_threads; ++i) {
+      for (const auto i : c10::irange(max_threads)) {
         total_acc = ops.combine(total_acc, buffer[i]);
       }
     }
@@ -253,7 +261,7 @@ void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vo
       typename traits::arg2_t>::value,
     "all types must match");
 
-  iter.output().fill_(ident);
+  iter.output_base().fill_(ident);
   iter.parallel_reduce([&](char** data, const int64_t* strides, int64_t size0, int64_t size1) {
     int64_t outer_strides[] = { strides[2], strides[3] };
     if (is_contiguous_reduction<traits>(strides)) {

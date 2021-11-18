@@ -6,7 +6,7 @@
 PyTorch is now available via Cocoapods, to integrate it to your project, simply add the following line to your `Podfile` and run `pod install`
 
 ```ruby
-pod 'LibTorch'
+pod 'LibTorch-Lite'
 ```
 
 ### Import the library
@@ -14,7 +14,7 @@ pod 'LibTorch'
 For Objective-C developers, simply import the umbrella header
 
 ```
-#import <LibTorch/LibTorch.h>
+#import <LibTorch-Lite.h>
 ```
 
 For Swift developers, you need to create an Objective-C class as a bridge to call the C++ APIs. We highly recommend you to follow the [Image Classification](https://github.com/pytorch/ios-demo-app/tree/master/PyTorchDemo) demo where you can find out how C++, Objective-C and Swift work together.

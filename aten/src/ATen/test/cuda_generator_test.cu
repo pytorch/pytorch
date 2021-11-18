@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/CUDAGeneratorImpl.h>
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <cuda.h>
@@ -27,6 +28,7 @@ __global__ void testEngineReproducibility(){
 
 void test_engine_reproducibility(){
   testEngineReproducibility<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineReproducibility) {
@@ -59,6 +61,7 @@ __global__ void testEngineOffset1(){
 
 void test_engine_offset1(){
   testEngineOffset1<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset1) {
@@ -88,6 +91,7 @@ __global__ void testEngineOffset2(){
 
 void test_engine_offset2(){
   testEngineOffset2<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset2) {
@@ -114,6 +118,7 @@ __global__ void testEngineOffset3(){
 
 void test_engine_offset3(){
   testEngineOffset2<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineOffset3) {
@@ -138,6 +143,7 @@ __global__ void testEngineThreadIndex(){
 
 void test_engine_thread_index(){
   testEngineThreadIndex<<<1, 1>>>();
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 TEST(CUDAGeneratorImpl, TestPhiloxEngineIndex) {

@@ -1,7 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <c10/macros/Macros.h>
-#include <ATen/cpu/vec/vec256/intrinsics.h>
+#include <ATen/cpu/vec/intrinsics.h>
 
 using vbool8   =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) char;
 using vbool16  =  __attribute__((altivec(vector__))) __attribute__((altivec(bool__))) short;

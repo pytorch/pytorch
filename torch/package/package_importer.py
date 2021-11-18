@@ -7,7 +7,7 @@ import os.path
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -120,6 +120,15 @@ class PackageImporter(Importer):
         Returns:
             types.ModuleType: The (possibly already) loaded module.
         """
+        # We should always be able to support importing modules from this package.
+        # This is to support something like:
+        #   obj = importer.load_pickle(...)
+        #   importer.import_module(obj.__module__)  <- this string will be mangled
+        #
+        # Note that _mangler.demangle will not demangle any module names
+        # produced by a different PackageImporter instance.
+        name = self._mangler.demangle(name)
+
         return self._gcd_import(name)
 
     def load_binary(self, package: str, resource: str) -> bytes:
@@ -173,11 +182,10 @@ class PackageImporter(Importer):
         restore_location = _get_restore_location(map_location)
         loaded_storages = {}
         loaded_reduces = {}
-        storage_context = torch._C.StorageContext()
+        storage_context = torch._C.DeserializationStorageContext()
 
-        def load_tensor(data_type, size, key, location, restore_location):
+        def load_tensor(dtype, size, key, location, restore_location):
             name = f"{key}.storage"
-            dtype = data_type(0).dtype
 
             if storage_context.has_storage(name):
                 storage = storage_context.get_storage(name, dtype).storage()
@@ -196,17 +204,23 @@ class PackageImporter(Importer):
             data = saved_id[1:]
 
             if typename == "storage":
-                data_type, key, location, size = data
+                storage_type, key, location, size = data
+                dtype = storage_type.dtype
+
                 if key not in loaded_storages:
                     load_tensor(
-                        data_type,
+                        dtype,
                         size,
                         key,
                         _maybe_decode_ascii(location),
                         restore_location,
                     )
                 storage = loaded_storages[key]
-                return storage
+                # TODO: Once we decide to break serialization FC, we can
+                # stop wrapping with TypedStorage
+                return torch.storage.TypedStorage(
+                    wrap_storage=storage._untyped(), dtype=dtype
+                )
             elif typename == "reduce_package":
                 # to fix BC breaking change, objects on this load path
                 # will be loaded multiple times erroneously
@@ -366,7 +380,7 @@ class PackageImporter(Importer):
             return
         # Set the module as an attribute on its parent.
         parent_module = self.modules[parent]
-        if parent_module.__loader__ is self:  # type: ignore[union-attr]
+        if parent_module.__loader__ is self:
             setattr(parent_module, name.rpartition(".")[2], module)
 
     # note: copied from cpython's import code, with call to create module replaced with _make_module
@@ -401,6 +415,15 @@ class PackageImporter(Importer):
         if module is None:
             message = "import of {} halted; " "None in sys.modules".format(name)
             raise ModuleNotFoundError(message, name=name)
+
+        # To handle https://github.com/pytorch/pytorch/issues/57490, where std's
+        # creation of fake submodules via the hacking of sys.modules is not import
+        # friendly
+        if name == "os":
+            self.modules["os.path"] = cast(Any, module).path
+        elif name == "typing":
+            self.modules["typing.io"] = cast(Any, module).io
+            self.modules["typing.re"] = cast(Any, module).re
 
         return module
 

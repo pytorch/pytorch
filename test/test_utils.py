@@ -1,3 +1,5 @@
+# Owner(s): ["high priority"]
+
 import sys
 import os
 import contextlib
@@ -19,23 +21,13 @@ import torch.utils.cpp_extension
 import torch.hub as hub
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
-from torch.testing._internal.common_utils import load_tests, retry, IS_SANDCASTLE, IS_WINDOWS
-from urllib.error import URLError
+from torch.testing._internal.common_utils import has_breakpad, load_tests, retry, IS_SANDCASTLE, IS_WINDOWS, TEST_WITH_ASAN
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
 HAS_CUDA = torch.cuda.is_available()
-
-def check_breakpad():
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        return "Minidump handler is uninintialized, make sure to call" in str(e)
-
-HAS_BREAKPAD = check_breakpad()
 
 
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -603,7 +595,7 @@ TORCHHUB_EXAMPLE_RELEASE_URL = 'https://github.com/ailzhang/torchhub_example/rel
 
 @unittest.skipIf(IS_SANDCASTLE, 'Sandcastle cannot ping external')
 class TestHub(TestCase):
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_from_github(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -614,7 +606,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_from_local_dir(self):
         local_dir = hub._get_cache_or_reload(
             'ailzhang/torchhub_example', force_reload=False)
@@ -627,7 +619,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_from_branch(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example:ci/test_slash',
@@ -637,7 +629,7 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(hub_model.state_dict()),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_set_dir(self):
         temp_dir = tempfile.gettempdir()
         hub.set_dir(temp_dir)
@@ -651,12 +643,12 @@ class TestHub(TestCase):
         assert os.path.exists(temp_dir + '/ailzhang_torchhub_example_master')
         shutil.rmtree(temp_dir + '/ailzhang_torchhub_example_master')
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_list_entrypoints(self):
         entry_lists = hub.list('ailzhang/torchhub_example', force_reload=True)
         self.assertObjectIn('mnist', entry_lists)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_download_url_to_file(self):
         temp_file = os.path.join(tempfile.gettempdir(), 'temp')
         hub.download_url_to_file(TORCHHUB_EXAMPLE_RELEASE_URL, temp_file, progress=False)
@@ -664,13 +656,13 @@ class TestHub(TestCase):
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_state_dict_from_url(self):
         loaded_state = hub.load_state_dict_from_url(TORCHHUB_EXAMPLE_RELEASE_URL)
         self.assertEqual(sum_of_state_dict(loaded_state),
                          SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_zip_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -681,7 +673,7 @@ class TestHub(TestCase):
                          SUM_OF_HUB_EXAMPLE)
 
     # Test the default zipfile serialization format produced by >=1.6 release.
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_zip_1_6_checkpoint(self):
         hub_model = hub.load(
             'ailzhang/torchhub_example',
@@ -697,7 +689,25 @@ class TestHub(TestCase):
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
+    def test_hub_parse_repo_info(self):
+        # If the branch is specified we just parse the input and return
+        self.assertEqual(
+            torch.hub._parse_repo_info('a/b:c'),
+            ('a', 'b', 'c')
+        )
+        # For torchvision, the default branch is main
+        self.assertEqual(
+            torch.hub._parse_repo_info('pytorch/vision'),
+            ('pytorch', 'vision', 'main')
+        )
+        # For the torchhub_example repo, the default branch is still master
+        self.assertEqual(
+            torch.hub._parse_repo_info('ailzhang/torchhub_example'),
+            ('ailzhang', 'torchhub_example', 'master')
+        )
+
+    @retry(Exception, tries=3)
     def test_load_state_dict_from_url_with_name(self):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
@@ -707,7 +717,7 @@ class TestHub(TestCase):
             self.assertEqual(sum_of_state_dict(loaded_state),
                              SUM_OF_HUB_EXAMPLE)
 
-    @retry(URLError, tries=3, skip_after_retries=True)
+    @retry(Exception, tries=3)
     def test_load_commit_from_forked_repo(self):
         with self.assertRaisesRegex(
                 ValueError,
@@ -743,12 +753,13 @@ class TestAssert(TestCase):
         # data can be passed without errors
         x = torch.randn(4, 4).fill_(1.0)
         ms(x)
-        with self.assertRaisesRegex(torch.jit.Error, "foo"):  # type: ignore[type-var]
+        with self.assertRaisesRegex(torch.jit.Error, "foo"):
             ms(torch.tensor([False], dtype=torch.bool))
 
 
 class TestCrashHandler(TestCase):
-    @unittest.skipIf(not HAS_BREAKPAD, "Crash handler lib was not linked in")
+    @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
+    @unittest.skipIf(not has_breakpad(), "Built without breakpad")
     def test_python_exception_writing(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             torch.utils._crash_handler.enable_minidumps(temp_dir)
@@ -823,6 +834,34 @@ class TestStandaloneCPPJIT(TestCase):
 
         finally:
             shutil.rmtree(build_dir)
+
+
+class DummyXPUModule(object):
+    @staticmethod
+    def is_available():
+        return True
+
+
+class TestExtensionUtils(TestCase):
+    def test_external_module_register(self):
+        # Built-in module
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('cuda', torch.cuda)
+
+        # Wrong device type
+        with self.assertRaisesRegex(RuntimeError, "Expected one of cpu"):
+            torch._register_device_module('dummmy', DummyXPUModule)
+
+        with self.assertRaises(AttributeError):
+            torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        torch._register_device_module('xpu', DummyXPUModule)
+
+        torch.xpu.is_available()  # type: ignore[attr-defined]
+
+        # No supporting for override
+        with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
+            torch._register_device_module('xpu', DummyXPUModule)
 
 
 if __name__ == '__main__':

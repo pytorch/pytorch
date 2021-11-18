@@ -2,8 +2,11 @@
 
 #include <c10/util/C++17.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/MaybeOwned.h>
 #include <atomic>
+#include <climits>
+#include <memory>
 #include <stdexcept>
 
 namespace pybind11 {
@@ -20,6 +23,9 @@ inline void incref(intrusive_ptr_target* self);
 namespace intrusive_ptr {
 inline void incref(intrusive_ptr_target* self);
 }
+
+template <typename TTarget>
+struct ExclusivelyOwnedTraits;
 
 // constructor tag used by intrusive_ptr constructors
 struct DontIncreaseRefcount {};
@@ -85,6 +91,9 @@ class C10_API intrusive_ptr_target {
   friend inline void raw::weak_intrusive_ptr::incref(
       intrusive_ptr_target* self);
 
+  template <typename T>
+  friend struct ExclusivelyOwnedTraits;
+
  protected:
   // protected destructor. We never want to destruct intrusive_ptr_target*
   // directly.
@@ -106,12 +115,24 @@ class C10_API intrusive_ptr_target {
 #pragma GCC diagnostic ignored "-Wexceptions"
 #endif
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        refcount_.load() == 0,
-        "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it");
+        // Second condition is there to accommodate
+        // unsafe_adapt_non_heap_allocated: since we are doing our own
+        // deallocation in that case, it is correct for each
+        // expected_decref to have happened (some user code tried to
+        // decref and thus free the object, but it didn't happen right
+        // away) or not (no user code tried to free the object, and
+        // now it's getting destroyed through whatever mechanism the
+        // caller of unsafe_adapt_non_heap_allocated wanted to
+        // use). We choose our reference count such that the count
+        // will not dip below INT_MAX regardless.
+        refcount_.load() == 0 || refcount_.load() >= INT_MAX,
+        "Tried to destruct an intrusive_ptr_target that still has intrusive_ptr to it; refcount was ",
+        refcount_.load());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         // See ~intrusive_ptr for optimization that will frequently result in 1
         // at destruction time.
-        weakcount_.load() == 1 || weakcount_.load() == 0,
+        weakcount_.load() == 1 || weakcount_.load() == 0 ||
+            weakcount_.load() == INT_MAX - 1 || weakcount_.load() == INT_MAX,
         "Tried to destruct an intrusive_ptr_target that still has weak_intrusive_ptr to it");
 #if defined(_MSC_VER) && !defined(__clang__)
 #pragma warning(pop)
@@ -226,6 +247,8 @@ class intrusive_ptr final {
 
   TTarget* target_;
 
+  template <typename T>
+  friend struct ExclusivelyOwnedTraits;
   template <class TTarget2, class NullType2>
   friend class intrusive_ptr;
   friend class weak_intrusive_ptr<TTarget, NullType>;
@@ -273,12 +296,6 @@ class intrusive_ptr final {
   // intrusive_ptr out of raw pointers except from inside the make_intrusive(),
   // reclaim() and weak_intrusive_ptr::lock() implementations.
 
-  // This constructor will not increase the ref counter for you.
-  // We use the tagged dispatch mechanism to explicitly mark this constructor
-  // to not increase the refcount
-  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
-      : target_(target) {}
-
   // This constructor will increase the ref counter for you.
   // This constructor will be used by the make_intrusive(), and also pybind11,
   // which wrap the intrusive_ptr holder around the raw pointer and incref
@@ -295,8 +312,8 @@ class intrusive_ptr final {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           target_->refcount_ == 0 && target_->weakcount_ == 0,
           "intrusive_ptr: Newly-created target had non-zero refcounts. Does its "
-          "constructor do something strange like incref or create an intrusive_ptr"
-          "from `this`?");
+          "constructor do something strange like incref or create an "
+          "intrusive_ptr from `this`?");
       target_->refcount_.store(1, std::memory_order_relaxed);
       target_->weakcount_.store(1, std::memory_order_relaxed);
     }
@@ -307,6 +324,15 @@ class intrusive_ptr final {
 
   intrusive_ptr() noexcept
       : intrusive_ptr(NullType::singleton(), raw::DontIncreaseRefcount{}) {}
+
+  // This constructor will not increase the ref counter for you.
+  // We use the tagged dispatch mechanism to explicitly mark this constructor
+  // to not increase the refcount
+  explicit intrusive_ptr(TTarget* target, raw::DontIncreaseRefcount) noexcept
+      : target_(target) {}
+
+  explicit intrusive_ptr(std::unique_ptr<TTarget> rhs) noexcept
+      : intrusive_ptr(rhs.release()) {}
 
   intrusive_ptr(intrusive_ptr&& rhs) noexcept : target_(rhs.target_) {
     rhs.target_ = NullType::singleton();
@@ -467,6 +493,43 @@ class intrusive_ptr final {
   }
 
   /**
+   * Turn an instance of TTarget that should not be reference counted
+   * (e.g., allocated into an arena with placement new) into an
+   * intrusive_ptr. This is gratuitously unsafe and should only be
+   * used if you can guarantee that the pointer will not escape and be
+   * refcounted as normal.
+   *
+   * `expected_decrefs` is a debugging parameter: it indicates the
+   * number of strong owners the intrusive_ptr_target in question is
+   * expected to get. In most use cases, this will likely be 1.
+   *
+   * The reason this method exists is for manually sharing
+   * StorageImpls across Tensors in the static runtime. It needs
+   * access to private intrusive_ptr members so that the refcounts can
+   * be initialized to custom values.
+   */
+  static intrusive_ptr unsafe_adapt_non_heap_allocated(
+      TTarget* raw_ptr,
+      size_t expected_decrefs) {
+    intrusive_ptr result(raw_ptr, raw::DontIncreaseRefcount{});
+    // INT_MAX is impractically huge for a reference count, while
+    // being in no danger of overflowing size_t. We actually only need to
+    // initialize the refcount to 2 -- we are just doing an unbalanced
+    // incref to prevent the non-heap-allocated target from being
+    // freed, and we are optimizing that incref by directly
+    // initializing the refcounts rather than doing an expensive
+    // atomic increment. The reason to use INT_MAX is to accommodate
+    // the debug assertions in ~intrusive_ptr_target.
+#ifdef NDEBUG
+    expected_decrefs = 0;
+#endif
+    result.target_->refcount_.store(
+        INT_MAX + expected_decrefs, std::memory_order_relaxed);
+    result.target_->weakcount_.store(INT_MAX, std::memory_order_relaxed);
+    return result;
+  }
+
+  /**
    * Turn a **non-owning raw pointer** to an intrusive_ptr.  It is
    * the moral equivalent of enable_shared_from_this on a shared pointer.
    *
@@ -552,6 +615,76 @@ struct MaybeOwnedTraits<c10::intrusive_ptr<T>> {
 
   static bool debugBorrowIsValid(const borrow_type& borrow) {
     return true;
+  }
+};
+
+template <typename T>
+struct ExclusivelyOwnedTraits<c10::intrusive_ptr<T>> {
+  using repr_type = T*;
+  using pointer_type = T*;
+  // You can still have non-const access to the T in the const methods
+  // because it's not stored by value.
+  using const_pointer_type = T*;
+
+  static constexpr repr_type nullRepr() {
+    return nullptr;
+  }
+
+  template <class... Args>
+  static repr_type createInPlace(Args&&... args) {
+    return new T(std::forward<Args>(args)...);
+  }
+
+  static repr_type moveToRepr(c10::intrusive_ptr<T>&& x) {
+    return x.release();
+  }
+
+  static void destroyOwned(repr_type x) {
+    if (!x) {
+      return;
+    }
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        x->refcount_ == 1,
+        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with refcount other than 1!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        x->weakcount_ == 1,
+        "ExclusivelyOwned<intrusive_ptr<T>> destroyed with weakcount other than 1!");
+    const_cast<std::remove_const_t<T>*>(x)->release_resources();
+#ifndef NDEBUG
+    // Needed to pass the debug assertions in ~intrusive_ptr_target.
+    x->refcount_ = 0;
+    x->weakcount_ = 0;
+#endif
+    x->release_resources();
+    delete x;
+  }
+
+  static c10::intrusive_ptr<T> take(repr_type& x) {
+    // May need to do reference count initialization, so use the regular
+    // intrusive_ptr ctor.
+
+    // Refcount would be zero if the ExclusivelyOwned was created
+    // in-place (so that the underlying T was never owned by an
+    // intrusive_ptr), and it would be 1 if it was created as an
+    // intrusive_ptr<T> and then moved into the ExclusivelyOwned.
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        x->refcount_ == 1 || x->refcount_ == 0,
+        "take() from ExclusivelyOwned<intrusive_ptr<T>> with refcount other than 0 or 1!");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        x->weakcount_ == 1 || x->weakcount_ == 0,
+        "take() from ExclusivelyOwned<intrusive_ptr<T>> with weakcount other than 0 or 1!");
+#ifndef NDEBUG
+    // Needed to pass the debug assertions in ~intrusive_ptr_target.
+    x->refcount_ = 0;
+    x->weakcount_ = 0;
+#endif
+    auto result = c10::intrusive_ptr<T>(x);
+    x = nullptr;
+    return result;
+  }
+
+  static pointer_type getImpl(repr_type x) {
+    return x;
   }
 };
 

@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 #include <tuple>
 #include <vector>
@@ -30,9 +31,14 @@ TORCH_META_FUNC(fractional_max_pool2d) (
   int64_t poolSizeW = pool_size[1];
 
   int64_t ndims = input.ndimension();
-  TORCH_CHECK(input.numel() > 0 && (ndims == 3 || ndims == 4),
-    "non-empty 3D or 4D (batch mode) tensor expected for input, but got: ",
-    ndims);
+  TORCH_CHECK(ndims == 3 || ndims == 4,
+              "fractional_max_pool2d(): Expected 3D or 4D tensor, but got: ", input.sizes());
+  for (const auto i : c10::irange(1, ndims)) {
+    TORCH_CHECK(input.size(i) > 0,
+                "fractional_max_pool2d(): Expected input to have non-zero size for non-batch dimensions, but got",
+                input.sizes(), " with dimension ", i, " being empty.");
+  }
+
 
   if (ndims == 4) {
     numBatch = input.size(0);
@@ -101,7 +107,7 @@ static void fractional_max_pool2d_out_single_batch_frame(
   int outputW, int outputH,
   int poolSizeW, int poolSizeH) {
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; ++plane) {
+    for (const auto plane : c10::irange(start, end)) {
       /* each plane contains 2 random samples, one for W and one for H */
       scalar_t* randomSamplesForPlane = randomSamples + plane * 2;
 
@@ -172,7 +178,7 @@ static void fractional_max_pool2d_out_frame(
       return;
     }
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool2d_out_single_batch_frame<scalar_t>(
           input + batch * numPlanes * inputH * inputW,
           output + batch * numPlanes * outputH * outputW,
@@ -249,7 +255,7 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
   int inputW, int inputH,
   int outputW, int outputH) {
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
-    for (auto plane = start; plane < end; plane++) {
+    for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputW * inputH;
       scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
       int64_t* indicesForPlane = indices + plane * outputW * outputH;
@@ -286,7 +292,7 @@ static void fractional_max_pool2d_backward_out_frame(
       return;
     }
     at::parallel_for(0, numBatch, 0, [&](int64_t start, int64_t end) {
-      for (auto batch = start; batch < end; ++batch) {
+      for (const auto batch : c10::irange(start, end)) {
         fractional_max_pool2d_backward_out_single_batch_frame<scalar_t>(
           gradInput + batch * numPlanes * inputH * inputW,
           gradOutput + batch * numPlanes * outputH * outputW,

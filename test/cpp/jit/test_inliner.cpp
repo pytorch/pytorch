@@ -36,7 +36,6 @@ struct InlinerGuard {
   bool oldState_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(InlinerTest, Basic) {
   // disable automatic inlining so we can test it manually
   InlinerGuard guard(/*shouldInline=*/false);
@@ -44,7 +43,7 @@ TEST(InlinerTest, Basic) {
   CompilationUnit cu(testSource);
   auto& fn = cu.get_function("foo3");
 
-  auto g = fn.graph();
+  auto g = toGraphFunction(fn).graph();
   Inline(*g);
   FileCheck().check_count("prim::Print", 3)->run(*g);
 }

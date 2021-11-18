@@ -221,14 +221,11 @@ bool PoolGradientOp<float, CPUContext, LpPoolFunctor>::
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LpPool, PoolOp<float, CPUContext, LpPoolFunctor>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     LpPoolGradient,
     PoolGradientOp<float, CPUContext, LpPoolFunctor>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpPool)
     .NumInputs(1)
     .NumOutputs(1)
@@ -301,7 +298,6 @@ Y:
     .Input(0, "X", "(*Tensor`<float>`*): input tensor")
     .Output(0, "Y", "(*Tensor`<float>`*): output tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LpPoolGradient).NumInputs(3).NumOutputs(1);
 
 class GetPoolGradient : public GradientMakerBase {
@@ -314,6 +310,5 @@ class GetPoolGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(LpPool, GetPoolGradient);
 } // namespace caffe2

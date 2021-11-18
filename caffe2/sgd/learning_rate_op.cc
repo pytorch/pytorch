@@ -1,10 +1,8 @@
 #include "caffe2/sgd/learning_rate_op.h"
 
 namespace caffe2 {
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(LearningRate, LearningRateOp<float, CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(LearningRate)
     .NumInputs(1)
     .NumOutputs(1)
@@ -144,7 +142,6 @@ Example usage:
           std::vector<DeviceOption>{def.device_option()});
     });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(LearningRate);
 } // namespace caffe2
 

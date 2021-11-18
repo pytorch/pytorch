@@ -14,6 +14,7 @@ namespace torch {
 TORCH_CUDA_CU_API bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
+  CudaIPCReceivedData() = default;
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
       : shared_ptr_(std::move(shared_ptr)) {}
   std::shared_ptr<void> shared_ptr_;
@@ -63,11 +64,8 @@ constexpr int64_t CUDA_IPC_MAXIMUM_EVENTS_TO_USE = 1000;
 struct CudaIPCSentDataLimbo final {
   ~CudaIPCSentDataLimbo();
   bool collect();
-  void clear_shared_blocks();
   void add(std::unique_ptr<CudaIPCSentData> shared_block);
-  uint64_t size() {
-    return shared_blocks_.size();
-  }
+  uint64_t size();
 
  private:
   // TODO: Can be changed to FIFO in order to avoid full traverse on every
@@ -78,14 +76,13 @@ struct CudaIPCSentDataLimbo final {
 
 struct CudaIPCRefCountersFile final {
   CudaIPCRefCountersFile(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string handle,
       uint64_t size,
       at::DataPtr data_ptr)
       : next_offset_(0),
         size_(size),
         used_slots_(0),
-        handle_(handle),
+        handle_(std::move(handle)),
         refcounted_shared_mem_(std::move(data_ptr)) {}
 
   int64_t* counter_ptr() {
@@ -136,8 +133,6 @@ namespace c10 {
 namespace {
 class CudaIPCCollectCallback : public FreeMemoryCallback {
  public:
-  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
-  ~CudaIPCCollectCallback() {};
   bool Execute() override {
     return torch::CudaIPCCollect();
   }

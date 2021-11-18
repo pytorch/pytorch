@@ -1,18 +1,33 @@
 #pragma once
+#include <ATen/cuda/cub.h>
 
 #include <cstddef>
 #include <type_traits>
 #include <iterator>
+#include <limits>
+
+#include <ATen/cuda/cub_definitions.cuh>
+
+#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
+
+#include <cub/cub.cuh>
+
+#else
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
 #undef CUB_NS_POSTFIX //undef to avoid redefinition warnings
 #undef CUB_NS_PREFIX
-#define CUB_NS_PREFIX namespace at { namespace cuda { namespace detail {
-#define CUB_NS_POSTFIX }}}
+#undef CUB_NS_QUALIFIER
+#define CUB_NS_PREFIX namespace at_cuda_detail {
+#define CUB_NS_POSTFIX }
+#define CUB_NS_QUALIFIER ::at_cuda_detail::cub
 #include <cub/cub.cuh>
 #undef CUB_NS_POSTFIX
 #undef CUB_NS_PREFIX
+#undef CUB_NS_QUALIFIER
+
+#endif
 
 #include <ATen/cuda/Exceptions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -28,42 +43,15 @@
   AT_CUDA_CHECK(cudaGetLastError());                                      \
 } while (false)
 
-#ifdef __HIP_PLATFORM_HCC__
+#ifdef USE_ROCM
 #define NO_ROCM(x)
 #else
 #define NO_ROCM(x) x
-
-namespace at { namespace native {
-
-namespace cub = at::cuda::detail::cub;
-
-}}
 #endif
 
-namespace at {
-namespace cuda {
+#if !defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()
 
-namespace detail {
-
-template<typename T>
-struct cuda_type {
-  using type = T;
-};
-template<>
-struct cuda_type<c10::Half> {
-  using type = __half;
-};
-
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 99999
-
-// waiting for https://github.com/NVIDIA/cub/pull/306 to land on CUDA
-template<>
-struct cuda_type<c10::BFloat16> {
-  using type = __nv_bfloat16;
-};
-
-#elif !defined(__HIP_PLATFORM_HCC__)
-
+namespace at_cuda_detail {
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
 template <>
@@ -81,81 +69,53 @@ struct cub::FpLimits<c10::BFloat16>
 };
 
 template <> struct cub::NumericTraits<c10::BFloat16>: cub::BaseTraits<cub::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
+}
+#endif
+
+#if !defined(USE_ROCM)
+namespace at { namespace native {
+namespace cub = ::at_cuda_detail::cub;
+}}
+#endif
+
+namespace at {
+namespace cuda {
+namespace cub {
+
+namespace detail {
+
+template<typename T>
+struct cuda_type {
+  using type = T;
+};
+template<>
+struct cuda_type<c10::Half> {
+  using type = __half;
+};
+
+#if CUB_SUPPORTS_NV_BFLOAT16()
+
+template<>
+struct cuda_type<c10::BFloat16> {
+  using type = __nv_bfloat16;
+};
 
 #endif
 
 }  // namespace detail
 
-namespace cub {
-
-inline int get_num_bits(uint64_t max_key) {
-  int num_bits = 1;
-  while (max_key > 1) {
-    max_key >>= 1;
-    num_bits++;
-  }
-  return num_bits;
-}
-
-template<typename key_t>
-static inline void sort_keys(
-    const key_t *keys_in, key_t *keys_out,
-    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
-) {
-  using key_t_ = typename detail::cuda_type<key_t>::type;
-
-  const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
-  key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-
-  if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeysDescending,
-      keys_in_, keys_out_, n,
-      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
-  } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortKeys,
-      keys_in_, keys_out_, n,
-      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
-  }
-}
-
-template<typename key_t, typename value_t>
-static inline void sort_pairs(
-    const key_t *keys_in, key_t *keys_out,
-    const value_t *values_in, value_t *values_out,
-    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
-) {
-  using key_t_ = typename detail::cuda_type<key_t>::type;
-
-  auto allocator = c10::cuda::CUDACachingAllocator::get();
-  c10::DataPtr keys_out_owner;
-
-  if (keys_out == nullptr) {
-    keys_out_owner = allocator->allocate(n * sizeof(key_t));
-    keys_out = reinterpret_cast<key_t *>(keys_out_owner.get());
-  }
-
-  const key_t_ *keys_in_ = reinterpret_cast<const key_t_*>(keys_in);
-  key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
-
-  if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairsDescending,
-      keys_in_, keys_out_, values_in, values_out, n,
-      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
-  } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceRadixSort::SortPairs,
-      keys_in_, keys_out_, values_in, values_out, n,
-      begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
-  }
-}
-
 template<typename key_t, typename value_t, typename OffsetIteratorT>
-static inline void segmented_sort_pairs(
+inline void segmented_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
     int64_t num_elements, int64_t num_segments,
     OffsetIteratorT begin_offsets, OffsetIteratorT end_offsets,
     bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8
 ) {
+  TORCH_CHECK(num_elements <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
+  TORCH_CHECK(num_segments <= std::numeric_limits<int>::max(),
+    "cub sort does not support sorting more than INT_MAX elements");
   using key_t_ = typename detail::cuda_type<key_t>::type;
 
   auto allocator = c10::cuda::CUDACachingAllocator::get();
@@ -170,12 +130,12 @@ static inline void segmented_sort_pairs(
   key_t_ *keys_out_ = reinterpret_cast<key_t_*>(keys_out);
 
   if (descending) {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSegmentedRadixSort::SortPairsDescending,
       keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
   } else {
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceSegmentedRadixSort::SortPairs,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSegmentedRadixSort::SortPairs,
       keys_in_, keys_out_, values_in, values_out,
       num_elements, num_segments, begin_offsets, end_offsets,
       begin_bit, end_bit, c10::cuda::getCurrentCUDAStream());
@@ -187,7 +147,9 @@ namespace impl {
 template<typename InputIteratorT1, typename InputIteratorT2, typename OutputIteratorT, class ScanOpT>
 C10_LAUNCH_BOUNDS_1(1)
 __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputIteratorT out, ScanOpT scan_op){
-  *out = scan_op(*a, *b);
+  // NOTE: out here not the final scan output, but an intermediate of the accumulation type.
+  using acc_t = typename std::iterator_traits<OutputIteratorT>::value_type;
+  *out = scan_op(static_cast<acc_t>(*a), static_cast<acc_t>(*b));
 }
 
 template<typename ValueT, typename InputIteratorT>
@@ -227,14 +189,14 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
       input,
       output,
       scan_op,
       size_cub,
       at::cuda::getCurrentCUDAStream());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  using input_t = std::remove_reference_t<decltype(*input)>;
+  using input_t = typename std::iterator_traits<InputIteratorT>::value_type;
   for (int64_t i = max_cub_size; i < num_items; i += max_cub_size) {
     auto allocator = c10::cuda::CUDACachingAllocator::get();
     c10::DataPtr first_elem = allocator->allocate(sizeof(input_t));
@@ -247,7 +209,7 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    using ArgIndexInputIterator = NO_ROCM(detail)::cub::ArgIndexInputIterator<InputIteratorT>;
+    using ArgIndexInputIterator = NO_ROCM(at_cuda_detail)::cub::ArgIndexInputIterator<InputIteratorT>;
     using tuple = typename ArgIndexInputIterator::value_type;
     auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
       if (x.key == 0) {
@@ -256,9 +218,9 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         return x.value;
       }
     };
-    auto input_ = NO_ROCM(detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
+    auto input_ = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
       ArgIndexInputIterator(input + i), input_iter_transform);
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
         output + i,
         scan_op,
@@ -274,7 +236,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // so split at int_max/2
   constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
-  CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::ExclusiveScan,
+  CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
       input,
       output,
       scan_op,
@@ -296,7 +258,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
       input + i, first_elem_ptr};
-    CUB_WRAPPER(NO_ROCM(detail)::cub::DeviceScan::InclusiveScan,
+    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
         input_,
         output + i,
         scan_op,
@@ -305,4 +267,4 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   }
 }
 
-}}}
+}}}  // namespace at::cuda::cub

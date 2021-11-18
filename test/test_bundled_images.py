@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: mobile"]
+
 import torch
 import torch.utils.bundled_inputs
 import io
@@ -67,7 +69,7 @@ class TestBundledImages(TestCase):
         self.assertEqual(len(inflated), 1)
         self.assertEqual(len(inflated[0]), 1)
         self.assertEqual(raw_data.shape, decoded_data.shape)
-        self.assertTrue(torch.allclose(raw_data, decoded_data, atol=0.1, rtol=1e-01))
+        self.assertEqual(raw_data, decoded_data, atol=0.1, rtol=1e-01)
 
         # Check if fb::image_decode_to_NCHW works as expected
         with open("caffe2/test/test_img/p1.jpg", "rb") as fp:
@@ -76,4 +78,4 @@ class TestBundledImages(TestCase):
             byte_tensor = torch.tensor(list(fp.read())).byte()
             im2_tensor = torch.ops.fb.image_decode_to_NCHW(byte_tensor, weight, bias)
             self.assertEqual(raw_data.shape, im2_tensor.shape)
-            self.assertTrue(torch.allclose(raw_data, im2_tensor, atol=0.1, rtol=1e-01))
+            self.assertEqual(raw_data, im2_tensor, atol=0.1, rtol=1e-01)

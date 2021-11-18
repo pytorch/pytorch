@@ -8,6 +8,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
 #include <cmath>
+#include <iostream>
 
 namespace c10 {
 bool _fastEqualsForContainer(const IValue& lhs, const IValue& rhs) {
@@ -50,19 +51,19 @@ TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
 }
 
 bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
-  return lhs.elements_.size() == rhs.elements_.size() &&
+  return lhs.size() == rhs.size() &&
       // see [container equality]
       std::equal(
-             lhs.elements_.cbegin(),
-             lhs.elements_.cend(),
-             rhs.elements_.cbegin(),
+             lhs.elements().cbegin(),
+             lhs.elements().cend(),
+             rhs.elements().cbegin(),
              _fastEqualsForContainer);
 }
 
 TupleTypePtr Tuple::type() const {
   if (!type_) {
     type_ = TupleType::create(
-        fmap(elements_, [&](const IValue& v) { return v.type(); }));
+        fmap(elements(), [&](const IValue& v) { return v.type(); }));
   }
   return type_;
 }
@@ -124,7 +125,7 @@ TypePtr IValue::type() const {
     case Tag::Capsule:
       return CapsuleType::get();
     case Tag::Tuple:
-      return toTuple()->type();
+      return toTupleRef().type();
     case Tag::Generator:
       return GeneratorType::get();
     case Tag::Quantizer:
@@ -146,7 +147,7 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
     case Tag::GenericList: {
       c10::ArrayRef<IValue> elems;
       if (isTuple()) {
-        elems = this->toTuple()->elements();
+        elems = this->toTupleRef().elements();
       } else {
         elems = this->toListRef();
       }
@@ -195,7 +196,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       subValues.insert(*this);
       c10::ArrayRef<IValue> elems;
       if (isTuple()) {
-        elems = this->toTuple()->elements();
+        elems = this->toTupleRef().elements();
       } else {
         elems = this->toListRef();
       }
@@ -288,11 +289,12 @@ IValue IValue::equals(const IValue& rhs) const {
       // In Python you're not supposed to do this comparison apparently. Not
       // sure if we should warn here or what
       return rhs.isNone();
-    case Tag::Tensor:
+    case Tag::Tensor: {
       if (!rhs.isTensor()) {
         return false;
       }
       return lhs.toTensor().eq(rhs.toTensor());
+    }
     case Tag::Storage:
       return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
@@ -540,7 +542,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
       return printList(out, elements, "(", finish, formatter);
     }
@@ -631,7 +633,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
   }
 
   if (v.isTuple()) {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       size_t n = elements.size();
 
       std::vector<IValueComparator> elements_lts;
@@ -641,8 +643,8 @@ IValueComparator getLessThanComparator(const IValue& v) {
       }
 
       return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
-        const auto& a_elements = a.toTuple()->elements();
-        const auto& b_elements = b.toTuple()->elements();
+        const auto& a_elements = a.toTupleRef().elements();
+        const auto& b_elements = b.toTupleRef().elements();
 
         for (const auto i : c10::irange(n)) {
           if (elements_lts[i](a_elements[i], b_elements[i])) {
@@ -726,7 +728,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     case IValue::Tag::Bool:
       return out << (v.toBool() ? "True" : "False");
     case IValue::Tag::Tuple: {
-      const auto& elements = v.toTuple()->elements();
+      const auto& elements = v.toTupleRef().elements();
       const auto& finish = elements.size() == 1 ? ",)" : ")";
       return printList(out, elements, "(", finish, formatter);
     }
@@ -801,7 +803,7 @@ IValue IValue::deepcopy(
       break;
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
-      for (const auto& e : toTuple()->elements()) {
+      for (const auto& e : toTupleRef().elements()) {
         copied_tuple.push_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(copied_tuple));
@@ -888,8 +890,18 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
+
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
-  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  auto object = ivalue::Object::create(type_, type()->numAttributes());
+  for (const auto i : c10::irange(slots_.size())) {
+    object->setSlot(i, slots_[i]);
+  }
+  return object;
+}
+
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref() const {
+  auto object = ivalue::Object::create(
+      WeakOrStrongTypePtr(type_.asWeakTypePtr()), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     object->setSlot(i, slots_[i]);
   }
@@ -902,7 +914,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
-  auto object = ivalue::Object::create(c10::StrongTypePtr(type_.cu_, type()), type()->numAttributes());
+  auto cu = type_.cu_;
+  auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     if (slots_[i].type() == c10::CapsuleType::get()) {
       // If we've gotten here, it means that we have *not* copied this
@@ -931,6 +944,24 @@ StrongTypePtr::StrongTypePtr(
   TORCH_INTERNAL_ASSERT(type_);
 }
 
+WeakTypePtr::WeakTypePtr(
+    std::weak_ptr<torch::jit::CompilationUnit> cu,
+    TypePtr type) {
+  cu_ = std::move(cu);
+  type_ = type;
+}
+
+WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
+  if (!holds_strong_ref()) {
+    return WeakTypePtr(cu_.getWeakRefOrThrow(), type_);
+  } else {
+    std::weak_ptr<torch::jit::CompilationUnit> weak_cu =
+        cu_.getStrongRefOrThrow();
+    return WeakTypePtr(weak_cu, type_);
+  }
+}
+
+
 ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
     static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
     return tmap;
@@ -944,18 +975,38 @@ getClassConverter() {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDataPtrs(
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractStorages(
     const at::IValue& value) {
-  std::vector<std::reference_wrapper<const at::DataPtr>> data_ptrs;
+  std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
   // custom subclasses. Thus, instead, we extract the tensors through pickling.
   if (value.isPyObject()) {
     std::vector<at::Tensor> tensors =
         value.toPyObjectHolder()->extractTensors();
-    data_ptrs.reserve(tensors.size());
+    size_t num_storages = 0;
     for (const at::Tensor& tensor : tensors) {
-      data_ptrs.emplace_back(tensor.storage().data_ptr());
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage. Therefore num_storages needs to be
+        // incremented by 2.
+        num_storages += 2;
+      } else {
+        // A dense/strided tensor contains 1 storage.
+        num_storages += 1;
+      }
+    }
+    weakStorageImpls.reserve(num_storages);
+    for (const at::Tensor& tensor : tensors) {
+      if (tensor.is_sparse()) {
+        // Sparse tensor is indices and values. Both are tensors
+        // and contain storage.
+        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+      } else {
+        // A dense/strided tensor contains 1 storage
+        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+      }
     }
   } else {
     at::IValue::HashAliasedIValues sub_values;
@@ -964,11 +1015,11 @@ std::vector<std::reference_wrapper<const at::DataPtr>> ivalue::Future::extractDa
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        data_ptrs.emplace_back(sub_value.toTensor().storage().data_ptr());
+        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
-  return data_ptrs;
+  return weakStorageImpls;
 }
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAll(
@@ -1070,7 +1121,7 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
       if (src.hasError()) {
         dst->setError(src.exception_ptr());
       } else {
-        dst->markCompleted(src.constValue(), src.dataPtrs());
+        dst->markCompleted(src.constValue(), src.storages());
       }
     }
   };

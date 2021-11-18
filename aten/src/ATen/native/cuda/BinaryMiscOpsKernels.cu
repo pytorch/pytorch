@@ -1,8 +1,10 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
+#include <ATen/native/cuda/Math.cuh>
 #include <ATen/NumericUtils.h>
 
 // NOTE: CUDA on Windows requires that the enclosing function
@@ -39,7 +41,7 @@ void mse_kernel_cuda(TensorIterator& iter) {
   });
 }
 
-void xlogy_kernel_cuda(TensorIterator& iter) {
+void xlogy_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.common_dtype(), "xlogy_cuda", [&]() {
     gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t y) -> scalar_t {
       if (at::_isnan(y)){

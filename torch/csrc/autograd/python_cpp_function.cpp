@@ -191,7 +191,6 @@ PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
   return &type;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<std::type_index, THPObjectPtr> cpp_function_types;
 
 struct DefaultFunctionType {

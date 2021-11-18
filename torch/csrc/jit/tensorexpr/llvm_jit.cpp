@@ -113,7 +113,7 @@ static void registerIntrinsics(
   }
   assertSuccess(JD.define(absoluteSymbols(symbols)));
 
-  for (const auto& kv : getNNCFunctionRegistry()) {
+  for (auto& kv : getNNCFunctionRegistry()) {
     assertSuccess(
         JD.define(absoluteSymbols({entry(kv.first.c_str(), kv.second)})));
   }

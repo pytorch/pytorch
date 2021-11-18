@@ -54,9 +54,11 @@ Creation Ops
 
     tensor
     sparse_coo_tensor
+    asarray
     as_tensor
     as_strided
     from_numpy
+    frombuffer
     zeros
     zeros_like
     ones
@@ -86,7 +88,9 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    argwhere
     cat
+    concat
     conj
     chunk
     dsplit
@@ -101,6 +105,7 @@ Indexing, Slicing, Joining, Mutating Ops
     moveaxis
     narrow
     nonzero
+    permute
     reshape
     row_stack
     scatter
@@ -288,10 +293,13 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
     bitwise_xor
+    bitwise_left_shift
+    bitwise_right_shift
     ceil
     clamp
     clip
@@ -348,6 +356,9 @@ Pointwise Ops
     polygamma
     positive
     pow
+    quantized_batch_norm
+    quantized_max_pool1d
+    quantized_max_pool2d
     rad2deg
     real
     reciprocal
@@ -381,6 +392,7 @@ Reduction Ops
     argmin
     amax
     amin
+    aminmax
     all
     any
     max
@@ -388,6 +400,7 @@ Reduction Ops
     dist
     logsumexp
     mean
+    nanmean
     median
     nanmedian
     mode
@@ -421,6 +434,7 @@ Comparison Ops
     greater
     isclose
     isfinite
+    isin
     isinf
     isposinf
     isneginf
@@ -477,6 +491,8 @@ Other Operations
     cdist
     clone
     combinations
+    corrcoef
+    cov
     cross
     cummax
     cummin
@@ -496,6 +512,8 @@ Other Operations
     rot90
     gcd
     histc
+    histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
@@ -514,6 +532,7 @@ Other Operations
     view_as_real
     view_as_complex
     resolve_conj
+    resolve_neg
 
 
 BLAS and LAPACK Operations
@@ -563,6 +582,8 @@ BLAS and LAPACK Operations
     symeig
     lobpcg
     trapz
+    trapezoid
+    cumulative_trapezoid
     triangular_solve
     vdot
 
@@ -578,6 +599,9 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
+    is_deterministic_algorithms_warn_only_enabled
+    set_deterministic_debug_mode
+    get_deterministic_debug_mode
     set_warn_always
     is_warn_always_enabled
     vmap

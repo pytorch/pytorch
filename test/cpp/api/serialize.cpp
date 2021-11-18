@@ -2,6 +2,7 @@
 
 #include <c10/util/tempfile.h>
 #include <c10/util/flat_hash_map.h>
+#include <c10/util/irange.h>
 
 #include <torch/torch.h>
 
@@ -41,7 +42,7 @@ void is_optimizer_param_group_equal(const OptimizerParamGroup& lhs, const Optimi
   const auto& rhs_params = rhs.params();
 
   ASSERT_TRUE(lhs_params.size() == rhs_params.size());
-  for (size_t j = 0; j < lhs_params.size(); j++) {
+  for (const auto j : c10::irange(lhs_params.size())) {
     ASSERT_TRUE(torch::equal(lhs_params[j], rhs_params[j]));
   }
   ASSERT_TRUE(static_cast<const DerivedOptions&>(lhs.options()) == static_cast<const DerivedOptions&>(rhs.options()));
@@ -136,7 +137,7 @@ void test_serialize_optimizer(DerivedOptimizerOptions options, bool only_has_glo
   ASSERT_TRUE(optim3_2_state.size() == optim3_state.size());
 
   // checking correctness of serialization logic for optimizer.param_groups_ and optimizer.state_
-  for (int i = 0; i < optim3_2_param_groups.size(); i++) {
+  for (const auto i : c10::irange(optim3_2_param_groups.size())) {
     is_optimizer_param_group_equal<DerivedOptimizerOptions>(
       optim3_2_param_groups[i], optim3_param_groups[i]);
     is_optimizer_state_equal<DerivedOptimizerParamState>(optim3_2_state, optim3_state);
@@ -173,7 +174,7 @@ void write_tensors_to_archive(
     const BufferContainer& buffers) {
   archive.write(
       key + "/size", torch::tensor(static_cast<int64_t>(buffers.size())));
-  for (size_t index = 0; index < buffers.size(); ++index) {
+  for (const auto index : c10::irange(buffers.size())) {
     archive.write(
         key + "/" + c10::to_string(index), buffers[index], /*is_buffer=*/true);
   }
@@ -200,11 +201,10 @@ void write_step_buffers(
         count_substr_occurrences(warnings.str(), "old serialization"), 1);   \
   }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, KeysFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
     output_archive.write("element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
@@ -212,16 +212,15 @@ TEST(SerializeTest, KeysFunc) {
   input_archive.load_from(tempfile.name);
   std::vector<std::string> keys = input_archive.keys();
   ASSERT_EQ(keys.size(), 3);
-  for (size_t i = 0; i < keys.size(); i++) {
+  for (const auto i : c10::irange(keys.size())) {
     ASSERT_EQ(keys[i], "element/" + c10::to_string(i));
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, TryReadFunc) {
   auto tempfile = c10::make_tempfile();
   torch::serialize::OutputArchive output_archive;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
     output_archive.write("element/" + c10::to_string(i), c10::IValue(static_cast<int64_t>(i)));
   }
   output_archive.save_to(tempfile.name);
@@ -233,7 +232,6 @@ TEST(SerializeTest, TryReadFunc) {
   ASSERT_EQ(ivalue.toInt(), 1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Basic) {
   torch::manual_seed(0);
 
@@ -245,7 +243,6 @@ TEST(SerializeTest, Basic) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicToFile) {
   torch::manual_seed(0);
 
@@ -262,7 +259,6 @@ TEST(SerializeTest, BasicToFile) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, BasicViaFunc) {
   torch::manual_seed(0);
 
@@ -294,7 +290,6 @@ TEST(SerializeTest, BasicViaFunc) {
   ASSERT_TRUE(x.allclose(z));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Resized) {
   torch::manual_seed(0);
 
@@ -307,7 +302,6 @@ TEST(SerializeTest, Resized) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Sliced) {
   torch::manual_seed(0);
 
@@ -320,7 +314,6 @@ TEST(SerializeTest, Sliced) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, NonContiguous) {
   torch::manual_seed(0);
 
@@ -333,7 +326,6 @@ TEST(SerializeTest, NonContiguous) {
   ASSERT_TRUE(x.allclose(y));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, ErrorOnMissingKey) {
   struct B : torch::nn::Module {
     B(const std::string& name_c) {
@@ -367,13 +359,12 @@ TEST(SerializeTest, ErrorOnMissingKey) {
       torch::load(model3, stream), "No such serialized submodule: 'a.x'");
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR) {
   // We better be able to save and load an XOR model!
   auto getLoss = [](Sequential model, uint32_t batch_size) {
     auto inputs = torch::empty({batch_size, 2});
     auto labels = torch::empty({batch_size});
-    for (size_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
@@ -411,7 +402,6 @@ TEST(SerializeTest, XOR) {
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim) {
   auto model1 = Linear(5, 2);
   auto model2 = Linear(5, 2);
@@ -481,7 +471,6 @@ TEST(SerializeTest, Optim) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adagrad) {
   test_serialize_optimizer<Adagrad, AdagradOptions, AdagradParamState>(AdagradOptions(1e-1));
 
@@ -522,7 +511,6 @@ TEST(SerializeTest, Optim_Adagrad) {
   is_optimizer_state_equal<AdagradParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_SGD) {
   test_serialize_optimizer<SGD, SGDOptions, SGDParamState>(SGDOptions(1e-1).momentum(0.9));
 
@@ -546,7 +534,7 @@ TEST(SerializeTest, Optim_SGD) {
   int64_t iteration_{0};
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
+  for (const auto i : c10::irange(params_.size())) {
     if(i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const SGDParamState& curr_state_ = static_cast<const SGDParamState&>(*(optim1_state.at(key_).get()));
@@ -565,7 +553,6 @@ TEST(SerializeTest, Optim_SGD) {
   is_optimizer_state_equal<SGDParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_Adam) {
   test_serialize_optimizer<Adam, AdamOptions, AdamParamState>(AdamOptions().lr(0.99999).amsgrad(true).weight_decay(0.5));
 
@@ -591,7 +578,7 @@ TEST(SerializeTest, Optim_Adam) {
   std::vector<at::Tensor> max_exp_average_sq_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
+  for (const auto i : c10::irange(params_.size())) {
     if(i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const AdamParamState& curr_state_ = static_cast<const AdamParamState&>(*(optim1_state.at(key_).get()));
@@ -616,7 +603,6 @@ TEST(SerializeTest, Optim_Adam) {
   is_optimizer_state_equal<AdamParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_AdamW) {
   test_serialize_optimizer<AdamW, AdamWOptions, AdamWParamState>(AdamWOptions().lr(0.99999).amsgrad(true).betas(std::make_tuple(0.999, 0.1)));
 
@@ -642,7 +628,7 @@ TEST(SerializeTest, Optim_AdamW) {
   std::vector<at::Tensor> max_exp_average_sq_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
+  for (const auto i : c10::irange(params_.size())) {
     if(i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const AdamWParamState& curr_state_ = static_cast<const AdamWParamState&>(*(optim1_state.at(key_).get()));
@@ -667,7 +653,6 @@ TEST(SerializeTest, Optim_AdamW) {
   is_optimizer_state_equal<AdamWParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_RMSprop) {
   auto options = RMSpropOptions(0.1).momentum(0.9).centered(true);
   test_serialize_optimizer<RMSprop, RMSpropOptions, RMSpropParamState>(options);
@@ -694,7 +679,7 @@ TEST(SerializeTest, Optim_RMSprop) {
   std::vector<at::Tensor> grad_average_buffers;
   const auto& params_ = optim1.param_groups()[0].params();
   const auto& optim1_state = optim1.state();
-  for (size_t i = 0; i < params_.size(); i++) {
+  for (const auto i : c10::irange(params_.size())) {
     if(i != (params_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       const RMSpropParamState& curr_state_ = static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
@@ -719,7 +704,7 @@ TEST(SerializeTest, Optim_RMSprop) {
   const auto& params1_2_ = optim1_2.param_groups()[0].params();
   auto& optim1_2_state = optim1_2.state();
   // old RMSprop didn't track step value
-  for (size_t i = 0; i < params1_2_.size(); i++) {
+  for (const auto i : c10::irange(params1_2_.size())) {
     if(i != (params1_2_.size() - 1)) {
       auto key_ = c10::guts::to_string(params_[i].unsafeGetTensorImpl());
       auto key1_2_ = c10::guts::to_string(params1_2_[i].unsafeGetTensorImpl());
@@ -731,7 +716,6 @@ TEST(SerializeTest, Optim_RMSprop) {
   is_optimizer_state_equal<RMSpropParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, Optim_LBFGS) {
   test_serialize_optimizer<LBFGS, LBFGSOptions, LBFGSParamState>(LBFGSOptions(), true);
   // bc compatibility check
@@ -793,7 +777,6 @@ TEST(SerializeTest, Optim_LBFGS) {
   is_optimizer_state_equal<LBFGSParamState>(optim1.state(), optim1_2.state());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, XOR_CUDA) {
   torch::manual_seed(0);
   // We better be able to save and load a XOR model!
@@ -806,7 +789,7 @@ TEST(SerializeTest, XOR_CUDA) {
       inputs = inputs.cuda();
       labels = labels.cuda();
     }
-    for (size_t i = 0; i < batch_size; i++) {
+    for (const auto i : c10::irange(batch_size)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
@@ -855,7 +838,6 @@ TEST(SerializeTest, XOR_CUDA) {
   ASSERT_LT(loss.item<float>(), 0.1);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     SerializeTest,
     CanSerializeModulesWithIntermediateModulesWithoutParametersOrBuffers) {
@@ -887,7 +869,6 @@ TEST(
   ASSERT_EQ(output, 5);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, VectorOfTensors) {
   torch::manual_seed(0);
 
@@ -899,7 +880,7 @@ TEST(SerializeTest, VectorOfTensors) {
   std::vector<torch::Tensor> y_vec;
   torch::load(y_vec, stream);
 
-  for (int64_t i = 0; i < x_vec.size(); i++) {
+  for (const auto i : c10::irange(x_vec.size())) {
     auto& x = x_vec[i];
     auto& y = y_vec[i];
     ASSERT_TRUE(y.defined());
@@ -908,7 +889,6 @@ TEST(SerializeTest, VectorOfTensors) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, IValue) {
   c10::IValue ivalue(1);
   auto tempfile = c10::make_tempfile();
@@ -927,7 +907,6 @@ TEST(SerializeTest, IValue) {
 
 // NOTE: if a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we expect those submodules to be skipped when the `Module` is being serialized.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
   struct A : torch::nn::Module {
     A() {
@@ -951,7 +930,6 @@ TEST(SerializeTest, UnserializableSubmoduleIsSkippedWhenSavingModule) {
 // NOTE: If a `Module` contains unserializable submodules (e.g. `nn::Functional`),
 // we don't check the existence of those submodules in the `InputArchive` when
 // deserializing.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(SerializeTest, UnserializableSubmoduleIsIgnoredWhenLoadingModule) {
   struct B : torch::nn::Module {
     B() {

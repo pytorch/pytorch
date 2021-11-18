@@ -526,12 +526,12 @@ void addNomnigraphMethods(pybind11::module& m) {
           "operator_def",
           [](Caffe2Annotation& annot) {
             auto opDef = py::module::import("caffe2.proto.caffe2_pb2")
-                                    .attr("OperatorDef");
+                             .attr("OperatorDef");
             // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
             auto proto = annot.getOperatorDef();
             std::string serialized_proto;
             proto.SerializeToString(&serialized_proto);
-            auto py_op_def= opDef();
+            auto py_op_def = opDef();
             py_op_def.attr("ParseFromString")(py::bytes(serialized_proto));
             return py_op_def;
           },
@@ -547,7 +547,6 @@ void addNomnigraphMethods(pybind11::module& m) {
           py::return_value_policy::reference);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_PYBIND_ADDITION(addNomnigraphMethods);
 
 } // namespace python

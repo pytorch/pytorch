@@ -5,7 +5,7 @@ namespace torch {
 namespace jit {
 namespace tensorexpr {
 // A helper structure to store the arguments to specify dimensions. In the
-// Compute arugments for dim_args, all of the following is supported. For
+// Compute arguments for dim_args, all of the following is supported. For
 // example:
 //    dim_args: {1, 2, 3, 4}
 //    dim_args: {{1, "x"}, {2, "y"}, {3, "z"}}

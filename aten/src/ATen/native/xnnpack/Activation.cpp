@@ -72,10 +72,22 @@ Tensor hardswish(const Tensor& input) {
 }
 
 Tensor& hardswish_(Tensor& input) {
-  using namespace internal;
+  Tensor padded_input = mobile::allocate_padded_contiguous_if_needed(
+    input, input.suggest_memory_format());
 
-  hardswish_impl(input, input);
-  return input;
+  // Don't need to allocate output if input is contiguous & already padded
+  if (input.data_ptr() == padded_input.data_ptr()) {
+    hardswish_impl(input, input);
+    return input;
+  } else {
+    Tensor output = mobile::empty_with_tail_padding(
+      padded_input.sizes(),
+      padded_input.options().dtype(),
+      input.suggest_memory_format(),
+      padded_input.names());
+    hardswish_impl(padded_input, output);
+    return input.copy_(output);
+  }
 }
 
 }

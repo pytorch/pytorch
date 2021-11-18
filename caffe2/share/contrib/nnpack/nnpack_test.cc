@@ -238,14 +238,12 @@ void runConv(
 
 constexpr size_t kIters = 20;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_3x3s1) {
   for (int i = 0; i < kIters; ++i) {
     runConv(3, 3, 1, 1);
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_3x3s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
@@ -263,14 +261,12 @@ TEST(NNPACK, Conv_3x3s1_precompute) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_3x3s1_FP16) {
   for (int i = 0; i < kIters; ++i) {
     runConv(3, 3, 1, 1, 1, "WINOGRAD_FP16");
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_3x3s1_FP16_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(1, 2);
@@ -288,7 +284,6 @@ TEST(NNPACK, Conv_3x3s1_FP16_precompute) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNs1) {
   for (int i = 0; i < kIters; ++i) {
     int kernel = randInt(2, 10);
@@ -296,7 +291,6 @@ TEST(NNPACK, Conv_NxNs1) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_1x1s1) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
@@ -307,7 +301,6 @@ TEST(NNPACK, Conv_1x1s1) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, ConvRelu_1x1s1) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
@@ -329,7 +322,6 @@ TEST(NNPACK, ConvRelu_1x1s1) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_1x1s1_precompute) {
   for (int i = 0; i < kIters; ++i) {
     auto group = randInt(1, 3);
@@ -341,7 +333,6 @@ TEST(NNPACK, Conv_1x1s1_precompute) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNs_grouped) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
@@ -353,7 +344,6 @@ TEST(NNPACK, Conv_NxNs_grouped) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNs_grouped_precompute) {
   for (int i = 0; i < kIters; ++i) {
     int group = randInt(2, 3);
@@ -365,7 +355,6 @@ TEST(NNPACK, Conv_NxNs_grouped_precompute) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_NxNsW) {
   for (int i = 0; i < 3; ++i) {
     int kernel = randInt(3, 5);
@@ -374,7 +363,6 @@ TEST(NNPACK, Conv_NxNsW) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, ConvRelu_NxNsW) {
   for (int i = 0; i < 3; ++i) {
     int kernel = randInt(3, 5);
@@ -383,7 +371,6 @@ TEST(NNPACK, ConvRelu_NxNsW) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(NNPACK, Conv_HxWsHxW) {
   for (int i = 0; i < 3; ++i) {
     int kernelH = randInt(2, 5);

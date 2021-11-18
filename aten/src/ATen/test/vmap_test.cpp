@@ -8,7 +8,6 @@ using namespace at;
 
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensor) {
   {
     // NOLINTNEXTLINE(bugprone-argument-comment)
@@ -62,7 +61,6 @@ static BatchDims maxBatchDimsAtFront() {
   return result;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorMaxLevel) {
   {
     // Should not throw
@@ -99,7 +97,6 @@ TEST(VmapTest, TestBatchedTensorMaxLevel) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // No batch dims
@@ -187,7 +184,6 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
         kVmapMaxTensorDims - 1);
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestMultiBatchVmapTransform) {
   {
     // Input is regular Tensor
@@ -275,7 +271,6 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     ASSERT_EQ(result.tensor().sizes(), expected_result_sizes);
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDim) {
   VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
 
@@ -293,7 +288,6 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDim) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(physical_view.getPhysicalDim(-4), c10::Error);
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
   VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2 | 8 | 16);
 
@@ -315,7 +309,6 @@ static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims)
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
   {
     // Simple case: single level
@@ -355,7 +348,6 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
 // Basic test for BatchedTensor::sum.
 // NB: We don't need to write tests in C++ for batching rules if we can test them
 // in Python via the vmap API. These are here to bootstrap that process.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorSum) {
   {
     // Simple: single batch dim, single reduce dim
@@ -409,7 +401,6 @@ static void checkBroadcastingVmapTransform(TensorList inputs, TensorList expecte
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
   {
     // Check that batch dims get moved to the front
@@ -487,7 +478,6 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBroadcastingVmapTransformBatchedUnbatched) {
   {
     // Check same example size
@@ -539,7 +529,6 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedUnbatched) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBroadcastingVmapTransformMaxLevels) {
   {
     // inputs have all 64 levels
@@ -579,7 +568,6 @@ TEST(VmapTest, TestBroadcastingVmapTransformMaxLevels) {
 }
 
 // Basic test for BatchedTensor::mul.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorMul) {
   {
     // batched * batched
@@ -643,7 +631,6 @@ TEST(VmapTest, TestBatchedTensorMul) {
 }
 
 // test for BatchedTensor::size(int).
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorSize) {
   {
     // Single batch dim at front
@@ -677,7 +664,6 @@ TEST(VmapTest, TestBatchedTensorSize) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestVmapPhysicalViewGetPhysicalShape) {
   {
     VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
@@ -694,7 +680,6 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalShape) {
 }
 
 // Basic test for BatchedTensor::expand
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorExpand) {
   {
     // Expand size is too small
@@ -757,7 +742,6 @@ TEST(VmapTest, TestBatchedTensorExpand) {
   }
 }
 // Basic test for BatchedTensor::unsqueeze
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   {
     // Basic test
@@ -791,7 +775,6 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   }
 }
 // Basic test for BatchedTensor::squeeze(dim)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorSqueeze) {
   {
     // Basic test
@@ -825,7 +808,6 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
   }
 }
 // Basic test for BatchedTensor::transpose
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorTranspose) {
   {
     // Basic test
@@ -852,15 +834,14 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
-    auto batched_out = batched.transpose(-2, -1);
+    auto batched_out = batched.mT();
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.transpose(-2, -1)));
+    ASSERT_TRUE(at::allclose(out, tensor.mT()));
   }
 }
 
 // Basic test for BatchedTensor::permute
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestBatchedTensorPermute) {
   {
     // Basic test
@@ -905,7 +886,6 @@ static void checkMultiBatchVmapTransform(TensorList inputs, TensorList expected_
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
   {
     // Check that batch dims get moved to the front
@@ -980,7 +960,6 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
   {
     // Check same example size
@@ -1032,7 +1011,6 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestMultiBatchVmapTransformMaxLevels) {
   {
     // inputs have all 64 levels
@@ -1071,7 +1049,6 @@ TEST(VmapTest, TestMultiBatchVmapTransformMaxLevels) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VmapTest, TestMultiBatchVmapTransformMultipleTensors) {
   // Test with three (all batched) tensors
   {

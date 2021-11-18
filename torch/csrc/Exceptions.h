@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <string>
+#include <system_error>
 #include <memory>
 #include <queue>
 #include <mutex>
@@ -14,6 +15,10 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
+
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#include <torch/csrc/distributed/c10d/exception.h>
+#endif
 
 static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());
@@ -48,7 +53,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     try {
 
 // Only catch torch-specific exceptions
-#define CATCH_TH_ERRORS(retstmnt)                                    \
+#define CATCH_CORE_ERRORS(retstmnt)                                  \
     catch (python_error & e) {                                       \
       e.restore();                                                   \
       retstmnt;                                                      \
@@ -83,11 +88,26 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_RuntimeError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
-    catch (torch::PyTorchError & e) {                                \
+    catch (torch::PyTorchError& e) {                                 \
       auto msg = torch::processErrorMsg(e.what());                   \
       PyErr_SetString(e.python_type(), msg);                         \
       retstmnt;                                                      \
     }
+
+#if defined(USE_DISTRIBUTED) && defined(USE_C10D)
+#define CATCH_C10D_ERRORS(retstmnt)                                  \
+    catch (const c10d::TimeoutError& e) {                            \
+      auto msg = torch::processErrorMsg(e.what());                   \
+      PyErr_SetString(PyExc_TimeoutError, msg);                      \
+      retstmnt;                                                      \
+    }
+#else
+#define CATCH_C10D_ERRORS(retstmnt)
+#endif
+
+#define CATCH_TH_ERRORS(retstmnt)                                    \
+    CATCH_CORE_ERRORS(retstmnt)                                      \
+    CATCH_C10D_ERRORS(retstmnt)
 
 #define CATCH_ALL_ERRORS(retstmnt)                                   \
     CATCH_TH_ERRORS(retstmnt)                                        \
@@ -126,7 +146,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 extern PyObject *THPException_FatalError;
 
 // Throwing this exception means that the python error flags have been already
@@ -164,8 +183,7 @@ struct python_error : public std::exception {
     }
   }
 
-  // NOLINTNEXTLINE(modernize-use-override,cppcoreguidelines-explicit-virtual-functions)
-  virtual const char* what() const noexcept override {
+   const char* what() const noexcept override {
     return message.c_str();
   }
 
@@ -294,8 +312,7 @@ struct ValueError : public PyTorchError {
 
 // Translates to Python NotImplementedError
 struct NotImplementedError : public PyTorchError {
-  // NOLINTNEXTLINE(modernize-use-equals-default)
-  NotImplementedError() {}
+  NotImplementedError() = default;
   PyObject* python_type() override {
     return PyExc_NotImplementedError;
   }
@@ -325,16 +342,26 @@ struct WarningMeta {
 };
 
 // ATen warning handler for Python
-struct PyWarningHandler: at::WarningHandler {
+struct PyWarningHandler {
+  // Move actual handler into a separate class with a noexcept
+  // destructor. Otherwise, we need to force all WarningHandler
+  // subclasses to have a noexcept(false) destructor.
+  struct InternalHandler: at::WarningHandler {
+    ~InternalHandler() override = default;
+    void process(const at::SourceLocation &source_location,
+                 const std::string &msg,
+                 const bool verbatim) override;
+
+    std::vector<WarningMeta> warning_buffer_;
+  };
+
+
 public:
-/// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
+  /// See NOTE [ Conversion Cpp Python Warning ] for noexcept justification
   TORCH_API PyWarningHandler() noexcept(true);
   // NOLINTNEXTLINE(bugprone-exception-escape)
-  TORCH_API ~PyWarningHandler() noexcept(false) override;
+  TORCH_API ~PyWarningHandler() noexcept(false);
 
-  void process(const at::SourceLocation &source_location,
-               const std::string &msg,
-               const bool verbatim) override;
 
   /** Call if an exception has been thrown
 
@@ -347,10 +374,7 @@ public:
   }
 
 private:
-  using warning_buffer_t = std::vector<WarningMeta>;
-
-  warning_buffer_t warning_buffer_;
-
+  InternalHandler internal_handler_;
   at::WarningHandler* prev_handler_;
   bool in_exception_;
 };

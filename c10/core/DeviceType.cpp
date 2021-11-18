@@ -21,12 +21,16 @@ std::string DeviceTypeName(DeviceType d, bool lower_case) {
       return lower_case ? "ideep" : "IDEEP";
     case DeviceType::HIP:
       return lower_case ? "hip" : "HIP";
+    case DeviceType::VE:
+      return lower_case ? "ve" : "VE";
     case DeviceType::FPGA:
       return lower_case ? "fpga" : "FPGA";
-    case DeviceType::MSNPU:
-      return lower_case ? "msnpu" : "MSNPU";
+    case DeviceType::ORT:
+      return lower_case ? "ort" : "ORT";
     case DeviceType::XLA:
       return lower_case ? "xla" : "XLA";
+    case DeviceType::Lazy:
+      return lower_case ? "lazy" : "LAZY";
     case DeviceType::MLC:
       return lower_case ? "mlc" : "MLC";
     case DeviceType::Vulkan:
@@ -69,9 +73,11 @@ bool isValidDeviceType(DeviceType d) {
     case DeviceType::MKLDNN:
     case DeviceType::IDEEP:
     case DeviceType::HIP:
+    case DeviceType::VE:
     case DeviceType::FPGA:
-    case DeviceType::MSNPU:
+    case DeviceType::ORT:
     case DeviceType::XLA:
+    case DeviceType::Lazy:
     case DeviceType::MLC:
     case DeviceType::Vulkan:
     case DeviceType::Metal:

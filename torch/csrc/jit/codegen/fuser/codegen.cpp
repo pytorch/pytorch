@@ -23,7 +23,6 @@ namespace jit {
 namespace fuser {
 
 // Template for computing the offset into the tensor to access a value
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto dim_calc = CodeTemplate(R"(
 //printf("tensor ${tensor} sizes[${d}] = %d, strides[${d}] = %d\n", ${tensor}.sizes[${d}],${tensor}.strides[${d}]);
 size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
@@ -662,7 +661,7 @@ std::string generateKernel(
 
   // HIP headers must be included until precompiled header feature is available
   // clang-format off
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   if (use_cuda && has_half_tensor) {
     env.s("RuntimeHeader", R"(

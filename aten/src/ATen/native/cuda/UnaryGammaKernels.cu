@@ -1,12 +1,13 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <limits>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/AccumulateType.h>
-#include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/Math.h>
 
 namespace at { namespace native {
 
@@ -34,7 +35,7 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   } else {
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "polygamma_cuda", [&]() {
       gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_polygamma(int(n), a);
+        return calc_polygamma<scalar_t, /*is_cuda=*/true>(int(n), a);
       });
     });
   }

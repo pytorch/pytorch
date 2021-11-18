@@ -6,9 +6,11 @@
 #include <utility>
 #include <vector>
 
+#include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/SmallVector.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -25,7 +27,7 @@ void AddMoments(
     T& m1,
     T& m2) {
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? 0 : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const T delta = m1_add - m1;
   m1 += c * delta;
   m2 += m2_add + delta * delta * c * static_cast<T>(m0);
@@ -42,7 +44,7 @@ void AddMomentsVec(
     vec::Vectorized<T>& m2) {
   using Vec = vec::Vectorized<T>;
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? 0 : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const Vec c_vec(c);
   const Vec delta = m1_add - m1;
   m1 += c_vec * delta;
@@ -55,7 +57,7 @@ void AddMomentsVec(
 // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
 // https://en.wikipedia.org/wiki/Pairwise_summation
 template <typename T, int64_t kMaxDepth>
-std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
+std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
 
   constexpr int64_t kVecSize = Vec::size();
@@ -68,12 +70,12 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
   c10::SmallVector<Vec, kMaxDepth> m1_stk(depth, kZeroVec);
   c10::SmallVector<Vec, kMaxDepth> m2_stk(depth, kZeroVec);
 
-  for (int64_t i = 0; i < m; ++i) {
+  for (const auto i : c10::irange(m)) {
     const T* X_ptr = X + i * kChunkSize * kVecSize;
     const int64_t m0 = std::min(kChunkSize, n - i * kChunkSize);
     Vec m1_vec(0);
     Vec m2_vec(0);
-    for (int64_t j = 0; j < m0; ++j) {
+    for (const auto j : c10::irange(m0)) {
       const Vec x_vec = Vec::loadu(X_ptr + j * kVecSize);
       const Vec delta_vec = x_vec - m1_vec;
       const Vec c_vec = Vec(T(1) / static_cast<T>(j + 1));
@@ -96,7 +98,7 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
       mask >>= 1;
     }
   }
-  for (int64_t i = 1; i < depth; ++i) {
+  for (const auto i : c10::irange(1, depth)) {
     AddMomentsVec(
         m0_stk[i], m1_stk[i], m2_stk[i], m0_stk[0], m1_stk[0], m2_stk[0]);
   }
@@ -115,30 +117,30 @@ std::pair<T, T> RowwiseMomentsImpl(const T* X, int64_t N) {
     m1 += delta / static_cast<T>(m0);
     m2 += delta * (X[i] - m1);
   }
-  for (int64_t i = 0; i < kVecSize; ++i) {
+  for (const auto i : c10::irange(kVecSize)) {
     AddMoments(n, m1_arr[i], m2_arr[i], m0, m1, m2);
   }
 
-  return std::make_pair(m1, m2 / static_cast<T>(N));
+  return std::make_pair(m1, m2 / static_cast<T>(N - ddof));
 }
 
 template <typename T>
-std::pair<T, T> RowwiseMoments(const T* X, int64_t N) {
+std::pair<T, T> RowwiseMoments(const T* X, int64_t N, int64_t ddof = 0) {
   using Vec = vec::Vectorized<T>;
   constexpr int64_t kVecSize = Vec::size();
   const int64_t n = N / kVecSize;
   const int64_t m = divup(n, kChunkSize);
   const int64_t depth = CeilLog2(m);
   if (depth <= 4) {
-    return RowwiseMomentsImpl<T, 4>(X, N);
+    return RowwiseMomentsImpl<T, 4>(X, N, ddof);
   } else if (depth <= 8) {
-    return RowwiseMomentsImpl<T, 8>(X, N);
+    return RowwiseMomentsImpl<T, 8>(X, N, ddof);
   } else if (depth <= 16) {
-    return RowwiseMomentsImpl<T, 16>(X, N);
+    return RowwiseMomentsImpl<T, 16>(X, N, ddof);
   } else if (depth <= 32) {
-    return RowwiseMomentsImpl<T, 32>(X, N);
+    return RowwiseMomentsImpl<T, 32>(X, N, ddof);
   } else {
-    return RowwiseMomentsImpl<T, 64>(X, N);
+    return RowwiseMomentsImpl<T, 64>(X, N, ddof);
   }
 }
 

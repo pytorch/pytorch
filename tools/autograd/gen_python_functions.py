@@ -52,11 +52,11 @@ from tools.codegen.api.python import (PythonArgument, PythonSignature,
                                       dispatch_lambda_return_str,
                                       has_tensor_options,
                                       namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params, YamlLoader
+from tools.codegen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -84,14 +84,17 @@ _SKIP_PYTHON_BINDINGS = [
     '_cholesky.*', '_triangular_solve.*', '_qr.*', '_symeig.*', '_svd.*',
     'slice', 'randint(_out)?',
     'item', '_local_scalar_dense', 'to',
+    '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
-    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_reshape_alias',
+    'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
@@ -162,9 +165,12 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
     create_python_bindings(
         fm, methods, is_py_variable_method, None, 'python_variable_methods.cpp', method=True)
 
+    # NOTE: num_shards here must be synced with gatherTorchFunctions in
+    #       torch/csrc/autograd/python_torch_functions_manual.cpp
     functions = load_signatures(native_functions, deprecated_yaml_path, method=False)
-    create_python_bindings(
-        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp', method=False)
+    create_python_bindings_sharded(
+        fm, functions, is_py_torch_function, 'torch', 'python_torch_functions.cpp',
+        method=False, num_shards=3)
 
     create_python_bindings(
         fm, functions, is_py_nn_function, 'torch.nn', 'python_nn_functions.cpp', method=False)
@@ -177,6 +183,16 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
+
+def group_filter_overloads(
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool]
+) -> Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]:
+    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
+    for pair in pairs:
+        if pred(pair.function):
+            grouped[pair.function.func.name.name].append(pair)
+    return grouped
 
 def create_python_bindings(
     fm: FileManager,
@@ -192,10 +208,7 @@ def create_python_bindings(
     py_method_defs: List[str] = []
     py_forwards: List[str] = []
 
-    grouped: Dict[BaseOperatorName, List[PythonSignatureNativeFunctionPair]] = defaultdict(list)
-    for pair in pairs:
-        if pred(pair.function):
-            grouped[pair.function.func.name.name].append(pair)
+    grouped = group_filter_overloads(pairs, pred)
 
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
@@ -209,6 +222,44 @@ def create_python_bindings(
         'py_methods': py_methods,
         'py_method_defs': py_method_defs,
     })
+
+def create_python_bindings_sharded(
+    fm: FileManager,
+    pairs: Sequence[PythonSignatureNativeFunctionPair],
+    pred: Callable[[NativeFunction], bool],
+    module: Optional[str],
+    filename: str,
+    *,
+    method: bool,
+    num_shards: int
+) -> None:
+    """Generates Python bindings to ATen functions"""
+    grouped = group_filter_overloads(pairs, pred)
+
+    def key_func(kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]) -> str:
+        return str(kv[0])
+
+    def env_func(
+        kv: Tuple[BaseOperatorName, List[PythonSignatureNativeFunctionPair]]
+    ) -> Dict[str, List[str]]:
+        return {
+            'py_forwards': list(forward_decls(kv[0], kv[1], method=method)),
+            'py_methods': [method_impl(kv[0], module, kv[1], method=method)],
+            'py_method_defs': [method_def(kv[0], module, kv[1], method=method)],
+        }
+
+    fm.write_sharded(
+        filename,
+        grouped.items(),
+        base_env={
+            'generated_comment':
+            '@' + f'generated from {fm.template_dir}/{filename}',
+        },
+        key_fn=key_func,
+        env_callable=env_func,
+        num_shards=num_shards,
+        sharded_keys={'py_forwards', 'py_methods', 'py_method_defs'}
+    )
 
 def load_signatures(
     native_functions: List[NativeFunction],

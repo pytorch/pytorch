@@ -29,16 +29,12 @@ class DummyAsyncOp final : public Operator<CPUContext> {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DagUtilTestDummySync, DummySyncOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(DagUtilTestDummyAsync, DummyAsyncOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DagUtilTestDummySync)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(DagUtilTestDummyAsync)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX);
@@ -61,8 +57,7 @@ class DagUtilTestContext {
 };
 
 void PrintChains(const dag_utils::ExecutionChains& chains) {
-  // NOLINTNEXTLINE(performance-for-range-copy,clang-diagnostic-range-loop-construct)
-  for (const auto kv : chains) {
+  for (const auto& kv : chains) {
     std::stringstream ss;
     ss << kv.first << ": ";
     for (const auto& v : kv.second) {
@@ -73,7 +68,6 @@ void PrintChains(const dag_utils::ExecutionChains& chains) {
 }
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, Empty) {
   const auto spec = R"DOC(
     name: "test0"
@@ -86,7 +80,6 @@ TEST(DagUtilTest, Empty) {
 }
 
 // 4 sync ops forming a diamond
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, AllSync) {
   const auto spec = R"DOC(
     name: "test1"
@@ -123,7 +116,6 @@ TEST(DagUtilTest, AllSync) {
 }
 
 // 3 async ops forming an L shape
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, AllAsync) {
   const auto spec = R"DOC(
     name: "test2"
@@ -156,7 +148,6 @@ TEST(DagUtilTest, AllAsync) {
 }
 
 // 3 sync ops and 1 async op (#2) forming a diamond
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, Mixed0) {
   const auto spec = R"DOC(
     name: "test3"
@@ -193,7 +184,6 @@ TEST(DagUtilTest, Mixed0) {
 }
 
 // 3 sync ops and 1 async op (#2) forming a Y shape
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, Mixed1) {
   const auto spec = R"DOC(
     name: "test3"
@@ -238,7 +228,6 @@ TEST(DagUtilTest, Mixed1) {
 //  |    6
 //   - -> 8*
 //  7* -/
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(DagUtilTest, Mixed2) {
   const auto spec = R"DOC(
     name: "test4"

@@ -1,14 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <torch/library.h>
+
 #include <c10/core/TensorOptions.h>
 
 namespace at { namespace native {
 
 // Returns true if resize is necessary
 bool resize_output_check(const Tensor& output, IntArrayRef shape) {
-  // Tests for resizing of tensors with one more elements
+  // Tests for resizing of tensors with one or more elements
   if (output.sizes().equals(shape)) {
     return false;
   }
@@ -25,12 +25,25 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
   return true;
 }
 
+static auto kFunctorchWrappedTensors = DispatchKeySet({
+    DispatchKey::FuncTorchGradWrapper,
+    DispatchKey::FuncTorchBatched,
+    DispatchKey::FuncTorchPython});
+
+static bool is_functorch_wrapped_tensor(const Tensor& tensor) {
+  auto key_set = tensor.unsafeGetTensorImpl()->key_set();
+  return !(key_set & kFunctorchWrappedTensors).empty();
+}
+
 bool resize_output(const Tensor& output, IntArrayRef shape) {
   if (resize_output_check(output, shape)) {
     // avoid a redispatch for cpu and cuda.
     // TODO: when resize_cuda_ is re-written to be unified with resize_,
     // we can provide the same benefit for cuda.
-    if (output.is_cpu()) {
+    //
+    // TODO(#61485): functorch wrapped tensors should not go through the
+    // fast path. This is a hack, longer term solutions are in the issue
+    if (output.is_cpu() && !is_functorch_wrapped_tensor(output)) {
       at::native::resize_(output, shape);
     } else {
       output.resize_(shape);
@@ -38,6 +51,22 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
     return true;
   } else {
     return false;
+  }
+}
+
+void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
+  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+
+  at::DataPtr new_data;
+  if (size_bytes != 0) {
+    new_data = storage->allocator()->allocate(size_bytes);
+  }
+  at::DataPtr old_data = storage->set_data_ptr(std::move(new_data));
+  const auto old_capacity = storage->nbytes();
+  storage->set_nbytes(size_bytes);
+  const auto copy_capacity = std::min(size_bytes, old_capacity);
+  if (old_data != nullptr && copy_capacity > 0) {
+    memcpy(storage->data(), old_data.get(), copy_capacity);
   }
 }
 

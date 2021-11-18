@@ -64,7 +64,6 @@ struct SymbolRange {
   const Symbol sym_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
     {Symbol::fromQualString("aten::_test_serialization_subcmul"),
      {0,
@@ -78,7 +77,6 @@ static std::unordered_map<Symbol, SymbolRange> symbol_range_map({
      {0, 4, Symbol::fromQualString("upgraders::full_0_4")}},
 });
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::unordered_map<NodeKind, uint64_t> kind_min_version_map({
     {aten::div, 4},
     {aten::div_, 4},

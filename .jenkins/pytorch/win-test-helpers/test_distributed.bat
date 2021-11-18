@@ -22,3 +22,6 @@ if %errorlevel% neq 0 ( exit /b %errorlevel% )
 
 %1\python.exe test/run_test.py --verbose -i distributed/test_store
 if %errorlevel% neq 0 ( exit /b %errorlevel% )
+
+%1\python.exe test/run_test.py --verbose -i distributed/test_pg_wrapper
+if %errorlevel% neq 0 ( exit /b %errorlevel% )

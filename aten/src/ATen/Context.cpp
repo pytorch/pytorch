@@ -14,8 +14,6 @@
 #include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
-#include <TH/TH.h> // for USE_LAPACK
-
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
@@ -64,18 +62,32 @@ bool Context::deterministicAlgorithms() const {
   return _deterministic_algorithms;
 }
 
-void Context::setDeterministicAlgorithms(bool b) {
+bool Context::deterministicAlgorithmsWarnOnly() const {
+  return _deterministic_algorithms_warn_only;
+}
+
+void Context::setDeterministicAlgorithms(bool b, bool warn_only=false) {
   _deterministic_algorithms = b;
+  _deterministic_algorithms_warn_only = warn_only;
 }
 
 void Context::alertNotDeterministic(c10::string_view const& caller) {
   if (globalContext().deterministicAlgorithms()) {
-    TORCH_CHECK(false,
-      caller, " does not have a deterministic implementation, but you set "
-      "'torch.use_deterministic_algorithms(True)'. You can turn off determinism ",
-      "just for this operation if that's acceptable for your application. You "
-      "can also file an issue at https://github.com/pytorch/pytorch/issues "
-      "to help us prioritize adding deterministic support for this operation.");
+    if (globalContext().deterministicAlgorithmsWarnOnly()) {
+      TORCH_WARN(
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True, warn_only=True)'. "
+        "You can file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    } else {
+      TORCH_CHECK(false,
+        caller, " does not have a deterministic implementation, but you set "
+        "'torch.use_deterministic_algorithms(True)'. You can turn off "
+        "determinism just for this operation, or you can use the "
+        "'warn_only=True' option, if that's acceptable for your application. "
+        "You can also file an issue at https://github.com/pytorch/pytorch/issues "
+        "to help us prioritize adding deterministic support for this operation.");
+    }
   }
 }
 
@@ -135,6 +147,14 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+bool Context::allowFP16ReductionCuBLAS() const {
+  return allow_fp16_reduction_cublas;
+}
+
+void Context::setAllowFP16ReductionCuBLAS(bool b) {
+  allow_fp16_reduction_cublas = b;
+}
+
 bool Context::hasMKL() {
 #if AT_MKL_ENABLED()
   return true;
@@ -160,7 +180,7 @@ bool Context::hasOpenMP() {
 }
 
 bool Context::hasLAPACK() {
-#ifdef USE_LAPACK
+#if AT_BUILD_WITH_LAPACK()
   return true;
 #else
   return false;
@@ -237,7 +257,6 @@ Allocator* getCPUAllocator() {
 //    means the allow_tf32 flags are overrided and tf32 is force disabled
 // override_allow_tf32_flag = false
 //    means the original allow_tf32 flags are followed
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool override_allow_tf32_flag = false;
 
 NoTF32Guard::NoTF32Guard() {

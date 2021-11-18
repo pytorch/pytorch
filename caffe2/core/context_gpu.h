@@ -310,7 +310,12 @@ class CAFFE2_CUDA_API CUDAContext final : public BaseContext {
 
   static bool IsStreamFree(const DeviceOption& option, StreamId stream_id) {
     auto stream = CUDAContext::cuda_stream(option.device_id(), stream_id);
-    return cudaStreamQuery(stream) == cudaSuccess;
+    auto status = cudaStreamQuery(stream);
+    if (status == cudaErrorNotReady) {
+      // ignore and clear the error if not ready
+      (void)cudaGetLastError();
+    }
+    return status == cudaSuccess;
   }
 
   at::Device device() const override {

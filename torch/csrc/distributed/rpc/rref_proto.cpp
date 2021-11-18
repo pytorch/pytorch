@@ -10,7 +10,7 @@ namespace rpc {
 
 namespace {
 
-std::vector<IValue> toIValues(const Message& message, MessageType type) {
+c10::ivalue::TupleElements toIValues(const Message& message, MessageType type) {
   TORCH_INTERNAL_ASSERT(
       type == message.type(),
       "Expecting message of type ",
@@ -25,7 +25,7 @@ std::vector<IValue> toIValues(const Message& message, MessageType type) {
       payload_size,
       *RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  return value.toTuple()->elements();
+  return std::move(*std::move(value).toTuple()).elements();
 }
 
 c10::intrusive_ptr<Message> fromIValues(
@@ -46,20 +46,6 @@ const RRefId& RRefMessageBase::rrefId() {
   return rrefId_;
 }
 
-c10::intrusive_ptr<Message> RRefMessageBase::toMessageImpl() && {
-  return fromIValues({rrefId_.toIValue()}, type_);
-}
-
-at::IValue RRefMessageBase::fromMessage(
-    const Message& message,
-    MessageType type) {
-  auto values = toIValues(message, type);
-
-  TORCH_INTERNAL_ASSERT(
-      values.size() == 1, "ScriptUserDelete expects 1 IValue from message.");
-  return std::move(values.back());
-}
-
 /////////////////////////// ForkMessageBase //////////////////////////////////
 
 const ForkId& ForkMessageBase::forkId() {
@@ -76,7 +62,7 @@ std::pair<RRefId, ForkId> ForkMessageBase::fromMessage(
   auto ivalues = toIValues(message, type);
 
   TORCH_INTERNAL_ASSERT(
-      ivalues.size() == 2, "ScriptUserDelete expects 2 IValue from message.");
+      ivalues.size() == 2, "ForkMessageBase expects 2 IValue from message.");
 
   return std::make_pair(
       RRefId::fromIValue(ivalues[0]), ForkId::fromIValue(ivalues[1]));
@@ -143,13 +129,13 @@ std::unique_ptr<ScriptRRefFetchRet> ScriptRRefFetchRet::fromMessage(
       values.size() == 1,
       "RRef of IValue should contain a single IValue, but got ",
       values.size());
-  return std::make_unique<ScriptRRefFetchRet>(std::move(values));
+  return std::make_unique<ScriptRRefFetchRet>(std::move(values).vec());
 }
 
 std::unique_ptr<PythonRRefFetchRet> PythonRRefFetchRet::fromMessage(
     const Message& message) {
   return std::make_unique<PythonRRefFetchRet>(
-      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET));
+      toIValues(message, MessageType::PYTHON_RREF_FETCH_RET).vec());
 }
 
 std::unique_ptr<RRefUserDelete> RRefUserDelete::fromMessage(

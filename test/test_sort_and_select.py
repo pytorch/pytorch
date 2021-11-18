@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -5,11 +7,15 @@ import random
 from torch._six import nan
 from itertools import permutations, product
 
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    all_types, all_types_and, floating_types_and, get_all_dtypes, get_all_int_dtypes, get_all_fp_dtypes,
+)
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, make_tensor, slowTest)
+    (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
-     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, onlyCPU, largeTensorTest)
+    (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
+     skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
 SIZE = 100
@@ -127,7 +133,7 @@ class TestSortAndSelect(TestCase):
                                  'random with NaNs')
 
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -198,12 +204,35 @@ class TestSortAndSelect(TestCase):
     def test_sort_discontiguous_slow(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
 
+    @dtypes(torch.float32)
+    def test_sort_1d_output_discontiguous(self, device, dtype):
+        tensor = torch.randn(12, device=device, dtype=dtype)[:6]
+        values = torch.empty_like(tensor)[::2]
+        indices = torch.empty(18, device=device, dtype=torch.long)[::3]
+        torch.sort(tensor, out=(values, indices))
+        values_cont, indices_cont = tensor.sort()
+        self.assertEqual(indices, indices_cont)
+        self.assertEqual(values, values_cont)
+
+    @dtypes(torch.float32)
+    def test_topk_1d_output_discontiguous(self, device, dtype):
+        tensor = torch.randn(12, device=device, dtype=dtype)
+        values = torch.empty_like(tensor)[::2]
+        indices = torch.empty(18, device=device, dtype=torch.long)[::3]
+        for sorted in (True, False):
+            # outputs of `sorted=False` test are not guaranteed to be the same,
+            # but with current implementation they are
+            torch.topk(tensor, 6, sorted=sorted, out=(values, indices))
+            values_cont, indices_cont = tensor.topk(6, sorted=sorted)
+            self.assertEqual(indices, indices_cont)
+            self.assertEqual(values, values_cont)
+
     # FIXME: remove torch.bool from unsupported types once support is added for cub sort
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bool, torch.complex64, torch.complex128})
     def test_stable_sort_against_numpy(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
-        if dtype in torch.testing.floating_types_and(torch.float16, torch.bfloat16):
+        if dtype in floating_types_and(torch.float16, torch.bfloat16):
             inf = float('inf')
             neg_inf = -float('inf')
             nan = float('nan')
@@ -264,7 +293,7 @@ class TestSortAndSelect(TestCase):
             idx_numpy = np.argsort(sample_numpy, axis=dim, kind='stable')
             self.assertEqual(idx_torch, idx_numpy)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + torch.testing.get_all_fp_dtypes()))
+    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes()))
     def test_msort(self, device, dtype):
         if TEST_WITH_ROCM and dtype == torch.bfloat16:
             return
@@ -581,21 +610,41 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(top1, top2)
         self.assertEqual(idx1, idx2)
 
+    def _test_topk_dtype(self, device, dtype, integral, size):
+        if integral:
+            a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max,
+                              size=(size,), dtype=dtype, device=device)
+        else:
+            a = torch.randn(size=(size,), dtype=dtype, device=device)
+
+        sort_topk = a.sort()[0][-(size // 2):].flip(0)
+        topk = a.topk(size // 2)
+        self.assertEqual(sort_topk, topk[0])      # check values
+        self.assertEqual(sort_topk, a[topk[1]])   # check indices
+
     @dtypes(torch.int8, torch.uint8, torch.int16, torch.int32, torch.int64)
     def test_topk_integral(self, device, dtype):
         small = 10
         large = 4096
         for curr_size in (small, large):
-            a = torch.randint(torch.iinfo(dtype).min, torch.iinfo(dtype).max,
-                              size=(curr_size,), dtype=dtype, device=device)
-            sort_topk = a.sort()[0][-(curr_size // 2):].flip(0)
-            topk = a.topk(curr_size // 2)
-            self.assertEqual(sort_topk, topk[0])      # check values
-            self.assertEqual(sort_topk, a[topk[1]])   # check indices
+            self._test_topk_dtype(device, dtype, True, curr_size)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
-    @dtypes(torch.float, torch.double)
+    @onlyCUDA
+    @dtypes(torch.bfloat16)
+    @skipCUDAIfRocm
+    def test_topk_bfloat16(self, device, dtype):
+
+        small = 10
+        large = 8192
+        for curr_size in (small, large):
+            self._test_topk_dtype(device, dtype, False, curr_size)
+
+    @dtypesIfCUDA(*get_all_fp_dtypes())
+    @dtypes(torch.float, torch.double, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            return
+
         x = torch.tensor([float('nan'), float('inf'), 1e4, 0, -1e4, -float('inf')], device=device, dtype=dtype)
         val, idx = x.topk(4)
         expect = torch.tensor([float('nan'), float('inf'), 1e4, 0], device=device, dtype=dtype)
@@ -620,9 +669,16 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyOnCPUAndCUDA
-    @dtypes(*(torch.testing.get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
+    @onlyNativeDeviceTypes
+    @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
+                                   include_bool=False,
+                                   include_half=False,
+                                   include_bfloat16=True)))
+    @dtypes(*(get_all_dtypes(include_complex=False, include_bool=False, include_half=False, include_bfloat16=False)))
     def test_topk_zero(self, device, dtype):
+        if TEST_WITH_ROCM and dtype == torch.bfloat16:
+            return
+
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
         val, idx = torch.topk(t, k=0, largest=False)
@@ -675,7 +731,8 @@ class TestSortAndSelect(TestCase):
                 self.assertEqual(expected_inverse.view(additional_shape), y_inverse)
                 self.assertEqual(expected_counts, y_counts)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -734,7 +791,8 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypes(*set(torch.testing.get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
+    @dtypesIfCPU(*set(get_all_dtypes()) - {torch.complex64, torch.complex128})
+    @dtypes(*set(get_all_dtypes()) - {torch.bfloat16, torch.complex64, torch.complex128})
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.half and self.device_type == 'cpu':
             return  # CPU does not have half support
@@ -822,19 +880,8 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyOnCPUAndCUDA   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
-
     @dtypes(torch.float)
-    @onlyOnCPUAndCUDA   # Fails on XLA
+    @onlyNativeDeviceTypes   # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way
@@ -842,6 +889,127 @@ class TestSortAndSelect(TestCase):
         ref = torch.tensor([2], device=device, dtype=dtype).kthvalue(1)
         self.assertEqual(res[0], ref[0].squeeze())
         self.assertEqual(res[1], ref[1].squeeze())
+
+    @dtypes(*all_types())
+    @dtypesIfCUDA(*all_types_and(torch.half))
+    def test_isin(self, device, dtype):
+        def assert_isin_equal(a, b):
+            # Compare to the numpy reference implementation.
+            x = torch.isin(a, b)
+            a = a.cpu().numpy() if torch.is_tensor(a) else np.array(a)
+            b = b.cpu().numpy() if torch.is_tensor(b) else np.array(b)
+            y = np.isin(a, b)
+            self.assertEqual(x, y)
+
+        # multi-dim tensor, multi-dim tensor
+        a = torch.arange(24, device=device, dtype=dtype).reshape([2, 3, 4])
+        b = torch.tensor([[10, 20, 30], [0, 1, 3], [11, 22, 33]], device=device, dtype=dtype)
+        assert_isin_equal(a, b)
+
+        # zero-dim tensor
+        zero_d = torch.tensor(3, device=device, dtype=dtype)
+        assert_isin_equal(zero_d, b)
+        assert_isin_equal(a, zero_d)
+        assert_isin_equal(zero_d, zero_d)
+
+        # empty tensor
+        empty = torch.tensor([], device=device, dtype=dtype)
+        assert_isin_equal(empty, b)
+        assert_isin_equal(a, empty)
+        assert_isin_equal(empty, empty)
+
+        # scalar
+        assert_isin_equal(a, 6)
+        assert_isin_equal(5, b)
+
+        def define_expected(lst, invert=False):
+            expected = torch.tensor(lst, device=device)
+            if invert:
+                expected = expected.logical_not()
+            return expected
+
+        # Adapted from numpy's in1d tests
+        for mult in [1, 10]:
+            for invert in [False, True]:
+                a = torch.tensor([5, 7, 1, 2], device=device, dtype=dtype)
+                b = torch.tensor([2, 4, 3, 1, 5] * mult, device=device, dtype=dtype)
+                ec = define_expected([True, False, True, True], invert=invert)
+                c = torch.isin(a, b, assume_unique=True, invert=invert)
+                self.assertEqual(c, ec)
+
+                a[0] = 8
+                ec = define_expected([False, False, True, True], invert=invert)
+                c = torch.isin(a, b, assume_unique=True, invert=invert)
+                self.assertEqual(c, ec)
+
+                a[0], a[3] = 4, 8
+                ec = define_expected([True, False, True, False], invert=invert)
+                c = torch.isin(a, b, assume_unique=True, invert=invert)
+                self.assertEqual(c, ec)
+
+                a = torch.tensor([5, 4, 5, 3, 4, 4, 3, 4, 3, 5, 2, 1, 5, 5], device=device, dtype=dtype)
+                b = torch.tensor([2, 3, 4] * mult, device=device, dtype=dtype)
+                ec = define_expected([False, True, False, True, True, True, True, True, True,
+                                      False, True, False, False, False], invert=invert)
+                c = torch.isin(a, b, invert=invert)
+                self.assertEqual(c, ec)
+
+                b = torch.tensor([2, 3, 4] * mult + [5, 5, 4] * mult, device=device, dtype=dtype)
+                ec = define_expected([True, True, True, True, True, True, True, True, True, True,
+                                      True, False, True, True], invert=invert)
+                c = torch.isin(a, b, invert=invert)
+                self.assertEqual(c, ec)
+
+                a = torch.tensor([5, 7, 1, 2], device=device, dtype=dtype)
+                b = torch.tensor([2, 4, 3, 1, 5] * mult, device=device, dtype=dtype)
+                ec = define_expected([True, False, True, True], invert=invert)
+                c = torch.isin(a, b, invert=invert)
+                self.assertEqual(c, ec)
+
+                a = torch.tensor([5, 7, 1, 1, 2], device=device, dtype=dtype)
+                b = torch.tensor([2, 4, 3, 3, 1, 5] * mult, device=device, dtype=dtype)
+                ec = define_expected([True, False, True, True, True], invert=invert)
+                c = torch.isin(a, b, invert=invert)
+                self.assertEqual(c, ec)
+
+                a = torch.tensor([5, 5], device=device, dtype=dtype)
+                b = torch.tensor([2, 2] * mult, device=device, dtype=dtype)
+                ec = define_expected([False, False], invert=invert)
+                c = torch.isin(a, b, invert=invert)
+                self.assertEqual(c, ec)
+
+                # multi-dimensional input case using sort-based algo
+                for assume_unique in [False, True]:
+                    a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])
+                    b = torch.arange(3, 30, device=device, dtype=dtype)
+                    ec = define_expected([[False, False, False], [True, True, True]], invert=invert)
+                    c = torch.isin(a, b, invert=invert, assume_unique=assume_unique)
+                    self.assertEqual(c, ec)
+
+    def test_isin_different_dtypes(self, device):
+        supported_types = all_types() if device == 'cpu' else all_types_and(torch.half)
+        for mult in [1, 10]:
+            for assume_unique in [False, True]:
+                for dtype1, dtype2 in product(supported_types, supported_types):
+                    a = torch.tensor([1, 2, 3], device=device, dtype=dtype1)
+                    b = torch.tensor([3, 4, 5] * mult, device=device, dtype=dtype2)
+                    ec = torch.tensor([False, False, True], device=device)
+                    c = torch.isin(a, b, assume_unique=assume_unique)
+                    self.assertEqual(c, ec)
+
+    @onlyCUDA
+    @dtypes(*all_types())
+    def test_isin_different_devices(self, device, dtype):
+        a = torch.arange(6, device=device, dtype=dtype).reshape([2, 3])
+        b = torch.arange(3, 30, device='cpu', dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.isin(a, b)
+
+        c = torch.arange(6, device='cpu', dtype=dtype).reshape([2, 3])
+        d = torch.arange(3, 30, device=device, dtype=dtype)
+        with self.assertRaises(RuntimeError):
+            torch.isin(c, d)
+
 
 instantiate_device_type_tests(TestSortAndSelect, globals())
 

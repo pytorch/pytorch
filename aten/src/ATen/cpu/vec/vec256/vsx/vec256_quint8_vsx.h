@@ -1,8 +1,10 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+
+#include <c10/util/irange.h>
 #include <c10/util/quint8.h>
 #include <array>
 
@@ -92,7 +94,7 @@ struct Vectorized<c10::quint8> {
           vec_vsx_ld(offset0, reinterpret_cast<const value_type*>(ptr)),
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
   }
@@ -101,7 +103,7 @@ struct Vectorized<c10::quint8> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<value_type*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<value_type*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, tmp_values);
       vec_vsx_st(_vec1, offset16, tmp_values);
       std::memcpy(
@@ -367,15 +369,6 @@ struct Vectorized<c10::quint8> {
     vuint8 vec1 = vec_packsu(vecshi2, vecshi3);
 
     return {vec0, vec1};
-  }
-
-  void dump() const {
-    value_type vals[size()];
-    store((void*)vals);
-    for (int i = 0; i < size(); ++i) {
-      std::cout << (int)(vals[i]) << " ";
-    }
-    std::cout << std::endl;
   }
 
   DEFINE_MEMBER_OP(operator==, c10::quint8, vec_cmpeq)

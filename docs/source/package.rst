@@ -2,11 +2,6 @@
 
 torch.package
 =============
-
-.. warning::
-
-    This module is experimental and has not yet been publicly released.
-
 ``torch.package`` adds support for creating hermetic packages containing arbitrary
 PyTorch code. These packages can be saved, shared, used to load and execute models
 at a later date or on a different machine, and can even be deployed to production using
@@ -14,6 +9,16 @@ at a later date or on a different machine, and can even be deployed to productio
 
 This document contains tutorials, how-to guides, explanations, and an API reference that
 will help you learn more about ``torch.package`` and how to use it.
+
+
+.. warning::
+
+    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+
+    It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
+    Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
+
+    For more information, review the `documentation <https://docs.python.org/3/library/pickle.html>`_ for the ``pickle`` module.
 
 
 .. contents:: :local:
@@ -25,7 +30,7 @@ Tutorials
 Packaging your first model
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 A tutorial that guides you through packaging and unpackaging a simple model is available
-`on Colab <https://colab.research.google.com/drive/1dWATcDir22kgRQqBg2X_Lsh5UPfC7UTK?usp=sharing>`_.
+`on Colab <https://colab.research.google.com/drive/1lFZkLyViGfXxB-m3jqlyTQuYToo3XLo->`_.
 After completing this exercise, you will be familiar with the basic API for creating and using
 Torch packages.
 
@@ -95,7 +100,7 @@ use the glob-style ``include`` and ``exclude`` filtering arguments.
 
 ::
 
-    with PackageExporter('my_package.pt', verbose=False) as pe:
+    with PackageExporter('my_package.pt') as pe:
         pe.save_pickle('models', 'model_1.pkl', mod)
         # can limit printed items with include/exclude args
         print(pe.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
@@ -140,6 +145,18 @@ You can also query ``Folder`` objects with the ``has_file()`` method.
 
     exporter_file_structure = exporter.file_structure()
     found: bool = exporter_file_structure.has_file("package_a/subpackage.py")
+
+See why a given module was included as a dependency?
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Say there is a given module ``foo``, and you want to know why your :class:`PackageExporter` is pulling in ``foo`` as a dependency.
+
+:meth:`PackageExporter.get_rdeps` will return all modules that directly depend on ``foo``.
+
+If you would like to see how a given module ``src`` depends on ``foo``, the :meth:`PackageExporter.all_paths` method will
+return a DOT-formatted graph showing all the dependency paths between ``src`` and ``foo``.
+
+If you would just like to see the whole dependency graph of your :class:`PackageExporter`, you can use :meth:`PackageExporter.dependency_graph_string`.
 
 
 Include arbitrary resources with my package and access them later?
@@ -245,7 +262,7 @@ Steps:
 
     foo_1 = foo.Foo("foo_1 initial string")
     foo_2 = foo.Foo("foo_2 initial string")
-    with PackageExporter('foo_package.pt', verbose=False) as pe:
+    with PackageExporter('foo_package.pt') as pe:
         # save as normal, no extra work necessary
         pe.save_pickle('foo_collection', 'foo1.pkl', foo_1)
         pe.save_pickle('foo_collection', 'foo2.pkl', foo_2)
@@ -447,7 +464,7 @@ Saving TorchScript objects that are attributes or submodules is supported as wel
 ::
 
     # save TorchScript just like any other object
-    with PackageExporter(file_name, verbose=True) as e:
+    with PackageExporter(file_name) as e:
         e.save_pickle("res", "script_model.pkl", scripted_model)
         e.save_pickle("res", "mixed_model.pkl", python_model_with_scripted_submodule)
     # load as normal

@@ -1,10 +1,10 @@
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/core/Scalar.h>
 
 
 namespace at { namespace native {
@@ -29,7 +29,7 @@ void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
   });
 }
 
-void isposinf_kernel_impl(TensorIterator &iter) {
+void isposinf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isposinf_cuda", [&]() {
     gpu_kernel(
       iter,
@@ -38,7 +38,7 @@ void isposinf_kernel_impl(TensorIterator &iter) {
   });
 }
 
-void isneginf_kernel_impl(TensorIterator &iter) {
+void isneginf_kernel_impl(TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "isneginf_cuda", [&]() {
     gpu_kernel(
       iter,
@@ -60,7 +60,7 @@ void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min, Scalar max) {
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     const auto lower = min.to<scalar_t>();
     const auto upper = max.to<scalar_t>();
@@ -154,7 +154,8 @@ __global__ void _assert_async_cuda_kernel(c10::complex<double>* input) {
   CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
 }
 
-void _assert_async_cuda(const Tensor& self) {
+void _assert_async_cuda(const Tensor& self_tensor) {
+  const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");

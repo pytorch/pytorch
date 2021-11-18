@@ -7,7 +7,6 @@
 namespace torch {
 namespace jit {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassTypeTest, AddRemoveAttr) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu, true);
@@ -35,7 +34,6 @@ TEST(ClassTypeTest, AddRemoveAttr) {
   cls->addAttribute("attr1", IntType::get());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassTypeTest, AddRemoveConstant) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
@@ -58,7 +56,6 @@ TEST(ClassTypeTest, AddRemoveConstant) {
   ASSERT_TRUE(cls->hasConstant("const3"));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassTypeTest, IdenticalTypesDifferentCus) {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();

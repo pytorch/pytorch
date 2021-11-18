@@ -2,12 +2,21 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THC.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/util/Optional.h>
 
 #include <cstddef>
 #include <vector>
+
+// NCCL BFloat16 is enabled only for CUDA 11+ and NCCL versions 2.10+, or for HIP 3.1+
+#if defined(__CUDA_BF16_TYPES_EXIST__)
+#define HAS_NCCL_BF16_DATATYPE \
+  ((NCCL_MAJOR > 2) || (NCCL_MAJOR == 2) && (NCCL_MINOR >= 10))
+#elif defined(USE_ROCM) && (TORCH_HIP_VERSION >= 301)
+#define HAS_NCCL_BF16_DATATYPE 1
+#else
+#define HAS_NCCL_BF16_DATATYPE 0
+#endif
 
 namespace torch {
 namespace cuda {
@@ -53,7 +62,9 @@ enum class ncclDataType {
     Float16    = 6, Half       = 6,
     Float32    = 7, Float      = 7,
     Float64    = 8, Double     = 8,
-    numTypes   = 9 };
+    Bfloat16   = 9,
+    NumTypes   = 10
+};
 
 
 

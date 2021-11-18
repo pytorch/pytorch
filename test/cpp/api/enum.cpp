@@ -12,7 +12,6 @@
   ASSERT_EQ(torch::enumtype::get_enum_name(v), pretty_print_name); \
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(EnumTest, AllEnums) {
   c10::variant<
     torch::enumtype::kLinear,

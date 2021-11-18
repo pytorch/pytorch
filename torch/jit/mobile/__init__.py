@@ -45,9 +45,9 @@ def _load_for_lite_interpreter(f, map_location=None):
     map_location = validate_map_location(map_location)
 
     if isinstance(f, str) or isinstance(f, pathlib.Path):
-        cpp_module = torch._C._load_for_lite_interpreter(f, map_location)  # type: ignore[attr-defined]
+        cpp_module = torch._C._load_for_lite_interpreter(f, map_location)
     else:
-        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(f.read(), map_location)  # type: ignore[attr-defined]
+        cpp_module = torch._C._load_for_lite_interpreter_from_buffer(f.read(), map_location)
 
     return LiteScriptModule(cpp_module)
 
@@ -102,9 +102,39 @@ def _get_model_bytecode_version(f_input) -> int:
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._get_model_bytecode_version(str(f_input))  # type: ignore[attr-defined]
+        return torch._C._get_model_bytecode_version(str(f_input))
     else:
-        return torch._C._get_model_bytecode_version_from_buffer(f_input.read())  # type: ignore[attr-defined]
+        return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
+
+def _get_mobile_model_contained_types(f_input) -> int:
+    r"""
+    Args:
+        f_input: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
+
+    Returns:
+        type_list: A set of string, like ("int", "Optional"). These are types used in bytecode.
+
+    Example:
+
+    .. testcode::
+
+        from torch.jit.mobile import _get_mobile_model_contained_types
+
+        # Get type list from a saved file path
+        type_list = _get_mobile_model_contained_types("path/to/model.ptl")
+
+    """
+    if isinstance(f_input, str):
+        if not os.path.exists(f_input):
+            raise ValueError(f"The provided filename {f_input} does not exist")
+        if os.path.isdir(f_input):
+            raise ValueError(f"The provided filename {f_input} is a directory")
+
+    if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
+        return torch._C._get_mobile_model_contained_types(str(f_input))
+    else:
+        return torch._C._get_mobile_model_contained_types_from_buffer(f_input.read())
 
 def _backport_for_mobile(f_input, f_output, to_version):
     r"""
@@ -124,9 +154,9 @@ def _backport_for_mobile(f_input, f_output, to_version):
 
     if ((isinstance(f_input, str) or isinstance(f_input, pathlib.Path)) and (
             isinstance(f_output, str) or isinstance(f_output, pathlib.Path))):
-        return torch._C._backport_for_mobile(str(f_input), str(f_output), to_version)  # type: ignore[attr-defined]
+        return torch._C._backport_for_mobile(str(f_input), str(f_output), to_version)
     else:
-        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output), to_version)  # type: ignore[attr-defined]
+        return torch._C._backport_for_mobile_from_buffer(f_input.read(), str(f_output), to_version)
 
 def _backport_for_mobile_to_buffer(f_input, to_version):
     r"""
@@ -142,9 +172,9 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._backport_for_mobile_to_buffer(str(f_input), to_version)  # type: ignore[attr-defined]
+        return torch._C._backport_for_mobile_to_buffer(str(f_input), to_version)
     else:
-        return torch._C._backport_for_mobile_from_buffer_to_buffer(f_input.read(), to_version)  # type: ignore[attr-defined]
+        return torch._C._backport_for_mobile_from_buffer_to_buffer(f_input.read(), to_version)
 
 def _get_model_ops_and_info(f_input):
     r"""
@@ -182,6 +212,6 @@ def _get_model_ops_and_info(f_input):
             raise ValueError(f"The provided filename {f_input} is a directory")
 
     if (isinstance(f_input, str) or isinstance(f_input, pathlib.Path)):
-        return torch._C._get_model_ops_and_info(str(f_input))  # type: ignore[attr-defined]
+        return torch._C._get_model_ops_and_info(str(f_input))
     else:
-        return torch._C._get_model_ops_and_info(f_input.read())  # type: ignore[attr-defined]
+        return torch._C._get_model_ops_and_info(f_input.read())

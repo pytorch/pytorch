@@ -1,6 +1,9 @@
+#include <pybind11/detail/common.h>
+#include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
 #include <torch/csrc/Device.h>
+#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
@@ -15,6 +18,7 @@
 #include <torch/csrc/jit/testing/file_check.h>
 
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/constants.h>
@@ -22,6 +26,7 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
+#include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
@@ -87,7 +92,7 @@ struct PythonResolver : public Resolver {
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
@@ -171,7 +176,7 @@ void checkOverloadDecl(const Decl& new_decl, const Decl& old_decl) {
       "Overload must have same number of parameters\n",
       new_decl.range(),
       old_decl.range());
-  for (size_t i = 0; i < new_decl.params().size(); ++i) {
+  for (const auto i : c10::irange(new_decl.params().size())) {
     TORCH_INTERNAL_ASSERT(
         new_params[i].ident().name() == old_params[i].ident().name(),
         "Overload parameters must have the same names\n",
@@ -307,7 +312,7 @@ static Decl mergeDefaultsAndExtraParametersToOverloadDecl(
       overload_decl.range(),
       impl_decl.range());
 
-  for (size_t i = 0; i < overload_params.size(); ++i) {
+  for (const auto i : c10::irange(overload_params.size())) {
     auto overload_name = overload_params[i].ident().name();
     auto impl_name = impl_params[i].ident().name();
     if (overload_name != impl_name) {
@@ -526,7 +531,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
 
 void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = func.function_->graph()->copy();
+  auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
   const auto name = QualifiedName(*module.type()->name(), "forward");
@@ -582,7 +587,7 @@ bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     } else if (item.a.isList()) {
       auto al = item.a.toList();
       auto bl = item.b.toList();
-      for (size_t i = 0; i < al.size(); ++i) {
+      for (const auto i : c10::irange(al.size())) {
         work.emplace_back(Work{al.get(i), bl.get(i)});
       }
     } else if (item.a.isGenericDict()) {
@@ -794,8 +799,18 @@ void initJitScriptBindings(PyObject* module) {
                       self.type()->getConstant(name));
                 }
                 TypePtr type = self.type()->getAttribute(name);
-                auto ivalue = toIValue(std::move(value), type);
-                self.setattr(name, ivalue);
+                try {
+                  auto ivalue = toIValue(std::move(value), type);
+                  self.setattr(name, ivalue);
+                } catch (std::exception& e) {
+                  throw py::cast_error(c10::str(
+                      "Could not cast attribute '",
+                      name,
+                      "' to type ",
+                      type->repr_str(),
+                      ": ",
+                      e.what()));
+                }
               })
           .def(
               "getattr",
@@ -874,6 +889,8 @@ void initJitScriptBindings(PyObject* module) {
                   return method.name();
                 });
               })
+          .def(
+              "_properties", [](Object& self) { return self.get_properties(); })
           .def("__copy__", &Object::copy)
           .def(
               "__hash__",
@@ -938,8 +955,18 @@ void initJitScriptBindings(PyObject* module) {
                 throw std::runtime_error(err.str());
               }));
 
-  // Special case __str__ to make sure we can print Objects/Modules regardless
-  // of if the user defined a __str__
+  py::class_<Object::Property>(m, "ScriptObjectProperty")
+      .def_property_readonly(
+          "name", [](const Object::Property& self) { return self.name; })
+      .def_property_readonly(
+          "getter",
+          [](const Object::Property& self) { return self.getter_func; })
+      .def_property_readonly("setter", [](const Object::Property& self) {
+        return self.setter_func;
+      });
+
+  // Special case __str__ to make sure we can print Objects/Modules
+  // regardless of if the user defined a __str__
   using MagicMethodImplType = std::function<py::object(
       const Object& self, py::args args, py::kwargs kwargs)>;
   std::unordered_map<std::string, MagicMethodImplType> special_magic_methods{
@@ -987,14 +1014,27 @@ void initJitScriptBindings(PyObject* module) {
             pyIValueDeepcopy(IValue(self._ivalue()), memo).toObject());
       });
 
-  // Used by torch.Package to save TS objects in unified format
+  // Used by torch.package to save ScriptModule objects in unified format.
   py::class_<ScriptModuleSerializer>(m, "ScriptModuleSerializer")
       .def(py::init<caffe2::serialize::PyTorchStreamWriter&>())
       .def("serialize", &ScriptModuleSerializer::serialize_unified_format)
       .def(
           "write_files",
           &ScriptModuleSerializer::writeFiles,
-          py::arg("code_dir") = ".data/ts_code/code/");
+          py::arg("code_dir") = ".data/ts_code/code/")
+      .def(
+          "storage_context",
+          &ScriptModuleSerializer::storage_context,
+          pybind11::return_value_policy::reference_internal);
+
+  // Used by torch.package to coordinate sharing of storages between eager
+  // and ScriptModules.
+  py::class_<
+      SerializationStorageContext,
+      std::shared_ptr<SerializationStorageContext>>(
+      m, "SerializationStorageContext")
+      .def("has_storage", &SerializationStorageContext::hasStorage)
+      .def("get_or_add_storage", &SerializationStorageContext::getOrAddStorage);
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
@@ -1317,7 +1357,11 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_interface",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_interface(name); });
+             const std::string& name) { return self->get_interface(name); })
+      .def(
+          "get_class",
+          [](const std::shared_ptr<CompilationUnit>& self,
+             const std::string& name) { return self->get_class(name); });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1370,11 +1414,13 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
           "graph",
-          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+          [](const StrongFunctionPtr& self) {
+            return toGraphFunction(*self.function_).graph();
+          })
       .def_property_readonly(
           "inlined_graph",
           [](const StrongFunctionPtr& self) {
-            auto g = self.function_->graph()->copy();
+            auto g = toGraphFunction(*self.function_).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1396,12 +1442,16 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().getDebugState();
+            return toGraphFunction(*self.function_)
+                .get_executor()
+                .getDebugState();
           })
       .def(
           "_debug_flush_compilation_cache",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().debugFlushCompilationCache();
+            toGraphFunction(*self.function_)
+                .get_executor()
+                .debugFlushCompilationCache();
           })
       .def_property_readonly(
           "name",
@@ -1435,7 +1485,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "inlined_graph",
           [](const Method& self) {
-            auto g = self.function().graph()->copy();
+            auto g = toGraphFunction(self.function()).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1674,7 +1724,8 @@ void initJitScriptBindings(PyObject* module) {
       "_import_ir_module_from_package",
       [](std::shared_ptr<CompilationUnit> cu,
          std::shared_ptr<caffe2::serialize::PyTorchStreamReader> reader,
-         std::shared_ptr<torch::jit::StorageContext> storage_context,
+         std::shared_ptr<torch::jit::DeserializationStorageContext>
+             storage_context,
          py::object map_location,
          std::string ts_id) {
         c10::optional<at::Device> optional_device;
@@ -1770,6 +1821,15 @@ void initJitScriptBindings(PyObject* module) {
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
+    return _get_mobile_model_contained_types(filename);
+  });
+  m.def(
+      "_get_mobile_model_contained_types_from_buffer",
+      [](const std::string& buffer) {
+        std::istringstream in(buffer);
+        return _get_mobile_model_contained_types(in);
       });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
@@ -1877,8 +1937,14 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
 
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
+
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
-    return Module(get_python_cu(), type);
+     return Module(get_python_cu(), type);
+   }).def("_create_object_with_type", [](const ClassTypePtr& type) {
+    return Object(get_python_cu(), type);
   });
 
   m.def("_export_opnames", [](Module& sm) {
@@ -2093,6 +2159,7 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   initScriptDictBindings(module);
+  initScriptListBindings(module);
 }
 } // namespace jit
 } // namespace torch

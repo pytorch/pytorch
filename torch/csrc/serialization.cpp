@@ -82,13 +82,11 @@ static inline ssize_t doPartialPythonIO(PyObject* fildes, void* buf, size_t nbyt
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
   if (!memview) throw python_error();
 
-  // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
-  char* method = "write";
+  std::string method = "write";
   if (is_read) {
-    // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
     method = "readinto";
   }
-  THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
+  THPObjectPtr r(PyObject_CallMethod(fildes, method.c_str(), "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());
   }
@@ -171,24 +169,4 @@ void doWrite(io fildes, void* raw_buf, size_t nbytes) {
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateBoolType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/serialization.cpp>
-#include <TH/THGenerateQTypes.h>
+#include <TH/THGenerateByteType.h>

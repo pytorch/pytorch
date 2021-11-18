@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
 #include <sleef.h>
 namespace at {
@@ -180,7 +180,7 @@ class Vectorized<float> {
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
 
-    __at_align32__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()];
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
 
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
@@ -190,7 +190,7 @@ class Vectorized<float> {
       vec_vsx_st(_vec0, offset0, reinterpret_cast<value_type*>(ptr));
       vec_vsx_st(_vec1, offset16, reinterpret_cast<value_type*>(ptr));
     } else if (count > 0) {
-      __at_align32__ value_type tmp_values[size()];
+      __at_align__ value_type tmp_values[size()];
       vec_vsx_st(_vec0, offset0, tmp_values);
       vec_vsx_st(_vec1, offset16, tmp_values);
       std::memcpy(
@@ -201,7 +201,7 @@ class Vectorized<float> {
   const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
 
-  Vectorized<float> map(float (*f)(float)) const {
+  Vectorized<float> map(float (*const f)(float)) const {
     Vectorized<float> ret;
     for (int i = 0; i < size() / 2; i++) {
       ret._vec0[i] = f(_vec0[i]);
@@ -212,7 +212,7 @@ class Vectorized<float> {
     return ret;
   }
 
-  Vectorized<float> mapbi(float (*f)(float, float), const Vectorized<float>& other)
+  Vectorized<float> mapbi(float (*const f)(float, float), const Vectorized<float>& other)
       const {
     Vectorized<float> ret;
     for (int i = 0; i < size() / 2; i++) {
@@ -434,13 +434,6 @@ class Vectorized<float> {
   }
   Vectorized<float> C10_ALWAYS_INLINE neg() const {
     return {vec_neg(_vec0), vec_neg(_vec1)};
-  }
-
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec0[2] << ","
-              << _vec0[3] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << "," << _vec1[2] << ","
-              << _vec1[3] << std::endl;
   }
 
   Vectorized<float> C10_ALWAYS_INLINE round() const {

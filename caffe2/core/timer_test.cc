@@ -8,7 +8,6 @@
 namespace caffe2 {
 namespace {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimerTest, Test) {
   Timer timer;
 
@@ -39,7 +38,6 @@ TEST(TimerTest, Test) {
   EXPECT_LT(timer.MicroSeconds(), 1000);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(TimerTest, TestLatency) {
   constexpr int iter = 1000;
   float latency = 0;

@@ -6,14 +6,14 @@
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
 #include <ATen/native/TensorIterator.h>
-#include <THC/THCIntegerDivider.cuh>
+#include <ATen/cuda/detail/IntegerDivider.cuh>
 
 // If element_sizes is nullptr, then the strides will be in bytes, otherwise
 // the strides will be in # of elements.
 // Operands that share the same shape, but may have different strides.
 // OffsetCalculator iterates the tensor in a column-major order
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 constexpr int MAX_DIMS = 16;
 #else
 constexpr int MAX_DIMS = 25;
@@ -36,7 +36,7 @@ struct OffsetCalculator {
   OffsetCalculator(int dims, const int64_t* sizes, const int64_t* const* strides, const int64_t* element_sizes=nullptr) : dims(dims) {
     TORCH_CHECK(dims <= MAX_DIMS, "tensor has too many (>", MAX_DIMS, ") dims");
     for (int i=0; i < dims; i++){
-      sizes_[i] = IntDivider<index_t>(sizes[i]);
+      sizes_[i] = at::cuda::detail::IntDivider<index_t>(sizes[i]);
       for (int arg = 0; arg < NARGS; arg++) {
         int64_t element_size = (element_sizes == nullptr ? 1LL : element_sizes[arg]);
         strides_[i][arg] = strides[arg][i] / element_size;
@@ -69,7 +69,7 @@ struct OffsetCalculator {
   }
 
   int dims;
-  IntDivider<index_t> sizes_[MAX_DIMS];
+  at::cuda::detail::IntDivider<index_t> sizes_[MAX_DIMS];
   stride_t strides_[MAX_DIMS][std::max<int>(NARGS, 1)];
 };
 
@@ -92,12 +92,28 @@ struct TrivialOffsetCalculator {
   }
 };
 
+// Make an OffsetCalculator with byte offsets
 template<int N, bool signed_strides = false>
 static OffsetCalculator<N, uint32_t, signed_strides> make_offset_calculator(const at::TensorIteratorBase& iter) {
-  AT_ASSERT(N <= iter.ntensors());
+  TORCH_INTERNAL_ASSERT(N <= iter.ntensors());
   std::array<const int64_t*, N> strides;
   for (int i = 0; i < N; i++) {
     strides[i] = iter.strides(i).data();
   }
   return OffsetCalculator<N, uint32_t, signed_strides>(iter.ndim(), iter.shape().data(), strides.data());
+}
+
+// Make an OffsetCalculator with element offsets
+template<int N, bool signed_strides = false>
+static OffsetCalculator<N, uint32_t, signed_strides> make_element_offset_calculator(
+    const at::TensorIteratorBase& iter) {
+  TORCH_INTERNAL_ASSERT(N <= iter.ntensors());
+  std::array<const int64_t*, N> strides;
+  std::array<int64_t, N> element_sizes;
+  for (int i = 0; i < N; i++) {
+    strides[i] = iter.strides(i).data();
+    element_sizes[i] = iter.element_size(i);
+  }
+  return OffsetCalculator<N, uint32_t, signed_strides>(
+      iter.ndim(), iter.shape().data(), strides.data(), element_sizes.data());
 }

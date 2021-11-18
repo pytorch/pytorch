@@ -295,14 +295,14 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 #define C10_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define C10_HIP_HOST_DEVICE __host__ __device__
 #else
 #define C10_HIP_HOST_DEVICE
 #endif
 
-#ifdef __HIP_PLATFORM_HCC__
-#define C10_WARP_SIZE 64
+#if defined(USE_ROCM)
+#define C10_WARP_SIZE warpSize // = 64 or 32 (Defined in hip_runtime.h)
 #else
 #define C10_WARP_SIZE 32
 #endif
@@ -314,8 +314,8 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || \
-    (defined(__HIP_PLATFORM_HCC__) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__XROS__) || \
+    (defined(USE_ROCM) && ROCM_VERSION < 40100)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
@@ -352,7 +352,14 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw();
+        const char* function) throw()
+// We match the declaration of __assert_fail exactly how it is in glibc in case
+// parts of the program are compiled with different NDEBUG settings. Otherwise
+// we might get 'ambiguous declaration' error.
+#ifdef __GNUC__
+        __attribute__((__noreturn__))
+#endif
+        ;
 #endif
 }
 #endif // NDEBUG
@@ -387,28 +394,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
-// We need --expt-relaxed-constexpr in CUDA because of Eigen. This flag allows
-// device code in CUDA to call host constexpr functions. Unfortunately,
-// the CUDA compiler (at least for CUDA 9.0, 9.1 and 9.2) isn't compatible
-// with many of the constexpr things we'd like to do and the device code
-// compiler crashes when it sees one of these host-only functions.
-// It works when nvcc builds host code, but not when it builds device code
-// and notices it can call these constexpr functions from device code.
-// As a workaround, we use C10_HOST_CONSTEXPR instead of constexpr for these
-// functions. This enables constexpr when compiled on the host and applies
-// __host__ when it is compiled on the device in an attempt to stop it from
-// being called from device functions. Not sure if the latter works, but
-// even if not, it not being constexpr anymore should be enough to stop
-// it from being called from device code.
-// TODO This occurred in CUDA 9 (9.0 to 9.2). Test if this is fixed in CUDA 10.
-#if defined(__CUDA_ARCH__)
-#define C10_HOST_CONSTEXPR __host__
-#define C10_HOST_CONSTEXPR_VAR
-#else
-#define C10_HOST_CONSTEXPR constexpr
-#define C10_HOST_CONSTEXPR_VAR constexpr
-#endif
-
 #if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
     __GNUC__ < 6
 #define CONSTEXPR_EXCEPT_GCC5
@@ -422,18 +407,73 @@ __host__ __device__
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+// Note [static constexpr char* members for windows NVCC]
+// The Windows NVCC compiler doesn't handle static constexpr class members,
+// although it's fixed in a later version.
+// (see
+// https://developercommunity.visualstudio.com/t/intellisense-error-c11-static-constexpr-member-ini/245425)
+//
+// If we want to ensure that our field is static under all builds, then we need
+// to work around it specifically for windows NVCC by making it (a) const, (b)
+// defined outside of the class definition We need to define it outside of the
+// class definition because of the C++ standard; char* is not an integral type
+// (see
+// https://stackoverflow.com/questions/24278473/intellisense-a-member-of-type-const-char-const-cannot-have-an-in-class-in)
+//
+// So instead of this:
+// struct Foo {
+//     static constexpr const char* name = "foo";
+// }
+// In Windows NVCC, we end up with this:
+// struct Foo {
+//     static const char* name;
+// }
+// const char* Foo::name = "foo";
+//
+// This gives us a small perf hit for any code that wants to access these field
+// members, but right now it isn't used in any perf-critical code paths.
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA __host__
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #else
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static const char* field;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val) \
+  const char* cls::field = val;
 #else
 #define CONSTEXPR_EXCEPT_WIN_CUDA constexpr
 #define C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA constexpr
+
+#define STATIC_CONSTEXPR_STR_INL_EXCEPT_WIN_CUDA(field, val) \
+  static constexpr const char* field = val;
+#define STATIC_CONST_STR_OUT_OF_LINE_FOR_WIN_CUDA(cls, field, val)
 #endif
 #endif
+
+#ifndef HAS_DEMANGLE
+#if defined(__ANDROID__) || defined(_WIN32) || defined(__EMSCRIPTEN__) || \
+    defined(__XROS__)
+#define HAS_DEMANGLE 0
+#elif defined(__APPLE__) && \
+    (TARGET_IPHONE_SIMULATOR || TARGET_OS_SIMULATOR || TARGET_OS_IPHONE)
+#define HAS_DEMANGLE 0
+#else
+#define HAS_DEMANGLE 1
+#endif
+#endif // HAS_DEMANGLE
 
 #endif // C10_MACROS_MACROS_H_

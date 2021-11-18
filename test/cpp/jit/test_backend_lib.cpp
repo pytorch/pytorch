@@ -79,17 +79,13 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "test_backend";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls_available =
     torch::jit::backend<TestBackend<true>>(backend_name);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 
 constexpr auto backend_unavailable_name = "test_backend_unavailable";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto cls_unavailable =
     torch::jit::backend<TestBackend<false>>(backend_unavailable_name);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg_unavailable =
     backend_preprocess_register(backend_unavailable_name, preprocess);
 

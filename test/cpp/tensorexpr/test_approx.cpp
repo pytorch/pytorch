@@ -11,9 +11,9 @@
 using namespace torch::indexing;
 namespace te = torch::jit::tensorexpr;
 
-static void vectorize(te::LoopNest* ln, te::Tensor* target, int width) {
+static void vectorize(te::LoopNest* ln, te::Tensor target, int width) {
   auto loops = ln->getLoopStmtsFor(target);
-  te::For *inner, *tail;
+  te::ForPtr inner, tail;
   ln->splitWithTail(loops[0], width, &inner, &tail);
   ASSERT_TRUE(te::LoopNest::vectorize(inner));
 }
@@ -30,16 +30,15 @@ std::string diffs(const at::Tensor& a, const at::Tensor& b) {
 }
 
 TEST(Approx, log_vml) {
-  te::KernelScope ks;
   te::VarHandle N("N", te::kInt);
-  te::Placeholder A("A", te::kFloat, {N});
-  te::Tensor* B = te::Compute(
+  te::BufHandle A("A", {N}, te::kFloat);
+  te::Tensor B = te::Compute(
       "B", {N}, [&](const te::VarHandle& i) { return log_vml(A.load(i)); });
 
   te::LoopNest ln({B});
   ln.prepareForCodegen();
   vectorize(&ln, B, 8);
-  te::Stmt* s = ln.root_stmt();
+  te::StmtPtr s = ln.root_stmt();
   s = te::IRSimplifier::simplify(s);
   te::LLVMCodeGen cg(s, {A, B, N});
 

@@ -89,9 +89,7 @@ class IDEEPLRNGradientOp final : public IDEEPOperator {
 };
 
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LRN, IDEEPLRNOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(LRNGradient, IDEEPLRNGradientOp);
 
 } // namespace

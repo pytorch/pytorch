@@ -71,14 +71,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
       return false;
     }
     const at::Tensor& weight_t = weight.value().toTensor();
-    if (!weight_t.device().is_cuda() ||
-        !weight_t.is_contiguous()
-#if CUDNN_VERSION < 8000
-        // Enabling the fusion for half-precision causes perf regression on
-        // earlier cuDNN
-        || weight_t.dtype() == at::kHalf
-#endif
-    ) {
+    if (!weight_t.device().is_cuda() || !weight_t.is_contiguous()) {
       return false;
     }
 

@@ -19,7 +19,6 @@
 
 // An explicitly defined module, testing correctness when we dynamically link a
 // module
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 CAFFE2_MODULE(caffe2_module_test_dynamic, "Dynamic module only used for testing.");
 
 namespace caffe2 {
@@ -35,10 +34,8 @@ class Caffe2ModuleTestDynamicDummyOp : public OperatorBase {
   }
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
   Caffe2ModuleTestDynamicDummy, Caffe2ModuleTestDynamicDummyOp);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Caffe2ModuleTestDynamicDummy);
 
 } // namespace caffe2

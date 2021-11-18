@@ -3,6 +3,7 @@
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/ATen.h>
+#include <c10/util/irange.h>
 
 namespace at {
 
@@ -146,20 +147,17 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
   auto size_physical = self_physical.getPhysicalShape(size);
   auto self_physical_dim = self_physical.tensor().dim();
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_CHECK(self_physical_dim <= size_physical.size(),
+  TORCH_CHECK(self_physical_dim <= static_cast<int64_t>(size_physical.size()),
        "expand: the number of sizes provided (", /*logical*/size.size(), ") ",
        "must be greater or equal to the number of dimensions in the tensor (",
        /*logical dim*/self.dim(), ")");
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  if (self_physical_dim == size_physical.size()) {
+  if (self_physical_dim == static_cast<int64_t>(size_physical.size())) {
     auto result = self_physical.tensor().expand(size_physical, implicit);
     return self_physical.getPhysicalToLogicalMap().apply(result);
   }
 
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  TORCH_INTERNAL_ASSERT(self_physical_dim < size_physical.size());
+  TORCH_INTERNAL_ASSERT(self_physical_dim < static_cast<int64_t>(size_physical.size()));
   // Here, we know we are expanding a (logical) tensor to a larger number
   // of dimensions. We have to be careful because we can't call expand directly
   // due to the presence of batch dimensions.
@@ -332,7 +330,7 @@ Tensor permute_batching_rule(const Tensor& self, IntArrayRef dims) {
 
   VmapDimVector all_dims_physical;
   all_dims_physical.reserve(self_physical.tensor().dim());
-  for (int64_t bdim = 0; bdim < self_physical.numBatchDims(); bdim++) {
+  for (const auto bdim : c10::irange(self_physical.numBatchDims())) {
     all_dims_physical.push_back(bdim);
   }
   all_dims_physical.insert(
@@ -1028,6 +1026,8 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
+  m.impl("_make_dual", native::_make_dual);
+  m.impl("is_same_size", native::is_same_size);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);
@@ -1050,7 +1050,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   // NB: static_cast because there's another variant of narrow. However, we don't
   // want to support the other variant yet bc it isn't documented...
   m.impl("narrow", static_cast<Tensor(*)(const Tensor&,int64_t,int64_t,int64_t)>(native::narrow)); // composite wrt autograd
-  m.impl("numpy_T", native::numpy_T); // composite wrt autograd
+  m.impl("numpy_T", native::numpy_T);   // composite wrt autograd
+  m.impl("matrix_H", native::matrix_H); // composite wrt autograd
+  m.impl("mT", native::mT);             // composite wrt autograd
+  m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
@@ -1180,10 +1183,10 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   TRIVIAL_OP(imag)
   TRIVIAL_OP(real);
   TRIVIAL_OP(view_as_real);
-  TRIVIAL_OP(_view_as_real_physical);
   TRIVIAL_OP(conj);
   TRIVIAL_OP(_conj);
   TRIVIAL_OP(resolve_conj);
+  TRIVIAL_OP(resolve_neg);
   m.impl("view_as_complex", view_as_complex_batching_rule);
 #undef TRIVIAL
 

@@ -13,7 +13,7 @@
 #include <algorithm>
 #include <string>
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
@@ -275,6 +275,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       "quantized::linear(): Input tensor rank should be >= 2");
   auto input_contig = input.contiguous();
 
+  // Weight packing is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -312,7 +314,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
       at::Tensor bias_quant_scales =
           weight_contig.q_per_channel_scales() * input_scale;
       at::Tensor bias_zp = at::zeros(bias_quant_scales.sizes(), c10::kInt);
-      qbias = at::native::quantize_per_channel_cpu(
+      qbias = at::native::quantize_per_channel(
           bias_fp32, bias_quant_scales, bias_zp, 0, c10::kQInt32);
     } else {
       qbias = at::native::quantize_per_tensor(
@@ -339,8 +341,7 @@ at::Tensor PackedLinearWeightsQnnp::apply_impl(
 
   size_t rows_input = 1;
   size_t cols_input = input_contig.size(input_contig.dim() - 1);
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < input_contig.dim() - 1; ++i) {
+  for (const auto i : c10::irange(input_contig.dim() -1)) {
     rows_input *= input_contig.size(i);
   }
 

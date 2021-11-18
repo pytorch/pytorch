@@ -11,7 +11,6 @@
 #include "caffe2/core/tensor.h"
 #include "caffe2/proto/caffe2_pb.h"
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     caffe2_print_blob_sizes_at_exit,
     false,
