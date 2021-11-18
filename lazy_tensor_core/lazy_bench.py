@@ -104,7 +104,6 @@ def short_name(name, limit=20):
     """Truncate a model name to limit chars"""
     return name if len(name) <= limit else f"{name[:limit - 3].rstrip('_')}..."
 
-
 # Iter torchbench models and toy models
 def iter_models(args):
     from fastNLP.core import logger
@@ -150,11 +149,11 @@ def call_model_with(model, inputs):
         return model(inputs)
     raise RuntimeError("invalid example inputs ", inputs)
 
+# TODO(whc)
 #2 understand delta between wait_device_ops, to_cuda
 #  see why to_cpu is _so much slower_, given cuda is also copying to cpu
 # - bert to_cpu amortized v unamortized huge delta... why?
 # - hf-bart, shows wait_device_ops method is way off from reality.  why?
-
 #3 see if bert vs bart data makes sense
 #4 see if divaddmul is getting fused into a single kernel or not
 #5 how much do my 'overhead fixes' from last night help?
