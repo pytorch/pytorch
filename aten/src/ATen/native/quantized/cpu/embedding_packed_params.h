@@ -25,4 +25,6 @@ struct EmbeddingPackedParamsBase : public torch::jit::CustomClassHolder {
 
   virtual int64_t bit_rate() const = 0;
   virtual int64_t version() const = 0;
+
+  virtual at::Tensor packed_weights() const = 0;
 };
