@@ -10030,8 +10030,7 @@ op_db: List[OpInfo] = [
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
-            ),
-        ],
+            ), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.celu',
@@ -10055,8 +10054,7 @@ op_db: List[OpInfo] = [
                     torch.bfloat16: tol(atol=1e-03, rtol=1.2e-03)
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
-            ),
-        ],
+            ), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.rrelu',
@@ -10111,8 +10109,7 @@ op_db: List[OpInfo] = [
                     torch.bfloat16: tol(atol=1e-2, rtol=1.8e-2)
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
-            ),
-        ],
+            ), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.silu',
