@@ -6790,6 +6790,17 @@
   structured_delegate: triangular_solve.X
   variants: method, function
 
+- func: linalg_solve_triangular.out(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False, Tensor(a!) out) -> Tensor(a!)
+  python_module: linalg
+  dispatch:
+    CPU, CUDA: linalg_solve_triangular_out
+
+- func: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
+  python_module: linalg
+  variants: method, function
+  dispatch:
+    CPU, CUDA: linalg_solve_triangular
+
 - func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
   dispatch:
     CompositeExplicitAutograd: symeig_out
@@ -8371,6 +8382,15 @@
   dispatch:
     CPU: _convert_indices_from_coo_to_csr_structured_cpu
     CUDA: _convert_indices_from_coo_to_csr_structured_cuda
+
+- func: _convert_indices_from_csr_to_coo(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False) -> Tensor
+  structured_delegate: _convert_indices_from_csr_to_coo.out
+
+- func: _convert_indices_from_csr_to_coo.out(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: _convert_indices_from_csr_to_coo_structured_cpu
+    CUDA: _convert_indices_from_csr_to_coo_structured_cuda
 
 ## NN wrappers
 
