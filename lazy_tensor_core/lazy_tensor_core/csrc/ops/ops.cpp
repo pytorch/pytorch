@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
-#include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
