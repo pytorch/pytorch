@@ -940,6 +940,14 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
+    @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
+    def test_direct_coo_csr_conversion(self, device, dtype):
+        for m, n in itertools.product([5, 2, 0], [5, 2, 0]):
+            size = (m, n)
+            dense = make_tensor(size, dtype=dtype, device=device)
+            coo_sparse = dense.to_sparse_coo()
+
+            self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
 # e.g., TestSparseCSRCPU and TestSparseCSRCUDA
 instantiate_device_type_tests(TestSparseCSR, globals())
