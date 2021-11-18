@@ -244,6 +244,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
   using TensorInplaceT = Tensor& (Tensor::*)(const Tensor&) const;
   using ScalarInplaceT = Tensor& (Tensor::*)(const Scalar&) const;
+  using CopyT = Tensor& (Tensor::*)(const Tensor&, bool) const;
 
   POINTWISE_BOXED(add_.Tensor); // just testing
   m.impl("add_.Scalar", inplacePlumbing1<
@@ -272,6 +273,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   m.impl("masked_fill_.Scalar", inplacePlumbing2<
      DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::masked_fill_, const Scalar&>), const Scalar&>);
+
+  m.impl("copy_", inplacePlumbing2<
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<CopyT, &Tensor::copy_, bool>), bool>);
 
 #define COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(#op".Tensor", \

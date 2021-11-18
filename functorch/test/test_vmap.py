@@ -1318,6 +1318,22 @@ class TestVmapOperators(Namespace.TestVmapBase):
         number = get_number(getter)
         self._test_unary(lambda t: op(t, number), getter, device)
 
+    def test_copy_(self):
+        x = torch.randn(3)
+        y = torch.randn(3)
+        vmap(Tensor.copy_)(x, y)
+        self.assertEqual(x, y)
+
+        x = torch.randn(3)
+        y = torch.randn(3, 2)
+        vmap(Tensor.copy_, in_dims=(1, None))(y, x)
+        self.assertEqual(y, x.expand(2, 3).t())
+
+        x = torch.randn(3)
+        y = torch.randn(2, 3)
+        with self.assertRaisesRegex(RuntimeError, 'inplace'):
+            vmap(Tensor.copy_, in_dims=(None, 0))(x, y)
+
     @parametrize('case', [
         subtest(_make_case(torch.add), name='add'),
         subtest(_make_case(lambda x, y: x + y), name='add_dunder'),
