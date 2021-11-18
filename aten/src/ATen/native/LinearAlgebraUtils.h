@@ -538,12 +538,12 @@ static inline int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n) {
 static inline void checkUplo(const c10::string_view uplo) {
   // To use std::toupper safely with plain chars (or signed chars), the argument should first be converted to unsigned char
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
-  TORCH_CHECK_LINALG(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
+  TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
     "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
 }
 
 static inline void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result") {
-  TORCH_CHECK_LINALG(
+  TORCH_CHECK(
       result.device() == input.device(),
       fn_name,
       ": Expected ", result_name, " and input tensors to be on the same device, but got ",
