@@ -405,7 +405,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
             dtypes = get_qconfig_dtypes(qconfig)
             if act_dtype == torch.float or \
                not (self.binary_op in binary_op_supported_dtypes and dtypes in binary_op_supported_dtypes[self.binary_op]):
-                print("dtype not supported:", dtypes)
                 if self.relu_node:
                     op_out = quantized_graph.node_copy(self.binary_op_node, load_arg(quantized=torch.float))
                     relu_args = [op_out]
@@ -434,7 +433,6 @@ class BinaryOpQuantizeHandler(QuantizeHandler):
                 activation_post_process = \
                     self._maybe_get_last_node_only_observer(modules)
                 assert activation_post_process is not None
-                print("quantized, printing quantizedn node for add")
                 return quantize_node(
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)

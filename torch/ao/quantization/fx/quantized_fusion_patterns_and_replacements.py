@@ -43,7 +43,6 @@ def get_bop_mrelu_pr(bop, qboprelu):
             self.zero_point = torch.tensor([0])
 
         def forward(self, x, y):
-            print(self.scale)
             x = qboprelu(x, y, self.scale.item(), self.zero_point.item())
             return x
 

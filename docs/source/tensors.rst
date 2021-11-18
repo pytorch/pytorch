@@ -245,6 +245,8 @@ Tensor class reference
     Tensor.arctan_
     Tensor.atan2
     Tensor.atan2_
+    Tensor.arctan2
+    Tensor.arctan2_
     Tensor.all
     Tensor.any
     Tensor.backward
