@@ -2668,6 +2668,8 @@ def sample_inputs_aminmax(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     test_cases = (
         ((1,), 0, None, None),
         ((S,), 0, None, None),
@@ -2678,22 +2680,27 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S), 0, (1, S), (2, S)),
         ((S, S), 0, None, (2, S)),
         ((S, S, S), 1, None, None),
-        ((S, S, S), 1, (S, 1, S), (S, 1, S)),)
+        ((S, S, S), 2, None, None),
+        ((S, S, S), 1, (S, 1, S), (S, 1, S)),
+        ((S, S, S), 2, (S, S, 1), (S, S, 1)),
+        ((S, S, S), 2, (S, S, S), (S, S, S)),)
 
     sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
-        args = (make_tensor(size, device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad), 1, dim,
-                make_tensor(size_prepend, device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad) if size_prepend else None,
-                make_tensor(size_append, device, dtype,
-                            low=None, high=None,
-                            requires_grad=requires_grad) if size_append else None)
-        sample_inputs.append(SampleInput(args[0], args=args[1:]))
+        prepend_size = 0 if (size_prepend is None) else size_prepend[dim]
+        append_size = 0 if (size_append is None) else size_append[dim]
+        dim_size = size[dim] + prepend_size + append_size
+        for n in range(dim_size):
+            input_tensor = make_arg(size)
+            prepend = make_arg(size_prepend) if size_prepend else None
+            append = make_arg(size_append) if size_append else None
+            sample_inputs.append(SampleInput(input_tensor, args=(n, dim, prepend, append,)))
 
-    return tuple(sample_inputs)
+    # add some samples with n > dim_size
+    sample_inputs.append(SampleInput(make_arg((S, S, S)), args=(S + 1, 1,)))
+    sample_inputs.append(SampleInput(make_arg((S, S, S)), args=(S * 3 + 2, 2, make_arg((S, S, S)), make_arg((S, S, S)),)))
+
+    return sample_inputs
 
 def sample_inputs_histogram(op_info, device, dtype, requires_grad):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -8346,6 +8353,11 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True),
     OpInfo('diff',
            op=torch.diff,
+           # np.diff has np._NoValue as default values for prepend and append, compare_with_reference breaks if prepend/append
+           # are set as None when converting to numpy
+           ref=lambda input, n=1, dim=-1, prepend=np._NoValue, append=np._NoValue: (
+               np.diff(input, n, dim, np._NoValue if prepend is None else prepend, np._NoValue if append is None else append)
+           ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_diff),
