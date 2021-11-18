@@ -11,7 +11,6 @@
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
-#include "lazy_tensor_core/csrc/ops/constant.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
@@ -110,14 +109,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, *torch_lazy_tensors::ir::ops::ltc_update_slice));
     }
     if (node->op().op == at::prim::Constant) {
-      auto scalar_node =
-          dynamic_cast<const torch_lazy_tensors::ir::ops::Scalar*>(node);
-      if (scalar_node) {
-        return LowerScalar(scalar_node);
-      }
-      return LowerConstant(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Constant>(
-              node, torch::lazy::OpKind(at::prim::Constant)));
+      return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
+          node, torch::lazy::OpKind(at::prim::Constant)));
     }
     if (node->op().op == at::aten::bernoulli) {
       std::vector<torch::jit::NamedValue> arguments;
@@ -368,16 +361,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(at::aten::_convolution, arguments);
   }
 
-  TSOpVector LowerConstant(const torch_lazy_tensors::ir::ops::Constant* node) {
-    at::Tensor value = node->value().value();
-    if (torch::lazy::getBackend()->EagerFallbackDeviceType() == at::kCUDA) {
-      value = value.cuda();
-    }
-    return {loctx()->graph()->insertConstant(value)};
-  }
-
-  TSOpVector LowerConstantPad(
-      const torch_lazy_tensors::ir::ops::ConstantPadNd* node) {
+  TSOpVector LowerConstantPad(const torch_lazy_tensors::ir::ops::ConstantPadNd* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->pad());

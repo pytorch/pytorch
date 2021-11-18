@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-#include "lazy_tensors/literal.h"
 #include "lazy_tensors/span.h"
 #include "torch/csrc/autograd/variable.h"
 
