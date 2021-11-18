@@ -264,6 +264,7 @@ void loadFunctions() {
       "####    SHAPE COMPUTE FUNCTIONS END   ###");
   TORCH_INTERNAL_ASSERT(start != std::string::npos && end != std::string::npos);
   TORCH_INTERNAL_ASSERT(start_1 != std::string::npos && end_1 != std::string::npos);
+
   auto shape_compute_functions =
       _shape_compute_functions.substr(start, end - start) +
       _shape_compute_functions_1.substr(start_1, end_1 - start_1) +
