@@ -333,7 +333,7 @@ If your network uses :ref:`custom autograd functions<extending-autograd>`
 autocast compatibility if any function
 
 * takes multiple floating-point Tensor inputs,
-* wraps any autocastable op (see the :ref:`Autocast Op Reference<autocast-op-reference>`), or
+* wraps any autocastable op (see the :ref:`Autocast Op Reference<autocast-cuda-op-reference>`), or
 * requires a particular ``dtype`` (for example, if it wraps
   `CUDA extensions <https://pytorch.org/tutorials/advanced/cpp_extension.html>`_
   that were only compiled for ``dtype``).

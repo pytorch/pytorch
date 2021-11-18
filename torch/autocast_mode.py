@@ -20,7 +20,8 @@ class autocast(object):
 
     In these regions, ops run in an op-specific dtype chosen by autocast
     to improve performance while maintaining accuracy.
-    See the :ref:`Autocast CUDA Op Reference<autocast-cuda-op-reference>` and :ref:`Autocast CPU Op Reference<autocast-cpu-op-reference>` for details.
+    See the :ref:`Autocast CUDA Op Reference<autocast-cuda-op-reference>` and
+    :ref:`Autocast CPU Op Reference<autocast-cpu-op-reference>` for details.
 
     When entering an autocast-enabled region, Tensors may be any type.
     You should not call ``half()`` or ``bfloat16()`` on your model(s) or inputs when using autocasting.
