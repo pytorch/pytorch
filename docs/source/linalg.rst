@@ -50,6 +50,7 @@ Solvers
     :nosignatures:
 
     solve
+    solve_triangular
     lstsq
 
 Inverses
