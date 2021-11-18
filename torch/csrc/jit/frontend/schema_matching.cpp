@@ -642,7 +642,10 @@ Value* emitBuiltinCall(
       if (version_entry != operator_version_map.end()) {
         auto old_schema_entry =
             findUpgrader(version_entry->second, version.value());
-        auto old_schema = parseSchema(old_schema_entry.old_schema);
+        if (!old_schema_entry.has_value()) {
+          TORCH_INTERNAL_ASSERT(false, "Valid upgrader must be present");
+        }
+        auto old_schema = parseSchema(old_schema_entry.value().old_schema);
         schemas.push_back(old_schema);
       }
     } else {
