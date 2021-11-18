@@ -273,7 +273,7 @@ at::Tensor PackedConvWeight<kSpatialDim>::apply_dynamic(
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     fbgemm::DoNothing<> kNoOpObj{};
     for (const auto task_id : c10::irange(begin, end)) {
-      fbgemm::ReQuantizeForFloat < ReluFused,
+      fbgemm::ReQuantizeForFloat <false>
           outputProcObj(
               /*nextop=*/kNoOpObj,
               /*Aq_scale=*/q_params.scale,
