@@ -10,7 +10,7 @@ namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ScalarType type) {
-  torch::lazy::Shape shape = ir::GetShapeFromTsValue(input);
+  torch::lazy::Shape shape = torch::lazy::GetShapeFromTsValue(input);
   shape.set_scalar_type(type);
   return shape;
 }
@@ -18,16 +18,16 @@ torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
 }  // namespace
 Cast::Cast(const torch::lazy::Value& input, at::ScalarType dtype,
            c10::optional<at::ScalarType> stype)
-    : TsNode(ltc_cast, {input}, {NodeOutputShape(input, dtype)},
-             /*num_outputs=*/1,
-             torch::lazy::MHash(101, static_cast<int>(dtype),
-                                OptionalOr<int>(stype, -1))),
+    : torch::lazy::TsNode(ltc_cast, {input}, {NodeOutputShape(input, dtype)},
+                          /*num_outputs=*/1,
+                          torch::lazy::MHash(101, static_cast<int>(dtype),
+                                             OptionalOr<int>(stype, -1))),
       dtype_(dtype),
       stype_(stype) {}
 
 std::string Cast::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString();
+  ss << torch::lazy::TsNode::ToString();
   ss << ", dtype=" << dtype_;
   if (stype_) {
     ss << ", stype=" << *stype_;

@@ -1,15 +1,16 @@
 #pragma once
 
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
+
 #include "lazy_tensor_core/csrc/cross_replica_reduces.h"
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AllReduce : public TsNode {
+class AllReduce : public torch::lazy::TsNode {
  public:
-  AllReduce(AllReduceType reduce_type, OpList operands,
+  AllReduce(AllReduceType reduce_type, torch::lazy::OpList operands,
             const torch::lazy::Value& token, double scale,
             std::vector<std::vector<int64_t>> groups);
 

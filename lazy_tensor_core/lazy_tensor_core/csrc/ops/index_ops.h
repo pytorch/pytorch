@@ -24,8 +24,8 @@
 #pragma once
 
 #include <ATen/core/Tensor.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 
 namespace torch_lazy_tensors {
@@ -63,11 +63,13 @@ torch::lazy::Value IndexPutByTensors(const LazyTensor& base,
                                      const LazyTensor& updates, bool accumulate,
                                      c10::ArrayRef<int64_t> result_permutation);
 
-NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
-                  const at::Scalar& value);
+torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
+                               const LazyTensor& index,
+                               const at::Scalar& value);
 
-NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
-                  const LazyTensor& value);
+torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
+                               const LazyTensor& index,
+                               const LazyTensor& value);
 
 torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
                             const LazyTensor& index, const LazyTensor& source);

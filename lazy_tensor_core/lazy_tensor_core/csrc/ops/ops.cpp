@@ -21,17 +21,20 @@ namespace ir {
 namespace ops {
 using torch::lazy::ScopePusher;
 
-#define PTLTC_UNARY_OP(name, sym)                          \
-  NodePtr name(const torch::lazy::Value& input) {                       \
-    return GenericOp(OpKind(sym), {input}, ir::GetShapeFromTsValue(input)); \
+#define PTLTC_UNARY_OP(name, sym)                              \
+  torch::lazy::NodePtr name(const torch::lazy::Value& input) { \
+    return GenericOp(torch::lazy::OpKind(sym), {input},        \
+                     torch::lazy::GetShapeFromTsValue(input)); \
   }
 
-#define PTLTC_BINARY_OP(name, sym)                                           \
-  NodePtr name(const torch::lazy::Value& input0, const torch::lazy::Value& input1) {                   \
-    NodePtr node = GenericOp(OpKind(sym), {input0, input1});                 \
-    std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(                                                  \
-        [&]() { return compiler::InferShape(node.get()); }); \
-    return node;                                                             \
+#define PTLTC_BINARY_OP(name, sym)                                          \
+  torch::lazy::NodePtr name(const torch::lazy::Value& input0,               \
+                            const torch::lazy::Value& input1) {             \
+    torch::lazy::NodePtr node =                                             \
+        GenericOp(torch::lazy::OpKind(sym), {input0, input1});              \
+    std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred( \
+        [&]() { return compiler::InferShape(node.get()); });                \
+    return node;                                                            \
   }
 
 PTLTC_UNARY_OP(Acos, at::aten::acos);
@@ -64,157 +67,205 @@ PTLTC_BINARY_OP(Pow, at::aten::pow);
 PTLTC_BINARY_OP(Fmod, at::aten::fmod);
 PTLTC_BINARY_OP(Atan2, at::aten::atan2);
 
-NodePtr ReciprocalOp(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::reciprocal), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr ReciprocalOp(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::reciprocal), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr SignOp(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::sign), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr SignOp(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::sign), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Abs(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::abs), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr Abs(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::abs), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr HardSigmoid(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::hardsigmoid), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr HardSigmoid(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::hardsigmoid), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr HardSigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::hardsigmoid_backward), {grad_output, input},
-                   ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr HardSigmoidBackward(const torch::lazy::Value& grad_output,
+                                         const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::hardsigmoid_backward),
+                   {grad_output, input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr SiLU(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::silu), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr SiLU(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::silu), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Sigmoid(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::sigmoid), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr Sigmoid(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::sigmoid), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr SigmoidBackward(const torch::lazy::Value& grad_output, const torch::lazy::Value& output) {
-  return grad_output * (ScalarOp(1, ir::GetShapeFromTsValue(output)) - output) * output;
+torch::lazy::NodePtr SigmoidBackward(const torch::lazy::Value& grad_output,
+                                     const torch::lazy::Value& output) {
+  return grad_output *
+         (ScalarOp(1, torch::lazy::GetShapeFromTsValue(output)) - output) *
+         output;
 }
 
-NodePtr Clamp(const torch::lazy::Value& input, const torch::lazy::Value& min, const torch::lazy::Value& max) {
-  return GenericOp(OpKind(at::aten::clamp), {input, min, max}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr Clamp(const torch::lazy::Value& input,
+                           const torch::lazy::Value& min,
+                           const torch::lazy::Value& max) {
+  return GenericOp(torch::lazy::OpKind(at::aten::clamp), {input, min, max},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Ger(const torch::lazy::Value& input, const torch::lazy::Value& other) {
-  NodePtr node = GenericOp(OpKind(at::aten::ger), {input, other});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr Ger(const torch::lazy::Value& input,
+                         const torch::lazy::Value& other) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(at::aten::ger), {input, other});
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
-NodePtr AdaptiveAvgPool3dBackward(const torch::lazy::Value& grad_output,
-                                  const torch::lazy::Value& input) {
-  NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool3d_backward),
-                           {grad_output, input});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr AdaptiveAvgPool3dBackward(
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(at::aten::adaptive_avg_pool3d_backward),
+                {grad_output, input});
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
-NodePtr AdaptiveAvgPool2dBackward(const torch::lazy::Value& grad_output,
-                                  const torch::lazy::Value& input) {
-  NodePtr node = GenericOp(OpKind(at::aten::adaptive_avg_pool2d_backward),
-                           {grad_output, input});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr AdaptiveAvgPool2dBackward(
+    const torch::lazy::Value& grad_output, const torch::lazy::Value& input) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(at::aten::adaptive_avg_pool2d_backward),
+                {grad_output, input});
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
-NodePtr ComparisonOp(c10::Symbol kind, const torch::lazy::Value& input, const torch::lazy::Value& other) {
-  NodePtr node = GenericOp(OpKind(kind), {input, other});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr ComparisonOp(c10::Symbol kind,
+                                  const torch::lazy::Value& input,
+                                  const torch::lazy::Value& other) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(kind), {input, other});
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
-NodePtr Where(const torch::lazy::Value& condition, const torch::lazy::Value& input, const torch::lazy::Value& other) {
-  return GenericOp(OpKind(at::aten::where), {condition, input, other},
-                   ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr Where(const torch::lazy::Value& condition,
+                           const torch::lazy::Value& input,
+                           const torch::lazy::Value& other) {
+  return GenericOp(torch::lazy::OpKind(at::aten::where),
+                   {condition, input, other},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr BroadcastTensors(OpList tensors) {
-  NodePtr node = GenericOp(OpKind(at::aten::broadcast_tensors), tensors,
-                           /*num_outputs=*/tensors.size());
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr BroadcastTensors(torch::lazy::OpList tensors) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(at::aten::broadcast_tensors), tensors,
+                /*num_outputs=*/tensors.size());
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }
 
-NodePtr Identity(int64_t lines, int64_t cols, c10::ScalarType element_type) {
+torch::lazy::NodePtr Identity(int64_t lines, int64_t cols,
+                              c10::ScalarType element_type) {
   return GenericOp(
-      OpKind(at::aten::eye),
+      torch::lazy::OpKind(at::aten::eye),
       lazy_tensors::ShapeUtil::MakeShape(element_type, {lines, cols}),
       /*num_outputs=*/1, torch::lazy::MHash(lines, cols));
 }
 
-NodePtr Lshift(const torch::lazy::Value& input, const at::Scalar& other) {
+torch::lazy::NodePtr Lshift(const torch::lazy::Value& input,
+                            const at::Scalar& other) {
   ScopePusher ir_scope(at::aten::__lshift__.toQualString());
-  return input * ScalarOp(pow(2, other.to<double>()), ir::GetShapeFromTsValue(input));
+  return input * ScalarOp(pow(2, other.to<double>()),
+                          torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Lshift(const torch::lazy::Value& input, const torch::lazy::Value& other) {
+torch::lazy::NodePtr Lshift(const torch::lazy::Value& input,
+                            const torch::lazy::Value& other) {
   ScopePusher ir_scope(at::aten::__lshift__.toQualString());
-  return input * Pow(ScalarOp(2, ir::GetShapeFromTsValue(input)), other);
+  return input *
+         Pow(ScalarOp(2, torch::lazy::GetShapeFromTsValue(input)), other);
 }
 
-NodePtr Rshift(const torch::lazy::Value& input, const at::Scalar& other) {
+torch::lazy::NodePtr Rshift(const torch::lazy::Value& input,
+                            const at::Scalar& other) {
   ScopePusher ir_scope(at::aten::__rshift__.toQualString());
-  return input / ScalarOp(pow(2, other.to<double>()), ir::GetShapeFromTsValue(input));
+  return input / ScalarOp(pow(2, other.to<double>()),
+                          torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Rshift(const torch::lazy::Value& input, const torch::lazy::Value& other) {
+torch::lazy::NodePtr Rshift(const torch::lazy::Value& input,
+                            const torch::lazy::Value& other) {
   ScopePusher ir_scope(at::aten::__rshift__.toQualString());
-  return input / Pow(ScalarOp(2, ir::GetShapeFromTsValue(input)), other);
+  return input /
+         Pow(ScalarOp(2, torch::lazy::GetShapeFromTsValue(input)), other);
 }
 
-NodePtr Remainder(const torch::lazy::Value& input, const torch::lazy::Value& divisor) {
+torch::lazy::NodePtr Remainder(const torch::lazy::Value& input,
+                               const torch::lazy::Value& divisor) {
   ScopePusher ir_scope(at::aten::remainder.toQualString());
-  NodePtr f = Fmod(input, Abs(divisor));
-  return f + divisor * ComparisonOp(at::aten::lt, SignOp(f) * SignOp(divisor),
-                                    ScalarOp(0, ir::GetShapeFromTsValue(input)));
+  torch::lazy::NodePtr f = Fmod(input, Abs(divisor));
+  return f +
+         divisor *
+             ComparisonOp(at::aten::lt, SignOp(f) * SignOp(divisor),
+                          ScalarOp(0, torch::lazy::GetShapeFromTsValue(input)));
 }
 
-NodePtr MaxUnary(const torch::lazy::Value& input) {
-  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)),
+torch::lazy::NodePtr MaxUnary(const torch::lazy::Value& input) {
+  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(
+               torch::lazy::GetShapeFromTsValue(input)),
            0);
   return GenericOp(
-      OpKind(at::aten::max), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), {}));
+      torch::lazy::OpKind(at::aten::max), {input},
+      lazy_tensors::ShapeUtil::MakeShape(
+          torch::lazy::GetShapeFromTsValue(input).scalar_type(), {}));
 }
 
-NodePtr MinUnary(const torch::lazy::Value& input) {
-  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(ir::GetShapeFromTsValue(input)),
+torch::lazy::NodePtr MinUnary(const torch::lazy::Value& input) {
+  CHECK_GT(lazy_tensors::ShapeUtil::ElementsIn(
+               torch::lazy::GetShapeFromTsValue(input)),
            0);
   return GenericOp(
-      OpKind(at::aten::min), {input},
-      lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), {}));
+      torch::lazy::OpKind(at::aten::min), {input},
+      lazy_tensors::ShapeUtil::MakeShape(
+          torch::lazy::GetShapeFromTsValue(input).scalar_type(), {}));
 }
 
-NodePtr Take(const torch::lazy::Value& input, const torch::lazy::Value& index) {
-  torch::lazy::Shape result_shape = ir::GetShapeFromTsValue(index);
-  result_shape.set_scalar_type(ir::GetShapeFromTsValue(input).scalar_type());
-  return GenericOp(OpKind(at::aten::take), {input, index},
+torch::lazy::NodePtr Take(const torch::lazy::Value& input,
+                          const torch::lazy::Value& index) {
+  torch::lazy::Shape result_shape = torch::lazy::GetShapeFromTsValue(index);
+  result_shape.set_scalar_type(
+      torch::lazy::GetShapeFromTsValue(input).scalar_type());
+  return GenericOp(torch::lazy::OpKind(at::aten::take), {input, index},
                    std::move(result_shape));
 }
 
-NodePtr Inverse(const torch::lazy::Value& input) {
-  return GenericOp(OpKind(at::aten::inverse), {input}, ir::GetShapeFromTsValue(input));
+torch::lazy::NodePtr Inverse(const torch::lazy::Value& input) {
+  return GenericOp(torch::lazy::OpKind(at::aten::inverse), {input},
+                   torch::lazy::GetShapeFromTsValue(input));
 }
 
-NodePtr Lerp(const torch::lazy::Value& start, const torch::lazy::Value& end, const torch::lazy::Value& weight) {
+torch::lazy::NodePtr Lerp(const torch::lazy::Value& start,
+                          const torch::lazy::Value& end,
+                          const torch::lazy::Value& weight) {
   ScopePusher ir_scope(at::aten::lerp.toQualString());
   return start + weight * (end - start);
 }
 
-NodePtr LogicalAnd(const torch::lazy::Value& input, const torch::lazy::Value& other) {
-  NodePtr node = GenericOp(OpKind(at::aten::logical_and), {input, other});
-  std::dynamic_pointer_cast<TsNode>(node)->SetShapeDeferred(
+torch::lazy::NodePtr LogicalAnd(const torch::lazy::Value& input,
+                                const torch::lazy::Value& other) {
+  torch::lazy::NodePtr node =
+      GenericOp(torch::lazy::OpKind(at::aten::logical_and), {input, other});
+  std::dynamic_pointer_cast<torch::lazy::TsNode>(node)->SetShapeDeferred(
       [&]() { return compiler::InferShape(node.get()); });
   return node;
 }

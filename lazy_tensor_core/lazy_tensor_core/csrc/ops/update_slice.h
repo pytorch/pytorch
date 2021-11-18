@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class UpdateSlice : public TsNode {
+class UpdateSlice : public torch::lazy::TsNode {
  public:
   UpdateSlice(const torch::lazy::Value& input, const torch::lazy::Value& source,
               c10::ArrayRef<int64_t> base_indices);

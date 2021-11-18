@@ -1,14 +1,13 @@
 #pragma once
 
 #include <torch/csrc/lazy/backend/backend_data.h>
-
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class DeviceData : public TsNode {
+class DeviceData : public torch::lazy::TsNode {
  public:
   DeviceData(std::shared_ptr<torch::lazy::BackendData> data);
 

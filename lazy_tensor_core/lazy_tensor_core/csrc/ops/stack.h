@@ -1,14 +1,14 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Stack : public TsNode {
+class Stack : public torch::lazy::TsNode {
  public:
-  Stack(OpList values, int64_t dim);
+  Stack(torch::lazy::OpList values, int64_t dim);
 
   std::string ToString() const override;
 

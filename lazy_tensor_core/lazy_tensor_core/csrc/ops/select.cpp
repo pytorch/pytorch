@@ -8,11 +8,11 @@ namespace ops {
 
 Select::Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
                int64_t end, int64_t stride)
-    : TsNode(
+    : torch::lazy::TsNode(
           ltc_select, {input},
           [&]() {
-            return MakeSelectShape(ir::GetShapeFromTsValue(input), dim, start,
-                                   end, stride);
+            return MakeSelectShape(torch::lazy::GetShapeFromTsValue(input), dim,
+                                   start, end, stride);
           },
           /*num_outputs=*/1, torch::lazy::MHash(dim, start, end, stride)),
       dim_(dim),
@@ -22,8 +22,8 @@ Select::Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
 
 std::string Select::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dim=" << dim_ << ", start=" << start_
-     << ", end=" << end_ << ", stride=" << stride_;
+  ss << torch::lazy::TsNode::ToString() << ", dim=" << dim_
+     << ", start=" << start_ << ", end=" << end_ << ", stride=" << stride_;
   return ss.str();
 }
 

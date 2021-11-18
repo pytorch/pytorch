@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Bernoulli : public TsNode {
+class Bernoulli : public torch::lazy::TsNode {
  public:
   Bernoulli(const torch::lazy::Value& probability, const torch::lazy::Value& seed,
             torch::lazy::Shape shape);

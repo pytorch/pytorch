@@ -1,13 +1,14 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
+
 #include "lazy_tensors/literal.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Constant : public TsNode {
+class Constant : public torch::lazy::TsNode {
  public:
   Constant(lazy_tensors::Literal value);
 

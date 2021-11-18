@@ -12,15 +12,18 @@ namespace ops {
 // aten::random builtin symbol cannot be recognized as a builtin function
 // since random only has in-place versions. Therefore we force the symbol to
 // be "aten::random_" here.
-Random::Random(const torch::lazy::Value& input, const c10::optional<int64_t>& from, const c10::optional<int64_t>& to)
-    : TsNode(torch::lazy::OpKind(c10::Symbol::fromQualString("aten::random_")),
-        {input}, {ir::GetShapeFromTsValue(input)})
-    , from(from)
-    , to(to) {}
+Random::Random(const torch::lazy::Value& input,
+               const c10::optional<int64_t>& from,
+               const c10::optional<int64_t>& to)
+    : torch::lazy::TsNode(
+          torch::lazy::OpKind(c10::Symbol::fromQualString("aten::random_")),
+          {input}, {torch::lazy::GetShapeFromTsValue(input)}),
+      from(from),
+      to(to) {}
 
 std::string Random::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString();
+  ss << torch::lazy::TsNode::ToString();
   if (from) {
     ss << ", from=" << *from;
   }

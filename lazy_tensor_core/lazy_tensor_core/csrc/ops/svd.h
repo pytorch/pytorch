@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class SVD : public TsNode {
+class SVD : public torch::lazy::TsNode {
  public:
   SVD(const torch::lazy::Value& input, bool some, bool compute_uv);
 

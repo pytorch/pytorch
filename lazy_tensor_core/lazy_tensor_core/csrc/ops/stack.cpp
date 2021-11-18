@@ -7,9 +7,9 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-Stack::Stack(OpList values, int64_t dim)
-    : TsNode(torch::lazy::OpKind(at::aten::stack), values,
-             /*num_outputs=*/1, torch::lazy::MHash(dim)),
+Stack::Stack(torch::lazy::OpList values, int64_t dim)
+    : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::stack), values,
+                          /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::InferShape(this); });
@@ -17,7 +17,7 @@ Stack::Stack(OpList values, int64_t dim)
 
 std::string Stack::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dim=" << dim_;
+  ss << torch::lazy::TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

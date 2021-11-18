@@ -8,8 +8,9 @@ namespace ir {
 namespace ops {
 
 SVD::SVD(const torch::lazy::Value& input, bool some, bool compute_uv)
-    : TsNode(torch::lazy::OpKind(at::aten::svd), {input},
-           /*num_outputs=*/3, torch::lazy::MHash(some, compute_uv)),
+    : torch::lazy::TsNode(torch::lazy::OpKind(at::aten::svd), {input},
+                          /*num_outputs=*/3,
+                          torch::lazy::MHash(some, compute_uv)),
       some_(some),
       compute_uv_(compute_uv) {
   SetShapeDeferred(
@@ -18,7 +19,7 @@ SVD::SVD(const torch::lazy::Value& input, bool some, bool compute_uv)
 
 std::string SVD::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", some=" << some_
+  ss << torch::lazy::TsNode::ToString() << ", some=" << some_
      << ", compute_uv=" << compute_uv_;
   return ss.str();
 }

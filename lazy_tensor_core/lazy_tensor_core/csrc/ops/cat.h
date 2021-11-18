@@ -1,15 +1,15 @@
 #pragma once
 
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Cat : public TsNode {
+class Cat : public torch::lazy::TsNode {
  public:
   Cat(std::vector<torch::lazy::Value> values, int64_t dim,
       std::vector<torch::lazy::Shape>&& shapes);

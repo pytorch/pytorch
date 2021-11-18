@@ -1,15 +1,15 @@
 #pragma once
 
-#include <array>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <array>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 // Node for the backward batch norm operator.
-class TSNativeBatchNormBackward : public TsNode {
+class TSNativeBatchNormBackward : public torch::lazy::TsNode {
  public:
   TSNativeBatchNormBackward(const torch::lazy::Value& grad_out, const torch::lazy::Value& input,
                             const torch::lazy::Value& weight, const torch::lazy::Value& running_mean,

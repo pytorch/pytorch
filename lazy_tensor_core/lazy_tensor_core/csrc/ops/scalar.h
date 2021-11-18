@@ -1,11 +1,10 @@
 #pragma once
 
-#include <c10/core/Scalar.h>
 #include <ATen/core/Formatting.h>
+#include <c10/core/Scalar.h>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include <iostream>
-
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,7 +14,7 @@ namespace ops {
 // Even though a Constant could have been used, for simple scalars broadcasted
 // to big shapes, the Constant leads to big literals expanded within the
 // computation graph.
-class Scalar : public TsNode {
+class Scalar : public torch::lazy::TsNode {
  public:
   Scalar(const at::Scalar& value, torch::lazy::Shape shape);
   Scalar(const at::Scalar& value, c10::ScalarType  type);

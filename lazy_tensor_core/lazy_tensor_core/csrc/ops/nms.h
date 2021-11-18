@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Nms : public TsNode {
+class Nms : public torch::lazy::TsNode {
  public:
   Nms(const torch::lazy::Value& boxes, const torch::lazy::Value& scores,
       const torch::lazy::Value& score_threshold,

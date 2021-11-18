@@ -8,7 +8,6 @@
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
-using NodePtr = torch::lazy::NodePtr;
 
 class LazyTensor {
  public:
@@ -119,7 +118,7 @@ class LazyTensor {
 
   c10::optional<at::Tensor> CurrentTensorData() const;
 
-  std::vector<LazyTensor> MakeOutputTensors(NodePtr node) const;
+  std::vector<LazyTensor> MakeOutputTensors(torch::lazy::NodePtr node) const;
 
   LazyTensor CreateViewTensor(ViewInfo view_info) const;
   LazyTensor CopyTensorToDevice(const torch::lazy::BackendDevice& device);

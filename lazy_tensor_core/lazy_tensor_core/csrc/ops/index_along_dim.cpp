@@ -6,11 +6,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-IndexAlongDim::IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
+IndexAlongDim::IndexAlongDim(torch::lazy::OpKind op,
+                             const torch::lazy::Value& buffer,
                              const torch::lazy::Value& index,
                              const torch::lazy::Value& value, int64_t dim)
-    : TsNode(op, {buffer, index, value},
-             /*num_outputs=*/1, torch::lazy::MHash(dim)),
+    : torch::lazy::TsNode(op, {buffer, index, value},
+                          /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {
   SetShapeDeferred(
       [&]() { return compiler::InferShape(this); });
@@ -18,7 +19,7 @@ IndexAlongDim::IndexAlongDim(OpKind op, const torch::lazy::Value& buffer,
 
 std::string IndexAlongDim::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dim=" << dim_;
+  ss << torch::lazy::TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

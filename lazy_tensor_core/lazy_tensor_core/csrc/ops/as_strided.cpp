@@ -12,11 +12,11 @@ namespace ops {
 
 AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
                      std::vector<int64_t> stride, int64_t storage_offset)
-    : TsNode(
+    : torch::lazy::TsNode(
           torch::lazy::OpKind(at::aten::as_strided), {input},
           [&]() {
             return lazy_tensors::ShapeUtil::MakeShape(
-                ir::GetShapeFromTsValue(input).scalar_type(), size);
+                torch::lazy::GetShapeFromTsValue(input).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
@@ -25,7 +25,7 @@ AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
 
 std::string AsStrided::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
+  ss << torch::lazy::TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), stride=(" << c10::Join(", ", stride_)
      << "), storage_offset=" << storage_offset_;
   return ss.str();

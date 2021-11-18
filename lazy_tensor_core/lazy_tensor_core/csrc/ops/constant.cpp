@@ -8,8 +8,8 @@ namespace ir {
 namespace ops {
 
 Constant::Constant(lazy_tensors::Literal value)
-    : TsNode(OpKind(at::prim::Constant), value.shape(), /*num_outputs=*/1,
-           value.Hash()),
+    : torch::lazy::TsNode(torch::lazy::OpKind(at::prim::Constant),
+                          value.shape(), /*num_outputs=*/1, value.Hash()),
       value_(std::move(value)) {}
 
 std::string Constant::ToString() const {
@@ -18,7 +18,7 @@ std::string Constant::ToString() const {
   std::string value_as_string = value_.ToStringWithoutShape();
   std::replace(value_as_string.begin(), value_as_string.end(), '\n', ';');
   std::stringstream ss;
-  ss << TsNode::ToString() << ", value=" << value_as_string;
+  ss << torch::lazy::TsNode::ToString() << ", value=" << value_as_string;
   return ss.str();
 }
 

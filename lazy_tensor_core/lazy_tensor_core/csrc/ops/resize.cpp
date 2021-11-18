@@ -10,13 +10,14 @@ namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
                                     c10::ArrayRef<int64_t> size) {
-  return lazy_tensors::ShapeUtil::MakeShape(ir::GetShapeFromTsValue(input).scalar_type(), size);
+  return lazy_tensors::ShapeUtil::MakeShape(
+      torch::lazy::GetShapeFromTsValue(input).scalar_type(), size);
 }
 
 }  // namespace
 
 Resize::Resize(const torch::lazy::Value& input, std::vector<int64_t> size)
-    : TsNode(
+    : torch::lazy::TsNode(
           torch::lazy::OpKind(at::aten::resize), {input},
           [&]() { return NodeOutputShape(input, size); },
           /*num_outputs=*/1, torch::lazy::MHash(size)),
@@ -24,7 +25,8 @@ Resize::Resize(const torch::lazy::Value& input, std::vector<int64_t> size)
 
 std::string Resize::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_) << ")";
+  ss << torch::lazy::TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
+     << ")";
   return ss.str();
 }
 

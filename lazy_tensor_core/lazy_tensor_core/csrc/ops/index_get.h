@@ -1,12 +1,12 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class IndexGet : public TsNode {
+class IndexGet : public torch::lazy::TsNode {
  public:
   IndexGet(const torch::lazy::Value& base, const torch::lazy::Value& indices,
            int64_t start_dim);

@@ -10,8 +10,8 @@
 #include <unordered_map>
 
 // TODO(whc) don't have ir util depend on ts_backend
-// temporary hack to use Node shape printing from TsNode::shape()
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+// temporary hack to use Node shape printing from torch::lazy::TsNode::shape()
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -131,7 +131,7 @@ std::string GenerateDotNodeLabel(
   static const size_t kMaxValueSize = 64;
   std::stringstream ss;
   ss << node->op() << "\\n";
-  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
+  if (auto tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
     ss << tsnode->shape();
   } else {
     ss << "{TODO implement Node::shape}";
@@ -162,7 +162,7 @@ std::string GenerateDotNodeSpec(
 std::string GenerateTextNodeSpec(const torch::lazy::Node* node,
                                  const NodeIdMap& id_map) {
   std::stringstream ss;
-  if (auto tsnode = dynamic_cast<const TsNode*>(node)) {
+  if (auto tsnode = dynamic_cast<const torch::lazy::TsNode*>(node)) {
     ss << tsnode->shapes() << " ";
   } else {
     ss << "{TODO implement Node::shape} ";
