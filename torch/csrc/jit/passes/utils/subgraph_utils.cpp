@@ -5,7 +5,7 @@
 #include <ATen/core/interned_strings.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <jit/jit_log.h>
+#include <torch/csrc/jit/jit_log.h>
 
 namespace torch {
 namespace jit {
