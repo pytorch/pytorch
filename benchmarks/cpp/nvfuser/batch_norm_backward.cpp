@@ -148,7 +148,6 @@ static void Baseline_BatchNorm_BWD(
   at::Tensor save_mean = at::zeros({input_shape[1]}, fp32_options);
   at::Tensor save_var = at::ones({input_shape[1]}, fp32_options);
 
-
   auto ato_weight = c10::optional<at::Tensor>(weight);
   auto ato_bias = c10::optional<at::Tensor>(bias);
   auto ato_run_mean = c10::optional<at::Tensor>(run_mean);
