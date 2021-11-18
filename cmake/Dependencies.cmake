@@ -1626,7 +1626,10 @@ if(NOT INTERN_BUILD_MOBILE)
   # https://github.com/pytorch/pytorch/pull/55292
   set(THRUST_SEARCH_PATHS ${CUDA_INCLUDE_DIRS})
   list(TRANSFORM THRUST_SEARCH_PATHS APPEND /thrust/cmake)
-  list(APPEND THRUST_SEARCH_PATHS ${CUDA_SOURCE_DIR}/thrust/cmake)
+  list(APPEND THRUST_SEARCH_PATHS
+    ${CUDA_SOURCE_DIR}/include/thrust/cmake
+    ${CUDA_SOURCE_DIR}/lib/cmake/thrust
+    )
   find_package(thrust PATHS ${THRUST_SEARCH_PATHS})
   if(NOT THRUST_VERSION LESS 1.13.1)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
