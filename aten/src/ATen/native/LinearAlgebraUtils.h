@@ -2,6 +2,7 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <c10/util/Exception.h>
 #include <ATen/ATen.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>

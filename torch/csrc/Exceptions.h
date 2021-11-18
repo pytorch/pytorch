@@ -144,6 +144,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   }                                                                  \
   CATCH_ALL_ERRORS(return retval)
 
+// Like TORCH_CHECK, but raises LinAlgError instead of Error.
+#define TORCH_CHECK_LINALG(cond, ...) \
+  TORCH_CHECK_WITH_MSG(::torch::linalg::LinAlgError, cond, "LINALG", __VA_ARGS__)
+
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
 extern PyObject *THPException_FatalError;
@@ -259,6 +263,11 @@ bool THPException_init(PyObject *module);
 
 namespace torch {
 
+namespace linalg {
+  extern PyObject *Pytorch_LinAlgError;
+  bool initLinAlgError(PyObject *module);
+}
+
 THP_CLASS std::string processErrorMsg(std::string str);
 
 THP_API bool get_cpp_stacktraces_enabled();
@@ -325,6 +334,16 @@ struct AttributeError : public PyTorchError {
     return PyExc_AttributeError;
   }
 };
+
+namespace linalg {
+// Translates to Python LinAlgError
+struct LinAlgError : public PyTorchError {
+  LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
+  PyObject* python_type() override {
+    return Pytorch_LinAlgError;
+  }
+};
+}
 
 struct WarningMeta {
   WarningMeta(const c10::SourceLocation& _source_location,

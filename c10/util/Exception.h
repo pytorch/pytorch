@@ -507,10 +507,6 @@ namespace detail {
 #define TORCH_CHECK_NOT_IMPLEMENTED(cond, ...) \
   TORCH_CHECK_WITH_MSG(NotImplementedError, cond, "TYPE", __VA_ARGS__)
 
-// Like TORCH_CHECK, but raises LinAlgError instead of Error.
-#define TORCH_CHECK_LINALG(cond, ...) \
-  TORCH_CHECK_WITH_MSG(LinAlgError, cond, "LINALG", __VA_ARGS__)
-
 // Report a warning to the user.  Accepts an arbitrary number of extra
 // arguments which are concatenated into the warning message using operator<<
 //

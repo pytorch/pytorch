@@ -167,6 +167,42 @@ AttributeError::AttributeError(const char* format, ...) {
   va_end(fmt_args);
 }
 
+namespace linalg {
+PyObject *Pytorch_LinAlgError;
+
+LinAlgError::LinAlgError(const char* format, ...) {
+  va_list fmt_args;
+  va_start(fmt_args, format);
+  msg = formatMessage(format, fmt_args);
+  va_end(fmt_args);
+}
+
+bool initLinAlgError(PyObject *module)
+{
+  static struct PyModuleDef def = {
+     PyModuleDef_HEAD_INIT,
+     "torch.linalg",
+     NULL,
+     -1,
+     NULL
+  };
+  PyObject* linalg = PyModule_Create(&def);
+
+  std::cout << "START\n";
+  Pytorch_LinAlgError = PyErr_NewException("torch.linalg.LinAlgError", nullptr, nullptr);
+  if (!Pytorch_LinAlgError) {
+    throw python_error();
+  }
+  std::cout << "1 START\n";
+  if (PyModule_AddObject(linalg, "LinAlgError", Pytorch_LinAlgError) != 0) {
+    throw python_error();
+  }
+
+  std::cout << "2 START\n";
+  return true;
+}
+}
+
 void PyWarningHandler::InternalHandler::process(
     const c10::SourceLocation& source_location,
     const std::string& msg,

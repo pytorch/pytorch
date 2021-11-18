@@ -35,6 +35,7 @@ from torch.distributions.binomial import Binomial
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
 torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
+# import torch.linalg.LinAlgError
 
 if TEST_SCIPY:
     import scipy
@@ -3286,7 +3287,7 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         info = torch.linalg.inv_ex(A).info
         self.assertEqual(info, 3)
-        with self.assertRaisesRegex(RuntimeError, r'diagonal element 3 is zero, the inversion could not be completed'):
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'diagonal element 3 is zero, the inversion could not be completed'):
             torch.linalg.inv_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
@@ -3300,7 +3301,7 @@ class TestLinalg(TestCase):
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
-        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 3\): The diagonal element 2 is zero'):
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The diagonal element 2 is zero'):
             torch.linalg.inv_ex(A, check_errors=True)
 
     @slowTest
