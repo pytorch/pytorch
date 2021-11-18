@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/reference_tensor.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <unordered_map>
@@ -91,7 +92,7 @@ class IndexCompute : public BackwardVisitor {
   std::unordered_map<kir::IterDomain*, kir::Val*> extent_map_; // NOLINT
 
   // Keeps track of domains that do not contribute to indexing
-  std::unordered_set<kir::IterDomain*> zero_; // NOLINT
+  std::unordered_set<kir::IterDomain*> zero_domains_; // NOLINT
 
   // This set keeps track of IterDomain's that have had a zero index merged into
   // them. This happens if we do something like tv->axis(0)->split(4) then
@@ -121,6 +122,10 @@ class IndexCompute : public BackwardVisitor {
     return extent_map_;
   }
 
+  const std::unordered_set<kir::IterDomain*>& zeroDomains() const {
+    return zero_domains_;
+  }
+
   const std::unordered_set<kir::IterDomain*>& zeroMergedIn() const {
     return zero_merged_in_;
   }
@@ -130,6 +135,7 @@ class IndexCompute : public BackwardVisitor {
       const TensorDomain* _td,
       std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
       std::unordered_map<kir::IterDomain*, kir::Val*> _extent_map,
+      std::unordered_set<kir::IterDomain*> zero_domains,
       std::unordered_set<kir::IterDomain*> _zero_merged_in,
       const std::vector<bool>& _root_contiguity,
       std::unordered_set<kir::IterDomain*> preferred_paths = {},
@@ -155,6 +161,7 @@ class IndexSwizzle : public IndexCompute {
       const TensorView* tv,
       std::unordered_map<kir::IterDomain*, kir::Val*> initial_index_map,
       std::unordered_map<kir::IterDomain*, kir::Val*> extent_map,
+      std::unordered_set<kir::IterDomain*> zero_domains,
       std::unordered_set<kir::IterDomain*> zero_merged_in);
 
   void run() override;
@@ -169,6 +176,52 @@ class IndexSwizzle : public IndexCompute {
   SwizzleType swizzle_type_ = SwizzleType::NoSwizzle;
   std::vector<IterDomain*> ids_to_swizzle_;
   std::unordered_set<IterDomain*> swizzled_ids_;
+};
+
+//! Predicate information of a root or contiguous merged domain
+class RootPredicateInfo {
+  friend class Index;
+
+ public:
+  const auto& startPredicates() const {
+    return start_predicates_;
+  }
+
+  auto& startPredicates() {
+    return start_predicates_;
+  }
+
+  const auto& startOffsets() const {
+    return start_offsets_;
+  }
+
+  const auto& stopPredicates() const {
+    return stop_predicates_;
+  }
+
+  const auto& stopOffsets() const {
+    return stop_offsets_;
+  }
+
+  const auto& rootIds() const {
+    return root_ids_;
+  }
+
+  //! Return a false RootPredicateInfo, i.e., both start and stop
+  //! predicates are false.
+  static RootPredicateInfo getFalseInfo();
+
+ private:
+  // prdicates for lower end
+  std::vector<kir::Bool*> start_predicates_;
+  // prdicates for upper end
+  std::vector<kir::Bool*> stop_predicates_;
+  // Offsets of the start predicate
+  std::vector<kir::Val*> start_offsets_;
+  // Offsets of the stop predicate
+  std::vector<kir::Val*> stop_offsets_;
+  // Track which roots have been handled by the generated predicates
+  std::unordered_set<IterDomain*> root_ids_;
 };
 
 // Simple interface for IndexCompute
@@ -230,15 +283,6 @@ class Index {
       const TensorView* consumer,
       const std::vector<kir::ForLoop*>& loops);
 
-  // Consumer indices for predicates, keep all indices matching in root domain.
-  // Even those not used for physical addressing. Returns pair <root indices, if
-  // indices are mapped to rfactor dom>
-  static std::pair<std::vector<kir::Val*>, bool> getConsumerRootPredIndices(
-      const kir::TensorView* consumer,
-      const std::vector<kir::ForLoop*>& loops,
-      const std::vector<bool>& root_contiguity,
-      bool unswitch = false);
-
   //! Take a consumer tensorview and loop nest and generates predicates
   //! associated with the concrete roots of the loop nest. Returns a list of
   //! predicates, and a list of concrete roots they're associated with. It is
@@ -256,14 +300,17 @@ class Index {
   //! However if we had TV.size[0] = 16 at "compile time" then we wouldn't need
   //! the predicate. This will be caught by canOmitPredicate in the predicate
   //! lowering
-  // TODO: Replace pair of vectors with vector of
-  static std::pair<
-      std::vector<kir::Bool*>,
-      std::vector<std::unordered_set<IterDomain*>>>
+  //!
+  //! unswitch_or_vec_loop is the for loop to start the unswitch like predicate,
+  //! this is not a bool value as if we have an unswitch loop with a vectorized
+  //! loop inside, we only want to base the "unswitch" like predicate on the
+  //! vectorized loop.
+  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
   getReferenceRootPredicates(
       const kir::TensorView* kir_consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
-      bool unswitch = false);
+      kir::ForLoop* unswitch_or_vec_loop,
+      bool padding_predicate);
 
   // Determine if we may run into over reuse of predicates or registers in the
   // compiler. If the loop can be unrolled and the index and domain are not
