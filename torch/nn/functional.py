@@ -4738,7 +4738,7 @@ def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
     for idx, size in enumerate(paddable_shape):
         out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
 
-    out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout, device=input.device)
+    out = input.new_empty(out_shape)
 
     # Put original array in padded array
     if ndim == 1:
