@@ -1100,7 +1100,7 @@ struct CheckToWillAlias {
       const ToArgs& to_args) {
     // The to_maybe_copy_out operator functor should have detected a
     // constant true `copy` argument and used to_copy instead.
-    bool copy;
+    bool copy = false;
     if (has_constant_non_tensor_dtype_and_flags) {
       DCHECK(!p_node->Input(3).toBool());
       copy = false;
