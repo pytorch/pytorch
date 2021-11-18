@@ -192,6 +192,13 @@ py_library(
 )
 
 py_binary(
+    name = "jit_shapes",
+    main = "_shapes.py",
+    srcs = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
+    deps = [],
+)
+
+py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
     deps = [
@@ -1895,7 +1902,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":cpp_generated_code",
+        ":cpp_generated_code", ":jit_shapes"
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
