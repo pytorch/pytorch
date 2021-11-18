@@ -39,5 +39,18 @@ static c10::optional<UpgraderEntry> findUpgrader(
   return c10::nullopt;
 }
 
+static bool isOpUptoDate(
+    std::vector<UpgraderEntry> upgraders_for_schema,
+    int current_version) {
+
+  for (const auto& entry: upgraders_for_schema) {
+    if (entry.version_bump > current_version) {
+      return false;
+    }
+
+  }
+  return true;
+}
+
 } // namespace jit
 } // namespace torch
