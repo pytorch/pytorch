@@ -19397,6 +19397,15 @@ class TestStateDictHooks(TestCase):
         m.load_state_dict(state_dict)
         self.assertEqual(2, hook_called)
 
+    @suppress_warnings
+    def test_bias(self):
+        module = nn.Bias(5)
+        self.assertIsInstance(module.bias, UninitializedParameter)
+        input = torch.ones(10, 5)
+        module(input)
+        self.assertIsInstance(module, nn.Bias)
+        self.assertTrue(module.bias.shape == (5,))
+
 
 instantiate_device_type_tests(TestNNDeviceType, globals())
 

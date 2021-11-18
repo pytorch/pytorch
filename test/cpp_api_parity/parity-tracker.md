@@ -147,6 +147,7 @@ torch::nn::utils::rnn::pad_packed_sequence|Yes|No
 torch::nn::utils::rnn::pad_sequence|Yes|No
 torch::nn::utils::rnn::pack_sequence|Yes|No
 torch::nn::SampleModule|Yes|Yes
+torch::nn::Bias|Yes|No
 
 ## torch::nn::functional
 

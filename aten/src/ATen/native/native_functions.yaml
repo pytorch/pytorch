@@ -10843,3 +10843,6 @@
 - func: unflatten_dense_tensors(Tensor flat, Tensor[] tensors) -> Tensor[]
   variants: function
   python_module: nn
+
+- func: bias(Tensor input, Tensor bias) -> Tensor
+  python_module: nn

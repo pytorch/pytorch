@@ -18,5 +18,8 @@ UnflattenOptions::UnflattenOptions(const char* dimname, namedshape_t namedshape)
 UnflattenOptions::UnflattenOptions(std::string dimname, namedshape_t namedshape)
   : dim_(0), dimname_(std::move(dimname)), namedshape_(std::move(namedshape)) {}
 
+BiasOptions::BiasOptions(int64_t num_features)
+ : num_features_(num_features) {}
+
 } // namespace nn
 } // namespace torch

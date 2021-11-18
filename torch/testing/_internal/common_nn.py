@@ -349,6 +349,15 @@ module_tests = [
         module_name='Tanhshrink',
         input_size=(2, 3, 4, 5),
     ),
+    dict(
+        module_name='Bias',
+        constructor_args=(5,),
+        cpp_constructor_args='torch::nn::BiasOptions(5)',
+        input_size=(10, 5),
+        reference_fn=lambda i, p, _: i + p[0],
+        with_tf32=True,
+        tf32_precision=0.005,
+    ),
 ]
 
 

@@ -5135,3 +5135,23 @@ TEST_F(ModulesTest, PrettyPrintAdaptiveLogSoftmaxWithLoss) {
       ")");
   }
 }
+
+TEST_F(ModulesTest, Bias) {
+  {
+    Bias model(5);
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto result = model(x);
+    torch::Tensor s = result.sum();
+
+    s.backward();
+    ASSERT_EQ(result.ndimension(), 2);
+    ASSERT_EQ(s.ndimension(), 0);
+    ASSERT_EQ(result.size(0), 10);
+    ASSERT_EQ(result.size(1), 5);
+
+    ASSERT_EQ(model->bias.grad().numel(), 5);
+
+    auto expected = torch::add(x, model->bias);
+    ASSERT_TRUE(torch::allclose(result, expected));
+  }
+}

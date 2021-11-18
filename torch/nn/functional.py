@@ -5213,3 +5213,21 @@ def multi_head_attention_forward(
         return attn_output, attn_output_weights.sum(dim=1) / num_heads
     else:
         return attn_output, None
+
+def bias(input: Tensor, bias: Tensor) -> Tensor:
+    r"""
+    Adds a learnable additive bias term to the incoming data
+
+    This operator supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    Shape:
+
+        - Input: :math:`(*, num\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Bias: :math:`(num\_features)` or :math:`()`
+        - Output: :math:`(*, num\_features)` or :math:`(*)`, based on the shape of the weight
+    """
+
+    if has_torch_function_variadic(input, bias):
+        return handle_torch_function(bias, (input, bias), input, bias=bias)
+    return torch._C._nn.linear(input, bias)

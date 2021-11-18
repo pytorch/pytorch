@@ -708,4 +708,8 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   return result;
 }
 
+Tensor bias(const Tensor& input, const Tensor& bias) {
+  return input.add(bias);
+}
+
 }}  // namespace at::native
