@@ -22,10 +22,7 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
-- ``constraints.symmetric``
 - ``constraints.stack``
-- ``constraints.symmetric``
-- ``constraints.symmetric_positive_definite``
 - ``constraints.unit_interval``
 """
 
@@ -57,7 +54,6 @@ __all__ = [
     'real_vector',
     'simplex',
     'stack',
-    'symmetric',
     'unit_interval',
 ]
 
@@ -460,16 +456,6 @@ class _CorrCholesky(Constraint):
         return _LowerCholesky().check(value) & unit_row_norm
 
 
-class _Symmetric(Constraint):
-    """
-    Constrain to Symmetric square matrices.
-    """
-    event_dim = 2
-
-    def check(self, value):
-        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
-
-
 class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
@@ -480,6 +466,7 @@ class _PositiveDefinite(Constraint):
         # Assumes that the matrix or batch of matrices in value are symmetric
         # info == 0 means no error, that is, it's SPD
         return torch.linalg.cholesky_ex(value).info.eq(0).unsqueeze(0)
+
 
 class _Cat(Constraint):
     """
@@ -546,8 +533,6 @@ class _Stack(Constraint):
                             for v, constr in zip(vs, self.cseq)], self.dim)
 
 
-
-
 # Public interface.
 dependent = _Dependent()
 dependent_property = _DependentProperty
@@ -569,11 +554,9 @@ unit_interval = _Interval(0., 1.)
 interval = _Interval
 half_open_interval = _HalfOpenInterval
 simplex = _Simplex()
-symmetric = _Symmetric()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
-symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
