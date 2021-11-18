@@ -238,7 +238,6 @@ void initPythonIRBindings(PyObject* module_) {
              bool keep_initializers_as_inputs,
              const std::map<std::string, int>& custom_opsets,
              bool add_node_names,
-             bool use_external_data_format,
              const std::string& onnx_file_path,
              const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
@@ -262,7 +261,7 @@ void initPythonIRBindings(PyObject* module_) {
                     keep_initializers_as_inputs,
                     custom_opsets,
                     add_node_names,
-                    use_external_data_format,
+                    val_use_external_data_format,
                     onnx_file_path,
                     node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
@@ -292,7 +291,6 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("keep_initializers_as_inputs") = true,
           py::arg("custom_opsets"),
           py::arg("add_node_names") = true,
-          py::arg("use_external_data_format") = false,
           py::arg("onnx_file_path") = std::string(),
           py::arg("node_attr_to_name") = NodeAttrNameMap())
       .def(
@@ -379,6 +377,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "create",
           [](Graph& g, const char* str, const std::vector<Value*>& inputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs);
           })
       .def(
@@ -387,6 +391,12 @@ void initPythonIRBindings(PyObject* module_) {
              const char* str,
              const std::vector<Value*>& inputs,
              size_t noutputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs, noutputs);
           })
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
