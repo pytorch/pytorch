@@ -77,11 +77,8 @@ from ..utils import (
     get_combined_dict,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
-    weight_is_quantized,
     activation_is_statically_quantized,
     activation_is_int8_quantized,
-    activation_dtype,
-    weight_dtype,
 )
 
 from .backend_config_dict.utils import (
