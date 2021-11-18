@@ -1,8 +1,8 @@
-from typing import List, Union
 from dataclasses import dataclass
-from torch.distributed.remote_device import _remote_device
+from typing import List, Union
 
 import torch
+from torch.distributed.remote_device import _remote_device
 
 @dataclass
 class ShardMetadata(object):
