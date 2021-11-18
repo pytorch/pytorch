@@ -252,7 +252,7 @@ Tensor cat(
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl("_cat", TORCH_FN(cat));
+  m.impl(TORCH_SELECTIVE_NAME("aten::_cat"), TORCH_FN(cat));
 }
 
 #endif /* USE_VULKAN_API */

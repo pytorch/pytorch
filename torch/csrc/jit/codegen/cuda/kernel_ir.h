@@ -316,6 +316,15 @@ class TORCH_CUDA_CU_API Val : public Node {
     return false;
   }
 
+  void setEvaluatorIndex(int to) {
+    TORCH_INTERNAL_ASSERT(evaluator_index_ == -1);
+    evaluator_index_ = to;
+  }
+
+  int evaluatorIndex() const {
+    return evaluator_index_;
+  }
+
  private:
   const DataType dtype_;
 
@@ -327,6 +336,9 @@ class TORCH_CUDA_CU_API Val : public Node {
 
   // All Kernel IR values have IDs (unique within the same Kernel)
   ValueId id_ = -1;
+
+  // Expr evaluator idx;
+  int evaluator_index_ = -1;
 };
 
 //! Base class for expressions and statements
@@ -729,14 +741,23 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
     return start_;
   }
 
+  Val* stop() const {
+    return stop_;
+  }
+
   Val* extent() const;
 
   bool isSimple() const {
     return is_simple_;
   }
 
+  bool hasPaddingToMultipleOfWarp() const {
+    return is_padded_dimension_;
+  }
+
  private:
   Val* const start_ = nullptr;
+  Val* const stop_ = nullptr;
   Val* const extent_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
@@ -748,6 +769,9 @@ class TORCH_CUDA_CU_API IterDomain final : public Val {
   // TODO(kir): this feels like a hack, revisit
   //
   bool is_simple_ = true;
+
+  //! Indicates if this iterdomain is a padded parallel dimension
+  bool is_padded_dimension_ = false;
 };
 
 // TODO(kir): is this really a value?
@@ -1409,7 +1433,8 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
       Val* stop,
       Val* step,
       bool vectorize,
-      Val* vectorize_shift);
+      Val* vectorize_shift,
+      bool unroll_required);
 
   ForLoop(Passkey passkey, IterDomain* iter_domain);
 
@@ -1453,15 +1478,22 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
     return vectorize_;
   }
 
-  // Returns if a loop could be unrolled. Start and stop must be constant, it
-  // must not be a broadcast dimension, cannot be bound to a parallel dimension,
-  // and returns false if start is 0 and stop is 1.
-  bool isUnrollable() const {
-    return start()->isConstScalar() && stop()->isConstScalar() &&
-        !iter_domain()->isThread() && !iter_domain()->isBroadcast() &&
-        !(start()->isZeroInt() && stop()->isOneInt()) &&
-        iter_domain()->parallelType() != ParallelType::Vectorize;
+  //! True if unrolled (i.e., "#pragma unroll" is attached)
+  bool isUnrolled() const;
+
+  //! True if unrolling is required
+  bool isUnrollRequired() const {
+    return unroll_required_;
   }
+
+  //! Set unrolling required
+  void requireUnroll() {
+    unroll_required_ = true;
+  }
+
+ private:
+  //! Returns if a loop could be unrolled.
+  bool isUnrollable() const;
 
  private:
   IterDomain* const iter_domain_ = nullptr;
@@ -1477,6 +1509,9 @@ class TORCH_CUDA_CU_API ForLoop final : public Expr {
   // [pre | vectorize | post] <= inner-most, merged root domain
   // shift_ is applied to vectorize and post sections.
   Val* vectorize_shift_ = nullptr;
+
+  //! True if unroll is required for avoiding stack allocation
+  bool unroll_required_ = false;
 
   Scope body_;
 };
