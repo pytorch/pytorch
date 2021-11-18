@@ -3320,7 +3320,8 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             if sample.input.dim() != pool_dim + 2:
                 continue
 
-            # No dilation for max_unpool
+            # No dilation for max_unpool,
+            # see https://github.com/pytorch/pytorch/issues/68420
             if sample.kwargs['dilation'] != 1:
                 continue
 
@@ -3334,8 +3335,8 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
                     'stride': sample.kwargs['stride'],
                     'padding': sample.kwargs['padding'],
                     # output_size could be None but we specify it explicitly
-                    # because some of the indices are out of boundaries for
-                    # default computed shapes
+                    # to compensate for the information lose in pool due
+                    # to the floor operation used to compute the shapes
                     'output_size': sample.input.size()
                 }
                 yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
