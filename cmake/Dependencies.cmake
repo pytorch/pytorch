@@ -1624,7 +1624,11 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  if(NOT ${CUDA_VERSION} LESS 11.5)
+  set(THRUST_SEARCH_PATHS ${CUDA_INCLUDE_DIRS})
+  list(TRANSFORM THRUST_SEARCH_PATHS APPEND /thrust/cmake)
+  list(APPEND THRUST_SEARCH_PATHS ${CUDA_SOURCE_DIR}/thrust/cmake)
+  find_package(thrust PATHS ${THRUST_SEARCH_PATHS})
+  if(NOT THRUST_VERSION LESS 1.14.0)
     string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
   endif()
 
