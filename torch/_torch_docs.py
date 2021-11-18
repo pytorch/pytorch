@@ -8550,7 +8550,7 @@ argument (:obj:`"sum"`).
 For non-existing indices, the output will be filled with the identity of the
 applied reduction.
 
-For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
+For a 3-D tensor with :obj:`reduce="sum"`, the output is given as:
 
     out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
     out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
@@ -8570,7 +8570,7 @@ Args:
     input (Tensor): the input tensor
     dim (int): the axis along which to index
     index (LongTensor): the indices of elements to scatter and reduce.
-    src (Tensor): the source elements to scatter and add
+    src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
         (:obj:`"sum"`)
     output_size (int, optional): the size of the output at dimension :attr`dim`.
@@ -8580,7 +8580,7 @@ Args:
 
 Example::
 
-    >>> input = torch.arange(1, 7)
+    >>> input = torch.tensor([1, 2, 3, 4, 5, 6])
     >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
 
     >>> torch._scatter_reduce(input, 0, index, reduce="sum", output_size=3)
