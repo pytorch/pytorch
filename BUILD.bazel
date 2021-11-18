@@ -191,11 +191,9 @@ py_library(
     data = glob(["tools/jit/templates/*"]),
 )
 
-py_binary(
+py_library(
     name = "jit_shapes",
-    main = "_shapes.py",
     srcs = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
-    deps = [],
 )
 
 py_binary(
@@ -1877,6 +1875,7 @@ cc_library(
         "@local_config_python//:python_headers",
         "@onnx",
     ],
+    data = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
     alwayslink = True,
 )
 
@@ -1902,7 +1901,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":cpp_generated_code", ":jit_shapes"
+        ":cpp_generated_code"
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [

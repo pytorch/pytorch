@@ -5,14 +5,14 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # mypy: ignore-errors
 # flake8: noqa
 
-from typing import List, Any, Optional, Tuple
-
-from numpy import number
+from typing import List, Any, Optional, Tuple, TypeVar, Union
 
 import torch
 
 from torch.jit._shapes_1 import *
 from torch.jit._shapes_1 import _copy
+
+number = TypeVar('number', bound=Union[int, float])
 
 ####    SHAPE COMPUTE FUNCTIONS START   ###
 
