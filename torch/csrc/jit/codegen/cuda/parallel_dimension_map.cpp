@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -39,6 +40,8 @@ void ParallelDimensionMap::build(Fusion* fusion) {
       populateDimensionMapWithMultipleCASet(pt, concrete_dom_set);
     }
   }
+
+  adjustMappingsForWarpPadding();
 }
 
 void ParallelDimensionMap::registerConstantExtent(IterDomain* id) {
@@ -130,13 +133,17 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
   bool all_equal = true;
-  kir::Val* known_dimension =
-      gpu_lower->lowerValue((*dom_set.begin())->extent());
-  // Set it -1 to signal it's not initialied yet
+  // Use nullptr to signal it's not initialied yet
+  kir::Val* known_dimension = nullptr;
+  // Use -1 to signal it's not initialied yet
   int64_t known_const = -1;
 
   // Check all of concrete domains to see if they match all together.
   for (auto concrete_id : dom_set) {
+    if (concrete_id->isBroadcast()) {
+      // Broadcasted concrete id's don't specify anything about shape
+      continue;
+    }
     // If this concrete domain has a constant extent, check if it
     // matches with the known constant extent.
     auto it = constant_extent_map_.find(concrete_id);
@@ -165,10 +172,15 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
     // At this point, it still remains undetermined whether this id
     // matches with those previously looked at. Constant check failed,
     // but symbolic matching may succeed.
-    if (!equalDim(
-            known_dimension, gpu_lower->lowerValue(concrete_id->extent()))) {
-      all_equal = false;
-      break;
+    auto this_dimension = gpu_lower->lowerValue(concrete_id->extent());
+    if (known_dimension == nullptr) {
+      // No previous dimension found yet
+      known_dimension = this_dimension;
+    } else {
+      if (!equalDim(known_dimension, this_dimension)) {
+        all_equal = false;
+        break;
+      }
     }
   }
 
@@ -183,6 +195,48 @@ void ParallelDimensionMap::populateDimensionMapWithMultipleCASet(
   } else {
     dim_map_.insert({pt, kir::NamedScalar::getParallelDim(pt)});
   }
+}
+
+void ParallelDimensionMap::adjustMappingsForWarpPadding() {
+  const auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  // If TIDx is padded to a multiple of the warp size, mark it as
+  // non-exact.
+
+  auto& warp_info = gpu_lower->getWarpPaddedParallelInfo();
+  if (!warp_info.is_tidx_padded) {
+    return;
+  }
+
+  const auto tidx_pt = ParallelType::TIDx;
+  auto warp_size = at::cuda::warp_size();
+
+  // If the dimension of TIDx is actually a multple of the warp size
+  // before padding, it can be left as exact
+  if (isExact(tidx_pt)) {
+    auto tidx_dim = dynamic_cast<kir::Int*>(get(tidx_pt));
+    if (tidx_dim && tidx_dim->isConst()) {
+      auto tidx_dim_val = tidx_dim->value().value();
+      if (tidx_dim_val % warp_size == 0) {
+        // Dimension of TIDx is a multiple of the warp size
+        return;
+      }
+    }
+  }
+
+  // TIDx is padded to a multiple of warp. If it's known to be a
+  // single warp, use the constant warp size as the dimension of
+  // TIDx. Otherwise, jsut use blockDim.x.
+  if (warp_info.is_tidx_single_warp) {
+    dim_map_.at(ParallelType::TIDx) = ir_builder.create<kir::Int>(warp_size);
+  } else {
+    dim_map_.at(ParallelType::TIDx) =
+        kir::NamedScalar::getParallelDim(ParallelType::TIDx);
+  }
+
+  // TIDx is no longer exact
+  exact_types_.erase(ParallelType::TIDx);
 }
 
 kir::Val* ParallelDimensionMap::get(ParallelType pt) const {
@@ -249,7 +303,8 @@ bool ParallelDimensionMap::equalDim(kir::Val* dim1, kir::Val* dim2) {
       (dim1_def->isA<kir::UnaryOp>() && dim2_def->isA<kir::UnaryOp>() &&
        (dim1_def->as<kir::UnaryOp>()->operation() ==
         dim2_def->as<kir::UnaryOp>()->operation()))) {
-    for (size_t i = 0; i < dim1_def->inputs().size(); ++i) {
+    for (const auto i : c10::irange(dim1_def->inputs().size())) {
+      (void)i; // Suppress unused variable warning
       if (!equalDim(dim1_def->inputs()[0], dim2_def->inputs()[0])) {
         return false;
       }

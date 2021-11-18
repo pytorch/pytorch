@@ -229,6 +229,28 @@ class TORCH_CUDA_CU_API Fusion final {
   std::unordered_set<int> getOutputAliasIndices() const;
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 
+  // mark input at index to be in channels last format
+  void setChannelsLastOnInput(int index) {
+    c_last_input_indices_.insert(index);
+  }
+
+  // mark output at index to be in channels last format
+  void setChannelsLastOutputIndices(int index) {
+    c_last_output_indices_.insert(index);
+  }
+
+  // return a set of indices that marks all input tensors in channels last
+  // format
+  const std::unordered_set<int>& getChannelsLastInputIndices() const {
+    return c_last_input_indices_;
+  }
+
+  // return a set of indices that marks all output tensors in channels last
+  // format
+  const std::unordered_set<int>& getChannelsLastOutputIndices() const {
+    return c_last_output_indices_;
+  }
+
   bool isTVUseInfoValid() {
     return all_tv_uses_valid_;
   }
@@ -273,6 +295,12 @@ class TORCH_CUDA_CU_API Fusion final {
 
   // io alias pointing from output to input
   std::unordered_map<Val*, Val*> io_alias_;
+
+  // See Note [ Channels Last support in nvfuser ]
+  // indices of input tensor view that is permuted to channels last
+  std::unordered_set<int> c_last_input_indices_;
+  // indices of output tensor view that is permuted to channels last
+  std::unordered_set<int> c_last_output_indices_;
 
   // Records if the current use data in the IR nodes are valid
   //  the states are either all valid or all invalid
