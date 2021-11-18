@@ -407,13 +407,6 @@ at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,
   return self;
 }
 
-at::Tensor LazyNativeFunctions::lt(const at::Tensor& self,
-                                   const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
-  return CreateAtenFromLtcTensor(
-      lazy_tensor_aten_ops::lt(TryGetLtcTensor(self), other));
-}
-
 at::Tensor LazyNativeFunctions::max_pool2d(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
