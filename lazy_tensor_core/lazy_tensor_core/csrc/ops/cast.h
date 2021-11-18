@@ -2,14 +2,13 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Optional.h>
-
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Cast : public TsNode {
+class Cast : public torch::lazy::TsNode {
  public:
   Cast(const torch::lazy::Value& input, at::ScalarType dtype,
        c10::optional<at::ScalarType> stype = c10::nullopt);

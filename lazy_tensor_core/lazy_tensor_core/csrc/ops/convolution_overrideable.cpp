@@ -11,11 +11,12 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     const torch::lazy::Value& bias, std::vector<int64_t> stride,
     std::vector<int64_t> padding, std::vector<int64_t> dilation,
     bool transposed, std::vector<int64_t> output_padding, int64_t groups)
-    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable),
-             {input, weight, bias},
-             /*num_outputs=*/1,
-             torch::lazy::MHash(stride, padding, dilation, transposed,
-                                output_padding, groups)),
+    : torch::lazy::TsNode(
+          torch::lazy::OpKind(at::aten::convolution_overrideable),
+          {input, weight, bias},
+          /*num_outputs=*/1,
+          torch::lazy::MHash(stride, padding, dilation, transposed,
+                             output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
       dilation_(std::move(dilation)),
@@ -31,11 +32,12 @@ ConvolutionOverrideable::ConvolutionOverrideable(
     std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
     std::vector<int64_t> output_padding, int64_t groups)
-    : TsNode(torch::lazy::OpKind(at::aten::convolution_overrideable),
-             {input, weight},
-             /*num_outputs=*/1,
-             torch::lazy::MHash(stride, padding, dilation, transposed,
-                                output_padding, groups)),
+    : torch::lazy::TsNode(
+          torch::lazy::OpKind(at::aten::convolution_overrideable),
+          {input, weight},
+          /*num_outputs=*/1,
+          torch::lazy::MHash(stride, padding, dilation, transposed,
+                             output_padding, groups)),
       stride_(std::move(stride)),
       padding_(std::move(padding)),
       dilation_(std::move(dilation)),
@@ -48,11 +50,11 @@ ConvolutionOverrideable::ConvolutionOverrideable(
 
 std::string ConvolutionOverrideable::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", stride=(" << c10::Join(", ", stride_)
-     << "), padding=(" << c10::Join(", ", padding_) << "), dilation=("
-     << c10::Join(", ", dilation_) << "), transpose=" << transposed_
-     << ", output_padding=(" << c10::Join(", ", output_padding_)
-     << "), groups=" << groups_;
+  ss << torch::lazy::TsNode::ToString() << ", stride=("
+     << c10::Join(", ", stride_) << "), padding=(" << c10::Join(", ", padding_)
+     << "), dilation=(" << c10::Join(", ", dilation_)
+     << "), transpose=" << transposed_ << ", output_padding=("
+     << c10::Join(", ", output_padding_) << "), groups=" << groups_;
   return ss.str();
 }
 

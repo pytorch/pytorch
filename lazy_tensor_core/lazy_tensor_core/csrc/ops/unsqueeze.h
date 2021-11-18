@@ -1,6 +1,6 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -9,7 +9,7 @@ namespace ops {
 std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
                                               int64_t dim);
 
-class Unsqueeze : public TsNode {
+class Unsqueeze : public torch::lazy::TsNode {
  public:
   // Insert a dimension of size one at the specified position.
   Unsqueeze(const torch::lazy::Value& input, int dim);

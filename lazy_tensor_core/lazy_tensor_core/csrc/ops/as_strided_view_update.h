@@ -1,14 +1,14 @@
 #pragma once
 
-#include <vector>
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <vector>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AsStridedViewUpdate : public TsNode {
+class AsStridedViewUpdate : public torch::lazy::TsNode {
  public:
   AsStridedViewUpdate(const torch::lazy::Value& target,
                       const torch::lazy::Value& input,

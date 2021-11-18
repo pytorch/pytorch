@@ -1,13 +1,14 @@
 #pragma once
 
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
+
 #include "lazy_tensor_core/csrc/cross_replica_reduces.h"
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class CollectivePermute : public TsNode {
+class CollectivePermute : public torch::lazy::TsNode {
  public:
   CollectivePermute(
       const torch::lazy::Value& input, const torch::lazy::Value& token,

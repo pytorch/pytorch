@@ -1,13 +1,13 @@
 #pragma once
 
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
 // IR node for 2D & 3D convolutions with or without bias.
-class ConvolutionOverrideable : public TsNode {
+class ConvolutionOverrideable : public torch::lazy::TsNode {
  public:
   ConvolutionOverrideable(const torch::lazy::Value& input,
                           const torch::lazy::Value& weight,

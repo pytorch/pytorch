@@ -11,8 +11,9 @@ namespace ops {
 CollectivePermute::CollectivePermute(
     const torch::lazy::Value& input, const torch::lazy::Value& token,
     std::vector<std::pair<int64_t, int64_t>> source_target_pairs)
-    : TsNode(ltc_collective_permute, {input, token},
-             /*num_outputs=*/2, torch::lazy::MHash(source_target_pairs)),
+    : torch::lazy::TsNode(ltc_collective_permute, {input, token},
+                          /*num_outputs=*/2,
+                          torch::lazy::MHash(source_target_pairs)),
       source_target_pairs_(std::move(source_target_pairs)) {
   SetShapeDeferred(
       [&]() { return compiler::InferShape(this); });
@@ -20,7 +21,7 @@ CollectivePermute::CollectivePermute(
 
 std::string CollectivePermute::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", source_target_pairs=(";
+  ss << torch::lazy::TsNode::ToString() << ", source_target_pairs=(";
   for (size_t i = 0; i < source_target_pairs_.size(); ++i) {
     ss << (i == 0 ? "(" : ", (");
     ss << source_target_pairs_[i].first << ", "

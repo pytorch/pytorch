@@ -18,7 +18,7 @@ std::vector<int64_t> BuildUnsqueezeDimensions(c10::ArrayRef<int64_t> dimensions,
 namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
-  const torch::lazy::Shape& shape = ir::GetShapeFromTsValue(input);
+  const torch::lazy::Shape& shape = torch::lazy::GetShapeFromTsValue(input);
   auto dimensions = BuildUnsqueezeDimensions(shape.sizes(), dim);
   return lazy_tensors::ShapeUtil::MakeShape(shape.scalar_type(), dimensions);
 }
@@ -26,14 +26,15 @@ torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
 }  // namespace
 
 Unsqueeze::Unsqueeze(const torch::lazy::Value& input, int dim)
-    : TsNode(torch::lazy::OpKind(at::aten::unsqueeze), {input},
-           [&]() { return NodeOutputShape(input, dim); },
-           /*num_outputs=*/1, torch::lazy::MHash(dim)),
+    : torch::lazy::TsNode(
+          torch::lazy::OpKind(at::aten::unsqueeze), {input},
+          [&]() { return NodeOutputShape(input, dim); },
+          /*num_outputs=*/1, torch::lazy::MHash(dim)),
       dim_(dim) {}
 
 std::string Unsqueeze::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dim=" << dim_;
+  ss << torch::lazy::TsNode::ToString() << ", dim=" << dim_;
   return ss.str();
 }
 

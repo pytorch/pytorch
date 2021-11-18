@@ -1,14 +1,13 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
-
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class ConstantPadNd : public TsNode {
+class ConstantPadNd : public torch::lazy::TsNode {
  public:
   ConstantPadNd(const torch::lazy::Value& input, std::vector<int64_t> pad,
                 const at::Scalar& value);

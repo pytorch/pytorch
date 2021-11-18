@@ -45,8 +45,7 @@ using namespace torch_lazy_tensors::ir;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
                                const torch::lazy::Shape& target_shape) {
-  if (ir::GetShapeFromTsValue(input).sizes() ==
-      target_shape.sizes()) {
+  if (torch::lazy::GetShapeFromTsValue(input).sizes() == target_shape.sizes()) {
     return input;
   }
   return torch::lazy::MakeNode<ir::ops::Expand>(
@@ -103,7 +102,7 @@ ViewInfo CreateAsStridedViewInfo(const torch::lazy::Shape& input_shape,
 // appropriately.
 LazyTensor DispatchComparisonOp(c10::Symbol kind, const LazyTensor& input,
                                 const at::Scalar& other) {
-  NodePtr node = ir::ops::ComparisonOp(
+  torch::lazy::NodePtr node = ir::ops::ComparisonOp(
       kind, input.GetIrValue(),
       LazyGraphExecutor::Get()->GetIrValueForScalar(other, input.GetDevice()));
   return LazyTensor::Create(node, input.GetDevice());
@@ -181,10 +180,11 @@ LazyTensor convolution_overrideable(
     std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
     std::vector<int64_t> output_padding, int64_t groups) {
-  NodePtr ir_value = torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
-      input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue(),
-      std::move(stride), std::move(padding), std::move(dilation), transposed,
-      std::move(output_padding), groups);
+  torch::lazy::NodePtr ir_value =
+      torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
+          input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue(),
+          std::move(stride), std::move(padding), std::move(dilation),
+          transposed, std::move(output_padding), groups);
   return input.CreateFrom(ir_value);
 }
 
@@ -193,10 +193,11 @@ LazyTensor convolution_overrideable(
     std::vector<int64_t> stride, std::vector<int64_t> padding,
     std::vector<int64_t> dilation, bool transposed,
     std::vector<int64_t> output_padding, int64_t groups) {
-  NodePtr ir_value = torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
-      input.GetIrValue(), weight.GetIrValue(), std::move(stride),
-      std::move(padding), std::move(dilation), transposed,
-      std::move(output_padding), groups);
+  torch::lazy::NodePtr ir_value =
+      torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
+          input.GetIrValue(), weight.GetIrValue(), std::move(stride),
+          std::move(padding), std::move(dilation), transposed,
+          std::move(output_padding), groups);
   return input.CreateFrom(ir_value);
 }
 
@@ -207,7 +208,7 @@ convolution_backward_overrideable(
     std::vector<int64_t> padding, std::vector<int64_t> dilation,
     bool transposed, std::vector<int64_t> output_padding, int64_t groups,
     std::array<bool, 3> output_mask) {
-  NodePtr node =
+  torch::lazy::NodePtr node =
       torch::lazy::MakeNode<ir::ops::ConvolutionBackwardOverrideable>(
           out_backprop.GetIrValue(), input.GetIrValue(), weight.GetIrValue(),
           std::move(stride), std::move(padding), std::move(dilation),
@@ -279,9 +280,10 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm(
       GetIrValueOrDefault(running_mean, 0, features_shape, input.GetDevice());
   torch::lazy::Value running_var_value =
       GetIrValueOrDefault(running_var, 0, features_shape, input.GetDevice());
-  NodePtr node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormForward>(
-      input.GetIrValue(), weight_value, bias_value, running_mean_value,
-      running_var_value, training, momentum, eps);
+  torch::lazy::NodePtr node =
+      torch::lazy::MakeNode<ir::ops::TSNativeBatchNormForward>(
+          input.GetIrValue(), weight_value, bias_value, running_mean_value,
+          running_var_value, training, momentum, eps);
   LazyTensor output = input.CreateFrom(torch::lazy::Value(node, 0));
   LazyTensor running_mean_output =
       input.CreateFrom(torch::lazy::Value(node, 1));
@@ -299,7 +301,7 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
   torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
   torch::lazy::Value weight_value =
       GetIrValueOrDefault(weight, 1, features_shape, input.GetDevice());
-  NodePtr node;
+  torch::lazy::NodePtr node;
   CHECK_EQ(running_mean.is_null(), running_var.is_null());
   if (running_mean.is_null()) {
     node = torch::lazy::MakeNode<ir::ops::TSNativeBatchNormBackward>(
@@ -325,7 +327,7 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
                                       const LazyTensor& score_threshold,
                                       const LazyTensor& iou_threshold,
                                       int64_t output_size) {
-  NodePtr node = torch::lazy::MakeNode<ir::ops::Nms>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::Nms>(
       boxes.GetIrValue(), scores.GetIrValue(), score_threshold.GetIrValue(),
       iou_threshold.GetIrValue(), output_size);
   return std::pair<LazyTensor, LazyTensor>(
@@ -465,7 +467,7 @@ LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
 
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv) {
-  NodePtr node =
+  torch::lazy::NodePtr node =
       torch::lazy::MakeNode<ir::ops::SVD>(input.GetIrValue(), some, compute_uv);
   return std::make_tuple(input.CreateFrom(torch::lazy::Value(node, 0)),
                          input.CreateFrom(torch::lazy::Value(node, 1)),

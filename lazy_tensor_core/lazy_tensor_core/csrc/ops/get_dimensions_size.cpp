@@ -12,15 +12,16 @@ namespace ops {
 
 GetDimensionsSize::GetDimensionsSize(const torch::lazy::Value& input,
                                      std::vector<int64_t> dimensions)
-    : TsNode(ltc_get_dimensions_size, {input},
-             {lazy_tensors::ShapeUtil::MakeShape(c10::ScalarType::Int, {})},
-             /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
+    : torch::lazy::TsNode(
+          ltc_get_dimensions_size, {input},
+          {lazy_tensors::ShapeUtil::MakeShape(c10::ScalarType::Int, {})},
+          /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
       dimensions_(std::move(dimensions)) {}
 
 std::string GetDimensionsSize::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", dimensions=(" << c10::Join(", ", dimensions_)
-     << ")";
+  ss << torch::lazy::TsNode::ToString() << ", dimensions=("
+     << c10::Join(", ", dimensions_) << ")";
   return ss.str();
 }
 

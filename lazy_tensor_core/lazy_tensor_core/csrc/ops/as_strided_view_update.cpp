@@ -14,11 +14,11 @@ AsStridedViewUpdate::AsStridedViewUpdate(const torch::lazy::Value& target,
                                          std::vector<int64_t> size,
                                          std::vector<int64_t> stride,
                                          int64_t storage_offset)
-    : TsNode(
+    : torch::lazy::TsNode(
           ltc_as_strided_view_update, {target, input},
           [&]() {
             return lazy_tensors::ShapeUtil::MakeShape(
-                ir::GetShapeFromTsValue(target).scalar_type(), size);
+                torch::lazy::GetShapeFromTsValue(target).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
       size_(std::move(size)),
@@ -27,7 +27,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(const torch::lazy::Value& target,
 
 std::string AsStridedViewUpdate::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
+  ss << torch::lazy::TsNode::ToString() << ", size=(" << c10::Join(", ", size_)
      << "), stride=(" << c10::Join(", ", stride_)
      << "), storage_offset=" << storage_offset_;
   return ss.str();

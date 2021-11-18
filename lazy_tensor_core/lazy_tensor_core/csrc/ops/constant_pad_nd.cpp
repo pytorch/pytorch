@@ -10,8 +10,9 @@ namespace ops {
 
 ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
                              std::vector<int64_t> pad, const at::Scalar& value)
-    : TsNode(torch::lazy::OpKind(at::aten::constant_pad_nd), {input},
-             /*num_outputs=*/1, torch::lazy::MHash(pad, ScalarHash(value))),
+    : torch::lazy::TsNode(
+          torch::lazy::OpKind(at::aten::constant_pad_nd), {input},
+          /*num_outputs=*/1, torch::lazy::MHash(pad, ScalarHash(value))),
       pad_(std::move(pad)),
       value_(value) {
   SetShapeDeferred(
@@ -20,7 +21,8 @@ ConstantPadNd::ConstantPadNd(const torch::lazy::Value& input,
 
 std::string ConstantPadNd::ToString() const {
   std::stringstream ss;
-  ss << TsNode::ToString() << ", pad=(" << c10::Join(", ", pad_) << ")"
+  ss << torch::lazy::TsNode::ToString() << ", pad=(" << c10::Join(", ", pad_)
+     << ")"
      << ", value=" << value_;
   return ss.str();
 }

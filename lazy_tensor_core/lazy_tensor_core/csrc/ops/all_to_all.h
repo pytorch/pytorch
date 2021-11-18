@@ -1,13 +1,14 @@
 #pragma once
 
+#include <torch/csrc/lazy/ts_backend/ts_node.h>
+
 #include "lazy_tensor_core/csrc/cross_replica_reduces.h"
-#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class AllToAll : public TsNode {
+class AllToAll : public torch::lazy::TsNode {
  public:
   AllToAll(const torch::lazy::Value& input, const torch::lazy::Value& token,
            int64_t split_dimension, int64_t concat_dimension,

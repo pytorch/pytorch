@@ -13,7 +13,7 @@ std::pair<LazyTensor, torch::lazy::Value> all_reduce(
     AllReduceType reduce_type, double scale,
     std::vector<std::vector<int64_t>> groups) {
   std::vector<torch::lazy::Value> input_values({input.GetIrValue()});
-  NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
       reduce_type, input_values, token, scale, std::move(groups));
   return {input.CreateFrom(torch::lazy::Value(node, 0)), torch::lazy::Value(node, 1)};
 }
@@ -23,7 +23,7 @@ torch::lazy::Value all_reduce_(LazyTensor& input,
                                AllReduceType reduce_type, double scale,
                                std::vector<std::vector<int64_t>> groups) {
   std::vector<torch::lazy::Value> input_values({input.GetIrValue()});
-  NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
       reduce_type, input_values, token, scale, std::move(groups));
   input.SetInPlaceIrValue(torch::lazy::Value(node, 0));
   return torch::lazy::Value(node, 1);
@@ -38,7 +38,7 @@ torch::lazy::Value all_reduce(std::vector<LazyTensor>* inputs,
   for (auto& input : *inputs) {
     input_values.push_back(input.GetIrValue());
   }
-  NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::AllReduce>(
       reduce_type, input_values, token, scale, std::move(groups));
   for (size_t i = 0; i < inputs->size(); ++i) {
     (*inputs)[i].SetInPlaceIrValue(torch::lazy::Value(node, i));
@@ -50,7 +50,7 @@ std::pair<LazyTensor, torch::lazy::Value> all_to_all(
     const LazyTensor& input, const torch::lazy::Value& token,
     int64_t split_dimension, int64_t concat_dimension, int64_t split_count,
     std::vector<std::vector<int64_t>> groups) {
-  NodePtr node = torch::lazy::MakeNode<ir::ops::AllToAll>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::AllToAll>(
       input.GetIrValue(), token, split_dimension, concat_dimension, split_count,
       std::move(groups));
   return {input.CreateFrom(torch::lazy::Value(node, 0)), torch::lazy::Value(node, 1)};
@@ -65,7 +65,7 @@ LazyTensor get_dimensions_size(const LazyTensor& input,
 std::pair<LazyTensor, torch::lazy::Value> collective_permute(
     const LazyTensor& input, const torch::lazy::Value& token,
     std::vector<std::pair<int64_t, int64_t>> source_target_pairs) {
-  NodePtr node = torch::lazy::MakeNode<ir::ops::CollectivePermute>(
+  torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::CollectivePermute>(
       input.GetIrValue(), token, std::move(source_target_pairs));
   return {input.CreateFrom(torch::lazy::Value(node, 0)), torch::lazy::Value(node, 1)};
 }
