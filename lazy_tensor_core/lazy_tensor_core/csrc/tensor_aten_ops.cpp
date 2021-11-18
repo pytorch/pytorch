@@ -99,16 +99,6 @@ ViewInfo CreateAsStridedViewInfo(const torch::lazy::Shape& input_shape,
                   input_shape, std::move(as_strided_info));
 }
 
-// Dispatches a comparison operator, setting the logical type of the result
-// appropriately.
-LazyTensor DispatchComparisonOp(c10::Symbol kind, const LazyTensor& input,
-                                const at::Scalar& other) {
-  torch::lazy::NodePtr node = ir::ops::ComparisonOp(
-      kind, input.GetIrValue(),
-      LazyGraphExecutor::Get()->GetIrValueForScalar(other, input.GetDevice()));
-  return LazyTensor::Create(node, input.GetDevice());
-}
-
 }  // namespace
 
 //////////////////////////////////////////////////////////////////////////////
@@ -234,10 +224,6 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       value, input.shape(), input.GetDevice());
   input.SetInPlaceIrValue(std::move(constant));
-}
-
-LazyTensor lt(const LazyTensor& input, const at::Scalar& other) {
-  return DispatchComparisonOp(at::aten::lt, input, other);
 }
 
 LazyTensor mul(const LazyTensor& input, const LazyTensor& other) {

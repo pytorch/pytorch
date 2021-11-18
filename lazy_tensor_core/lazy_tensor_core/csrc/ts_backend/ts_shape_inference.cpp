@@ -35,16 +35,6 @@
 namespace torch_lazy_tensors {
 namespace compiler {
 
-torch::lazy::Shape InferComparison(const torch::lazy::Node* node) {
-  const torch::lazy::Output& lhs = node->operand(0);
-  const torch::lazy::Output& rhs = node->operand(1);
-  return torch::lazy::Shape(
-      c10::ScalarType::Bool,
-      Helpers::GetPromotedShape(
-          torch::lazy::GetShapeFromTsOutput(lhs).sizes(),
-          torch::lazy::GetShapeFromTsOutput(rhs).sizes()));
-}
-
 torch::lazy::Shape InferConvolutionOverrideable(
     const ir::ops::ConvolutionOverrideable* conv) {
   const auto& operands = conv->operands();
@@ -177,14 +167,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
       }
       return torch::lazy::Shape(argument_shape.scalar_type(),
                                  padded_dimensions);
-    }
-    case at::aten::eq:
-    case at::aten::ge:
-    case at::aten::gt:
-    case at::aten::le:
-    case at::aten::lt:
-    case at::aten::ne: {
-      return InferComparison(node);
     }
     default:
       LOG(FATAL) << *node << "Not implemented yet.";

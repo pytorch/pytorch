@@ -40,6 +40,7 @@ full_codegen:
   - log2
   - log_sigmoid_backward
   - log_sigmoid_forward
+  - lt.Scalar
   - lt.Tensor
   - masked_fill_.Scalar
   - masked_fill_.Tensor
@@ -121,7 +122,6 @@ supported:
   - sub.Tensor
   - sub.Scalar
   - view
-  - lt.Scalar
   - alias
   - tanh_backward
 autograd:

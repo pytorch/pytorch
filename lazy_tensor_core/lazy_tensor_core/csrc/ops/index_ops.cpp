@@ -127,33 +127,9 @@ CanonicalIndexInfo TransposeToFront(at::Tensor base, at::TensorList indices) {
           torch::lazy::InversePermutation(Helpers::I64List(dims)), 0};
 }
 
-// Wraps index tensors once into the [0, dim_size) interval, where dim_size is
-// the size of the current indexed dimension.
-std::vector<LazyTensor> WrapIndicesOnce(const LazyTensor& base,
-                                        c10::ArrayRef<LazyTensor> indices,
-                                        int start_dim) {
-  std::vector<LazyTensor> canonical_indices;
-  auto base_shape_ref = base.shape();
-  CHECK_LE(indices.size(), base_shape_ref.get().dim());
-  for (size_t dim_idx = 0; dim_idx < indices.size(); ++dim_idx) {
-    const LazyTensor& dim_index = indices[dim_idx];
-    int64_t dim_size = base_shape_ref.get().size(dim_idx + start_dim);
-    LazyTensor wrapped_dim_index = LazyTensor::Create(
-        dim_index.GetIrValue() +
-            LazyGraphExecutor::Get()->GetIrValueForScalar(
-                dim_size, dim_index.shape(), base.GetDevice()),
-        base.GetDevice());
-    LazyTensor wrap_cond =
-        lazy_tensor_aten_ops::lt(indices[dim_idx], at::Scalar(int64_t(0)));
-    canonical_indices.push_back(
-        lazy_tensor_aten_ops::where(wrap_cond, wrapped_dim_index, dim_index));
-  }
-  return canonical_indices;
-}
-
 torch::lazy::NodePtr IndexFillOp(const torch::lazy::Value& buffer, int64_t dim,
-                                 const torch::lazy::Value& index,
-                                 const torch::lazy::Value& value) {
+                    const torch::lazy::Value& index,
+                    const torch::lazy::Value& value) {
   torch::lazy::Value index_rank1 = EnsureRank1(index);
   torch::lazy::NodePtr node = torch::lazy::MakeNode<ir::ops::IndexAlongDim>(
       torch::lazy::OpKind(at::aten::index_fill), buffer, index_rank1, value,
@@ -218,47 +194,8 @@ torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
              : index;
 }
 
-LazyTensor IndexByTensors(const LazyTensor& base,
-                          c10::ArrayRef<LazyTensor> indices,
-                          int64_t start_dim) {
-  if (indices.empty()) {
-    return base;
-  }
-  auto canonical_indices = WrapIndicesOnce(base, indices, start_dim);
-  int64_t indices_rank = canonical_indices.front().shape().get().dim();
-  // Stack the indices to allow the whole multi-indexing to be dispatched with a
-  // single gather.
-  LazyTensor indices_nd =
-      lazy_tensor_aten_ops::stack(canonical_indices, indices_rank);
-  return LazyTensor::Create(
-      torch::lazy::MakeNode<ir::ops::IndexGet>(
-          base.GetIrValue(), indices_nd.GetIrValue(), start_dim),
-      base.GetDevice());
-}
-
-torch::lazy::Value IndexPutByTensors(
-    const LazyTensor& base, c10::ArrayRef<LazyTensor> indices,
-    int64_t start_dim, const LazyTensor& values, bool accumulate,
-    c10::ArrayRef<int64_t> result_permutation) {
-  if (indices.empty()) {
-    return base.GetIrValue();
-  }
-  auto canonical_indices = WrapIndicesOnce(base, indices, start_dim);
-  int64_t indices_rank = canonical_indices.front().shape().get().dim();
-  // Stack the indices to allow the whole multi-indexing to be dispatched with a
-  // single scatter.
-  LazyTensor indices_nd =
-      lazy_tensor_aten_ops::stack(canonical_indices, indices_rank);
-  return torch::lazy::MakeNode<ir::ops::Permute>(
-      torch::lazy::MakeNode<ir::ops::IndexPut>(
-          base.GetIrValue(), indices_nd.GetIrValue(), start_dim,
-          values.GetIrValue(), accumulate),
-      lazy_tensors::util::ToVector<int64_t>(result_permutation));
-}
-
-torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
-                               const LazyTensor& index,
-                               const at::Scalar& value) {
+torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTensor& index,
+                  const at::Scalar& value) {
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
