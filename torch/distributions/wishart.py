@@ -79,7 +79,7 @@ class Wishart(Distribution):
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
             self.df = self.precision_matrix.shape[-1] if df is None else df
 
-        assert self.df > self.precision_matrix.shape[-1] - 1, \
+        assert self.df > event_shape[-1] - 1, \
             "Degree of Freedom paramter should be larger than the dimension - 1"
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
@@ -178,7 +178,7 @@ class Wishart(Distribution):
             - (
                 - (nu - p - 1) * value.logdet()
                 + nu * p * math.log(2)
-                + torch.einsum("ik,...kj->...ij", V.inverse(), value).trace()
+                + torch.einsum("ik,...kj->...ij", V.inverse(), value).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
             ) / 2
         )
 
