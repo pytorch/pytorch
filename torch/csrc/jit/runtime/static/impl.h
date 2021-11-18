@@ -156,6 +156,7 @@ struct TORCH_API StaticModuleOptions {
 ///
 
 class MemoryPlanner;
+class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 class TORCH_API StaticModule {
@@ -270,6 +271,8 @@ class TORCH_API StaticModule {
   // Bookkeeping for creating new StaticRuntime instances
   // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
+  // The functions to be called by corresponding ProcessedNode.
+  std::vector<ProcessedFunction> functions_{};
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
   // Indices of graph outputs in the single values array.
@@ -443,6 +446,37 @@ class TORCH_API StaticRuntime {
   std::vector<ProcessedNode> nodes_;
 };
 
+class TORCH_API ProcessedFunction {
+ public:
+  ProcessedFunction(
+      Node* node,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  enum class Kind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+
+  const std::function<void(ProcessedNode*)>& f() const {
+    return f_;
+  }
+
+  Kind kind() const {
+    return kind_;
+  }
+
+  bool checkMemoryOverlap() const {
+    return check_memory_overlap_;
+  }
+
+ private:
+  std::function<void(ProcessedNode*)> f_;
+  Kind kind_{ProcessedFunction::Kind::kOutVariant};
+  bool check_memory_overlap_{false};
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
@@ -453,10 +487,9 @@ class TORCH_API ProcessedNode {
   // they are copied into a StaticRuntime.
   ProcessedNode(
       Node* n,
+      ProcessedFunction* fn,
       ProcessedNodeInputs inputs,
-      uint16_t outputs_offset,
-      bool enable_out_variant,
-      bool check_memory_overlap);
+      uint16_t outputs_offset);
 
   ProcessedNode(const ProcessedNode&) = default;
   ProcessedNode& operator=(const ProcessedNode&) = default;
@@ -504,11 +537,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> inputs_ivalue_vec() const;
 
   bool has_out_variant() const {
-    return fn_.kind == FunctionKind::kOutVariant;
+    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.kind == FunctionKind::kNativeFunction;
+    return fn_->kind() == ProcessedFunction::Kind::kNativeFunction;
   }
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -520,15 +553,15 @@ class TORCH_API ProcessedNode {
   bool verify_no_memory_overlap() const;
 
   bool check_outputs_for_memory_overlap() const {
-    return fn_.check_memory_overlap_;
+    return fn_->checkMemoryOverlap();
   }
 
   void set_outputs_memory_overlap_detected() {
-    fn_.overlap_detected_ = true;
+    overlap_detected_ = true;
   }
 
   bool outputs_memory_overlap_detected() {
-    return fn_.overlap_detected_;
+    return overlap_detected_;
   }
 
   void verify_and_correct_memory_overlap();
@@ -548,18 +581,8 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  enum class FunctionKind : uint8_t {
-    kOutVariant,
-    kNativeFunction,
-    kInterpreterFallback,
-  };
-  struct Function {
-    std::function<void(ProcessedNode*)> f;
-    FunctionKind kind = FunctionKind::kOutVariant;
-    bool check_memory_overlap_{false};
-    bool overlap_detected_{false};
-  };
-  Function fn_;
+  const ProcessedFunction* fn_;
+  bool overlap_detected_{false};
   ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
   uint16_t num_outputs_;
