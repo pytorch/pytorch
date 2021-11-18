@@ -236,7 +236,10 @@ def create_python_return_type_bindings(
     pred: Callable[[NativeFunction], bool],
     filename: str,
 ) -> None:
-    """Generates Python bindings to ATen functions"""
+    """
+    Generate function to initialize and return named tuple for native functions
+    which returns named tuple and relevant entry for the map in `python_return_types.cpp`.
+    """
     py_return_types_definition: List[str] = []
     py_return_types_map: List[str] = []
 
@@ -244,8 +247,8 @@ def create_python_return_type_bindings(
 
     for name in sorted(grouped.keys(), key=lambda x: str(x)):
         overloads = grouped[name]
-        defintions, map_entries = generate_return_type_defintion_and_map_entry(overloads)
-        py_return_types_definition.append("" if not defintions else "\n".join(defintions))
+        definitions, map_entries = generate_return_type_definition_and_map_entry(overloads)
+        py_return_types_definition.append("" if not definitions else "\n".join(definitions))
         py_return_types_map.append("" if not map_entries else "\n".join(map_entries))
 
     fm.write_with_template(filename, filename, lambda: {
@@ -462,7 +465,7 @@ static PyTypeObject* {typename} = get_namedtuple("{name}");""")
     return typedefs, typenames
 
 
-def generate_return_type_defintion_and_map_entry(
+def generate_return_type_definition_and_map_entry(
     overloads: Sequence[PythonSignatureNativeFunctionPair],
 ) -> Tuple[List[str], List[str]]:
     """
