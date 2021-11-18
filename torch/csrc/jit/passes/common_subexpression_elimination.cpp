@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/jit_log.h>
 
 #include <unordered_map>
-#include "ATen/core/interned_strings.h"
 
 namespace torch {
 namespace jit {
