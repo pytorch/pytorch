@@ -1321,7 +1321,7 @@ def gradcheck(
     assert not (check_undefined_grad and not check_backward_ad), \
         "Setting check_undefined_grad=True requires check_backward_ad to be True"
     assert not (check_batched_grad and not check_backward_ad), (
-        "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
+        "Setting check_batched_grad=True requires check_backward_ad to be True")
     assert not (check_batched_forward_grad and not check_forward_ad), (
         "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
     args = locals().copy()
