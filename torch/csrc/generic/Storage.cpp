@@ -2,10 +2,6 @@
 #define TH_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #else
 
-#if !defined(THC_GENERIC_FILE)
-#include <c10/core/CPUAllocator.h>
-#endif
-
 PyObject *THPStorageClass = nullptr;
 
 PyObject * THPStorage_(New)(c10::StorageImpl *ptr)
@@ -97,11 +93,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     self->cdata = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       length,
-#if defined(THC_GENERIC_FILE)
-      c10::cuda::CUDACachingAllocator::get(),
-#else
-      c10::GetDefaultCPUAllocator(),
-#endif
+      allocator,
       /*resizable=*/true)
       .release();
     THPObjectPtr item;

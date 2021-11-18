@@ -24,7 +24,6 @@
 #undef THWTensor
 #undef THWTensor_
 
-#undef THStorageImplPtr
 #undef THPStoragePtr
 #undef THWTensorPtr
 #undef THPTensorPtr

@@ -4,8 +4,6 @@
 #endif
 #include <structmember.h>
 
-#define THP_HOST_HALF
-
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
@@ -16,6 +14,7 @@
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <c10/core/CPUAllocator.h>
 
 #include <fmt/format.h>
 

@@ -86,7 +86,7 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  THStorageImplPtr new_storage(c10::make_intrusive<at::StorageImpl>(
+  auto new_storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
     0,
 #if defined(THC_GENERIC_FILE)
@@ -94,11 +94,10 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
 #else
     c10::GetDefaultCPUAllocator(),
 #endif
-    /*resizable=*/true)
-    .release());
+    /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *_ret = THPStorage_(New)(new_storage);
+  PyObject *_ret = THPStorage_(New)(new_storage.get());
   new_storage.release();
   return _ret;
   END_HANDLE_TH_ERRORS

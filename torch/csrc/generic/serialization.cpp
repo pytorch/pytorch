@@ -113,7 +113,7 @@ c10::StorageImpl * THPStorage_(readFileRaw)(io file, c10::StorageImpl *_storage,
     torch::utils::THP_decodeInt64Buffer(
         &nbytes, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
   }
-  THStorageImplPtr storage;
+  c10::intrusive_ptr<at::StorageImpl> storage;
   if (_storage == nullptr) {
     storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
@@ -123,8 +123,7 @@ c10::StorageImpl * THPStorage_(readFileRaw)(io file, c10::StorageImpl *_storage,
 #else
       c10::GetDefaultCPUAllocator(),
 #endif
-      /*resizable=*/true)
-      .release();
+      /*resizable=*/true);
   } else {
     int64_t _storage_nbytes = _storage->nbytes();
     THPUtils_assert(
@@ -132,7 +131,7 @@ c10::StorageImpl * THPStorage_(readFileRaw)(io file, c10::StorageImpl *_storage,
         "storage has wrong byte size: expected %ld got %ld",
         nbytes,
         _storage_nbytes);
-    storage = _storage;
+    storage = c10::intrusive_ptr<at::StorageImpl>::reclaim(_storage);
   }
 
 #ifndef THC_GENERIC_FILE
