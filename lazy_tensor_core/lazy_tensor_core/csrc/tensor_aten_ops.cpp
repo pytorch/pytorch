@@ -506,11 +506,5 @@ LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor where(const LazyTensor& condition, const LazyTensor& input,
-                 const LazyTensor& other) {
-  return input.CreateFrom(ir::ops::Where(
-      condition.GetIrValue(), input.GetIrValue(), other.GetIrValue()));
-}
-
 }  // namespace lazy_tensor_aten_ops
 }  // namespace torch_lazy_tensors
