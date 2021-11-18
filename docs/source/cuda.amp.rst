@@ -54,7 +54,7 @@ updates the parameters, so the scale factor does not interfere with the learning
 .. autoclass:: GradScaler
     :members:
 
-.. _autocast-op-reference:
+.. _autocast-cuda-op-reference:
 
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^

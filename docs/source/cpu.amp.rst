@@ -22,6 +22,8 @@ Autocasting
 .. autoclass:: autocast
     :members:
 
+.. _autocast-cpu-op-reference:
+
 Autocast Op Reference
 ^^^^^^^^^^^^^^^^^^^^^
 

@@ -14,11 +14,11 @@ Automatic Mixed Precision package - torch.autocast
 
 :class:`torch.autocast` provides convenience methods for mixed precision,
 where some operations use the ``torch.float32`` (``float``) datatype and other operations
-use lower precision floating point datatype (``lower_precision_fp``)：``torch.float16`` (``half``) or ``torch.bfloat16``. Some ops, like linear layers and convolutions,
+use lower precision floating point datatype (``lower_precision_fp``): ``torch.float16`` (``half``) or ``torch.bfloat16``. Some ops, like linear layers and convolutions,
 are much faster in ``lower_precision_fp``. Other ops, like reductions, often require the dynamic
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
-For CUDA and CPU, :doc:`cuda.amp` and :doc:`cpu.amp` are also provided seperately. ``torch.cuda.amp.autocast(args...)`` is equivalent to ``torch.autocast("cuda", args...)``. ``torch.cpu.amp.autocast(args...)`` is equivalent to ``torch.autocast("cpu", args...)``.
+For CUDA and CPU, :doc:`cuda.amp` and :doc:`cpu.amp` are also provided seperately. ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``. ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``.
 
 .. contents:: :local:
 
