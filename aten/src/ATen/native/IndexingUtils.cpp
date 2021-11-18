@@ -2,7 +2,7 @@
 
 namespace at { namespace native {
 
-bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
+bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   int64_t elements = t.numel();
   if (elements >= max_elem) {
     return false;
