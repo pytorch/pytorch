@@ -77,7 +77,7 @@ std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kLong, ncclInt64},
     {at::kHalf, ncclHalf},
     {at::kBool, ncclUint8},
-#if defined(ENABLE_NCCL_BF16_DATATYPE)
+#if HAS_NCCL_BF16_DATATYPE
     {at::kBFloat16, ncclBfloat16},
 #endif
 };
@@ -513,12 +513,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     asyncErrorHandling_ = false;
   }
 
-  // Perform health check by initializing dummy communicators and destroying
-  // them. This will help indicate any NCCL-related issues prior to the first
-  // collective.
-  // Run it in a separate thread and wait on CV to handle timeouts, since
-  // majority of getNCCLComm failures are hangs.
-  runHealthCheck();
+  if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
+    // Perform health check by initializing dummy communicators and destroying
+    // them. This will help indicate any NCCL-related issues prior to the first
+    // collective.
+    // Run it in a separate thread and wait on CV to handle timeouts, since
+    // majority of getNCCLComm failures are hangs.
+    runHealthCheck();
+  }
 
 #ifdef ENABLE_NCCL_ERROR_CHECKING
   ncclCommWatchdogThread_ =

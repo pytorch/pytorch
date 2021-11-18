@@ -37,7 +37,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -60,7 +60,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim_TupleUnpack,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const auto& elems = p_node->Input(0).toTuple()->elements();
+        const auto& elems = p_node->Input(0).toTupleRef().elements();
         const size_t num_outputs = p_node->outputs().size();
         TORCH_CHECK(
             num_outputs == elems.size(),
@@ -78,7 +78,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -99,9 +99,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime_dict_unpack,
     [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->inputs().size() - 1 == p_node->outputs().size());
+        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
-        for (size_t i = 1; i < p_node->inputs().size(); ++i) {
+        for (size_t i = 1; i < p_node->num_inputs(); ++i) {
           auto key = p_node->Input(i);
           auto value = dict.find(key);
           TORCH_CHECK(value != dict.end(), "Key not in dict: ", key);
@@ -145,7 +145,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -154,7 +154,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         listConstruct(
             stack,
             p_node->node()->output()->type()->expectRef<ListType>(),
-            p_node->inputs().size());
+            p_node->num_inputs());
         // put output back
         p_node->Output(0) = std::move(stack[0]);
       };
@@ -167,7 +167,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         // prepare inputs
         std::vector<IValue> stack;
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         stack.reserve(size);
         for (const auto i : c10::irange(size)) {
           stack.emplace_back(p_node->Input(i));
@@ -478,13 +478,84 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node*) -> SROperator {
       return [](ProcessedNode* pnode) {
         size_t output_idx = 0;
-        for (const auto& tuple : pnode->inputs()) {
-          for (auto& elem : tuple->toTuple()->elements()) {
+        for (const auto idx : c10::irange(pnode->num_inputs())) {
+          const auto& tuple = pnode->Input(idx);
+          for (auto& elem : tuple.toTupleRef().elements()) {
             pnode->Output(output_idx) = elem;
             ++output_idx;
           }
         }
       };
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::view,
+    aten_view,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::view(Tensor(a) self, int[] size) -> (Tensor(a))"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        const auto size = p_node->Input(1).toIntList();
+        p_node->Output(0) = at::native::view(input, size.vec());
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::size,
+    aten_size,
+    [](Node* n) -> SROperator {
+      if (!n->matches(
+              torch::schema("aten::size(Tensor self, int dim) -> int"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& input = p_node->Input(0).toTensor();
+        auto dim = p_node->Input(1).toInt();
+        const auto ndim = input.dim();
+
+        if (dim < 0 || dim >= ndim) {
+          dim = c10::maybe_wrap_dim(dim, ndim);
+        }
+        p_node->Output(0) = input.sizes()[dim];
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::squeeze,
+    aten_squeeze,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "aten::squeeze.dim(Tensor(a) self, int dim) -> Tensor(a)"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto dim = p_node->Input(1).toInt();
+        p_node->Output(0) = at::native::squeeze(self, dim);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROperator {
+  if (!n->matches(torch::schema(
+          "aten::split(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
+  }
+
+  return [](ProcessedNode* p_node) {
+    const auto& self = p_node->Input(0).toTensor();
+    const auto split_size = p_node->Input(1).toInt();
+    const auto dim = p_node->Input(2).toInt();
+    p_node->Output(0) = at::native::split(self, split_size, dim);
+  };
+});
+
 } // namespace jit
 } // namespace torch

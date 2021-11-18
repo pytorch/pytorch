@@ -3,7 +3,7 @@
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase, InputTensorSpec
+from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 from parameterized import parameterized
 
 
@@ -30,7 +30,7 @@ class TestSoftmaxConverter(AccTestCase):
             Softmax(dim),
             inputs,
             expected_ops={acc_ops.softmax},
-            test_implicit_batch_dim=(dim % len(inputs[0].shape) != 0),
+            test_implicit_batch_dim=(dim is None or dim % len(inputs[0].shape) != 0),
         )
 
     def test_softmax_with_dynamic_shape(self):

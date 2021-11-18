@@ -27,8 +27,10 @@
 #include <torch/csrc/utils/tensor_new.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <ATen/NamedTensorUtils.h>
+#include <c10/core/DeviceType.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+
 
 #include <torch/library.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
@@ -44,6 +46,8 @@
 #include <memory>
 #include <utility>
 #include <vector>
+
+
 
 using namespace at;
 using namespace torch;
@@ -154,6 +158,24 @@ static bool check_has_torch_dispatch(PyObject *obj) {
   );
 }
 
+// NOLINTNEXTLINE
+static PyObject* device_to_py_class_ [static_cast<size_t>(c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];
+
+void registerPythonTensorClass(const std::string& device, PyObject* python_tensor_class) {
+  c10::Device dev(device);
+
+  TORCH_CHECK(dev.type() == kXLA, "Only the python class for XLA can be overriden");
+  if (device_to_py_class_[static_cast<size_t>(dev.type())] != nullptr) {
+    TORCH_WARN("Overriding a previously registered python class for ", dev.str());
+  }
+
+  device_to_py_class_[static_cast<size_t>(dev.type())] = python_tensor_class;
+}
+
+static PyObject* getPythonTensorClass(c10::Device d) {
+  return device_to_py_class_[static_cast<size_t>(d.type())];
+}
+
 // TODO: Make this take Variable by const reference
 PyObject * THPVariable_Wrap(at::TensorBase var)
 {
@@ -199,6 +221,17 @@ PyObject * THPVariable_Wrap(at::TensorBase var)
       status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
     }
   }
+
+  if (C10_LIKELY(var.device().type() != c10::kXLA)) {
+    return THPVariable_NewWithVar(
+      (PyTypeObject*)THPVariableClass, std::move(var), status);
+  }
+
+  if (auto clazz = getPythonTensorClass(var.device())) {
+      return THPVariable_NewWithVar(
+        (PyTypeObject*)clazz, std::move(var), status);
+  }
+
   return THPVariable_NewWithVar(
       (PyTypeObject*)THPVariableClass, std::move(var), status);
 }
@@ -369,9 +402,9 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
   // NB: pin_memory doesn't actually do anything
   // TODO: strides variant?
   static PythonArgParser parser({
-    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
+    "_make_wrapper_subclass(PyObject* cls, IntArrayRef size, *, IntArrayRef? strides=None, int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False)",
   });
-  ParsedArgs<8> parsed_args{};
+  ParsedArgs<10> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
   PyObject* cls = r.pyobject(0);
 
@@ -385,24 +418,26 @@ static PyObject* THPVariable_make_wrapper_subclass(PyObject*, PyObject* args, Py
     ((PyTypeObject*)cls)->tp_name, " must define __torch_dispatch__");
 
   const auto options = TensorOptions()
-    .dtype(r.scalartype(3))
-    .device(r.device(5))
-    .layout(r.layoutOptional(4))
+    .dtype(r.scalartype(5))
+    .device(r.device(7))
+    .layout(r.layoutOptional(6))
     // NB: long standing issue, requires_grad is not respected here; you
     // have to set it post facto, see https://github.com/pytorch/pytorch/issues/26428
     // .requires_grad(r.toBool(7))
-    .pinned_memory(r.toBool(6));
+    .pinned_memory(r.toBool(8));
 
   // don't bother releasing GIL here, as we are not allocating any nontrivial
   // data
   // TODO: for_blob produces non-resizable tensors, we might want this to be
   // resizable (have to define a custom allocator in that case)
   auto data = at::for_blob(nullptr, r.intlist(1))
-    .context(nullptr, [](void *ctx) {})
-    .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
-    .options(options)
-    .make_tensor();
-  data.set_requires_grad(r.toBool(7));
+        .strides(r.intlistOptional(2))
+        .storage_offset(r.toInt64Optional(3))
+        .context(nullptr, [](void *ctx) {})
+        .target_device(options.device())  // TODO: this shouldn't be necessary if it came from options
+        .options(options)
+        .make_tensor();
+  data.set_requires_grad(r.toBool(9));
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,

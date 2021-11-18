@@ -261,11 +261,7 @@ using RPC. For more details see :ref:`distributed-autograd-design`.
 Distributed Optimizer
 ---------------------
 
-.. warning ::
-    Distributed optimizer is not currently supported when using CUDA tensors
-
-.. automodule:: torch.distributed.optim
-    :members: DistributedOptimizer
+See the `torch.distributed.optim <https://pytorch.org/docs/master/distributed.optim.html>`__ page for documentation on distributed optimizers.
 
 Design Notes
 ------------

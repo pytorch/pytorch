@@ -127,6 +127,11 @@ genrule(
         "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/RegisterBackendSelect.cpp",
         "aten/src/ATen/RegisterCPU.cpp",
+        "aten/src/ATen/RegisterFunctionalization_0.cpp",
+        "aten/src/ATen/RegisterFunctionalization_1.cpp",
+        "aten/src/ATen/RegisterFunctionalization_2.cpp",
+        "aten/src/ATen/RegisterFunctionalization_3.cpp",
+        # "aten/src/ATen/RegisterFunctionalizationEverything.cpp",
         "aten/src/ATen/RegisterMkldnnCPU.cpp",
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
@@ -143,6 +148,7 @@ genrule(
         "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
         "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
         "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
+        "aten/src/ATen/FunctionalInverses.h",
         "aten/src/ATen/Functions.h",
         "aten/src/ATen/Functions.cpp",
         "aten/src/ATen/RedispatchFunctions.h",
@@ -236,11 +242,10 @@ libtorch_python_generated_sources = [
 genrule(
     name = "all_generated_code",
     srcs = [
-        "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -379,7 +384,7 @@ filegroup(
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
-        "aten/src/THC/THCGeneral.cpp",
+        "aten/src/THC/THCStorage.cpp",
         "aten/src/THC/THCStorageCopy.cpp",
         "aten/src/THC/THCTensor.cpp",
     ],
@@ -412,6 +417,7 @@ filegroup(
 filegroup(
     name = "aten_srcs_cu",
     srcs = [
+        "aten/src/ATen/cuda/cub.cu.cc",
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
         "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",

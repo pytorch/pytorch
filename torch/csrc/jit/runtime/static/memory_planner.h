@@ -58,7 +58,15 @@ class MemoryPlanner {
   }
 
   size_t total_num_unmanaged() const {
+    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
     return unmanaged_ivalues_.size();
+  }
+
+  C10_NODISCARD size_t num_unmanaged_scalars() const {
+    return num_unmanaged_scalar_ivalues_;
   }
 
   size_t total_managed() const {
@@ -98,18 +106,52 @@ class MemoryPlanner {
     return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
   }
 
+  bool isManagedStorageImpl(const at::StorageImpl* impl) const {
+    if (managed_tensor_storage_impls_.empty()) {
+      return false;
+    }
+    // Comparing pointers that aren't within the same array is
+    // UB. We're doing fancy memory allocation stuff, so we cast to an
+    // integer type and carry on.
+    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
+    const auto start =
+        reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
+    const auto end = reinterpret_cast<uintptr_t>(
+        &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
+    return impl_p >= start && impl_p < end;
+  }
+
+  bool overlapWithInternalBuffer(void* data_ptr) {
+    return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
+  }
+
  private:
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
   // each pair contains the size (in bytes) of data to be allocated
-  // and a vector of Tensors that should be backed by that same data.
-  // Thus, if memonger is disabled, all vectors are of size 1.
+  // and a vector of Tensors' storages that should be backed by that
+  // same data. Thus, if memonger is disabled, all vectors are of
+  // size 1.
+
+  // We allocate StorageImpls ourselves so that 1) we don't have to do
+  // an extra two loads per Tensor (which will likely miss in the CPU
+  // data cache) first reading the Storage (i.e., StorageImpl pointer)
+  // from the TensorImpl object and then second dereferencing it and
+  // 2) our memory access pattern during allocate() has high locality.
+  std::vector<std::pair<size_t, at::StorageImpl>>
+      managed_tensor_storage_impls_{};
+  // We don't have any guarantee that the model doesn't change the
+  // Storage for managed tensors out from under us during execution,
+  // so we have to check the StorageImpls each time we deallocate.
   std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
+  uint8_t* buffer_start_{nullptr};
+  uint8_t* buffer_end_{nullptr};
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
+  size_t num_unmanaged_scalar_ivalues_{0};
 
   // Since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens on the client side).

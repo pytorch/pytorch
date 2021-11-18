@@ -654,6 +654,12 @@ struct TORCH_API TensorType : public Type {
         sizes, contiguousStridesOf(sizes));
   }
 
+  TensorTypePtr withDevice(at::Device device) const {
+    auto copy = clone();
+    copy->device_ = device;
+    return copy;
+  }
+
   TensorTypePtr dimensionedOnly() const {
     auto copy = clone();
     copy->sizes_ = SymbolicShape(sizes().size());
@@ -1626,23 +1632,23 @@ inline TypePtr TensorType::fromBoolType() {
   return TensorType::createContiguous(at::kBool, at::kCPU, {});
 }
 
-inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const c10::TypePtr & type) {
-  if (type == FloatType::get()) {
+inline c10::optional<c10::ScalarType> tryScalarTypeFromJitType(const Type& type) {
+  if (&type == FloatType::get().get()) {
     return at::typeMetaToScalarType(c10::get_default_dtype());
-  } else if (type == IntType::get()) {
+  } else if (&type == IntType::get().get()) {
     return at::ScalarType::Long;
-  } else if (type == BoolType::get()) {
+  } else if (&type == BoolType::get().get()) {
     return at::ScalarType::Bool;
   }
   return c10::nullopt;
 }
 
-inline at::ScalarType scalarTypeFromJitType(const c10::TypePtr& type) {
+inline at::ScalarType scalarTypeFromJitType(const Type& type) {
   auto result = tryScalarTypeFromJitType(type);
   TORCH_CHECK(
       result,
       "Add new condition, expected Float, Complex, Int, or Bool but got",
-      type->str());
+      type.str());
   return *result;
 }
 
@@ -1937,14 +1943,14 @@ struct TORCH_API ClassAttribute {
   TypePtr attributeType,
   std::string attributeName) :
     kind_(kind),
-    attributeType_(attributeType),
+    attributeType_(std::move(attributeType)),
     attributeName_(std::move(attributeName)) {}
 
   AttributeKind getKind() const {
     return kind_;
   }
 
-  TypePtr getType() const {
+  const TypePtr& getType() const {
     return attributeType_;
   }
 
@@ -2026,22 +2032,22 @@ struct TORCH_API ClassType : public NamedType {
     return attributes_[pos].getType();
   }
 
-  TypePtr getAttribute(const std::string& name) const {
-    auto type = findAttribute(name);
+  const TypePtr& getAttribute(const std::string& name) const {
+    auto slot = findAttributeSlot(name);
     TORCH_CHECK(
-        type,
+        slot,
         repr_str(),
         " does not have an attribute with name '",
         name,
         "'");
-    return type;
+    return attributes_[*slot].getType();
   }
 
   size_t numAttributes() const {
     return attributes_.size();
   }
 
-  TypePtr getAttribute(size_t slot) const {
+  const TypePtr& getAttribute(size_t slot) const {
     AT_ASSERT(slot < attributes_.size());
     return attributes_.at(slot).getType();
   }
@@ -2059,7 +2065,7 @@ struct TORCH_API ClassType : public NamedType {
   c10::optional<size_t> findAttributeSlot(const std::string& name) const {
     size_t slot = 0;
     for (const auto& attr : attributes_) {
-      if (name.compare(attr.getName()) == 0) {
+      if (name == attr.getName()) {
         return slot;
       }
       slot++;
@@ -2094,7 +2100,7 @@ struct TORCH_API ClassType : public NamedType {
 
   size_t addAttribute(
       const std::string& name,
-      const TypePtr& type,
+      TypePtr type,
       bool is_parameter = false,
       bool is_buffer = false);
 
@@ -2122,7 +2128,7 @@ struct TORCH_API ClassType : public NamedType {
       bool is_buffer = false) {
     auto slot_idx = findAttributeSlot(name);
     if (!slot_idx) {
-      return addAttribute(name, ty, is_parameter, is_buffer);
+      return addAttribute(name, std::move(ty), is_parameter, is_buffer);
     }
 
     TORCH_CHECK(
@@ -2130,7 +2136,7 @@ struct TORCH_API ClassType : public NamedType {
         "Parameter field mismatch for the field '",
         name,
         "'");
-    TypePtr atype = getAttribute(*slot_idx);
+    const TypePtr& atype = getAttribute(*slot_idx);
     TORCH_CHECK(
       ty->isSubtypeOf(*atype),
       ty->repr_str(),
@@ -2227,7 +2233,7 @@ struct TORCH_API ClassType : public NamedType {
     AT_ASSERT(numAttributes() == contained_types.size());
     for(size_t i = 0; i < attributes_.size(); ++i) {
       AT_ASSERT(attributes_[i].getType()->isSubtypeOf(*contained_types[i]));
-      ptr->addAttribute(attributes_[i].getName(), contained_types[i]);
+      ptr->addAttribute(attributes_[i].getName(), std::move(contained_types[i]));
     }
     // Copy methods over
     for (const auto& method : methods()) {
