@@ -3,11 +3,11 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
 
-from typing import List, Any, Optional, Tuple
+from typing import List, Any, Optional, Tuple # noqa F401
 
-from numpy import number
+from numpy import number # noqa F401
 
-import torch
+import torch # noqa F401
 
 ####    SHAPE COMPUTE FUNCTIONS START   ### # noqa: E266
 
@@ -154,7 +154,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
-            if idx == maybe_wrap_dim(reduce_dim, len(self)):
+            if idx == maybe_wrap_dim(reduce_dim, len(self)): # type: ignore
                 is_mean_dim = True
         if is_mean_dim:
             if keep_dim:
@@ -399,7 +399,7 @@ def mv(self: List[int], vec: List[int]):
 
 
 def unsqueeze(li: List[int], dim: int):
-    dim = maybe_wrap_dim(dim, len(li) + 1)
+    dim = maybe_wrap_dim(dim, len(li) + 1) # type: ignore
     out = _copy(li)
     out.insert(dim, 1)
     return out
@@ -415,7 +415,7 @@ def squeeze_nodim(li: List[int]):
 
 def squeeze(li: List[int], dim: int):
     out: List[int] = []
-    wrapped_dim = maybe_wrap_dim(dim, len(li))
+    wrapped_dim = maybe_wrap_dim(dim, len(li)) # type: ignore
     for i in range(len(li)):
         if i == wrapped_dim:
             if li[i] != 1:
@@ -424,6 +424,6 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
-####    SHAPE COMPUTE FUNCTIONS END   ### # noqa: E262
-### DO NOT REMOVE THIS STRING!!! # noqa: E262
+####    SHAPE COMPUTE FUNCTIONS END   ### # noqa E266
+### DO NOT REMOVE THIS STRING!!! # # noqa E266
 ")====="

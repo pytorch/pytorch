@@ -9,7 +9,7 @@ from numpy import number
 
 import torch
 
-from torch.jit._shapes_1 import *
+from torch.jit._shapes_1 import * # noqa F403
 from torch.jit._shapes_1 import _copy
 
 ####    SHAPE COMPUTE FUNCTIONS START   ### # noqa: E266
@@ -100,7 +100,7 @@ def max_int():
 def slice(
     self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int
 ):
-    ndim = len(self)
+    ndim = len(self) # noqa F823
     assert ndim != 0
     dim = maybe_wrap_dim(dim, ndim)
     start_val = start if start is not None else 0
@@ -237,7 +237,7 @@ def matmul(tensor1: List[int], tensor2: List[int]):
 
         return output_shape
     else:
-        assert False, "both  arguments to matmul need to be at least 1D"
+        assert False, "both  arguments to matmul need to be at least 1D" # noqa B011
 
 
 def t(self: List[int]):
@@ -434,7 +434,7 @@ def multiply_integers(li: List[int]):
 
 def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
     assert end >= 0
-    return [int(torch.ceil(end))]
+    return [int(torch.ceil(end))] # type: ignore
 
 
 def arange_start(
@@ -442,7 +442,7 @@ def arange_start(
 ):
     assert end >= 0
     assert end >= start
-    return [int(torch.ceil(end - start))]
+    return [int(torch.ceil(end - start))] # type: ignore
 
 
 def arange_start_step(
@@ -453,7 +453,7 @@ def arange_start_step(
         assert start >= end
     else:
         assert end >= start
-    return [int(torch.ceil((end - start) / step))]
+    return [int(torch.ceil((end - start) / step))] # type: ignore
 
 
 def permute(input: List[int], dims: List[int]):
@@ -499,15 +499,15 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
 
 def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
     assert isinstance(
-        conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase
+        conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase # type: ignore
     )
-    weight, bias, stride, padding, dilation, groups = unchecked_cast(
+    weight, bias, stride, padding, dilation, groups = unchecked_cast( # type: ignore
         Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int],
-        ops.quantized.conv2d_unpack_sizes(conv2dOpContext),
+        ops.quantized.conv2d_unpack_sizes(conv2dOpContext), # type: ignore
     )
     return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
 
-####    SHAPE COMPUTE FUNCTIONS END   ###
-### DO NOT REMOVE THIS STRING!!!
+####    SHAPE COMPUTE FUNCTIONS END   ### # noqa E266
+### DO NOT REMOVE THIS STRING!!! # noqa E266
 ")====="
