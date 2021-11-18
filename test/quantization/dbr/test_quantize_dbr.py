@@ -1,7 +1,6 @@
 import collections
 import copy
 import math
-import tabulate
 import unittest
 
 import torch
@@ -961,13 +960,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 v['node_output']['mq'][0]['fqn'],
                 v['node_output']['mq'][0]['ref_node_target_type'],
                 v['node_output']['mq'][0]['sqnr']])
-
-        # debugging only, TODO(future PR) remove this once we have
-        # better tooling
-        if False:
-            print(tabulate.tabulate(
-                to_print, headers=['layer_name', 'fqn', 'type', 'sqnr']))
-
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
