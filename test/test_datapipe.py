@@ -1654,7 +1654,7 @@ class TestFunctionalMapDataPipe(TestCase):
         self.assertEqual([[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]], list(batch_dp_2))
 
         # Functional Test: unbatch everything first before batching again
-        batch_dp_unbatch_first = batch_dp.batch(batch_size=3, unbatch_level=-1)
+        batch_dp_unbatch_first = batch_dp.unbatch(unbatch_level=-1).batch(batch_size=3)
         self.assertEqual([[0, 1, 2], [3, 4, 5], [6, 7, 8], [9, 10, 11]], list(batch_dp_unbatch_first))
 
         # Reset Test:
