@@ -3,6 +3,7 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
 # mypy: ignore-errors
+# flake8: noqa
 
 from typing import List, Any, Optional, Tuple # noqa: F401
 
