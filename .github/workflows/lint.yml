@@ -42,6 +42,24 @@ jobs:
           git grep -Il . >> lint_paths.txt
       - name: Run lintrunner
         run: lintrunner --paths-from=lint_paths.txt --verbose
+      - name: Store annotations
+        if: ${{ failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository}}
+        run: |
+          lintrunner --json \
+            | python .github/scripts/convert_lintrunner_annotations_to_github.py \
+            > annotations.json
+      - name: Add annotations
+        # Don't run on forked pull requests
+        if: ${{ failure() && github.event.pull_request.head.repo.full_name == github.repository }}
+        uses: pytorch/add-annotations-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          check_name: 'lintrunner-shadow'
+          linter_output_path: annotations.json
+          commit_sha: ${{ github.event.pull_request.head.sha }}
+          mode: json
+
 
   quick-checks:
     runs-on: ubuntu-18.04
