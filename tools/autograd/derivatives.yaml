@@ -1870,11 +1870,11 @@
   output_differentiability: [True, False]
 
 - name: max_unpool2d(Tensor self, Tensor indices, int[2] output_size) -> Tensor
-  self: max_unpool2d_backward(grad, self, indices, output_size)
+  self: max_pool_double_backward(grad, indices, 2)
   indices: non_differentiable
 
 - name: max_unpool3d(Tensor self, Tensor indices, int[3] output_size, int[3] stride, int[3] padding) -> Tensor
-  self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
+  self: max_pool_double_backward(grad, indices, 3)
   indices: non_differentiable
 
 - name: convolution_overrideable(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
