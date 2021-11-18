@@ -10,8 +10,8 @@ def DataPipeToQueuesLoop(source_datapipe, req_queue, res_queue):
         pipe_type = communication.iter
         protocol_type = communication.protocol.IterDataPipeQueueProtocolServer
     elif isinstance(source_datapipe, MapDataPipe):
-        pipe_type = communication.map
-        protocol_type = communication.protocol.MapDataPipeQueueProtocolServer
+        pipe_type = communication.map  # type: ignore[misc]
+        protocol_type = communication.protocol.MapDataPipeQueueProtocolServer  # type: ignore[assignment]
     else:
         raise Exception('Only supports IterDataPipe or MapDataPipe, got', source_datapipe)
 
