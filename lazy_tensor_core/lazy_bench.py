@@ -1,5 +1,4 @@
 import argparse
-import collections
 import copy
 import csv
 import functools
@@ -12,18 +11,11 @@ import numpy as np
 import os
 import re
 import sys
-import textwrap
 import time
 import torch
-import torch.nn.functional as F
-import torch.autograd.profiler as profiler
-import warnings
 from torch import nn
-from torch.nn import Module
 from torch.jit import fuser
 from os.path import abspath
-from os.path import exists
-from scipy.stats import gmean
 from scipy.stats import ttest_ind
 
 # from caffe2.python import workspace
@@ -35,9 +27,7 @@ import lazy_tensor_core.debug.metrics as met
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
-torchbench_dir = abspath("/home/whc/benchmark")
-assert os.path.exists(torchbench_dir)
-sys.path.append(torchbench_dir)
+
 log = logging.getLogger(__name__)
 SKIP = {}
 current_name = ""
@@ -66,7 +56,7 @@ class DivAddMulBenchmark:
         return DivAddMul(self.dims, device, jit)
 
 class DivAddMul(nn.Module):
-    def __init__(self, dims=[128, 16, 128, 128], device='cuda', jit=False):
+    def __init__(self, dims, device='cuda', jit=False):
         super(DivAddMul, self).__init__()
         self.attention_head_size = dims[1]
         self.name = "DivAddMul[" + ','.join([str(d) for d in dims]) + ']'
@@ -88,10 +78,10 @@ class DivAddMul(nn.Module):
         return out3
 
 def list_toy_models():
-    yield DivAddMulBenchmark(dims=[1,1,1,1])
-    yield DivAddMulBenchmark(dims=[1,16,128,128])
-    yield DivAddMulBenchmark(dims=[128,16,128,128])
-    yield DivAddMulBenchmark(dims=[256,16,128,128])
+    yield DivAddMulBenchmark(dims=[1, 1, 1, 1])
+    yield DivAddMulBenchmark(dims=[1, 16, 128, 128])
+    yield DivAddMulBenchmark(dims=[128, 16,  128,  128])
+    yield DivAddMulBenchmark(dims=[256, 16, 128, 128])
 
 def pick_grad(name):
     if name in ("maml",):
@@ -147,25 +137,23 @@ def call_model_with(model, inputs):
     elif isistance(inputs, torch.Tensor):
         return model(inputs)
     raise RuntimeError("invalid example inputs ", inputs)
-
+"""
 # TODO(whc)
-#2 understand delta between wait_device_ops, to_cuda
 #  see why to_cpu is _so much slower_, given cuda is also copying to cpu
 # - bert to_cpu amortized v unamortized huge delta... why?
 # - hf-bart, shows wait_device_ops method is way off from reality.  why?
-#3 see if bert vs bart data makes sense
-#4 see if divaddmul is getting fused into a single kernel or not
-#5 how much do my 'overhead fixes' from last night help?
+"""
+
 class CudaSync:
     def __init__(self, sync_every_iter=False):
         self.sync_every_iter = sync_every_iter
 
     def iter_sync(self, results):
         if self.sync_every_iter:
-           torch.cuda.synchronize()
+            torch.cuda.synchronize()
 
     def final_sync(self, results):
-       torch.cuda.synchronize()
+        torch.cuda.synchronize()
 
 class NoOpSync:
     def iter_sync(self, results):
@@ -227,7 +215,7 @@ def timed(model, example_inputs, sync, times=1):
         results.append(call_model_with(model, example_inputs))
         # may be just an async 'mark_step' for lazy, or no-op for cuda
         sync.iter_sync(results)
-    
+
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
     sync.final_sync(results)
@@ -239,7 +227,7 @@ def to_device(inputs, device):
         return None
 
     try:
-        import transformer
+        import transformers
         if isinstance(inputs, transformers.modeling_outputs.MaskedLMOutput) \
         or isinstance(inputs, transformers.modeling_outputs.Seq2SeqLMOutput):
             correct_result = correct_result.to_tuple()[0]
@@ -283,7 +271,7 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     else:
         cuda_sync = CudaSync(sync_every_iter=sync_every_iter) 
         lazy_sync = LazySync(sync_every_iter=sync_every_iter)
-    
+
     # interleave the runs to handle frequency scaling and load changes
     for rep in range(args.warmup):
         # warmup
@@ -305,7 +293,7 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
-    import transformers #noqa
+    import transformers  # noqa
     if isinstance(correct_result, transformers.modeling_outputs.MaskedLMOutput) \
       or isinstance(correct_result, transformers.modeling_outputs.Seq2SeqLMOutput):
         correct_result = correct_result.to_tuple()[0]
@@ -322,8 +310,13 @@ if __name__ == "__main__" :
     parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=6, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, default='fuser2', choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
+    parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     args = parser.parse_args()
     results = []
+
+    torchbench_dir = abspath(args.torchbench_dir) if args.torchbench_dir else abspath("../../benchmark")
+    assert os.path.exists(os.path.join(torchbench_dir, "torchbenchmark")), "set --torchbench_dir to installed torchbench repo"
+    sys.path.append(torchbench_dir)
 
     for device, name, model, example_inputs, lazy_model, lazy_inputs in iter_models(args):
         if device == 'cuda':
@@ -341,11 +334,11 @@ if __name__ == "__main__" :
                 continue
             if not check_results(name, correct_result, lazy_result, device):
                 print(f"INCORRECT ({name})")
-                import ipdb; ipdb.set_trace()
                 continue
             lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs)
 
             with fuser(args.fuser): 
+                # using LazySync
                 lazy_compute_experiment("amortized", results, args, model, example_inputs, lazy_model, lazy_inputs)
                 lazy_compute_experiment("unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True)
 
