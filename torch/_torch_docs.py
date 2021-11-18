@@ -927,6 +927,12 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
+add_docstr(torch.arctan2,
+           r"""
+arctan2(input, other, *, out=None) -> Tensor
+Alias for :func:`torch.atan2`.
+""")
+
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
@@ -2695,11 +2701,19 @@ cross(input, other, dim=None, *, out=None) -> Tensor
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
 
-:attr:`input` and :attr:`other` must have the same size, and the size of their
-:attr:`dim` dimension should be 3.
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
+
+.. seealso::
+        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
+
+.. warning:: This function may change in a future PyTorch release to match
+        the default behaviour in :func:`torch.linalg.cross`. We recommend using
+        :func:`torch.linalg.cross`.
 
 Args:
     {input}
@@ -3215,8 +3229,6 @@ Computes the n-th forward difference along the given dimension.
 
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
-
-.. note::  Only `n = 1` is currently supported
 
 Args:
     input (Tensor): the tensor to compute the differences on
@@ -3784,6 +3796,9 @@ It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
 ``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
 and ``numpy.bool``.
+
+.. warning::
+    Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
 
 Example::
 
@@ -4401,8 +4416,8 @@ Elements lower than min and higher than max are ignored.
 Args:
     {input}
     bins (int): number of histogram bins
-    min (int): lower end of the range (inclusive)
-    max (int): upper end of the range (inclusive)
+    min (Scalar): lower end of the range (inclusive)
+    max (Scalar): upper end of the range (inclusive)
 
 Keyword args:
     {out}
@@ -11673,14 +11688,14 @@ Args:
 
 add_docstr(torch.searchsorted,
            r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, out=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
-corresponding values in :attr:`values` were inserted before the indices, the order of the
-corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default),
-then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index
-satisfies the following rules:
+corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
+of the corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False or side is
+'left (default), then the left boundary of :attr:`sorted_sequence` is closed. More formally,
+the returned index satisfies the following rules:
 
 .. list-table::
    :widths: 12 10 78
@@ -11704,7 +11719,8 @@ satisfies the following rules:
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
-                              dimension.
+                              dimension unless :attr:`sorter` is provided, in which case the sequence does not
+                              need to be sorted
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:
@@ -11716,11 +11732,15 @@ Keyword args:
                             (one pass the last index of the *innermost* dimension). In other words, if False,
                             gets the lower bound index for each value in :attr:`values` on the corresponding
                             *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
-                            bound index instead. Default value is False.
+                            bound index instead. Default value is False. :attr:`side` does the same and is
+                            preferred. It will error if :attr:`side` is set to "left" while this is True.
+    side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
+                            and "right" corresponds to True for :attr:`right`. It will error if this is set to
+                            "left" while :attr:`right` is True.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
-
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
-          because it has fewer dimension checks resulting in slightly better performance.
+    sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
+                            :attr:`sorted_sequence` containing a sequence of indices that sort it in the
+                            ascending order on the innermost dimension
 
 
 Example::
@@ -11736,7 +11756,7 @@ Example::
     >>> torch.searchsorted(sorted_sequence, values)
     tensor([[1, 3, 4],
             [1, 2, 4]])
-    >>> torch.searchsorted(sorted_sequence, values, right=True)
+    >>> torch.searchsorted(sorted_sequence, values, side='right')
     tensor([[2, 3, 5],
             [1, 3, 4]])
 
