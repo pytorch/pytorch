@@ -15573,7 +15573,7 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.float, torch.half)
+    @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
