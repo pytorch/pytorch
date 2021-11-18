@@ -45,6 +45,31 @@ def output_csv(name, headers):
     output.writerow(headers)
     return output
 
+class HardSwishBenchmark:
+    def __init__(self, dims):
+        self.name = "HardSwish[" + ','.join([str(d) for d in dims]) + ']'
+        self.dims = dims
+
+    def __call__(self, device, jit):
+        return HardSwish(self.dims, device, jit)
+
+class HardSwish(nn.Module):
+    def __init__(self, dims, device='cuda', jit=False):
+        super(HardSwish, self).__init__()
+        self.name = "HardSwish[" + ','.join([str(d) for d in dims]) + ']'
+        self.example_inputs = (
+            torch.randn(*dims, device=device, dtype=torch.float32),
+        )
+
+    def get_module(self):
+        return self, self.example_inputs
+
+    def name(self):
+        return self.name
+
+    def forward(self, x):
+        return x * torch.clamp(x + 3.0, 0.0, 6.0) / 6.0
+
 class DivAddMulBenchmark:
     """This wrapper helps interface with the same iterator as torchbench models
     """
@@ -78,9 +103,13 @@ class DivAddMul(nn.Module):
         return out3
 
 def list_toy_models():
+    yield HardSwishBenchmark(dims=[1, 1, 1, 1])
+    yield HardSwishBenchmark(dims=[1, 16, 128, 128])
+    yield HardSwishBenchmark(dims=[64, 16,  128,  128])
+    yield HardSwishBenchmark(dims=[256, 16, 128, 128])
     yield DivAddMulBenchmark(dims=[1, 1, 1, 1])
     yield DivAddMulBenchmark(dims=[1, 16, 128, 128])
-    yield DivAddMulBenchmark(dims=[128, 16,  128,  128])
+    yield DivAddMulBenchmark(dims=[64, 16,  128,  128])
     yield DivAddMulBenchmark(dims=[256, 16, 128, 128])
 
 def pick_grad(name):
@@ -107,7 +136,9 @@ def iter_models(args):
             or name in SKIP
         ):
             continue
-        for device in args.devices:
+        # TODO(whc) better to support list of devices;
+        # curently since env var needs to be set for GPU, have to launch one dev at a time
+        for device in [args.device]:
             try:
                 torch.manual_seed(1337)
                 benchmark = benchmark_cls(device=device, jit=False)
@@ -156,6 +187,9 @@ class CudaSync:
         torch.cuda.synchronize()
 
 class NoOpSync:
+    def __init__(self, sync_every_iter=False):
+        pass
+
     def iter_sync(self, results):
         pass
 
@@ -172,16 +206,12 @@ class LazySync:
             ltm.wait_device_ops()
             if current_device == 'cuda':
                 torch.cuda.synchronize()
-            else:
-                raise RuntimeError("unexpected to not have current device=cuda")
 
     def final_sync(self, results):
         ltm.mark_step()
         ltm.wait_device_ops()
         if current_device == 'cuda':
             torch.cuda.synchronize()
-        else:
-            raise RuntimeError("unexpected to not have current device=cuda")
 
 class ToDeviceSync:
     def __init__(self, device, sync_every_iter=False):
@@ -244,13 +274,14 @@ def to_device(inputs, device):
 
 def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
+    ref_sync = CudaSync if current_device == 'cuda' else NoOpSync
     for rep in range(args.warmup):
         # interleave the runs to handle frequency scaling and load changes
-        timed(model, example_inputs, sync=CudaSync(sync_every_iter=True))
+        timed(model, example_inputs, sync=ref_sync(sync_every_iter=True))
         timed(lazy_model, lazy_inputs, sync=LazySync(sync_every_iter=True))
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs, sync=CudaSync(sync_every_iter=True))
+        _, timings[rep, 0] = timed(model, example_inputs, sync=ref_sync(sync_every_iter=True))
         _, timings[rep, 1] = timed(lazy_model, lazy_inputs, sync=NoOpSync())
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
@@ -266,20 +297,20 @@ def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, l
 def lazy_compute_experiment(experiment, results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=False, to_dev_sync=None):
     timings = np.zeros((args.repeat, 2), np.float64)
     if to_dev_sync is not None:
-        cuda_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter) 
+        ref_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
         lazy_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
     else:
-        cuda_sync = CudaSync(sync_every_iter=sync_every_iter) 
+        ref_sync = CudaSync(sync_every_iter=sync_every_iter) if current_device == 'cuda' else NoOpSync()
         lazy_sync = LazySync(sync_every_iter=sync_every_iter)
 
     # interleave the runs to handle frequency scaling and load changes
     for rep in range(args.warmup):
         # warmup
-        timed(model, example_inputs, sync=cuda_sync)
+        timed(model, example_inputs, sync=ref_sync)
         timed(lazy_model, lazy_inputs, sync=lazy_sync)
     for rep in range(args.repeat):
         # measure
-        _, timings[rep, 0] = timed(model, example_inputs, times=args.inner_loop_repeat, sync=cuda_sync)
+        _, timings[rep, 0] = timed(model, example_inputs, times=args.inner_loop_repeat, sync=ref_sync)
         _, timings[rep, 1] = timed(lazy_model, lazy_inputs, times=args.inner_loop_repeat, sync=lazy_sync)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
@@ -301,18 +332,28 @@ def check_results(name, correct_result, lazy_result, device):
     lazy_result = lazy_result.to(device)
     return torch.allclose(correct_result, lazy_result)
 
+def check_fuser(args):
+    if args.fuser is None:
+        args.fuser = 'fuser1' if args.device == 'cpu' else 'fuser2'
+    if args.device == 'cpu':
+        assert args.fuser in ['fuser0', 'fuser1']
+    if args.device == 'cuda':
+        assert args.fuser in ['fuser0', 'fuser2']
+
 if __name__ == "__main__" :
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filter", "-k", action="append", default=["DivAddMul", "hf_Bert", "hf_Bart"], help="filter benchmarks")
+    parser.add_argument("--filter", "-k", action="append", default=["HardSwish", "DivAddMul", "hf_Bert", "hf_Bart"], help="filter benchmarks")
     parser.add_argument("--exclude", "-x", action="append", default=[], help="filter benchmarks")
-    parser.add_argument("--devices", "-d", action="append", default=['cuda'], help="cpu or cuda")
+    parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
     parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=6, help="repeat the computation this many times per sample")
-    parser.add_argument("--fuser", type=str, default='fuser2', choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
+    parser.add_argument("--fuser", type=str, choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     args = parser.parse_args()
     results = []
+
+    check_fuser(args)
 
     torchbench_dir = abspath(args.torchbench_dir) if args.torchbench_dir else abspath("../../benchmark")
     assert os.path.exists(os.path.join(torchbench_dir, "torchbenchmark")), "set --torchbench_dir to installed torchbench repo"
@@ -346,6 +387,7 @@ if __name__ == "__main__" :
                 lazy_compute_experiment("to_cpu amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cpu')
                 lazy_compute_experiment("to_cpu unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cpu')
 
-                # using to_cuda sync
-                lazy_compute_experiment("to_cuda amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
-                lazy_compute_experiment("to_cuda unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
+                if device == 'cuda':
+                    # using to_cuda sync
+                    lazy_compute_experiment("to_cuda amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
+                    lazy_compute_experiment("to_cuda unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
