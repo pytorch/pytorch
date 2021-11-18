@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include "lazy_tensor_core/csrc/view_ops/opcode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class GenericSlice : public torch::lazy::TsNode {
+class GenericSlice : public BaseNode {
  public:
   GenericSlice(const torch::lazy::Value& input,
                c10::ArrayRef<int64_t> base_indices,
@@ -21,6 +21,20 @@ class GenericSlice : public torch::lazy::TsNode {
  private:
   std::vector<int64_t> base_indices_;
   std::vector<int64_t> sizes_;
+};
+
+class GenericSliceReverse : public BaseNode {
+ public:
+  GenericSliceReverse(const torch::lazy::Value& input,
+                      const torch::lazy::Value& source,
+                      c10::ArrayRef<int64_t> base_indices);
+
+  std::string ToString() const override;
+
+  const std::vector<int64_t>& base_indices() const { return base_indices_; }
+
+ private:
+  std::vector<int64_t> base_indices_;
 };
 
 }  // namespace ops

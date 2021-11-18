@@ -1,4 +1,4 @@
-#include "lazy_tensor_core/csrc/ops/diagonal.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal.h"
 
 #include <cmath>
 
@@ -10,7 +10,7 @@ namespace ops {
 
 Diagonal::Diagonal(const torch::lazy::Value& input, int64_t offset,
                    int64_t dim1, int64_t dim2)
-    : torch::lazy::TsNode(
+    : BaseNode(
           torch::lazy::OpKind(at::aten::diagonal), {input},
           [&]() {
             return MakeDiagonalShape(torch::lazy::GetShapeFromTsValue(input),
@@ -23,14 +23,14 @@ Diagonal::Diagonal(const torch::lazy::Value& input, int64_t offset,
 
 std::string Diagonal::ToString() const {
   std::stringstream ss;
-  ss << torch::lazy::TsNode::ToString() << ", offset=" << offset_
-     << ", dim1=" << dim1_ << ", dim2=" << dim2_;
+  ss << BaseNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+     << ", dim2=" << dim2_;
   return ss.str();
 }
 
-torch::lazy::Shape Diagonal::MakeDiagonalShape(
-    const torch::lazy::Shape& shape, int64_t offset, int64_t dim1,
-    int64_t dim2) {
+torch::lazy::Shape Diagonal::MakeDiagonalShape(const torch::lazy::Shape& shape,
+                                               int64_t offset, int64_t dim1,
+                                               int64_t dim2) {
   std::vector<int64_t> dimensions;
   for (int64_t dim = 0; dim < shape.dim(); ++dim) {
     if (dim != dim1 && dim != dim2) {
@@ -47,6 +47,23 @@ torch::lazy::Shape Diagonal::MakeDiagonalShape(
   }
   dimensions.push_back(dsize);
   return torch::lazy::Shape(shape.scalar_type(), dimensions);
+}
+
+DiagonalReverse::DiagonalReverse(const torch::lazy::Value& target,
+                                 const torch::lazy::Value& input,
+                                 int64_t offset, int64_t dim1, int64_t dim2)
+    : BaseNode(diagonal_reverse, {target, input},
+               {torch::lazy::GetShapeFromTsValue(target)},
+               /*num_outputs=*/1, torch::lazy::MHash(offset, dim1, dim2)),
+      offset_(offset),
+      dim1_(dim1),
+      dim2_(dim2) {}
+
+std::string DiagonalReverse::ToString() const {
+  std::stringstream ss;
+  ss << BaseNode::ToString() << ", offset=" << offset_ << ", dim1=" << dim1_
+     << ", dim2=" << dim2_;
+  return ss.str();
 }
 
 }  // namespace ops

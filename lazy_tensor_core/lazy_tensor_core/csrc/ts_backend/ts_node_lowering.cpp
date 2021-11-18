@@ -1,36 +1,31 @@
-#include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
-
-#include <ATen/core/Reduction.h>
-#include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
-#include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/generic_slice.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensor_core/csrc/ops/select.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
-#include "lazy_tensor_core/csrc/ops/unselect.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
-#include "lazy_tensor_core/csrc/ops/update_slice.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
+#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/opcode.h"
+#include "lazy_tensor_core/csrc/view_ops/permute.h"
+#include "lazy_tensor_core/csrc/view_ops/select.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch {
 namespace lazy {
@@ -77,36 +72,35 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::AsStrided>(
               node, torch::lazy::OpKind(at::aten::as_strided)));
     }
-    if (node->op() ==
-        *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update) {
-      return LowerAsStridedViewUpdate(
-          torch::lazy::NodeCast<
-              torch_lazy_tensors::ir::ops::AsStridedViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update));
+    if (node->op() == torch_lazy_tensors::ir::ops::as_strided_reverse) {
+      return LowerAsStridedReverse(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::AsStridedReverse>(
+              node, torch_lazy_tensors::ir::ops::as_strided_reverse));
     }
     if (node->op() == *torch_lazy_tensors::ir::ops::ltc_cast) {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
           node, *torch_lazy_tensors::ir::ops::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_generic_slice) {
+    if (node->op() == torch_lazy_tensors::ir::ops::generic_slice) {
       return LowerGenericSlice(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::GenericSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_generic_slice));
+              node, torch_lazy_tensors::ir::ops::generic_slice));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select) {
+    if (node->op() == torch_lazy_tensors::ir::ops::select) {
       return LowerSelect(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
-              node, *torch_lazy_tensors::ir::ops::ltc_select));
+              node, torch_lazy_tensors::ir::ops::select));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_unselect) {
-      return LowerUnselect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Unselect>(
-              node, *torch_lazy_tensors::ir::ops::ltc_unselect));
+    if (node->op() == torch_lazy_tensors::ir::ops::select_reverse) {
+      return LowerSelectReverse(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::SelectReverse>(
+              node, torch_lazy_tensors::ir::ops::select_reverse));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_update_slice) {
-      return LowerUpdateSlice(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::UpdateSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_update_slice));
+    if (node->op() == torch_lazy_tensors::ir::ops::generic_slice_reverse) {
+      return LowerGenericSliceReverse(
+          torch::lazy::NodeCast<
+              torch_lazy_tensors::ir::ops::GenericSliceReverse>(
+              node, torch_lazy_tensors::ir::ops::generic_slice_reverse));
     }
     if (node->op().op == at::prim::Constant) {
       return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
@@ -218,8 +212,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {GenerateClone(as_strided_out.front())};
   }
 
-  TSOpVector LowerAsStridedViewUpdate(
-      const torch_lazy_tensors::ir::ops::AsStridedViewUpdate* node) {
+  TSOpVector LowerAsStridedReverse(
+      const torch_lazy_tensors::ir::ops::AsStridedReverse* node) {
     torch::jit::Value* destination =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const torch::lazy::Output& input_op = node->operand(1);
@@ -463,7 +457,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(stack, arguments);
   }
 
-  TSOpVector LowerUnselect(const torch_lazy_tensors::ir::ops::Unselect* node) {
+  TSOpVector LowerSelectReverse(
+      const torch_lazy_tensors::ir::ops::SelectReverse* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     int64_t step = torch_lazy_tensors::ir::ops::Select::GetStride(
@@ -475,8 +470,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {dest};
   }
 
-  TSOpVector LowerUpdateSlice(
-      const torch_lazy_tensors::ir::ops::UpdateSlice* node) {
+  TSOpVector LowerGenericSliceReverse(
+      const torch_lazy_tensors::ir::ops::GenericSliceReverse* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();

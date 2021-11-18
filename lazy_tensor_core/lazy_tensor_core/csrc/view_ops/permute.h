@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include "lazy_tensor_core/csrc/view_ops/opcode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Permute : public torch::lazy::TsNode {
+class Permute : public BaseNode {
  public:
   Permute(const torch::lazy::Value& input, std::vector<int64_t> dims);
 

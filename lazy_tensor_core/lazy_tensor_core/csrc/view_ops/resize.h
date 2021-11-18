@@ -1,12 +1,12 @@
 #pragma once
 
-#include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include "lazy_tensor_core/csrc/view_ops/opcode.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Resize : public torch::lazy::TsNode {
+class Resize : public BaseNode {
  public:
   Resize(const torch::lazy::Value& input, std::vector<int64_t> size);
 

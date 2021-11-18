@@ -4,13 +4,12 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
@@ -42,7 +41,7 @@ LazyTensor LazyTensor::Create(torch::lazy::Value ir_value,
   return xtensor;
 }
 
-LazyTensor LazyTensor::Create(std::shared_ptr<View> view,
+LazyTensor LazyTensor::Create(std::shared_ptr<LazyView> view,
                               const torch::lazy::BackendDevice& device) {
   LazyTensor xtensor(std::move(view), device);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
@@ -71,7 +70,7 @@ LazyTensor::LazyTensor(torch::lazy::Value ir_value,
   TryLimitGraphSize();
 }
 
-LazyTensor::LazyTensor(std::shared_ptr<View> view,
+LazyTensor::LazyTensor(std::shared_ptr<LazyView> view,
                        const torch::lazy::BackendDevice& device)
     : data_(std::make_shared<Data>(std::move(view), device)) {}
 
@@ -278,7 +277,7 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
 }
 
 std::tuple<torch::lazy::Value, bool> LazyTensor::GetViewUpdate(
-    const std::shared_ptr<View>& view) const {
+    const std::shared_ptr<LazyView>& view) const {
   auto value_with_update = view->GetViewIrNode();
   if (std::get<1>(value_with_update)) {
     data()->handle = nullptr;
@@ -287,8 +286,8 @@ std::tuple<torch::lazy::Value, bool> LazyTensor::GetViewUpdate(
   return value_with_update;
 }
 
-std::shared_ptr<View> LazyTensor::UpdateView(
-    std::shared_ptr<View> view, torch::lazy::Value ir_value) const {
+std::shared_ptr<LazyView> LazyTensor::UpdateView(
+    std::shared_ptr<LazyView> view, torch::lazy::Value ir_value) const {
   if (torch::lazy::GetShapeFromTsValue(ir_value).sizes() !=
       view->shape().sizes()) {
     CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
@@ -318,12 +317,12 @@ void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
   // in place, we need to turn this existing tensor into a view.
   torch::lazy::Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  data()->view = std::make_shared<View>(
+  data()->view = std::make_shared<LazyView>(
       torch::lazy::GetShapeFromTsValue(ir_value), alias, std::move(view_info));
   AssignIrValue(torch::lazy::Value());
 }
 
-std::shared_ptr<View> LazyTensor::CreateView(ViewInfo view_info) const {
+std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
   if (data()->view != nullptr) {
     return data()->view->CreateSubView(view_info.shape, view_info);
   }
@@ -336,10 +335,10 @@ std::shared_ptr<View> LazyTensor::CreateView(ViewInfo view_info) const {
                           torch::lazy::GetShapeFromTsValue(ir_value),
                           torch::lazy::GetShapeFromTsValue(ir_value));
   data()->view =
-      std::make_shared<View>(torch::lazy::GetShapeFromTsValue(ir_value), alias,
-                             std::move(this_view_info));
+      std::make_shared<LazyView>(torch::lazy::GetShapeFromTsValue(ir_value),
+                                 alias, std::move(this_view_info));
   AssignIrValue(torch::lazy::Value());
-  return std::make_shared<View>(view_info.shape, alias, view_info);
+  return std::make_shared<LazyView>(view_info.shape, alias, view_info);
 }
 
 LazyTensor LazyTensor::CreateViewTensor(ViewInfo view_info) const {

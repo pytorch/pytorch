@@ -1,14 +1,15 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 
+#include <ATen/InferSize.h>
+
 #include <algorithm>
 #include <functional>
-#include <ATen/InferSize.h>
+
 #include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
@@ -18,7 +19,6 @@
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
-#include "lazy_tensor_core/csrc/ops/permute.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -26,10 +26,12 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
+#include "lazy_tensor_core/csrc/view_ops/permute.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/autograd/variable.h"
