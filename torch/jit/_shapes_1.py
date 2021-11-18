@@ -2,6 +2,7 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
 # this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
+# mypy: ignore-errors
 
 from typing import List, Any, Optional, Tuple # noqa F401
 
@@ -154,7 +155,7 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
     for idx in range(len(self)):
         is_mean_dim: bool = False
         for reduce_dim in dims:
-            if idx == maybe_wrap_dim(reduce_dim, len(self)): # type: ignore
+            if idx == maybe_wrap_dim(reduce_dim, len(self)): 
                 is_mean_dim = True
         if is_mean_dim:
             if keep_dim:
@@ -399,7 +400,7 @@ def mv(self: List[int], vec: List[int]):
 
 
 def unsqueeze(li: List[int], dim: int):
-    dim = maybe_wrap_dim(dim, len(li) + 1) # type: ignore
+    dim = maybe_wrap_dim(dim, len(li) + 1) 
     out = _copy(li)
     out.insert(dim, 1)
     return out
@@ -415,7 +416,7 @@ def squeeze_nodim(li: List[int]):
 
 def squeeze(li: List[int], dim: int):
     out: List[int] = []
-    wrapped_dim = maybe_wrap_dim(dim, len(li)) # type: ignore
+    wrapped_dim = maybe_wrap_dim(dim, len(li)) 
     for i in range(len(li)):
         if i == wrapped_dim:
             if li[i] != 1:

@@ -2,7 +2,7 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
 # this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
-
+# mypy: ignore-errors
 from typing import List, Any, Optional, Tuple
 
 from numpy import number
@@ -434,7 +434,7 @@ def multiply_integers(li: List[int]):
 
 def arange_end(end: number, inp0: Any, inp1: Any, inp2: Any, inp3: Any):
     assert end >= 0
-    return [int(torch.ceil(end))] # type: ignore
+    return [int(torch.ceil(end))] 
 
 
 def arange_start(
@@ -442,7 +442,7 @@ def arange_start(
 ):
     assert end >= 0
     assert end >= start
-    return [int(torch.ceil(end - start))] # type: ignore
+    return [int(torch.ceil(end - start))] 
 
 
 def arange_start_step(
@@ -453,7 +453,7 @@ def arange_start_step(
         assert start >= end
     else:
         assert end >= start
-    return [int(torch.ceil((end - start) / step))] # type: ignore
+    return [int(torch.ceil((end - start) / step))] 
 
 
 def permute(input: List[int], dims: List[int]):
@@ -499,11 +499,12 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
 
 def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
     assert isinstance(
-        conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase # type: ignore
+        
+        conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase
     )
-    weight, bias, stride, padding, dilation, groups = unchecked_cast( # type: ignore
+    weight, bias, stride, padding, dilation, groups = unchecked_cast( 
         Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int],
-        ops.quantized.conv2d_unpack_sizes(conv2dOpContext), # type: ignore
+        ops.quantized.conv2d_unpack_sizes(conv2dOpContext), 
     )
     return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
