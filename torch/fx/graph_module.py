@@ -385,7 +385,7 @@ class {module_name}(torch.nn.Module):
                 torch.save(module, module_file)
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace('\r', ' ').replace('\n', ' ')
-                module_str = f"torch.load(r'{module_file}') # {module_repr}"
+                module_str = f"torch.load(r'{module_file}')"
                 comment_str = f" # {module_repr}"
             model_str += f"{tab*2}setattr(self, '{module_name}', {module_str}){comment_str}\n"
 
