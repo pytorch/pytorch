@@ -10125,6 +10125,19 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
     ),
     UnaryUfuncInfo(
+        'nn.functional.softmin',
+        ref=lambda x, inplace=False:
+            np.exp(-x) / sum(np.exp(x)),
+        sample_inputs_func=sample_inputs_softmax_variant,
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+    ),
+    UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
         ref=reference_hardsigmoid,
         dtypes=floating_types(),
