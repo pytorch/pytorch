@@ -1,3 +1,5 @@
+# Owner(s): ["module: cuda"]
+
 from itertools import repeat, chain, product
 from typing import NamedTuple
 import collections
@@ -581,6 +583,13 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):

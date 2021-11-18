@@ -1,7 +1,6 @@
 import math
 import operator
-from typing import Any, Tuple, Sequence, Union, List, Optional
-
+import warnings
 
 import numpy as np
 import tensorrt as trt
@@ -15,394 +14,21 @@ from torch.fx.experimental.fx2trt.fx2trt import (
 )
 from torch.fx.immutable_collections import immutable_list
 
-ShapeType = Union[Sequence[int], trt.Dims]
-
-TRT_LOGGER = trt.Logger()
-trt.init_libnvinfer_plugins(TRT_LOGGER, '')
-
-
-def get_trt_plugin(
-    plugin_name: str,
-    field_collection: List[trt.PluginFieldCollection],
-    version: str,
-    plugin_namespace: str = ""
-) -> trt.IPluginV2:
-    """
-    Get a TensorRT plugin based on the given parameters.
-
-    Args:
-        plugin_name (str): Name of the plugin.
-        field_collection (List[trt.PluginFieldCollection]): Parameters that needed
-            to create a plugin using the plugin creator.
-        version (str): Version of the plugin.
-        plugin_namespace (str): Namespace of the plugin.
-
-    Returns:
-        A TensorRT plugin that can be added to TensorRT network as Plugin layer.
-    """
-    plugin_registry = trt.get_plugin_registry()
-    plugin_creator = plugin_registry.get_plugin_creator(plugin_name, version, plugin_namespace)
-    plugin = plugin_creator.create_plugin(name=plugin_name, field_collection=field_collection)
-
-    assert plugin is not None, f"Plugin: {plugin_name} could not be fetched"
-    return plugin
-
-
-def to_numpy(tensor: Optional[torch.Tensor]) -> Optional[np.ndarray]:
-    """
-    Convert a PyTorch Tensor to a Numpy Array. If the tensor is
-    quantized it will be dequantized first.
-
-    Args:
-        tensor (Optional[torch.Tensor]): A PyTorch tensor or None.
-
-    Returns:
-        A Numpy array.
-    """
-    if tensor is None:
-        return tensor
-
-    if tensor.is_quantized:
-        tensor = tensor.dequantize()
-
-    assert isinstance(tensor, torch.Tensor), f"to_numpy can't be called on None or a torch.Tensor, got: {tensor}"
-
-    return tensor.cpu().detach().contiguous().numpy()
-
-
-def has_dynamic_shape(shape: ShapeType) -> bool:
-    """
-    Determine if the given shape has dynamic dim. i.e. if there're -1 in shape.
-
-    Args:
-        shape (ShapeType): Shape of a tensor. Essentially is a sequence of integers.
-
-    Returns:
-        A boolean value indicates whether there's dynamic dim in the shape.
-    """
-    return any(s == -1 for s in shape)
-
-
-def get_axes_for_reduce_op(
-    dim: Union[int, Sequence[int]],
-    has_implicit_batch_dimension: bool,
-) -> int:
-    """
-    TensorRT reduce layer relies on the binary representation of axes to
-    determine which dims to reduce. For example, if we want to reduce on
-    dim 1 and 2 then axes should be 6(110).
-
-    Args:
-        dim (Union[int, Sequence[int]]): An integer or a sequence of integers
-            that will be used to generate axes for TensorRT.
-        has_implicit_batch_dimension (bool): Whether the TensorRT network is
-            using implicit batch dimension.
-
-    Returns:
-        An integer which binary form can be used as axes for TensorRT reduce
-        layer.
-    """
-    if isinstance(dim, int):
-        dim = (dim,)
-
-    if has_implicit_batch_dimension:
-        assert 0 not in dim, "Can't reduce over batch dimension when it's implicit."
-
-    axes = 0
-    for d in dim:
-        axes |= 1 << (d - (1 if has_implicit_batch_dimension else 0))
-
-    return axes
-
-
-def create_constant(
-    network: trt.INetworkDefinition,
-    value: Union[int, float, torch.Tensor],
-    name: str,
-    dtype: Optional[torch.dtype],
-) -> trt.tensorrt.ITensor:
-    """
-    Add a TensorRT constant layer whose value is `value` to `network`.
-
-    Args:
-        network (trt.INetworkDefinition): A TensorRT network to which we want to add
-            a constant layer.
-        value (Union[int, float, torch.Tensor]): A literal value or a PyTorch tensor
-            that will be used as value of the added TensorRT Constant layer.
-        name (str): Name of the added TensorRT Constant layer.
-        dtype (Optional[torch.dtype]): If a dtype is given, we will convert the type
-            of the given `value` to this dtype.
-
-    Returns:
-        A TensorRT ITensor that represents the given value.
-    """
-    if isinstance(value, int):
-        value = torch.IntTensor([value])
-
-    if isinstance(value, float):
-        value = torch.Tensor([value])
-
-    if dtype:
-        value = value.to(dtype)
-
-    constant = network.add_constant(value.shape, to_numpy(value))
-    constant.name = name
-    return constant.get_output(0)
-
-
-def get_trt_tensor(
-    network: trt.INetworkDefinition,
-    input_val: Any,
-    name: str,
-    dtype: Optional[torch.dtype] = None
-) -> trt.tensorrt.ITensor:
-    """
-    Given a value of random type, we try to convert it to a TensorRT ITensor.
-    An runtime error is raised if we're not able to do that.
-
-    Args:
-        network (trt.INetworkDefinition): A TensorRT network. If we want to
-            add a TensorRT Constant layer, we will add it to this network.
-        input_val (Any): An value that we want to convert to a TensorRT ITensor.
-        name (str): The name of the created TensorRT Constant layer if there's
-            one.
-        dtype (Optional[torch.dtype]): If dtype is provided, the given value
-            will be converted to this dtype.
-
-    Returns:
-        A TensorRT ITensor that represents the given value.
-    """
-    if isinstance(input_val, (torch.Tensor, int, float)):
-        return create_constant(network, input_val, name, dtype)
-    elif not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"Received input {input_val} of name {name} that "
-            "is not part of the TensorRT region!"
-        )
-    else:
-        return input_val
-
-
-def prepend_ones(
-    network: trt.INetworkDefinition,
-    tensor: trt.tensorrt.ITensor,
-    name: str,
-    num_prepend_ones: int,
-) -> trt.tensorrt.ITensor:
-    """
-    Prepend 1s to the shape of TensorRT ITensor `tensor`.
-
-    Args:
-        network (trt.INetworkDefinition): The TensorRT network that `tensor`
-            belongs to.
-        tensor (trt.tensorrt.ITensor): A TensorRT tensor.
-        name (str): Name of the TensorRT Shuffle layer which is used to prepend
-            1s.
-        num_prepend_ones (int): Number of 1s that will be prepend.
-
-    Returns:
-        A Tensorrt ITensor which contains the same value as `tensor` but with
-        more 1s prepended to the beginning of `tensor` shape.
-    """
-    layer = network.add_shuffle(tensor)
-
-    # If there're dynamic dim in tensor's shape, we need to use shape layer to
-    # compute the final shape.
-    if has_dynamic_shape(tensor.shape):
-        tensor_shape_layer = network.add_shape(tensor)
-        tensor_shape_layer.name = f"{name}_broadcast_orig_shape"
-        prepend_shape_layer = network.add_constant(
-            (num_prepend_ones,), np.ones((num_prepend_ones,), dtype=np.int32)
-        )
-        prepend_shape_layer.name = f"{name}_broadcast_prepend_ones"
-        reshape_dim_layer = network.add_concatenation(
-            [prepend_shape_layer.get_output(0), tensor_shape_layer.get_output(0)]
-        )
-        reshape_dim_layer.axis = 0
-        reshape_dim_layer.name = f"{name}_broadcast_final_shape"
-        layer.set_input(1, reshape_dim_layer.get_output(0))
-    else:
-        layer.reshape_dims = (1,) * num_prepend_ones + tuple(tensor.shape)
-
-    layer.name = name
-    return layer.get_output(0)
-
-
-def broadcast(
-    network: trt.INetworkDefinition,
-    a: trt.tensorrt.ITensor,
-    b: trt.tensorrt.ITensor,
-    a_name: str,
-    b_name: str,
-    preset_diff: int = 0
-) -> Tuple[trt.tensorrt.ITensor, trt.tensorrt.ITensor]:
-    """
-    Broadcast two TensorRT tensors to the same number of dimensions by
-    prepending 1s to the tensor with less number of dimensions.
-
-    Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        a (trt.tensorrt.ITensor): A TensorRT ITensor.
-        b (trt.tensorrt.ITensor): A TensorRT ITensor.
-        a_name (str): Name of tensor a.
-        b_name (str): Name of tensor b.
-        preset_diff (int): The difference of number of dimensions after broadcast.
-            A positive number means after broadcast, tensor `a` would have `preset_diff`
-            more dimensions than `b`. This is used in matmul, since we need to broadcast
-            tensors but not always to the same number of dimension. The reason is that
-            matmul supports Matrix x Vector and in this case broadcasted vector should
-            have 1 less number of dimensions than the matrix tensor.
-
-    Returns:
-        Two TensorRT ITensors that are broadcasted to the same number of dimensions.
-    """
-    a_shape = tuple(a.shape)
-    b_shape = tuple(b.shape)
-
-    diff = len(a_shape) - len(b_shape) - preset_diff
-    if diff > 0:
-        b = prepend_ones(network, b, f"{b_name}_broadcast", diff)
-    elif diff < 0:
-        a = prepend_ones(network, a, f"{a_name}_broadcast", -diff)
-
-    return a, b
-
-def add_binary_elementwise_layer(
-    network: trt.INetworkDefinition,
-    lhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
-    rhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
-    op_type: trt.ElementWiseOperation,
-    name: str
-) -> trt.tensorrt.ITensor:
-    """
-    This function adds a TensorRT elementwise layer. We only allow at most one
-    operand to not be a trt tensor, otherwise, we should const fold it first.
-    If any operand is not a trt tensor, we make it a trt constant layer which
-    has the same type as the other trt tensor. Then we broadcast these two inputs
-    to have the same number of dimensions.
-
-    Limitation:
-        If we are using implicit batch dim mode, the operand that is not a trt
-    tensor are not allowed to have larger ranks than the trt tensor operand.
-
-    Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        lhs_val (trt.tensorrt.ITensor): Left operand of the binary operation. Could
-            be a TensorRT tensor, a PyTorch tensor or a simple value.
-        rhs_val (trt.tensorrt.ITensor): Right operand of the binary operation. Similar
-            to lhs_val.
-        op_type (trt.ElementWiseOperation): Type of the TensorRT elementwise binary operation.
-        name (str): The name we want to assign to the created TensorRT layer.
-
-    Returns:
-        The output of TensorRT Elementwise layer.
-    """
-    dtype = None
-    is_lhs_trt_tensor = False
-    is_rhs_trt_tensor = False
-    if isinstance(lhs_val, trt.tensorrt.ITensor):
-        dtype = torch_dtype_from_trt(lhs_val.dtype)
-        is_lhs_trt_tensor = True
-    if isinstance(rhs_val, trt.tensorrt.ITensor):
-        dtype = torch_dtype_from_trt(rhs_val.dtype)
-        is_rhs_trt_tensor = True
-    if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
-        raise RuntimeError(f"Both operands of the binary elementwise op {name}"
-                           "are constant. In this case, please consider constant fold the model first.")
-
-    lhs_val = get_trt_tensor(network, lhs_val, f"{name}_lhs", dtype)
-    rhs_val = get_trt_tensor(network, rhs_val, f"{name}_rhs", dtype)
-
-    # Check the limitation in the doc string.
-    if network.has_implicit_batch_dimension:
-        if is_lhs_trt_tensor and not is_rhs_trt_tensor:
-            assert len(lhs_val.shape) >= len(rhs_val.shape), f"{lhs_val.shape} >= {rhs_val.shape}"
-        elif not is_lhs_trt_tensor and is_rhs_trt_tensor:
-            assert len(rhs_val.shape) >= len(lhs_val.shape), f"{rhs_val.shape} >= {lhs_val.shape}"
-
-    lhs_val, rhs_val = broadcast(
-        network, lhs_val, rhs_val, f"{name}_lhs", f"{name}_rhs"
-    )
-    layer = network.add_elementwise(lhs_val, rhs_val, op_type)
-    layer.name = name
-    return layer.get_output(0)
-
-
-def add_unary_layer(
-    network: trt.INetworkDefinition,
-    input_val: trt.tensorrt.ITensor,
-    operation_type: trt.UnaryOperation,
-    name: str,
-) -> trt.tensorrt.ITensor:
-    """
-    Add a TensorRT Unary layer to `network`.
-
-    Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        input_val (trt.tensorrt.ITensor): Input to the unary op. Must be a TensorRT tensor.
-        op_type (trt.ElementWiseOperation): Type of the TensorRT unary operation.
-        name (str): The name we want to assign to the created TensorRT layer.
-
-    Returns:
-        The output of TensorRT Unary layer.
-    """
-    if not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"{operation_type} received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
-    layer = network.add_unary(input_val, operation_type)
-    layer.name = name
-    return layer.get_output(0)
-
-
-def add_activation_layer(
-    network: trt.INetworkDefinition,
-    input_val: trt.tensorrt.ITensor,
-    operation_type: trt.ActivationType,
-    name: str,
-) -> trt.tensorrt.ITensor:
-    """
-    Add a TensorRT Activation layer to `network`.
-
-    Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        input_val (trt.tensorrt.ITensor): Input to the activation op.
-            Must be a TensorRT tensor.
-        op_type (trt.ElementWiseOperation): Type of the TensorRT activation
-            operation.
-        name (str): The name we want to assign to the created TensorRT layer.
-
-    Returns:
-        The output of TensorRT Activation layer.
-    """
-    if not isinstance(input_val, trt.tensorrt.ITensor):
-        raise RuntimeError(
-            f"{operation_type} received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
-    layer = network.add_activation(input_val, operation_type)
-    layer.name = name
-    return layer.get_output(0)
-
-
-def process_attr(
-    val: Any,
-    num_elem: int,
-) -> Tuple[Any, ...]:
-    """
-    If `val` is not a tuple, then we make a tuple of size `num_elem` by
-    replicating `val` `num_elem` times.
-
-    Args:
-        val (Any): Value that we want to process.
-
-    Returns:
-        A tuple.
-    """
-    if not isinstance(val, tuple):
-        val = (val,) * num_elem
-    return val
+from .converter_utils import (
+    get_trt_plugin,
+    set_layer_name,
+    to_numpy,
+    has_dynamic_shape,
+    get_axes_for_reduce_op,
+    get_trt_tensor,
+    prepend_ones,
+    broadcast,
+    add_binary_elementwise_layer,
+    add_unary_layer,
+    add_activation_layer,
+    extend_attr_to_tuple,
+    get_positive_dim,
+)
 
 
 @tensorrt_converter(acc_ops.conv2d)
@@ -449,13 +75,132 @@ def acc_ops_conv2d(network, target, args, kwargs, name):
             bias=bias,
         )
 
-    layer.name = name
+    set_layer_name(layer, target, name)
     layer.stride = kwargs["stride"]
     layer.padding = kwargs["padding"]
     layer.dilation = kwargs["dilation"]
     if kwargs["groups"] is not None:
         layer.num_groups = kwargs["groups"]
 
+    return layer.get_output(0)
+
+
+@tensorrt_converter(acc_ops.pad, enabled=trt.__version__ < "8.2")
+def acc_ops_pad_with_padding_layer(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    pad = kwargs["pad"]
+    mode = kwargs["mode"]
+    value = kwargs["value"]
+    rank = len(input_val.shape)
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"pad received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    if mode != "constant":
+        raise RuntimeError(
+            f"Currently we only support constant mode for pad, got {mode}."
+        )
+
+    if len(pad) / 2 > rank:
+        raise RuntimeError(
+            f"Trying to pad last {len(pad) / 2} dimension but the input only has {rank} dimension."
+        )
+
+    if value != 0:
+        raise RuntimeError(
+            f"Currently we only support padding value of 0, got {value}."
+        )
+
+    if len(pad) > 4:
+        raise RuntimeError("Currently we only support padding last two dimensions.")
+
+    pre_padding = tuple(pad[len(pad) - i - 2] for i in range(0, len(pad), 2))
+    post_padding = tuple(pad[len(pad) - i - 1] for i in range(0, len(pad), 2))
+
+    layer = network.add_padding(
+        input_val,
+        pre_padding if len(pre_padding) == 2 else (0,) + pre_padding,
+        post_padding if len(post_padding) == 2 else (0,) + post_padding
+    )
+    set_layer_name(layer, target, name)
+    return layer.get_output(0)
+
+
+@tensorrt_converter(acc_ops.pad, enabled=trt.__version__ >= "8.2")
+def acc_ops_pad_with_slice_layer(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    pad = kwargs["pad"]
+    mode = kwargs["mode"]
+    value = kwargs["value"]
+    rank = len(input_val.shape)
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"pad received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    if mode != "constant":
+        raise RuntimeError(
+            f"Currently we only support constant mode for pad, got {mode}."
+        )
+
+    if len(pad) / 2 > rank:
+        raise RuntimeError(
+            f"Trying to pad last {len(pad) / 2} dimension but the input only has {rank} dimension."
+        )
+
+    if value != 0:
+        raise RuntimeError(
+            f"Currently we only support padding value of 0, got {value}."
+        )
+
+    input_shape = input_val.shape
+    pre_start = tuple(i - 1 for i in input_shape)
+    prefix_len = len(input_shape) - len(pad) // 2
+    pre_shape = tuple(input_shape[i] + (pad[-(i - prefix_len) * 2 - 2] if i >= prefix_len else 0)
+                      for i in range(0, len(input_shape)))
+    pre_stride = [-1] * len(input_shape)
+
+    layer = network.add_slice(
+        input_val,
+        pre_start,
+        pre_shape,
+        pre_stride,
+    )
+    layer.mode = trt.SliceMode.FILL
+    set_layer_name(layer, target, f"pre-{name}")
+    half_pad_output = layer.get_output(0)
+
+    shape = half_pad_output.shape
+    mid_start = tuple(i - 1 for i in shape)
+    mid_stride = [-1] * len(shape)
+    layer = network.add_slice(
+        half_pad_output,
+        mid_start,
+        shape,
+        mid_stride
+    )
+    layer.mode = trt.SliceMode.FILL
+    set_layer_name(layer, target, f"transpose-{name}")
+    transpose_output = layer.get_output(0)
+
+    shape = transpose_output.shape
+    post_start = tuple([0] * len(shape))
+    post_shape = tuple(shape[i] + (pad[-(i - prefix_len) * 2 - 1] if i >= prefix_len else 0) for i in range(0, len(shape)))
+    post_stride = tuple([1] * len(shape))
+
+    layer = network.add_slice(
+        transpose_output,
+        post_start,
+        post_shape,
+        post_stride
+    )
+    layer.mode = trt.SliceMode.FILL
+    set_layer_name(layer, target, f"post-{name}")
     return layer.get_output(0)
 
 
@@ -470,8 +215,8 @@ def acc_ops_flatten(network, target, args, kwargs, name):
         )
 
     num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    start_dim = (kwargs["start_dim"] if "start_dim" in kwargs else 0) % num_dims
-    end_dim = (kwargs["end_dim"] if "end_dim" in kwargs else -1) % num_dims
+    start_dim = get_positive_dim(kwargs["start_dim"] if "start_dim" in kwargs else 0, num_dims)
+    end_dim = get_positive_dim(kwargs["end_dim"] if "end_dim" in kwargs else -1, num_dims)
 
     if network.has_implicit_batch_dimension:
         assert start_dim != 0, "Can't flatten batch dimension when it's implicit."
@@ -479,7 +224,7 @@ def acc_ops_flatten(network, target, args, kwargs, name):
         end_dim -= 1
 
     layer = network.add_shuffle(input_val)
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     # If there're dynamic shapes then we need to use shape layers
     # to figure out the final shape after flatten. We first slice
@@ -580,7 +325,7 @@ def acc_ops_size(network, target, args, kwargs, name):
         return torch.Size(input_val.shape)
 
     layer = network.add_shape(input_val)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -607,7 +352,7 @@ def acc_ops_batch_norm(network, target, args, kwargs, name):
     power = np.ones_like(scale)
 
     layer = network.add_scale(input_val, trt.ScaleMode.CHANNEL, bias, scale, power)
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     return layer.get_output(0)
 
@@ -632,10 +377,11 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
 
     # E[x]
     mean_expected_layer = network.add_reduce(input_val, trt.ReduceOperation.AVG, axes, keep_dims=True)
-    mean_expected_layer.name = f"{name}_mean_expected"
+    set_layer_name(mean_expected_layer, target, f"{name}_mean_expected")
+
     # X-E[x]
     sub_trt = add_binary_elementwise_layer(
-        network, input_val, mean_expected_layer.get_output(0), trt.ElementWiseOperation.SUB, f"{name}_sub"
+        network, input_val, mean_expected_layer.get_output(0), trt.ElementWiseOperation.SUB, target, f"{name}_sub"
     )
     # Variance = mean(pow(x_sub_mean,2))
     pow_tensor = network.add_constant(
@@ -643,22 +389,22 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
     )
     pow_tensor.name = f"{name}_power"
     pow_var = add_binary_elementwise_layer(
-        network, sub_trt, pow_tensor.get_output(0), trt.ElementWiseOperation.POW, f"{name}_pow_var"
+        network, sub_trt, pow_tensor.get_output(0), trt.ElementWiseOperation.POW, target, f"{name}_pow_var"
     )
     mean_trt_layer = network.add_reduce(pow_var, trt.ReduceOperation.AVG, axes, keep_dims=True)
-    mean_trt_layer.name = f"{name}_mean"
+    set_layer_name(mean_trt_layer, target, f"{name}_mean")
     # Variance + eps
     eps_tensor = network.add_constant(
         (1,) * len(input_val.shape), trt.Weights(np.ascontiguousarray([eps], dtype=np.float32))
     )
     eps_tensor.name = f"{name}_eps"
     add_trt = add_binary_elementwise_layer(
-        network, mean_trt_layer.get_output(0), eps_tensor.get_output(0), trt.ElementWiseOperation.SUM, f"{name}_add"
+        network, mean_trt_layer.get_output(0), eps_tensor.get_output(0), trt.ElementWiseOperation.SUM, target, f"{name}_add"
     )
     # SQRT((Var + eps))
-    sqrt_trt = add_unary_layer(network, add_trt, trt.UnaryOperation.SQRT, f"{name}_sqrt")
+    sqrt_trt = add_unary_layer(network, add_trt, trt.UnaryOperation.SQRT, target, f"{name}_sqrt")
     # (x - E[x]) / sqrt((var + eps))
-    div_trt = add_binary_elementwise_layer(network, sub_trt, sqrt_trt, trt.ElementWiseOperation.DIV, f"{name}_div_trt")
+    div_trt = add_binary_elementwise_layer(network, sub_trt, sqrt_trt, trt.ElementWiseOperation.DIV, target, f"{name}_div_trt")
 
     assert gamma is not None
     gamma_tensor = network.add_constant(gamma.shape, trt.Weights(np.ascontiguousarray(gamma)))  # type: ignore[attr-defined]
@@ -668,10 +414,10 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
     beta_tensor.name = f"{name}_beta"
     # y * gamma + beta
     scale_layer = add_binary_elementwise_layer(
-        network, div_trt, gamma_tensor.get_output(0), trt.ElementWiseOperation.PROD, f"{name}_scale"
+        network, div_trt, gamma_tensor.get_output(0), trt.ElementWiseOperation.PROD, target, f"{name}_scale"
     )
     return add_binary_elementwise_layer(
-        network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, name
+        network, scale_layer, beta_tensor.get_output(0), trt.ElementWiseOperation.SUM, target, name
     )
 
 
@@ -698,14 +444,14 @@ def acc_ops_softmax(network, target, args, kwargs, name):
     if dim is None:
         dim = get_softmax_dim(input_ranks)
 
-    dim = dim % input_ranks
+    dim = get_positive_dim(dim, input_ranks)
     if network.has_implicit_batch_dimension:
         assert dim != 0, "Can't apply softmax on batch dimension when it's implicit."
         dim -= 1
 
     layer = network.add_softmax(input_val)
     layer.axes = 1 << dim
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -757,7 +503,7 @@ def acc_ops_tile(network, target, args, kwargs, name):
     strides = [1] * len(dims)
     layer = network.add_slice(input_val, starts, shapes, strides)
     layer.mode = trt.SliceMode.WRAP
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     if has_dynamic_shape(input_val.shape):
         starts_tensor = network.add_constant(
@@ -773,6 +519,7 @@ def acc_ops_tile(network, target, args, kwargs, name):
             input_shape_layer.get_output(0),
             dims_tensor,
             trt.ElementWiseOperation.PROD,
+            target,
             f"{name}_slice_shapes",
         )
         layer.set_input(1, starts_tensor)
@@ -784,126 +531,126 @@ def acc_ops_tile(network, target, args, kwargs, name):
 def acc_ops_relu(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.ActivationType.RELU
-    return add_activation_layer(network, input_val, operation_type, name)
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sin)
 def acc_ops_sin(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SIN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.cos)
 def acc_ops_cos(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.COS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.tan)
 def acc_ops_tan(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.TAN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sinh)
 def acc_ops_sinh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SINH
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.cosh)
 def acc_ops_cosh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.COSH
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.tanh)
 def acc_ops_tanh(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.ActivationType.TANH
-    return add_activation_layer(network, input_val, operation_type, name)
+    return add_activation_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.asin)
 def acc_ops_asin(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ASIN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.acos)
 def acc_ops_acos(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ACOS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.atan)
 def acc_ops_atan(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ATAN
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.exp)
 def acc_ops_exp(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.EXP
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.log)
 def acc_ops_log(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.LOG
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sqrt)
 def acc_ops_sqrt(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.SQRT
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.reciprocal)
 def acc_ops_reciprocal(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.RECIP
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.abs)
 def acc_ops_abs(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.ABS
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.neg)
 def acc_ops_neg(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.NEG
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.floor)
 def acc_ops_floor(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.FLOOR
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.ceil)
 def acc_ops_ceil(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     operation_type = trt.UnaryOperation.CEIL
-    return add_unary_layer(network, input_val, operation_type, name)
+    return add_unary_layer(network, input_val, operation_type, target, name)
 
 
 @tensorrt_converter(acc_ops.sum)
@@ -933,7 +680,7 @@ def acc_ops_sum(network, target, args, kwargs, name):
         get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
         keepdim,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -956,20 +703,19 @@ def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
         get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
         False,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
     new_kwargs = kwargs.copy()
     new_kwargs['k'] = 1
-
 
     if reduce_op == trt.ReduceOperation.MAX:
         new_kwargs['largest'] = True
     elif reduce_op == trt.ReduceOperation.MIN:
         new_kwargs['largest'] = False
     new_kwargs['sorted'] = False
-
 
     (topk_out0, topk_out1) = acc_ops_topk(network, target, args, new_kwargs, name + "_topk")
 
@@ -995,45 +741,51 @@ def add_acc_ops_dim_reduce(network, target, args, kwargs, name, reduce_op):
 
     shuffle_layer0 = network.add_shuffle(input_val)
     shuffle_layer0.reshape_dims = tuple(output_shape)
-    shuffle_layer0.name = name + '_shuffle0'
+    set_layer_name(shuffle_layer0, target, f"{name}_shuffle0")
 
     input_val = topk_out1
     shape = input_val.shape
 
     shuffle_layer1 = network.add_shuffle(input_val)
     shuffle_layer1.reshape_dims = tuple(output_shape)
-    shuffle_layer1.name = name + '_shuffle1'
-
+    set_layer_name(shuffle_layer1, target, f"{name}_shuffle1")
 
     return (shuffle_layer0.get_output(0), shuffle_layer1.get_output(0))
 
-@tensorrt_converter(acc_ops.max_full_reduce)
+
+@tensorrt_converter(acc_ops.max_full_reduce, no_implicit_batch_dim=True)
 def acc_ops_max_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
 
-@tensorrt_converter(acc_ops.min_full_reduce)
+
+@tensorrt_converter(acc_ops.min_full_reduce, no_implicit_batch_dim=True)
 def acc_ops_min_full_reduce(network, target, args, kwargs, name):
     return add_acc_ops_full_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
+
 
 @tensorrt_converter(acc_ops.max_dim_reduce)
 def acc_ops_max_dim_reduce(network, target, args, kwargs, name):
     return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MAX)
 
+
 @tensorrt_converter(acc_ops.min_dim_reduce)
 def acc_ops_min_dim_reduce(network, target, args, kwargs, name):
     return add_acc_ops_dim_reduce(network, target, args, kwargs, name, trt.ReduceOperation.MIN)
 
+
 @tensorrt_converter(acc_ops.maximum)
 def acc_ops_maximum(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MAX, target, name
     )
+
 
 @tensorrt_converter(acc_ops.minimum)
 def acc_ops_minimum(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.MIN, target, name
     )
+
 
 @tensorrt_converter(acc_ops.max_pool2d)
 def acc_ops_max_pool2d(network, target, args, kwargs, name):
@@ -1045,10 +797,10 @@ def acc_ops_max_pool2d(network, target, args, kwargs, name):
             "of the TensorRT region!"
         )
 
-    kernel_size = process_attr(kwargs["kernel_size"], 2)
-    stride = process_attr(kwargs["stride"], 2)
-    padding = process_attr(kwargs["padding"], 2)
-    dilation = process_attr(kwargs["dilation"], 2)
+    kernel_size = extend_attr_to_tuple(kwargs["kernel_size"], 2)
+    stride = extend_attr_to_tuple(kwargs["stride"], 2)
+    padding = extend_attr_to_tuple(kwargs["padding"], 2)
+    dilation = extend_attr_to_tuple(kwargs["dilation"], 2)
     ceil_mode = kwargs["ceil_mode"]
 
     if dilation != (1, 1):
@@ -1061,7 +813,7 @@ def acc_ops_max_pool2d(network, target, args, kwargs, name):
     )
     layer.stride = stride
     layer.padding = padding
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     if ceil_mode:
         layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
@@ -1084,7 +836,7 @@ def acc_ops_squeeze(network, target, args, kwargs, name):
     # dim, which is a very rare case. For now we just claim not supporting dim=None.
     assert dim is not None, "We don't support dim=None right now."
 
-    dim = dim % (len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0))
+    dim = get_positive_dim(dim, len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0))
     if network.has_implicit_batch_dimension:
         assert dim != 0, "We don't support squeeze batch dim when it's implicit."
         dim -= 1
@@ -1101,41 +853,41 @@ def acc_ops_squeeze(network, target, args, kwargs, name):
         output_shape.append(s)
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(output_shape)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
 @tensorrt_converter(acc_ops.add)
 def acc_ops_add(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUM, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUM, target, name
     )
 
 
 @tensorrt_converter(acc_ops.sub)
 def acc_ops_sub(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUB, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.SUB, target, name
     )
 
 
 @tensorrt_converter(acc_ops.div)
 def acc_ops_div(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
     )
 
 
 @tensorrt_converter(acc_ops.mul)
 def acc_ops_mul(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, name
+        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.PROD, target, name
     )
 
 @tensorrt_converter(acc_ops.pow)
 def acc_ops_pow(network, target, args, kwargs, name):
     return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, name
+        network, kwargs["input"], kwargs["exponent"], trt.ElementWiseOperation.POW, target, name
     )
 
 @tensorrt_converter(acc_ops.unsqueeze)
@@ -1149,8 +901,8 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
     dim = kwargs["dim"]
     input_shape = input_val.shape
     input_shape_size = len(input_val.shape) + 1 if network.has_implicit_batch_dimension else len(input_val.shape)
-    if dim < 0:
-        dim = dim % (input_shape_size + 1)
+    dim = get_positive_dim(dim, input_shape_size + 1)
+
     if network.has_implicit_batch_dimension:
         assert dim != 0
         dim -= 1
@@ -1158,8 +910,9 @@ def acc_ops_unsqueeze(network, target, args, kwargs, name):
     assert len(get_dynamic_dims(input_val.shape)) <= 1, "Currently we don't support unsqueeze with more than one dynamic dims."
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(input_val.shape)[:dim] + (1,) + tuple(input_val.shape)[dim:]
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.topk)
 def acc_ops_topk(network, target, args, kwargs, name):
@@ -1177,13 +930,14 @@ def acc_ops_topk(network, target, args, kwargs, name):
 
     num_dims = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
     k = kwargs["k"]
-    dim = (kwargs["dim"] if kwargs["dim"] is not None else -1) % num_dims
+    dim = get_positive_dim(kwargs["dim"] if kwargs["dim"] is not None else -1, num_dims)
     operation = trt.TopKOperation.MAX if kwargs["largest"] else trt.TopKOperation.MIN
     layer = network.add_topk(
         input_val, operation, k, get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension)
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0), layer.get_output(1)
+
 
 @tensorrt_converter(acc_ops.adaptive_avg_pool2d)
 def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
@@ -1219,7 +973,7 @@ def acc_ops_adaptive_avg_pool2d(network, target, args, kwargs, name):
         input=input_val, type=trt.PoolingType.AVERAGE, window_size=kernel_size
     )
     layer.stride = stride
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     return layer.get_output(0)
 
@@ -1234,9 +988,9 @@ def acc_ops_avg_pool2d(network, target, args, kwargs, name):
             "of the TensorRT region!"
         )
 
-    kernel_size = process_attr(kwargs["kernel_size"], 2)
-    stride = process_attr(kwargs["stride"], 2)
-    padding = process_attr(kwargs["padding"], 2)
+    kernel_size = extend_attr_to_tuple(kwargs["kernel_size"], 2)
+    stride = extend_attr_to_tuple(kwargs["stride"], 2)
+    padding = extend_attr_to_tuple(kwargs["padding"], 2)
     ceil_mode = kwargs["ceil_mode"]
     count_include_pad = kwargs["count_include_pad"]
     divisor_override = kwargs["divisor_override"]
@@ -1250,6 +1004,7 @@ def acc_ops_avg_pool2d(network, target, args, kwargs, name):
     layer.stride = stride
     layer.padding = padding
     layer.average_count_excludes_padding = False if count_include_pad else True
+    set_layer_name(layer, target, name)
 
     if ceil_mode:
         layer.padding_mode = trt.PaddingMode.EXPLICIT_ROUND_UP
@@ -1294,8 +1049,9 @@ def acc_ops_reshape(network, target, args, kwargs, name):
         shape_layer.name = f"{name}_output_shape"
         layer.set_input(1, shape_layer.get_output(0))
 
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.slice_tensor)
 def acc_ops_slice_tensor(network, target, args, kwargs, name):
@@ -1306,7 +1062,7 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
                            "of the TensorRT region!")
 
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    dims = [dim % ranks for dim in kwargs["dims"]]
+    dims = [get_positive_dim(dim, ranks) for dim in kwargs["dims"]]
 
     if network.has_implicit_batch_dimension:
         if not len(dims):
@@ -1332,10 +1088,11 @@ def acc_ops_slice_tensor(network, target, args, kwargs, name):
         output_shape[dim] = (stops[i] - starts[i]) // steps[i]
 
     layer = network.add_slice(input_val, start=start, shape=output_shape, stride=stride)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
-@tensorrt_converter(acc_ops.split)
+
+@tensorrt_converter(acc_ops.split, no_explicit_batch_dim=True)
 def acc_ops_split(network, target, args, kwargs, name):
     input_val = kwargs["input"]
 
@@ -1367,9 +1124,10 @@ def acc_ops_split(network, target, args, kwargs, name):
         start[dim] = offset
         layer = network.add_slice(input_val, start=start, shape=shape, stride=stride)
         offset += split_size
-        layer.name = f"{name}_{i}"
+        set_layer_name(layer, target, f"{name}_{i}")
         output.append(layer.get_output(0))
     return output
+
 
 @tensorrt_converter(acc_ops.linear)
 def acc_ops_linear(network, target, args, kwargs, name):
@@ -1393,7 +1151,7 @@ def acc_ops_linear(network, target, args, kwargs, name):
     # with lowering to fully_connected layer.
     layer = network.add_shuffle(input_val)
     layer.reshape_dims = tuple(input_val.shape) + (1, 1)
-    layer.name = f"{name}_pre_shuffle"
+    set_layer_name(layer, target, f"{name}_pre_shuffle")
     bias = to_numpy(kwargs["bias"])
 
     if network.has_explicit_precision:
@@ -1418,14 +1176,15 @@ def acc_ops_linear(network, target, args, kwargs, name):
             kernel=weight,
             bias=bias,
         )
-    layer.name = f"{name}_linear"
+    set_layer_name(layer, target, name)
 
     # reshape back
     layer = network.add_shuffle(layer.get_output(0))
     layer.reshape_dims = tuple(input_val.shape[:-1]) + (kwargs["weight"].shape[0],)
-    layer.name = f"{name}_post_shuffle"
+    set_layer_name(layer, target, f"{name}_post_shuffle")
 
     return layer.get_output(0)
+
 
 def add_clamp(network, input, val, op):
     acc_ops_clamp_shape = (1,) * len(input.shape)  # broadcast all dimensions
@@ -1457,13 +1216,13 @@ def acc_ops_clamp(network, target, args, kwargs, name):
         clamp_min_layer = add_clamp(
             network, input_val, min_val, trt.ElementWiseOperation.MAX
         )
-        clamp_min_layer.name = f"{name}_clamp_min"
+        set_layer_name(clamp_min_layer, target, f"{name}_clamp_min")
         input_val = clamp_min_layer.get_output(0)
     if max_val is not None:
         clamp_max_layer = add_clamp(
             network, input_val, max_val, trt.ElementWiseOperation.MIN
         )
-        clamp_max_layer.name = f"{name}_clamp_max"
+        set_layer_name(clamp_max_layer, target, f"{name}_clamp_max")
         input_val = clamp_max_layer.get_output(0)
 
     return input_val
@@ -1504,9 +1263,9 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         """
         Convert python slice to TensorRT slice layer parameters.
         """
-        start = (py_slice.start % dim_size) if py_slice.start else 0
+        start = get_positive_dim(py_slice.start, dim_size) if py_slice.start else 0
         stride = py_slice.step if py_slice.step else 1
-        stop = (py_slice.stop % dim_size) if py_slice.stop else dim_size
+        stop = get_positive_dim(py_slice.stop, dim_size) if py_slice.stop else dim_size
         size = math.ceil((stop - start) * 1.0 / stride)
         return start, size, stride
 
@@ -1517,7 +1276,7 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         # Raise an error if it's trying to subscript batch dimension unless it's
         # slice(None, None, None).
         batch_subscript = slices[0]
-        if batch_subscript != slice(None, None, None):
+        if batch_subscript not in [slice(None, None, None), slice(0, None, None)]:
             raise RuntimeError(
                 f"{name}: Can't subscript batch dimension when it's implicit. Got {slices}"
             )
@@ -1554,7 +1313,7 @@ def acc_ops_getitem(network, target, args, kwargs, name):
             size.append(params[1])
             stride.append(params[2])
         else:
-            start.append(s % input_val.shape[i])
+            start.append(get_positive_dim(s, input_val.shape[i]))
             size.append(1)
             stride.append(1)
         i += 1
@@ -1571,12 +1330,13 @@ def acc_ops_getitem(network, target, args, kwargs, name):
         shape=size,
         stride=stride,
     )
-    layer.name = name
+    set_layer_name(layer, target, name)
 
     # Add shuffle layer to insert dimensions for 'None' and remove dimensions for 'int'.
     if any(not isinstance(s, slice) for s in slices):
         slice_out = layer.get_output(0)
         layer = network.add_shuffle(slice_out)
+        set_layer_name(layer, target, f"{name}_shuffle")
         final_shape = []
         original_idx = 0
         for s in slices:
@@ -1606,7 +1366,7 @@ def acc_ops_cat(network, target, args, kwargs, name):
 
     layer = network.add_concatenation(inputs=tensors)
     layer.axis = kwargs["dim"] - (1 if network.has_implicit_batch_dimension else 0)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1634,7 +1394,7 @@ def acc_ops_matmul(network, target, args, kwargs, name):
 
     input_val, other_val = broadcast(network, input_val, other_val, f"{name}_input", f"{name}_other", preset_diff)
     layer = network.add_matrix_multiply(input_val, input_matrix_op, other_val, other_matrix_op)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1649,7 +1409,7 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
         )
 
     layer = network.add_activation(input=input_val, type=trt.ActivationType.SIGMOID)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1657,7 +1417,7 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
 def acc_ops_permute(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     ranks = len(input_val.shape) + (1 if network.has_implicit_batch_dimension else 0)
-    permutation = [i % ranks for i in kwargs["permutation"]]
+    permutation = [get_positive_dim(i, ranks) for i in kwargs["permutation"]]
 
     if not isinstance(input_val, trt.tensorrt.ITensor):
         raise RuntimeError(
@@ -1671,7 +1431,7 @@ def acc_ops_permute(network, target, args, kwargs, name):
 
     layer = network.add_shuffle(input_val)
     layer.second_transpose = tuple(permutation)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
 
 
@@ -1702,7 +1462,7 @@ def acc_ops_quantize_per_tensor(network, target, args, kwargs, name):
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = 0
-    layer.name = input_val.name + ".per_tensor_quant"
+    set_layer_name(layer, target, f"{input_val.name}_per_tensor_quant")
     return layer.get_output(0)
 
 
@@ -1742,7 +1502,7 @@ def acc_ops_quantize_per_channel(network, target, args, kwargs, name):
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_quantize(input=input_val, scale=scale)
     layer.axis = q_per_channel_axis
-    layer.name = input_val.name + ".per_channel_quant"
+    set_layer_name(layer, target, f"{input_val.name}_per_channel_quant")
     return layer.get_output(0)
 
 
@@ -1787,11 +1547,12 @@ def acc_ops_dequantize(network, target, args, kwargs, name):
     # assert trt.__version__ > "8.0", "Explicit dequantize op is only supported in "
     # "TensorRT 8.0 or above, current TensorRT version:" + trt.__version__
     layer = network.add_dequantize(input=input_val, scale=scale)
-    layer.name = input_val.name + ".dequant"
+    set_layer_name(layer, target, f"{input_val.name}_.dequant")
     layer.axis = q_axis
     return layer.get_output(0)
 
-@tensorrt_converter(acc_ops.gelu)
+
+@tensorrt_converter(acc_ops.gelu, no_implicit_batch_dim=True)
 def acc_ops_gelu(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     if not isinstance(input_val, trt.tensorrt.ITensor):
@@ -1813,8 +1574,9 @@ def acc_ops_gelu(network, target, args, kwargs, name):
     plugin = get_trt_plugin(plugin_name, field_collection, plugin_version)
 
     layer = network.add_plugin_v2([input_val], plugin)
-    layer.name = name
+    set_layer_name(layer, target, name)
     return layer.get_output(0)
+
 
 @tensorrt_converter(acc_ops.chunk)
 def acc_ops_chunk(network, target, args, kwargs, name):
@@ -1827,19 +1589,21 @@ def acc_ops_chunk(network, target, args, kwargs, name):
         raise RuntimeError(f"chunk received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-
     if network.has_implicit_batch_dimension:
         input_dim_size += 1
-        dim = dim % input_dim_size
+        dim = get_positive_dim(dim, input_dim_size)
         assert dim != 0, "Can't chunk on batch dim when it's implicit!"
         dim -= 1
     else:
-        dim = dim % input_dim_size
+        dim = get_positive_dim(dim, input_dim_size)
 
     if chunks > input_val.shape[dim]:
-        print(f"Warning! Asked for {chunks} chunks along dimention "
-              f"{dim} on tensor with size {input_val.shape} chunks "
-              f"will default to {input_val.shape[dim]}")
+        warnings.warn(
+            f"Asked for {chunks} chunks along dimention "
+            f"{dim} on tensor with size {input_val.shape}, chunks "
+            f"will default to {input_val.shape[dim]}",
+            RuntimeWarning
+        )
         chunks = input_val.shape[dim]
 
     start = [0] * len(input_val.shape)
@@ -1856,11 +1620,11 @@ def acc_ops_chunk(network, target, args, kwargs, name):
         start[dim] = offset
         layer = network.add_slice(input_val, start=start, shape=shape, stride=stride)
         offset += split_size
-        layer.name = f"{name}_{i}"
+        set_layer_name(layer, target, f"{name}_{i}")
         output.append(layer.get_output(0))
     return output
 
-@tensorrt_converter(acc_ops.cumsum)
+@tensorrt_converter(acc_ops.cumsum, no_implicit_batch_dim=True)
 def acc_ops_cumsum(network, target, args, kwargs, name):
     input_val = kwargs["input"]
     dim = kwargs["dim"]
@@ -1874,20 +1638,19 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
         raise RuntimeError(
             "cumsum converter currently doesn't support implicit batch dimension"
         )
-    if dim < 0:
-        dim = dim % input_dim_size
+    dim = get_positive_dim(dim, input_dim_size)
     loop = network.add_loop()
-    loop.name = name + "_loop"
     trip_limit = None
     if (input_shape[dim] > 0):
         axis = torch.tensor(input_shape[dim], dtype=torch.int32)
-        trip_limit = network.add_constant(axis.shape, to_numpy(axis)).get_output(0)
+        trip_limit_layer = network.add_constant(axis.shape, to_numpy(axis))
     else:
         input_shape = network.add_shape(input_val).get_output(0)
         dim_value = torch.tensor(dim, dtype=torch.int32)
         axis = network.add_constant(dim_value.shape, to_numpy(dim_value)).get_output(0)
-        trip_limit = network.add_gather(input_shape, axis, 0).get_output(0)
-    trip_limit.name = name + "_trip_limit"
+        trip_limit_layer = network.add_gather(input_shape, axis, 0)
+    set_layer_name(trip_limit_layer, target, f"{name}_trip_limit")
+    trip_limit = trip_limit_layer.get_output(0)
 
     loop.add_trip_limit(trip_limit, trt.TripLimit(0))
     iterator = loop.add_iterator(input_val, dim, False)
@@ -1895,16 +1658,37 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
     new_dims = tuple(data.shape)
     zero_tensor = torch.zeros(new_dims, dtype=torch.float32)
     zero_tensor = network.add_constant(zero_tensor.shape, to_numpy(zero_tensor)).get_output(0)
+
     running_sum = loop.add_recurrence(zero_tensor)
+    set_layer_name(running_sum, target, f"{name}_running_sum_1")
     running_sum_tensor = running_sum.get_output(0)
-    current_sum = network.add_elementwise(data, running_sum_tensor, trt.ElementWiseOperation.SUM)
-    current_sum.name = name + "_elementwise_sum_1"
-    running_sum.set_input(1, current_sum.get_output(0))
+
+    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_1")
+    running_sum.set_input(1, current_sum)
+
     running_sum = loop.add_recurrence(zero_tensor)
+    set_layer_name(running_sum, target, f"{name}_running_sum_2")
     running_sum_tensor = running_sum.get_output(0)
-    current_sum = network.add_elementwise(data, running_sum_tensor, trt.ElementWiseOperation.SUM)
-    current_sum.name = name + "_elementwise_sum_2"
-    running_sum.set_input(1, current_sum.get_output(0))
-    loop_output = loop.add_loop_output(current_sum.get_output(0), trt.LoopOutput.CONCATENATE, dim)
+
+    current_sum = add_binary_elementwise_layer(network, data, running_sum_tensor, trt.ElementWiseOperation.SUM, target, "sum_2")
+    running_sum.set_input(1, current_sum)
+
+    loop_output = loop.add_loop_output(current_sum, trt.LoopOutput.CONCATENATE, dim)
+    set_layer_name(loop_output, target, f"{name}_loop_output")
     loop_output.set_input(1, trip_limit)
     return loop_output.get_output(0)
+
+
+@tensorrt_converter(acc_ops.hardtanh)
+def acc_ops_hardtanh(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"hardtanh received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    layer = network.add_activation(input_val, trt.ActivationType.CLIP)
+    layer.alpha = kwargs["min_val"]
+    layer.beta = kwargs["max_val"]
+    set_layer_name(layer, target, name)
+    return layer.get_output(0)

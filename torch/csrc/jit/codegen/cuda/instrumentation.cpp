@@ -31,6 +31,10 @@ Trace::Trace() {
     start_timestamp_ = Clock::now();
     logEvent('I', "TRACE_START");
   }
+
+  if (getenv("PYTORCH_NVFUSER_DISABLE_NVTX")) {
+    record_nvtx_range_ = false;
+  }
 }
 
 Trace::~Trace() {

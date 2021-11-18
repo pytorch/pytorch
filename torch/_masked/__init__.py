@@ -25,7 +25,6 @@ def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
     """
-
     docstring_templates = dict(
         reduction_signature='''\
 {function_name}(input, dim, *, keepdim=False, dtype=None, mask=None) -> Tensor''',
@@ -363,9 +362,7 @@ elements, have ``nan`` values.
 
 {reduction_args}
 
-{reduction_example}
-
-    """
+{reduction_example}"""
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided:

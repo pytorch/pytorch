@@ -47,8 +47,7 @@ from tools.codegen.api.autograd import (
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import native_function_manager, with_native_function
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from tools.codegen.model import (Argument, NativeFunction, SchemaKind,
                                  SelfArgument, TensorOptionsArguments,
                                  BaseType, ListType)
@@ -105,10 +104,10 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'cross', 'lu_unpack', 'renorm', '_conj_physical',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
-    'linalg_pinv', 'linalg_lstsq',
+    'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
@@ -473,7 +472,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
     is_out_fn = f.func.kind() == SchemaKind.out
     returns_void = len(f.func.returns) == 0
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
 
     def gen_differentiable_input(
         arg: Union[Argument, SelfArgument, TensorOptionsArguments]
@@ -811,7 +810,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         unpacked_args = [b.name for b in unpacked_bindings]
         base_type_call = emit_dispatch_call(f, 'self_', unpacked_args)
 
-        if get_view_info(fn) is not None or modifies_arguments(f):
+        if get_view_info(f) is not None or modifies_arguments(f):
             guard = 'at::AutoDispatchBelowAutograd guard;'
         else:
             guard = 'at::AutoDispatchBelowADInplaceOrView guard;'
