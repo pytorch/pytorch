@@ -5374,6 +5374,8 @@ def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs)
     create_tensor = partial(torch.tensor, dtype=dtype, device=device, requires_grad=False)
 
     cases = (  # type: ignore[assignment]
+        # TODO: (@krshrimali) This doesn't work as of now, WIP, @krshrimali
+        ((), (1, 2)),
         ((S, S), (25,)),
         ((1, 2, 3), (2, 6)),
         ((0), (1,)),
@@ -10027,7 +10029,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unfold),
     # NumPy returns output as tuple, hence 2 OpInfos required to test as_tuple behavior
     OpInfo('unravel_index',
-           op=lambda x, *args: torch.unravel_index(x, *args, as_tuple=True),
+           op=torch.unravel_index,
            variant_test_name='as_tuple',
            ref=np.unravel_index,
            dtypes=integral_types(),
@@ -10039,8 +10041,8 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_unravel_index),
     OpInfo('unravel_index',
+           op=lambda x, *args: torch.unravel_index(x, *args, as_tuple=False),
            variant_test_name='without_as_tuple',
-           op=lambda x, *args: torch.unravel_index(x, *args),
            dtypes=integral_types(),
            supports_autograd=False,
            supports_out=False,
