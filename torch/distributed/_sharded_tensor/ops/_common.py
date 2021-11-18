@@ -19,6 +19,7 @@ def _handle_col_wise_sharding_base(
     weight,
     local_shard,
     pg,
+    gathered_inputs=None,
     mode=None,
     gathered_per_sample_weights=None,
     gathered_offsets=None,
@@ -41,6 +42,8 @@ def _handle_col_wise_sharding_base(
         weight: shareded weight tensor.
         local_shard: col-wise sharded weight tensor.
         pg: process group.
+        gathered_inputs: list of inputs from all ranks. If specified, we
+            don't need to communicate with each rank any more.
         mode: aggregation mode of EmbeddingBag.
         gathered_per_sample_weights: per_sample_weights across all ranks.
         gathered_offsets: offsets across all ranks.
@@ -53,9 +56,10 @@ def _handle_col_wise_sharding_base(
 
     Return: final result of input being applied with the op.
     """
-    # allgather the inputs first.
-    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-    dist.all_gather(gathered_inputs, input, group=pg)
+    if gathered_inputs is None:
+        # allgather the inputs first.
+        gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
+        dist.all_gather(gathered_inputs, input, group=pg)
 
     # run the operator's function for all the inputs.
     results = []
@@ -317,11 +321,14 @@ def _handle_max_norm_col_wise(
     norm_type,
     local_shard,
     input,
+    world_size,
     pg,
 ):
     """
     For col-wise sharding of weight, we need to aggregate the
     norm across all ranks before we can perform the proper re-norm.
+    Note that, the max_norm logic is only applied to the embedding
+    indices that are looked up and not the whole shard.
 
     Args:
         max_norm: If given, each embedding vector with norm larger
@@ -330,12 +337,19 @@ def _handle_max_norm_col_wise(
         norm_type: The p in the p-norm to compute for the max_norm option.
         local_shard: col-wise shared local weight used for lookup.
         input: tensor to be applied op to.
+        world_size: number of ranks.
         pg: process group.
 
-    Return: local_shard re-normed to max_norm if the norm is larger
-        than it.
+    Return:
+        local_shard_norm_renormed: local_shard re-normed to max_norm if the norm is larger
+            than it.
+        gathered_inputs: list of inputs from all ranks.
     """
     norm_type = norm_type if norm_type is not None else 2.0
+    # allgather the inputs first.
+    gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
+    dist.all_gather(gathered_inputs, input, group=pg)
+    unique_inp = torch.unique(torch.cat(gathered_inputs))
     local_shard_sum = torch.sum(
         torch.pow(torch.abs(local_shard), norm_type), dim=1, dtype=local_shard.dtype
     )
@@ -345,16 +359,18 @@ def _handle_max_norm_col_wise(
     local_shard_norm = torch.pow(local_shard_sum, 1.0 / norm_type)
     max_norm_tensor = torch.full(
         (local_shard.size(0),),
-        max_norm,
+        float("inf"),
         dtype=local_shard.dtype,
         device=input.device,
     )
+    max_norm_tensor[unique_inp] = max_norm
     local_shard_t = local_shard.t().contiguous()
     normalized_tensor = torch.where(
         local_shard_norm > max_norm_tensor, max_norm_tensor, local_shard_norm
     )
-    return (
+    local_shard_norm_renormed = (
         torch.div(torch.mul(local_shard_t, normalized_tensor), local_shard_norm)
         .t()
         .contiguous()
     )
+    return local_shard_norm_renormed, gathered_inputs

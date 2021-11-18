@@ -212,10 +212,11 @@ def _handle_col_wise_sharding(
 
     Returns: final result of lookup.
     """
+    gathered_inputs = None
     if max_norm is not None:
         # max_norm changes the weight in-place
-        local_shard = _handle_max_norm_col_wise(
-            max_norm, norm_type, local_shard, input, pg
+        local_shard, gathered_inputs = _handle_max_norm_col_wise(
+            max_norm, norm_type, local_shard, input, world_size, pg
         )
 
     output = _handle_col_wise_sharding_base(
@@ -228,6 +229,7 @@ def _handle_col_wise_sharding(
         local_shard,
         pg,
         padding_idx=padding_idx,
+        gathered_inputs=gathered_inputs,
     )
     return (output, local_shard)
 
