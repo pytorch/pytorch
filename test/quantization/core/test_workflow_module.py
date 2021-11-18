@@ -1208,8 +1208,6 @@ class TestFusedObsFakeQuantModule(TestCase):
                 # Ensure that Linear is now quantized
                 self.assertEqual(type(inference_gm.linear), torch.nn.quantized.Linear)
 
-
-
     def test_default_fused_qat_config(self):
         class Model(nn.Module):
             def __init__(self):
