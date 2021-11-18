@@ -74,6 +74,7 @@ net models. In particular, TorchScript supports:
    "``T``", "A `TorchScript Class`_"
    "``E``", "A `TorchScript Enum`_"
    "``NamedTuple[T0, T1, ...]``", "A :func:`collections.namedtuple <collections.namedtuple>` tuple type"
+   "``Union[T0, T1, ...]``", "One of the subtypes ``T0``, ``T1``, etc."
 
 Unlike Python, each variable in TorchScript function must have a single static type.
 This makes it easier to optimize TorchScript functions.
@@ -130,7 +131,6 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
 
    ":any:`typing.Any`", ":any:`typing.Any` is currently in development but not yet released"
    ":any:`typing.NoReturn`", "Not implemented"
-   ":any:`typing.Union`", "Unlikely to be implemented (however :any:`typing.Optional` is supported)"
    ":any:`typing.Sequence`", "Not implemented"
    ":any:`typing.Callable`", "Not implemented"
    ":any:`typing.Literal`", "Not implemented"
