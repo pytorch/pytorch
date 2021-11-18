@@ -137,8 +137,7 @@ Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
 }
 
 Tensor sin_sparse_csr(const Tensor& self) {
-  auto result = get_result_tensor_for_unary_op(&at::sin, self);
-  return sin_sparse_csr_out(self, result);
+  return get_result_tensor_for_unary_op(&at::sin, self);
 }
 
 Tensor& sin_sparse_csr_(Tensor& self) {

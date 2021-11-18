@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
-from torch.testing._internal.common_methods_invocations import (unary_ufuncs, )
+from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -30,8 +30,6 @@ def _check_cusparse_spgemm_available():
     version = _get_torch_cuda_version()
     min_supported_version = (11, 0)
     return version >= min_supported_version
-
-_sparse_csr_unary_ops = list(filter(lambda op: op.supports_sparse_csr, unary_ufuncs))
 
 # This should be just an import from test_linalg instead of code duplication
 # but https://github.com/pytorch/pytorch/pull/63511#discussion_r733989701
@@ -942,7 +940,7 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(csr_sparse.to_dense(), dense)
 
-    @ops(_sparse_csr_unary_ops)
+    @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 

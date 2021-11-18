@@ -274,18 +274,6 @@ Tensor empty_like(
 
   auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Preserve);
 
-  if (options.layout() == kSparseCsr && self.is_sparse_csr()) {
-    auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        c10::typeMetaToScalarType(options.dtype()),
-        options.layout(),
-        options.device()
-    );
-  }
-
   if (self.is_quantized()) {
 
     // TODO: To support all features of MemoryFormat::Preserve we need to add
