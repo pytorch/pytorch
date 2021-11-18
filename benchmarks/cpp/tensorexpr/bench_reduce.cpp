@@ -1,10 +1,10 @@
 #include <benchmark/benchmark.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
-#include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
-#include <torch/csrc/jit/tensorexpr/tensor.h>
+#include <torch/csrc/jit/tensorexpr/loopnest.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
+#include <torch/csrc/jit/tensorexpr/tensor.h>
 #include <torch/torch.h>
 
 #include <immintrin.h>
@@ -25,8 +25,9 @@ class Reduce1D : public benchmark::Fixture {
 
   void TearDown(benchmark::State& state) override {
     TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-7));
-    state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * M * sizeof(float),
-                                                 benchmark::Counter::kIsRate);
+    state.counters["BYTES"] = benchmark::Counter(
+        uint64_t(state.iterations()) * M * sizeof(float),
+        benchmark::Counter::kIsRate);
   }
 
   int M;
@@ -35,7 +36,7 @@ class Reduce1D : public benchmark::Fixture {
   at::Tensor ref;
 };
 
-}  // namespace
+} // namespace
 
 BENCHMARK_DEFINE_F(Reduce1D, Torch)(benchmark::State& state) {
   for (auto _ : state) {
@@ -48,18 +49,23 @@ BENCHMARK_REGISTER_F(Reduce1D, Torch)->Args({1 << 24});
 #define VALIDATE(F, A, B) ValidateFunc((F), #F, (A), (B))
 
 template <typename Func>
-void ValidateFunc(Func func, const std::string& func_name, at::Tensor& A, at::Tensor& B) {
+void ValidateFunc(
+    Func func,
+    const std::string& func_name,
+    at::Tensor& A,
+    at::Tensor& B) {
   func(A, B);
-  float *pB = B.data_ptr<float>();
+  float* pB = B.data_ptr<float>();
   at::Tensor B2 = torch::sum(A, {0});
-  float *pB2 = B2.data_ptr<float>();
+  float* pB2 = B2.data_ptr<float>();
   int size = A.numel();
   float size_sqrt = std::sqrt(size);
   float natural_noise = size_sqrt * 1e-7;
   if (!torch::allclose(B, B2, natural_noise)) {
     std::ostringstream oss;
     oss << func_name << " failed check: " << std::endl;
-    oss << "value: " << B << std::endl;;
+    oss << "value: " << B << std::endl;
+    ;
     oss << "reference: " << B2 << std::endl;
     oss << "threshold: " << natural_noise << std::endl;
     throw std::runtime_error(oss.str());
@@ -67,8 +73,8 @@ void ValidateFunc(Func func, const std::string& func_name, at::Tensor& A, at::Te
 }
 
 static void reduce1d_naive(at::Tensor& A, at::Tensor& B) {
-  float *pA = A.data_ptr<float>();
-  float *pB = B.data_ptr<float>();
+  float* pA = A.data_ptr<float>();
+  float* pB = B.data_ptr<float>();
   int size = A.numel();
   TORCH_CHECK(B.numel() == 1);
   *pB = 0.;
@@ -87,8 +93,8 @@ BENCHMARK_DEFINE_F(Reduce1D, Naive)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, Naive)->Args({1 << 24});
 
 static void reduce1d_native_rfactor(at::Tensor& A, at::Tensor& B) {
-  float *pA = A.data_ptr<float>();
-  float *pB = B.data_ptr<float>();
+  float* pA = A.data_ptr<float>();
+  float* pB = B.data_ptr<float>();
   int size = A.numel();
   constexpr int kChunkSize = 16;
   TORCH_CHECK(B.numel() == 1);
@@ -146,8 +152,8 @@ inline float sum_f32x8(__m256 x) {
 }
 
 static void reduce1d_native_vector(at::Tensor& A, at::Tensor& B) {
-  float *pA = A.data_ptr<float>();
-  float *pB = B.data_ptr<float>();
+  float* pA = A.data_ptr<float>();
+  float* pB = B.data_ptr<float>();
   int size = A.numel();
   constexpr int kChunkSize = sizeof(__m256) / sizeof(float);
   TORCH_CHECK(B.numel() == 1);
@@ -177,12 +183,18 @@ BENCHMARK_REGISTER_F(Reduce1D, NativeVector)->Args({1 << 24});
 
 static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
   static constexpr int kTileSize = 4;
-  float *pA = A.data_ptr<float>();
-  float *pB = B.data_ptr<float>();
+  float* pA = A.data_ptr<float>();
+  float* pB = B.data_ptr<float>();
   int size = A.numel();
   constexpr int kChunkSize = sizeof(__m256) / sizeof(float);
   TORCH_CHECK(B.numel() == 1, "Invalid size: ", B.numel(), " != 1");
-  TORCH_CHECK(size % kChunkSize == 0, "Invalid size: ", size, " % ", kChunkSize , " ! = 0");
+  TORCH_CHECK(
+      size % kChunkSize == 0,
+      "Invalid size: ",
+      size,
+      " % ",
+      kChunkSize,
+      " ! = 0");
   __m256 t[kTileSize];
   for (int j = 0; j < kTileSize; j++) {
     t[j] = _mm256_setzero_ps();
@@ -190,9 +202,9 @@ static void reduce1d_native_tiled(at::Tensor& A, at::Tensor& B) {
 
   int tile_count = size / kChunkSize / kTileSize;
   for (int i = 0; i < tile_count; i++) {
-    #pragma unroll
+#pragma unroll
     for (int j = 0; j < kTileSize; j++) {
-      float *p = pA + (i * kTileSize + j) * kChunkSize;
+      float* p = pA + (i * kTileSize + j) * kChunkSize;
       __m256 data = _mm256_loadu_ps(p);
       t[j] = _mm256_add_ps(t[j], data);
     }
@@ -217,7 +229,6 @@ BENCHMARK_REGISTER_F(Reduce1D, NativeTiled)->Args({1 << 24});
 #endif // USE_AVX2
 
 BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
-
   int M = A.numel();
 
   te::BufHandle AP("A", {M}, te::kFloat);
@@ -249,7 +260,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeNaive)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeNaive)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
-
   int M = A.numel();
 
   te::BufHandle AP("A", {M}, te::kFloat);
@@ -289,7 +299,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitTail)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeSplitTail)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
-
   int M = A.numel();
 
   te::BufHandle AP("A", {M}, te::kFloat);
@@ -329,7 +338,6 @@ BENCHMARK_DEFINE_F(Reduce1D, TeSplitMask)(benchmark::State& state) {
 BENCHMARK_REGISTER_F(Reduce1D, TeSplitMask)->Args({1 << 24});
 
 BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
-
   int M = A.numel();
   const int kChunkSize = 8;
   TORCH_CHECK(M % kChunkSize == 0);
@@ -339,9 +347,7 @@ BENCHMARK_DEFINE_F(Reduce1D, TeRfactorV1)(benchmark::State& state) {
       "reduce_full",
       {},
       te::Sum(),
-      [&](const te::ExprHandle& m) {
-        return AP.load(m);
-      },
+      [&](const te::ExprHandle& m) { return AP.load(m); },
       {{M, "M"}});
 
   te::LoopNest loop({BT});
@@ -424,8 +430,9 @@ class Reduce2DCol : public benchmark::Fixture {
 
   void TearDown(benchmark::State& state) override {
     TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-5));
-    state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
-                                                 benchmark::Counter::kIsRate);
+    state.counters["BYTES"] = benchmark::Counter(
+        uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
+        benchmark::Counter::kIsRate);
   }
 
   int M;
@@ -441,9 +448,9 @@ BENCHMARK_DEFINE_F(Reduce2DCol, Torch)(benchmark::State& state) {
   }
 }
 BENCHMARK_REGISTER_F(Reduce2DCol, Torch)
-->Args({1 << 3, 1 << 21})
-->Args({1 << 6, 1 << 18})
-->Args({1 << 12, 1 << 12});
+    ->Args({1 << 3, 1 << 21})
+    ->Args({1 << 6, 1 << 18})
+    ->Args({1 << 12, 1 << 12});
 
 BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
   constexpr int kCacheSize = 1 << 12;
@@ -476,15 +483,16 @@ BENCHMARK_DEFINE_F(Reduce2DCol, OpSchedule)(benchmark::State& state) {
     cg.call({A.data_ptr<float>(), B.data_ptr<float>()});
   }
 }
-BENCHMARK_REGISTER_F(Reduce2DCol, OpSchedule)->Apply(//CustomArgs);
-    [](benchmark::internal::Benchmark* b) {
-      for (auto sch : {0, 1, 2, 3}) {
-        for (auto rows : {3, 6, 12}) {
-          auto cols = 24 - rows;
-          b->Args({1 << rows, 1 << cols, sch});
-        }
-      }
-    });
+BENCHMARK_REGISTER_F(Reduce2DCol, OpSchedule)
+    ->Apply( // CustomArgs);
+        [](benchmark::internal::Benchmark* b) {
+          for (auto sch : {0, 1, 2, 3}) {
+            for (auto rows : {3, 6, 12}) {
+              auto cols = 24 - rows;
+              b->Args({1 << rows, 1 << cols, sch});
+            }
+          }
+        });
 
 class Reduce2DRow : public benchmark::Fixture {
  public:
@@ -500,8 +508,9 @@ class Reduce2DRow : public benchmark::Fixture {
 
   void TearDown(benchmark::State& state) override {
     TORCH_CHECK(at::allclose(B, ref, std::sqrt(A.numel()) * 1e-4));
-    state.counters["BYTES"] = benchmark::Counter(uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
-                                                 benchmark::Counter::kIsRate);
+    state.counters["BYTES"] = benchmark::Counter(
+        uint64_t(state.iterations()) * (A.nbytes() + B.nbytes()),
+        benchmark::Counter::kIsRate);
   }
 
   int M;
@@ -517,10 +526,10 @@ BENCHMARK_DEFINE_F(Reduce2DRow, Torch)(benchmark::State& state) {
   }
 }
 BENCHMARK_REGISTER_F(Reduce2DRow, Torch)
-->Args({1 << 3, 1 << 21})
-->Args({1 << 6, 1 << 18})
-->Args({1 << 12, 1 << 12})
-->Args({1 << 18, 1 << 6});
+    ->Args({1 << 3, 1 << 21})
+    ->Args({1 << 6, 1 << 18})
+    ->Args({1 << 12, 1 << 12})
+    ->Args({1 << 18, 1 << 6});
 
 BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
   auto a = A.data_ptr<float>();
@@ -533,7 +542,8 @@ BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
       for (int n_outer = 0; n_outer < N; n_outer += Nb) {
         for (int m_inner = 0; m_inner < Mb; m_inner++) {
           for (int n_inner = 0; n_inner < Nb; n_inner++) {
-            bregs[m_inner][n_inner] += a[(m_outer + m_inner) * N + n_outer + n_inner];
+            bregs[m_inner][n_inner] +=
+                a[(m_outer + m_inner) * N + n_outer + n_inner];
           }
         }
       }
@@ -549,13 +559,13 @@ BENCHMARK_DEFINE_F(Reduce2DRow, Hand)(benchmark::State& state) {
     fn();
   }
 }
-BENCHMARK_REGISTER_F(Reduce2DRow, Hand)
-->Args({1 << 18, 1 << 6});
+BENCHMARK_REGISTER_F(Reduce2DRow, Hand)->Args({1 << 18, 1 << 6});
 
 BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
   constexpr int kChunkSize = 8;
   te::BufHandle a("A", {M, N}, te::kFloat);
-  te::Tensor b = te::computeSum({a, te::IntList({1}), false}, {M}, at::kFloat, at::kCPU);
+  te::Tensor b =
+      te::computeSum({a, te::IntList({1}), false}, {M}, at::kFloat, at::kCPU);
   te::LoopNest nest({b});
 
   auto sch = state.range(2);
@@ -598,12 +608,13 @@ BENCHMARK_DEFINE_F(Reduce2DRow, OpSchedule)(benchmark::State& state) {
     cg.call({A.data_ptr<float>(), B.data_ptr<float>()});
   }
 }
-BENCHMARK_REGISTER_F(Reduce2DRow, OpSchedule)->Apply(//CustomArgs);
-    [](benchmark::internal::Benchmark* b) {
-      for (auto sch : {0, 1, 2, 3}) {
-        for (auto rows : {3, 6, 12, 18}) {
-          auto cols = 24 - rows;
-          b->Args({1 << rows, 1 << cols, sch});
-        }
-      }
-    });
+BENCHMARK_REGISTER_F(Reduce2DRow, OpSchedule)
+    ->Apply( // CustomArgs);
+        [](benchmark::internal::Benchmark* b) {
+          for (auto sch : {0, 1, 2, 3}) {
+            for (auto rows : {3, 6, 12, 18}) {
+              auto cols = 24 - rows;
+              b->Args({1 << rows, 1 << cols, sch});
+            }
+          }
+        });
