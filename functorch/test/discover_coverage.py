@@ -195,6 +195,7 @@ def get_top_ops(torch_threshold, nn_fn_threshold):
         'nn.functional.relu_',
         'nn.functional.boolean_dispatch',
         'nn.functional.assert_int_or_pair',
+        'fft', # is namespace
     })
 
     torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
@@ -325,9 +326,10 @@ method_only_ops = get_method_only_ops_we_care_about()
 # for op in method_only_ops:
 #     print(f'    {op},')
 
-# top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
-# for op in top_ops_not_covered_by_opinfo:
-#     print(f'{op}, {top_ops.usage_count[op]}')
+top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(100, 25)
+print('=' * 80)
+for op in top_ops_not_covered_by_opinfo:
+    print(f'{op}, {top_ops.usage_count[op]}')
 
 # print("top ops not covered by opinfo: ")
 # top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(200, 50)
