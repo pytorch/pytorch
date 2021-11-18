@@ -1624,8 +1624,9 @@ if(NOT INTERN_BUILD_MOBILE)
 
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
-  set(THRUST_SEARCH_PATHS ${CUDA_INCLUDE_DIRS})
-  list(TRANSFORM THRUST_SEARCH_PATHS APPEND /thrust/cmake)
+  foreach(tmp_path ${CUDA_INCLUDE_DIRS})
+    list(APPEND THRUST_SEARCH_PATHS "${tmp_path}/thrust/cmake")
+  endforeach()
   list(APPEND THRUST_SEARCH_PATHS
     ${CUDA_SOURCE_DIR}/include/thrust/cmake
     ${CUDA_SOURCE_DIR}/lib/cmake/thrust
