@@ -10,8 +10,7 @@ namespace jit {
 void DeduplicateInitializers(
     std::shared_ptr<Graph>& g,
     std::map<std::string, IValue>& paramsDict,
-    bool is_train,
-    int opset_version);
+    bool is_train);
 
 } // namespace jit
 

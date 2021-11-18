@@ -3,13 +3,25 @@ producer_name: "pytorch"
 producer_version: "CURRENT_VERSION"
 graph {
   node {
+    input: "weight"
+    output: "running_var"
+    name: "Identity_0"
+    op_type: "Identity"
+  }
+  node {
+    input: "bias"
+    output: "running_mean"
+    name: "Identity_1"
+    op_type: "Identity"
+  }
+  node {
     input: "input"
     input: "weight"
     input: "bias"
     input: "running_mean"
     input: "running_var"
     output: "6"
-    name: "BatchNormalization_0"
+    name: "BatchNormalization_2"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
@@ -34,18 +46,6 @@ graph {
     data_type: 1
     name: "bias"
     raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
-    name: "running_mean"
-    raw_data: "\000\000\000\000\000\000\000\000"
-  }
-  initializer {
-    dims: 2
-    data_type: 1
-    name: "running_var"
-    raw_data: "\000\000\200?\000\000\200?"
   }
   input {
     name: "input"

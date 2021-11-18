@@ -216,20 +216,7 @@ void initJITBindings(PyObject* module) {
             return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
           })
       .def("_jit_pass_onnx_preprocess", PreprocessForONNX)
-      .def(
-          "_jit_pass_onnx_deduplicate_initializers",
-          [](std::shared_ptr<Graph>& graph,
-             std::map<std::string, IValue>& paramsDict,
-             bool is_train,
-             int opset_version) {
-            DeduplicateInitializers(
-                graph,
-                paramsDict,
-                is_train,
-                opset_version); // overload resolution
-            return paramsDict;
-          },
-          pybind11::return_value_policy::move)
+      .def("_jit_pass_onnx_deduplicate_initializers", &DeduplicateInitializers)
       .def(
           "_jit_pass_onnx_eval_peephole",
           [](std::shared_ptr<Graph>& graph,

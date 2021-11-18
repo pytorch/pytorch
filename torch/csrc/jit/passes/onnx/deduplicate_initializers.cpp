@@ -14,7 +14,6 @@ using namespace ::c10::onnx;
 void DeduplicateInitializers(
     std::shared_ptr<Graph>& g,
     ValueToParamPairMap& valsToParamsMap,
-    int opset_version,
     bool (*comp)(at::Tensor&, at::Tensor&)) {
   auto is_same_tensor_as = [&valsToParamsMap, comp](Value* v1) {
     return [&valsToParamsMap, v1, comp](Value* v2) {
@@ -48,7 +47,12 @@ void DeduplicateInitializers(
       uniqueVals.emplace_back(v);
     } else {
       inputsIndicesToRemove.emplace_back(i);
-      v->replaceAllUsesWith(*it);
+      auto id_node = g->create(onnx::Identity);
+      id_node->insertAfter(g->block()->param_node());
+      id_node->addInput(*it);
+      id_node->output()->copyMetadata(v);
+      id_node->copyMetadata(g->block()->param_node());
+      v->replaceAllUsesWith(id_node->output());
     }
   }
   for (auto it = inputsIndicesToRemove.rbegin();
@@ -71,19 +75,17 @@ bool DeduplicateInitializersByValue(at::Tensor& t1, at::Tensor& t2) {
 void DeduplicateInitializers(
     std::shared_ptr<Graph>& g,
     std::map<std::string, IValue>& paramsDict,
-    bool is_train,
-    int opset_version) {
+    bool is_train) {
   auto valsToParamsMap = buildValueToParamsMap(g->block(), paramsDict);
   // ONNX spec does not support parameters with shared memory.
   // This pass de-duplicate those parameters. Training is not affected.
-  DeduplicateInitializers(
-      g, valsToParamsMap, opset_version, DeduplicateInitializersByDataPtr);
+  DeduplicateInitializers(g, valsToParamsMap, DeduplicateInitializersByDataPtr);
   if (!is_train) {
     // More aggressive parameters de-duplication based on tensor values.
-    // Since it may affect training, this pass is disabled when training mode is
-    // turned on.
-    DeduplicateInitializers(
-        g, valsToParamsMap, opset_version, DeduplicateInitializersByValue);
+    // Producing more compact model for inference.
+    // For training, this pass is disabled,
+    // because parameters may be updated differently.
+    DeduplicateInitializers(g, valsToParamsMap, DeduplicateInitializersByValue);
   }
   buildParamsMapFromValueToParamsMap(valsToParamsMap, paramsDict);
 }

@@ -227,7 +227,6 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         dynamic_axes = {} if dynamic_axes is None else dynamic_axes
         torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     torch._C._jit_pass_onnx_lint(graph)
-    print(graph)
     graph = torch._C._jit_pass_onnx(graph, operator_export_type)
     torch._C._jit_pass_onnx_lint(graph)
     torch._C._jit_pass_lint(graph)
@@ -527,9 +526,8 @@ def _model_to_graph(model, args, verbose=False,
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
-                                                                   training == TrainingMode.TRAINING,
-                                                                   _export_onnx_opset_version)
+    torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
+                                                     training == TrainingMode.TRAINING)
 
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
