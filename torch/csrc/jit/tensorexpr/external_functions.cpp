@@ -119,8 +119,8 @@ at::Tensor from_blob_quantized(
 
 #ifndef _WIN32
 at::Tensor quantized_add(
-    at::Tensor x1,
-    at::Tensor x2,
+    const at::Tensor& x1,
+    const at::Tensor& x2,
     double scale,
     int64_t zero) {
   const auto qadd_op =
