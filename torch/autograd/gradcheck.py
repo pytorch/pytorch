@@ -819,8 +819,8 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # Squash warnings since these are expected to happen in most cases
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message="Batching rule not implemented")
-        warnings.filterwarnings("ignore", message="torch.vmap is an experimental prototype")
+        warnings.filterwarnings("ignore", message="There is a performance drop")
+        warnings.filterwarnings("ignore", message="Please use functorch.vmap")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
