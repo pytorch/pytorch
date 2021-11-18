@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._sharded_tensor import (
+    TEST_GPU_NUM,
     ShardedTensorTestBase,
     with_comms,
 )
@@ -67,7 +68,9 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         )
 
         # Copy the weights from local embedding bag.
-        sharded_embedding_bag.weight = local_embedding_bag.weight
+        sharded_embedding_bag.weight = torch.nn.Parameter(
+            local_embedding_bag.weight.detach().clone()
+        )
 
         # Shard the parameter.
         shard_parameter(sharded_embedding_bag, "weight", spec)
@@ -138,14 +141,14 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self.assertEqual(local_output, sharded_output)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_embedding_bag_colwise(self):
         for spec in generate_chunk_sharding_specs_for_test(1):
             self._test_sharded_embedding_bag_with_test_cases(spec)
 
     @with_comms(init_rpc=False)
-    @skip_if_lt_x_gpu(4)
+    @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_embedding_bag_rowwise(self):
         for spec in generate_chunk_sharding_specs_for_test(0):
