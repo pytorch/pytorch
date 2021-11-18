@@ -478,6 +478,7 @@ OperatorGenerator(
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
         {code}
+        throw std::runtime_error("In Generated Code");
         drop(stack, {len(args)});
         {func_call_and_push}
     }},
