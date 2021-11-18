@@ -120,7 +120,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
 
     if (event_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(false, "Couldn't open shared event: <", eventname, ">, error code: <", GetLastError(), ">");
+      TORCH_INTERNAL_ASSERT(false, "Couldn't open shared event: <", eventname_, ">, error code: <", GetLastError(), ">");
     }
 
     if (flags_ & ALLOCATOR_MAPPED_EXCLUSIVE) {
@@ -132,13 +132,13 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
 
     if (handle_ == nullptr) {
-      TORCH_INTERNAL_ASSERT(false, "Couldn't open shared file mapping: <", filename, ">, error code: <", GetLastError(), ">");
+      TORCH_INTERNAL_ASSERT(false, "Couldn't open shared file mapping: <", filename_, ">, error code: <", GetLastError(), ">");
     }
 
     size_ = size;
     base_ptr_ = MapViewOfFile(handle_, FILE_MAP_ALL_ACCESS, 0, 0, size);
     if (!base_ptr_) {
-      TORCH_INTERNAL_ASSERT(false, "Couldn't map view of shared file <", filename, ">, error code: <", GetLastError(), ">");
+      TORCH_INTERNAL_ASSERT(false, "Couldn't map view of shared file <", filename_, ">, error code: <", GetLastError(), ">");
     }
   } else {
 
