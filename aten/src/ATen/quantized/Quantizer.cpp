@@ -163,9 +163,9 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
 }
 
 void per_tensor_affine_dequantize_impl(
-    Tensor& rtensor, 
-    const Tensor& qtensor, 
-    const double scale, 
+    Tensor& rtensor,
+    const Tensor& qtensor,
+    const double scale,
     const int64_t zero_point) {
   const auto qtensor_contig =
     qtensor.expect_contiguous(qtensor.suggest_memory_format());
@@ -213,9 +213,9 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
 }
 
 void per_channel_affine_dequantize_impl(
-    Tensor& rtensor, 
-    const Tensor& qtensor, 
-    const Tensor& scale, 
+    Tensor& rtensor,
+    const Tensor& qtensor,
+    const Tensor& scale,
     const Tensor& zero_point,
     const int64_t axis) {
   const auto qtensor_contig =
@@ -263,9 +263,9 @@ Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
 }
 
 void per_channel_affine_float_q_params_dequantize_impl(
-    Tensor& rtensor, 
-    const Tensor& qtensor, 
-    const Tensor& scale, 
+    Tensor& rtensor,
+    const Tensor& qtensor,
+    const Tensor& scale,
     const Tensor& zero_point,
     const int64_t axis) {
   const auto qtensor_contig =
