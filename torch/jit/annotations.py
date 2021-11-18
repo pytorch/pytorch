@@ -62,7 +62,7 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    signature = try_real_annotations(fn, loc)
+    signature = try_real_annotations(fn.default, loc)
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -109,7 +109,8 @@ def get_param_names(fn, n_args):
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
-
+    else:
+        fn = fn.default
     if is_function_or_method(fn):
         if is_ignored_fn(fn):
             fn = inspect.unwrap(fn)

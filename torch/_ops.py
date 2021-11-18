@@ -29,13 +29,13 @@ class OpOverload:
     def __init__(self, op, schema):
         self.op = op
         self.schema = schema
-    
+
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs or {})
-    
+
     def __getattr__(self, key):
         return getattr(self.op, key)
-    
+
     # `my_namespace::my_op`
     def qualified_name(self):
         return self.schema.name
@@ -44,7 +44,7 @@ class OpOverload:
         return self.schema.overload_name
 
     # vector of Arguments -- each Argument's name, and type can currently be accessed
-    # it might be useful to make the mutability of the arg accessible (using the alias_info stored in the C++ struct) 
+    # it might be useful to make the mutability of the arg accessible (using the alias_info stored in the C++ struct)
     def returns(self):
         return self.schema.returns
 
@@ -62,39 +62,27 @@ class OpOverload:
 
 # this might be a bit slower than the version before.
 class OpOverloadBundle():
-    def __init__(self, namespace_name, op_name):
-        # Get the op `my_namespace::my_op` if available. This will also check
-        # for overloads and raise an exception if there are more than one.
-        qualified_op_name = '{}::{}'.format(namespace_name, op_name)
-        op = torch._C._jit_get_operation(qualified_op_name)
-
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        setattr(self, op_name, op)
-        op.__module__ = self.__module__ + "." + namespace_name
-
-        self.op = op
-        self.namespace_name = namespace_name
+    def __init__(self, qualified_op_name, op_name, op):
+        self.qualified_op_name = qualified_op_name
         self.op_name = op_name
+        self.op = op
 
     def __getattr__(self, key):
-        # It is not a valid op_name when __file__ is passed in
-        if key == '__file__':
-            return 'torch.ops'
-
         # return the overload packet
         # make sure to disallow this keyword in native functions
         # can access all overloads except -> overload_name=empty string, schema-> aten::add(Scalar a, Scalar b) -> (Scalar)
-        if key == 'default':
-            key = ""
-        qualified_op_name = '{}::{}'.format(self.namespace_name, self.op_name)
-        op = torch._C.get_operation_overload(qualified_op_name, key)
-        schema = torch.get_schema(qualified_op_name, key)
-        print(schema)
-        return OpOverload(op, schema)
 
-    
+        try:
+            use_key = "" if key == 'default' else key
+            print(self.qualified_op_name, key)
+            op = torch._C.get_operation_overload(self.qualified_op_name, use_key)
+            schema = torch.get_schema(self.qualified_op_name, use_key)
+
+            return OpOverload(op, schema)
+        except RuntimeError:
+            out = getattr(self.op, key)
+            return out
+
     def __call__(self, *args, **kwargs):
         # to ensure torch.ops.foo.bar() is still callable from JIT
         # "" key handling from above
@@ -140,7 +128,21 @@ class _OpNamespace(types.ModuleType):
         self.name = name
 
     def __getattr__(self, op_name):
-        return OpOverloadBundle(self.name, op_name)
+        # It is not a valid op_name when __file__ is passed in
+        if op_name == '__file__':
+            return 'torch.ops'
+        # Get the op `my_namespace::my_op` if available. This will also check
+        # for overloads and raise an exception if there are more than one.
+        namespace_name = self.name
+        qualified_op_name = '{}::{}'.format(namespace_name, op_name)
+        op = torch._C._jit_get_operation(qualified_op_name)
+
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
+        op.__module__ = self.__module__ + "." + namespace_name
+        opoverloadbundle = OpOverloadBundle(qualified_op_name, op_name, op)
+        setattr(self, op_name, opoverloadbundle)
 
 '''
 FYI:

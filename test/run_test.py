@@ -103,6 +103,7 @@ TESTS = discover_tests(
         'test_metal',
         'test_nnapi',
         'test_python_dispatch',
+        'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
         'test_throughput_benchmark',
@@ -198,6 +199,9 @@ WINDOWS_BLOCKLIST = [
     "distributed/elastic/agent/server/test/api_test",
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
+    "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
 ] + FSDP_TEST
 
@@ -207,6 +211,9 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
+    "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
     "test_determination",
     "test_multiprocessing",
@@ -342,6 +349,9 @@ DISTRIBUTED_TESTS = [
     "distributed/elastic/multiprocessing/api_test",
     "distributed/_sharding_spec/test_sharding_spec",
     "distributed/_sharded_tensor/test_sharded_tensor",
+    "distributed/_sharded_tensor/ops/test_embedding",
+    "distributed/_sharded_tensor/ops/test_embedding_bag",
+    "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
@@ -587,7 +597,7 @@ def test_distributed(test_module, test_directory, options):
                         test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options)
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
                 if return_code != 0:
                     return return_code
             finally:

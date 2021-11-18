@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -12,7 +14,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, slowTest)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyOnCPUAndCUDA,
+    (instantiate_device_type_tests, dtypes, onlyNativeDeviceTypes,
      skipCUDAIfRocm, onlyCUDA, dtypesIfCUDA, dtypesIfCPU, onlyCPU, largeTensorTest)
 
 # TODO: remove this
@@ -667,7 +669,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(val, expected_val, atol=0, rtol=0)
         self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypesIfCUDA(*(get_all_dtypes(include_complex=False,
                                    include_bool=False,
                                    include_half=False,
@@ -878,19 +880,8 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(res1val[:, :], res2val[:, :, k - 1], atol=0, rtol=0)
             self.assertEqual(res1ind[:, :], res2ind[:, :, k - 1], atol=0, rtol=0)
 
-    # test overlapping output
-    @dtypes(torch.double)
-    @onlyOnCPUAndCUDA   # Fails on XLA
-    def test_kthvalue_overlap(self, device, dtype):
-        S = 10
-        k = 5
-        a = torch.randn(S, device=device)
-        indices = torch.empty((), device=device, dtype=torch.long)
-        with self.assertRaisesRegex(RuntimeError, "unsupported operation:"):
-            torch.kthvalue(a, k, out=(a, indices))
-
     @dtypes(torch.float)
-    @onlyOnCPUAndCUDA   # Fails on XLA
+    @onlyNativeDeviceTypes   # Fails on XLA
     def test_kthvalue_scalar(self, device, dtype):
         # Test scalar input (test case from https://github.com/pytorch/pytorch/issues/30818)
         # Tests that passing a scalar tensor or 1D tensor with 1 element work either way

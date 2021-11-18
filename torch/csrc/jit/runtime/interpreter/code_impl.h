@@ -463,7 +463,7 @@ struct CodeImpl {
     TORCH_INTERNAL_ASSERT(bailout_index >= 0);
 
     auto build_bailout_graph = [bailout_index,
-                                unoptimized_graph](Function& func) {
+                                unoptimized_graph](GraphFunction& func) {
       BuildBailOutGraphFrom(bailout_index, unoptimized_graph, func.graph());
     };
 
