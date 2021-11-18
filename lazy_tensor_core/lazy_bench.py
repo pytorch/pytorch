@@ -1,4 +1,3 @@
-
 import argparse
 import collections
 import copy
@@ -44,7 +43,7 @@ SKIP = {}
 current_name = ""
 current_device = ""
 
-@functools.lru_cache(1)
+@functools.cache
 def output_csv(name, headers):
     output = csv.writer(
         io.TextIOWrapper(
@@ -217,7 +216,6 @@ class ToDeviceSync:
         if current_device == 'cuda':
             torch.cuda.synchronize()
 
-
 def timed(model, example_inputs, sync, times=1):
     results = []
     sync.final_sync(results)
@@ -272,8 +270,8 @@ def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, l
     results.append(overhead)
     output_csv(
         "lazy_overheads.csv",
-        ("dev", "name", "overhead"),
-    ).writerow([current_device, current_name, f"{overhead:.4f}"])
+        ("dev", "name", "overhead", "pvalue"),
+    ).writerow([current_device, current_name, f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, 30):<30} {current_device:<4}  {'trace overheads':<20} overhead: {overhead:.4f} pvalue: {pvalue:.4e}")
     return (overhead, pvalue)
 
@@ -301,9 +299,9 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     results.append(speedup)
     output_csv(
         "lazy_compute.csv",
-        ("experiment", "dev", "name", "speedup"),
-    ).writerow([experiment, current_device, current_name, f"{speedup:.4f}"])
-    print(f"{short_name(name, 30):<30} {current_device:<4}  {experiment:<20} speedup: {speedup:.4f} pvalue: {pvalue:.4e}")
+        ("name", "dev", "experiment", "speedup", "pvalue"),
+    ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.4e}"])
+    print(f"{short_name(current_name, 30):<30} {current_device:<4}  {experiment:<20} speedup: {speedup:.4f} pvalue: {pvalue:.4e}")
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
