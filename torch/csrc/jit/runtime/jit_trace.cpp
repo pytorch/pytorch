@@ -312,7 +312,6 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
     td.traced_graph_->block()->registerOutput(td.old_to_new_.at(out));
   }
 
-
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
   return td.traced_graph_;
 }
