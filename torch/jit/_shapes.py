@@ -499,7 +499,6 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
 
 def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
     assert isinstance(
-        
         conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase
     )
     weight, bias, stride, padding, dilation, groups = unchecked_cast( 
