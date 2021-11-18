@@ -1059,22 +1059,19 @@ class AbstractTestCases:
                 torch.randn(2, 0).unflatten(1, (2, -1, 0))
 
         def test_unravel_index(self):
-            # Expected error for negative indices/shape
-            self.assertRaises(ValueError, lambda: torch.unravel_index([-1, -2], (1, 2)))
+            # Expected error for negative indices/shape (not supported yet)
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([-1, -2]), torch.tensor([-1, -2])))
 
             # Expected error when non-integral type tensors/values are passed
-            self.assertRaises(TypeError, lambda: torch.unravel_index([1.2, 2.3], torch.tensor([2, 3])))
             self.assertRaises(TypeError, lambda: torch.unravel_index(torch.tensor([1, 2]), torch.tensor([2.3, 3.4])))
             self.assertRaises(TypeError, lambda: torch.unravel_index(torch.tensor([1, 2]), [2.3, 3.4]))
 
             # Expected error when any index is out of bound for given shape
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([3, 4]), torch.tensor([1, 2])))
-            self.assertRaises(ValueError, lambda: torch.unravel_index([3, 4], [1, 2]))
 
-            # Expected error when shape is empty but indices is not
+            # Expected error when target shape cannot cover source indices
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([1, 2]), torch.tensor([], dtype=torch.int64)))
-            self.assertRaises(ValueError, lambda: torch.unravel_index([1, 2], []))
+            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([10, 11]), torch.tensor([1, 2], dtype=torch.int64)))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):
