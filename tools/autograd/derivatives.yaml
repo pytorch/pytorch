@@ -486,6 +486,7 @@
 
 - name: diag(Tensor self, int diagonal=0) -> Tensor
   self: diag_backward(grad, self.sizes(), diagonal)
+  result: auto_linear
 
 - name: diagonal(Tensor(a) self, int offset=0, int dim1=0, int dim2=1) -> Tensor(a)
   self: diagonal_backward(grad, self.sizes(), offset, dim1, dim2)
@@ -745,6 +746,7 @@
 
 - name: inverse(Tensor self) -> Tensor
   self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
+  result: -at::matmul(at::matmul(result, self_t), result)
 
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
@@ -1389,6 +1391,9 @@
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads, self, eigenvalues, eigenvectors)
+  # FIXME: Use eigenvalues, eigenvectors: linalg_eig_jvp instead (for now this is not possible due to a codegen limitation)
+  eigenvalues: std::get<0>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors))
+  eigenvectors: std::get<1>(linalg_eig_jvp(self_t, eigenvalues, eigenvectors))
 
 - name: t(Tensor(a) self) -> Tensor(a)
   self: grad.t()
@@ -1772,6 +1777,9 @@
 - name: upsample_bilinear2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
+- name: _upsample_bilinear2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  self: _upsample_bilinear2d_aa_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
+
 - name: upsample_bicubic2d(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   self: upsample_bicubic2d_backward(grad, output_size, self.sizes(), align_corners, scales_h, scales_w)
 
@@ -1801,6 +1809,9 @@
 
 - name: upsample_bilinear2d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   input: upsample_bilinear2d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
+
+- name: _upsample_bilinear2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  input: _upsample_bilinear2d_aa_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
 
 - name: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   input: upsample_trilinear3d_backward(grad, output_size, input.sizes(), align_corners, scale_factors)
@@ -2097,6 +2108,9 @@
 - name: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: upsample_bilinear2d(grad, output_size, align_corners, scales_h, scales_w)
 
+- name: _upsample_bilinear2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  grad_output: _upsample_bilinear2d_aa(grad, output_size, align_corners, scales_h, scales_w)
+
 - name: upsample_bicubic2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   grad_output: upsample_bicubic2d(grad, output_size, align_corners, scales_h, scales_w)
 
@@ -2126,6 +2140,9 @@
 
 - name: upsample_bilinear2d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   grad_output: upsample_bilinear2d(grad, output_size, align_corners, scale_factors)
+
+- name: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  grad_output: _upsample_bilinear2d_aa(grad, output_size, align_corners, scale_factors)
 
 - name: upsample_trilinear3d_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
   grad_output: upsample_trilinear3d(grad, output_size, align_corners, scale_factors)

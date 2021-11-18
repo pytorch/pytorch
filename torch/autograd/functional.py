@@ -1,7 +1,7 @@
 import torch
 from typing import Tuple, List
 from . import forward_ad as fwAD
-from torch._vmap_internals import _vmap  # can we replace with use of is_grads_batched=True
+from torch._vmap_internals import _vmap
 
 # Utility functions
 
@@ -506,7 +506,9 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
         strategy (str, optional): Set to ``"forward-mode"`` or ``"reverse-mode"`` to
             determine whether the Jacobian will be computed with forward or reverse
             mode AD. Currently, ``"forward-mode"`` requires ``vectorized=True``.
-            Defaults to ``"reverse-mode"``.
+            Defaults to ``"reverse-mode"``. If ``func`` has more outputs than
+            inputs, ``"forward-mode"`` tends to be more performant. Otherwise,
+            prefer to use ``"reverse-mode"``.
 
     Returns:
         Jacobian (Tensor or nested tuple of Tensors): if there is a single
@@ -547,7 +549,10 @@ def jacobian(func, inputs, create_graph=False, strict=False, vectorize=False, st
          tensor([[3., 0.],
                  [0., 3.]]))
     """
-    assert strategy in ("forward-mode", "reverse-mode")
+    assert strategy in ("forward-mode", "reverse-mode"), ('Expected strategy to be either '
+        '"forward-mode" or "reverse-mode". Hint: If your function has more outputs than '
+        'inputs, "forward-mode" tends to be more performant. Otherwise, prefer to use '
+        '"reverse-mode".')
     if strategy == "forward-mode":
         if create_graph:
             raise NotImplementedError('torch.autograd.functional.jacobian: `create_graph=True` '
@@ -765,7 +770,8 @@ def hessian(func, inputs, create_graph=False, strict=False, vectorize=False, out
     """
 
     is_inputs_tuple, inputs = _as_tuple(inputs, "inputs", "hessian")
-    assert outer_jacobian_strategy in ("forward-mode", "reverse-mode")
+    assert outer_jacobian_strategy in ("forward-mode", "reverse-mode"), ('Expected strategy '
+        'to be either "forward-mode" or "reverse-mode".')
 
     def ensure_single_output_function(*inp):
         out = func(*inp)
