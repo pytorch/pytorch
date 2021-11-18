@@ -643,9 +643,8 @@ def convert(model: GraphModule, is_reference: bool = False,
     model = QuantizedGraphModule(model, act_post_process_removed_graph, preserved_attributes)
     if not is_reference:
         model = duplicate_dequantize_node(model)
-        print("duplicated dequantize:", model)
         model = fold_weight(model, node_name_to_scope)
         model = lower_to_fbgemm(model)
-        # model = remove_quant_dequant_pairs(model)
-        # model = remove_extra_dequantize(model)
+        model = remove_quant_dequant_pairs(model)
+        model = remove_extra_dequantize(model)
     return model

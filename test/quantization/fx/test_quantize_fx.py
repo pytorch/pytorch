@@ -1386,9 +1386,12 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_module(nn.Linear),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
-            ns.call_method("dequantize"),
-            ns.call_function(torch.add),
-            ns.call_function(torch.quantize_per_tensor),
+            # the following pattern is produced, but it's fused into
+            # torch.ops.quantized.add
+            # ns.call_method("dequantize"),
+            # ns.call_function(torch.add),
+            # ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
             ns.call_function(torch.ops.quantized.add),
             # m1
             ns.call_module(nnq.Linear),
@@ -3227,19 +3230,19 @@ class TestQuantizeFx(QuantizationTestCase):
                                         "module_name": [("mods1.0", None)]}
 
                 node_occurrence = {
-                    ns.call_function(torch.quantize_per_tensor): 2,
+                    ns.call_function(torch.quantize_per_tensor): 1,
                     ns.call_function(torch.nn.functional.linear): 1,
                     ns.call_function(torch.ops.quantized.linear): 1,
                     ns.call_function(torch.ops.quantized.add): 1,
-                    ns.call_method("dequantize"): 2
+                    ns.call_function(torch.ops.quantized.mul): 1,
+                    ns.call_method("dequantize"): 1,
                 }
                 order_check = [
                     ns.call_function(torch.nn.functional.linear),
                     ns.call_function(torch.quantize_per_tensor),
                     ns.call_function(torch.ops.quantized.linear),
                     ns.call_function(torch.ops.quantized.add),
-                    ns.call_method("dequantize"),
-                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.mul),
                     ns.call_module(nnq.Linear),
                     ns.call_method("dequantize"),
                 ]
@@ -5605,11 +5608,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model_list = get_available_classification_models(models)
         quantized_model_list = get_available_classification_models(quantized_models)
 
-        no_pretrained_model = set(['shufflenet_v2_x0_5', 'shufflenet_v2_x1_5', 'shufflenet_v2_x2_0'])
-        quantized_model_list = set(quantized_model_list) - no_pretrained_model
+        quantized_model_list = set(quantized_model_list)
         # test eager and graph consistency
         model_list = quantized_model_list
-        model_list = set(model_list)
         # mobilenet/inception_v3/googlenet qat is not working due to AdaptiveAveragePool qat
         # we might observe the output of AdaptiveAveragePool in the future
         # and re-enable the test
@@ -5782,7 +5783,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             converted_ref = convert_fx(prepared_ref)
             inp = torch.rand(5, 5)
             out = converted(inp)
-            out_ref = converted(inp)
+            out_ref = converted_ref(inp)
 
             torch.testing.assert_allclose(out, out_ref)
 if __name__ == '__main__':
