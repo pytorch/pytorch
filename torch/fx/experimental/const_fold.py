@@ -1,4 +1,4 @@
-from typing import Dict, Set, Optional, Union
+from typing import Callable, Dict, Set, Optional, Union
 
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_utils as acc_utils
@@ -112,7 +112,8 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
 
 
 def split_const_subgraphs(
-    module: Union[torch.nn.Module, torch.fx.GraphModule]
+    module: Union[torch.nn.Module, torch.fx.GraphModule],
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -138,10 +139,17 @@ def split_const_subgraphs(
 
         # If the node itself is constant, or all of its inputs are constant,
         # then tag it as constant.
-        if node.op == "get_attr" or set(node.all_input_nodes).issubset(const_nodes):
-            const_nodes.add(node)
-            if node.op != "get_attr":
-                found_const_folding = True
+        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(const_nodes):
+            continue
+
+        # If provided skip folding function says to skip, then skip.
+        if skip_folding_node_fn and skip_folding_node_fn(node):
+            continue
+
+        # Must be a constant foldable node at this point.
+        const_nodes.add(node)
+        if node.op != "get_attr":
+            found_const_folding = True
 
     # If we did not find any const folding then return early without a const fold subgraph.
     if not found_const_folding:
