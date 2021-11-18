@@ -150,22 +150,7 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateAllTypes.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateQTypes.h>
+#include <TH/THGenerateByteType.h>
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
@@ -194,5 +179,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
+
+void storage_copy(at::Storage dst, at::Storage src, bool non_blocking=false);
 
 #endif
