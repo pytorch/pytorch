@@ -22,7 +22,7 @@ message TwoNumberStatsProto {
 // a node outputs to the blob.
 message BlobProfile {
   // Name of the blob (corresponds to OperatorDef.output).
-  optional string name = 1;  // required
+  optional string name = 1; // required
 
   // Profiling statistics.
   optional TwoNumberStatsProto bytes_used = 3;
@@ -45,7 +45,6 @@ message ProfDAGProto {
 
   // The extra_info from the operator device option.
   repeated string extra_info = 7;
-
 }
 
 // Operator profiling information.
