@@ -98,6 +98,17 @@ class cuBLASModule:
             return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
         raise AssertionError("Unknown attribute " + name)
 
+class _LinalgModule:
+    def __getattr__(self, name):
+        if name == "preferred_library":
+            return torch._C._get_linalg_preferred_backend()
+        raise AssertionError("Unknown attribute " + name)
+
+    def __setattr__(self, name, value):
+        if name == "preferred_library":
+            return torch._C._set_linalg_preferred_backend(value)
+        raise AssertionError("Unknown attribute " + name)
 
 cufft_plan_cache = cuFFTPlanCacheManager()
 matmul = cuBLASModule()
+linalg = _LinalgModule()

@@ -813,7 +813,6 @@ import torch.backends.cudnn
 import torch.backends.mkl
 import torch.backends.mkldnn
 import torch.backends.openmp
-import torch.backends.linalg
 import torch.backends.quantized
 import torch.utils.data
 from torch import __config__ as __config__

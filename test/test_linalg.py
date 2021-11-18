@@ -8194,15 +8194,17 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_preferred_backends(self):
         # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
         x = torch.randint(2, 5, (2, 4, 4), device='cuda', dtype=torch.double)
-        with torch.backends.linalg.flags(preferred=torch.linalg_cusolver):
-            out1 = torch.linalg.inv(x)
-        with torch.backends.linalg.flags(preferred=torch.linalg_magma):
-            out2 = torch.linalg.inv(x)
-        with torch.backends.linalg.flags(preferred=torch.linalg_default):
-            # Although linalg preferred flags doesn't affect CPU currently,
-            # we set this to make sure the flag can switch back to default normally.
-            # We may also have different CPU backends in the future.
-            out_ref = torch.linalg.inv(x.cpu())
+
+        torch.backends.cuda.linalg.preferred_library = torch.linalg_cusolver
+        out1 = torch.linalg.inv(x)
+
+        torch.backends.cuda.linalg.preferred_library = torch.linalg_magma
+        out2 = torch.linalg.inv(x)
+
+        torch.backends.cuda.linalg.preferred_library = torch.linalg_default
+        # Although linalg preferred flags doesn't affect CPU currently,
+        # we set this to make sure the flag can switch back to default normally.
+        out_ref = torch.linalg.inv(x.cpu())
 
         self.assertEqual(out_ref, out1.cpu())
         self.assertEqual(out1, out2)
