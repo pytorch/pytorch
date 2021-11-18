@@ -180,7 +180,7 @@ class Event(torch._C._CudaEventBase):
         event.
 
         Use ``torch.cuda.current_stream()`` if no stream is specified.
-        
+
         .. note:: This is a wrapper around ``cudaStreamWaitEvent()``: see
             `CUDA Event documentation`_ for more info.
         """
