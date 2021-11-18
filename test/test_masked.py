@@ -12,6 +12,47 @@ from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, onlyNativeDeviceTypes)
 
 
+def apply_masked_reduction_along_dim(op, input, *args, **kwargs):
+    """Applies reduction op along given dimension to strided x
+    elements that are valid according to mask tensor.
+    """
+    mask = kwargs.pop('mask', None)
+    dim_pos = kwargs.pop('dim_position', 0)
+    if input.ndim == 0:
+        # scalar input
+        return op(input, *args, **kwargs)
+    keepdim = kwargs.pop('keepdim', False)
+    dtype = kwargs.get('dtype', input.dtype)
+    if dim_pos < len(args):
+        assert 'dim' not in kwargs, (args, kwargs)
+        dim = args[dim_pos]
+        args0 = args[:dim_pos] + (None,) + args[dim_pos + 1:]
+    else:
+        dim = kwargs.pop('dim', None)
+        args0 = args
+    dim_ = torch._masked._canonical_dim(dim, input.ndim)
+    inpmask = torch._masked._input_mask(input, mask=mask)
+    ranges = []
+    shape = []
+    for i in range(input.ndim):
+        if i in dim_:
+            ranges.append((slice(None),))
+            shape.append(1)
+        else:
+            ranges.append(range(input.shape[i]))
+            shape.append(input.shape[i])
+    output = input.new_full(shape, float('nan') if dtype.is_floating_point else 0, dtype=dtype)
+    for s in itertools.product(*ranges):
+        data = input[s].flatten()[inpmask[s].flatten().argwhere()]
+        if not data.numel():
+            continue
+        output[s][0] = op(data, *args0, **kwargs)
+    if not keepdim:
+        shape = [shape[i] for i in range(len(shape)) if i not in dim_]
+        output = output.reshape(shape)
+    return output
+
+
 def apply_masked_normalization_along_dim(op, x, dim, dtype=None, mask=None):
     """Applies normalization op along given dimension to strided x
     elements that are valid according to mask tensor.
@@ -30,6 +71,7 @@ def apply_masked_normalization_along_dim(op, x, dim, dtype=None, mask=None):
 
 
 reference_functions = dict(
+    norm=lambda *args, **kwargs: apply_masked_reduction_along_dim(torch.linalg.vector_norm, *args, **dict(kwargs, dim_position=1)),
     softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.softmax, *args, **kwargs),
     log_softmax=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.log_softmax, *args, **kwargs),
     softmin=lambda *args, **kwargs: apply_masked_normalization_along_dim(torch.nn.functional.softmin, *args, **kwargs),
