@@ -843,7 +843,6 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
 // Vectorized<int64_t> of 512 bits containing all ones (i.e., eight negative 1s).
 // A Vec<double> of 256 bits containing all ones can be cast to a
 // Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
-
 // There is a struct here because we don't have static_if and I can't
 // partially specialize a templated function.
 template<typename dst_t, typename src_t>
@@ -861,6 +860,7 @@ struct CastImpl<scalar_t, scalar_t> {
     return src;
   }
 };
+
 template<typename dst_t, typename src_t>
 inline Vectorized<dst_t> cast(const Vectorized<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
