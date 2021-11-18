@@ -79,10 +79,17 @@ class LazyIR:
         base_ctor_value_args = ", ".join(base_ctor_value_args_list)
         has_optional_decls = "\n  ".join([f"bool has_{value}: 1;" for value in optional_values])
         has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
-        members_to_string = "\n    ".join(
-            [(f'ss << ", {t.name}=" << {t.name}_.value();' if isinstance(t.type, OptionalCType)
-                else f'ss << ", {t.name}=" << {t.name}_;')
-             for t in scalar_types])
+        members_to_string = []
+        for t in scalar_types:
+            if isinstance(t.type, OptionalCType):
+                members_to_string.append(f"""if ({t.name}_.has_value()) {{
+    ss << ", {t.name}=" << {t.name}_.value();
+}} else {{
+    ss << ", {t.name}=null";
+}}""")
+            else:
+                members_to_string.append(f'ss << ", {t.name}=" << {t.name}_;')
+        members_to_string = "\n    ".join(members_to_string)
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
