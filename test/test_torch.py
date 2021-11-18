@@ -4646,7 +4646,7 @@ else:
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypes(torch.half, torch.float)
     def test_exponential_no_zero(self, device, dtype):
         # naively, 0 in exponential can be generated with probability 2^-24
         # so we need more samples to check if it's not generated
@@ -5522,7 +5522,7 @@ else:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -5532,7 +5532,7 @@ else:
         self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -6122,8 +6122,8 @@ else:
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
     @onlyCUDA
-    @dtypesIfCUDA(*(get_all_complex_dtypes() +
-                    get_all_int_dtypes()))
+    @dtypes(*(get_all_complex_dtypes() +
+              get_all_int_dtypes()))
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
