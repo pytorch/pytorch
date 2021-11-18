@@ -1,4 +1,4 @@
-R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
+R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
@@ -11,10 +11,10 @@ from numpy import number
 
 import torch
 
-from torch.jit._shapes_1 import * # noqa: F403
+from torch.jit._shapes_1 import *
 from torch.jit._shapes_1 import _copy
 
-####    SHAPE COMPUTE FUNCTIONS START   ### # noqa: E266
+####    SHAPE COMPUTE FUNCTIONS START   ###
 
 
 def index_select(self: List[int], dim: int, index: List[int]):
@@ -29,55 +29,6 @@ def index_select(self: List[int], dim: int, index: List[int]):
         else:
             result_size.append(self[i])
     return result_size
-
-
-def avg_pool2d(
-    input: List[int],
-    kernel_size: List[int],
-    stride: List[int],
-    padding: List[int],
-    ceil_mode: bool,
-    count_include_pad: bool,
-    divisor_override: Optional[int],
-):
-    assert len(kernel_size) == 1 or len(kernel_size) == 2
-    kH = kernel_size[0]
-    kW = kH if len(kernel_size) == 1 else kernel_size[1]
-
-    assert len(stride) >= 0 or len(stride) <= 2
-    dH = kH if len(stride) == 0 else stride[0]
-    dW = kW if len(stride) == 0 else (dH if len(stride) == 1 else stride[1])
-    assert len(padding) == 1 or len(padding) == 2
-    padH = padding[0]
-    padW = padH if len(padding) == 1 else padding[1]
-
-    assert divisor_override is None or divisor_override != 0
-    nbatch = input[0] if len(input) == 4 else 1
-    nInputPlane = input[-3]
-    inputHeight = input[-2]
-    inputWidth = input[-1]
-    outputHeight = pooling_output_shape(inputHeight, kH, padH, dH, 1, ceil_mode)
-    outputWidth = pooling_output_shape(inputWidth, kW, padW, dW, 1, ceil_mode)
-    pool2d_shape_check(
-        input,
-        kH,
-        kW,
-        dH,
-        dW,
-        padH,
-        padW,
-        1,
-        1,
-        nInputPlane,
-        inputHeight,
-        inputWidth,
-        outputHeight,
-        outputWidth,
-    )
-    if len(input) == 3:
-        return [nInputPlane, outputHeight, outputWidth]
-    else:
-        return [nbatch, nInputPlane, outputHeight, outputWidth]
 
 
 def embedding(
@@ -102,7 +53,7 @@ def max_int():
 def slice(
     self: List[int], dim: int, start: Optional[int], end: Optional[int], step: int
 ):
-    ndim = len(self) # noqa: F823
+    ndim = len(self)
     assert ndim != 0
     dim = maybe_wrap_dim(dim, ndim)
     start_val = start if start is not None else 0
@@ -239,7 +190,7 @@ def matmul(tensor1: List[int], tensor2: List[int]):
 
         return output_shape
     else:
-        assert False, "both  arguments to matmul need to be at least 1D" # noqa: B011
+        assert False, "both  arguments to matmul need to be at least 1D"
 
 
 def t(self: List[int]):
@@ -304,25 +255,24 @@ def check_shape_forward(
     weight_dim = len(weight_sizes)
 
     # TODO: assertions could be expanded with the error messages
-    assert not check_non_negative(padding), "negative padding"
-    assert not check_non_negative(stride), "negative stride"
+    assert not check_non_negative(padding)
+    assert not check_non_negative(stride)
 
-    assert weight_dim == k, "weight_dim != k"
-    assert weight_sizes[0] >= groups, "weight sizes[0] not >= groups"
-    assert (weight_sizes[0] % groups) == 0, "weight sizes not divisable by groups"
+    assert weight_dim == k
+    assert weight_sizes[0] >= groups
+    assert (weight_sizes[0] % groups) == 0
     # only handling not transposed
-    assert input[1] == weight_sizes[1] * groups, "weight sizes[1] != groups"
+    assert input[1] == weight_sizes[1] * groups
     assert bias is None or (len(bias) == 1 and bias[0] == weight_sizes[0])
 
-    for i in range(k, k):
+    for i in range(2, k):
         assert (input[i] + 2 * padding[i - 2]) >= (
             dilation[i - 2] * (weight_sizes[i] - 1) + 1
-        ), "kernel size can't be bigger than input size"
+        )
 
     # this is not handling transposed convolution yet
 
 
-# this is not handling transposed convolution yet
 def conv_output_size(
     input_size: List[int],
     weight_size: List[int],
@@ -335,6 +285,7 @@ def conv_output_size(
     check_shape_forward(
         input_size, weight_size, bias, stride, padding, dilation, groups
     )
+
     has_dilation = len(dilation) > 0
     dim = len(input_size)
     output_size: List[int] = []
@@ -342,6 +293,7 @@ def conv_output_size(
     weight_output_channels_dim = 0
     output_size.append(input_size[input_batch_size_dim])
     output_size.append(weight_size[weight_output_channels_dim])
+
     for d in range(2, dim):
         dilation_ = dilation[d - 2] if has_dilation else 1
         kernel = dilation_ * (weight_size[d] - 1) + 1
@@ -503,13 +455,13 @@ def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
     assert isinstance(
         conv2dOpContext, __torch__.torch.classes.quantized.Conv2dPackedParamsBase
     )
-    weight, bias, stride, padding, dilation, groups = unchecked_cast(
+    (weight, bias, stride, padding, dilation, groups) = unchecked_cast(
         Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int],
         ops.quantized.conv2d_unpack_sizes(conv2dOpContext),
     )
     return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
 
-####    SHAPE COMPUTE FUNCTIONS END   ### # noqa: E266
-### DO NOT REMOVE THIS STRING!!! # noqa: E266
+####    SHAPE COMPUTE FUNCTIONS END   ###
+### DO NOT REMOVE THIS STRING!!!
 ")====="

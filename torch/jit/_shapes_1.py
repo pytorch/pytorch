@@ -1,17 +1,18 @@
-R"=====("  ### DO NOT REMOVE THIS STRING!!! # noqa: E262
+R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # this file is included in torch/csrc/jit/runtime/symbolic_shape_registry.cpp
 # at compile time and turned into a "raw" string
 # there's a matching one at the bottom
 # mypy: ignore-errors
 # flake8: noqa
 
-from typing import List, Any, Optional, Tuple # noqa: F401
+from typing import List, Any, Optional, Tuple
 
-from numpy import number # noqa: F401
+from numpy import number
 
-import torch # noqa: F401
+import torch
 
-####    SHAPE COMPUTE FUNCTIONS START   ### # noqa: E266
+####    SHAPE COMPUTE FUNCTIONS START   ###
+
 
 def broadcast(a: List[int], b: List[int]):
     dimsA = len(a)
@@ -75,15 +76,12 @@ def broadcast_inplace(a: List[int], b: List[int]):
         dimB = dimsB - dimsA + dimA
         sizeA = a[dimA]
         sizeB = b[dimB] if (dimB >= 0) else 1
-        if dimB >= 0:
-            assert sizeA == sizeB
-        else:
-            if sizeA != sizeB and sizeB != 1:
-                # TODO: only assertion error is bound in C++ compilation right now
-                raise AssertionError(
-                    "The size of tensor a {} must match the size of tensor b ("
-                    "{}) at non-singleton dimension {}".format(sizeA, sizeB, dimA)
-                )
+        if sizeA != sizeB and sizeB != 1:
+            # TODO: only assertion error is bound in C++ compilation right now
+            raise AssertionError(
+                "The size of tensor a {} must match the size of tensor b ("
+                "{}) at non-singleton dimension {}".format(sizeA, sizeB, dimA)
+            )
     return _copy(a)
 
 
@@ -357,32 +355,6 @@ def upsample_nearest2d(
     assert 0, "Either output_size or scale_factors must be presented"
 
 
-def my_upsample_bilinear2d(
-    input: List[int], output_size: List[int], scale_factors: Optional[List[float]]
-):
-    out: List[int] = []
-    out.append(input[0])
-    out.append(input[1])
-    if output_size is not None:
-        assert (
-            scale_factors is None
-        ), "Must specify exactly one of output_size and scale_factors"
-        assert len(output_size) == 2
-        out.append(output_size[0])
-        out.append(output_size[1])
-        return out
-
-    if scale_factors is not None:
-        assert (
-            output_size is None
-        ), "Must specify exactly one of output_size and scale_factors"
-        assert len(scale_factors) == 2
-        out.append(int(input[2] * scale_factors[0]))
-        out.append(int(input[3] * scale_factors[1]))
-        return out
-    assert 0, "Either output_size or scale_factors must be presented"
-
-
 def mm(self: List[int], mat2: List[int]):
     assert len(self) == 2, "self must be a matrix"
     assert len(mat2) == 2, "mat2 must be a matrix"
@@ -431,6 +403,7 @@ def squeeze(li: List[int], dim: int):
             out.append(li[i])
     return out
 
-####    SHAPE COMPUTE FUNCTIONS END   ### # noqa: E266
-### DO NOT REMOVE THIS STRING!!! # # noqa: E266
+
+####    SHAPE COMPUTE FUNCTIONS END   ###
+### DO NOT REMOVE THIS STRING!!! #
 ")====="
