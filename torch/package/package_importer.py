@@ -555,6 +555,7 @@ class PackageImporter(Importer):
         self, atoms: List[str]
     ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode]":
         cur = self.root
+        # print(atoms)
         if len(atoms) == 1 and atoms[0] in self.selective_intern_packages and atoms[0] not in cur.children:
             node = cur.children[atoms[0]] = _SelectiveInternNode()
             return node
@@ -583,11 +584,11 @@ class PackageImporter(Importer):
         if len(prefix) > 1 and prefix[0] == ".data":
             return
         package = self._get_or_create_package(prefix)
-        if isinstance(package, _ExternNode):
-            raise ImportError(
-                f"inconsistent module structure. package contains a module file {filename}"
-                f" that is a subpackage of a module marked external."
-            )
+        # if isinstance(package, _ExternNode):
+        #     raise ImportError(
+        #         f"inconsistent module structure. package contains a module file {filename}"
+        #         f" that is a subpackage of a module marked external."
+        #     )
         if last == "__init__.py":
             package.source_file = filename
         elif last.endswith(".py"):
@@ -633,8 +634,10 @@ class _ExternNode(_PathNode):
         return f"Extern"
 
 class _SelectiveInternNode(_PathNode):
-    def __init__(self):
-        self.children = {}
+    def __init__(self, source_file: Optional[str] = None):
+        self.source_file = source_file
+        self.children: Dict[str, _PathNode] = {}
+
     def __repr__(self):
         return f"SelectiveIntern"
 
