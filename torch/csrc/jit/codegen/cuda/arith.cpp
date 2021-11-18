@@ -58,7 +58,8 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
       "Tried to create new output TensorView but received empty list.");
 
   std::vector<IterDomain*> out_domain(
-      TensorDomain::noReductions(tvs[0]->getRootDomain()).size(), nullptr);
+      TensorDomain::noReductions(tvs[0]->getMaybeRFactorDomain()).size(),
+      nullptr);
 
   // For the start and stop offsets, take the maximum of input axes.
   // For now, the offsets of both start and stop are always integer
@@ -71,7 +72,7 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<IterType> iter_types(out_domain.size(), IterType::Iteration);
 
   for (auto tv : tvs) {
-    auto dom = TensorDomain::noReductions(tv->getRootDomain());
+    auto dom = TensorDomain::noReductions(tv->getMaybeRFactorDomain());
     TORCH_INTERNAL_ASSERT(
         dom.size() == out_domain.size(),
         "Invalid tensor view found while producing and output, it has ",
@@ -111,7 +112,8 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
     } else {
       IterType itype = IterType::BroadcastWithoutStride;
       for (const auto tv : tvs) {
-        auto dim = TensorDomain::noReductions(tv->getRootDomain())[dim_i];
+        auto dim =
+            TensorDomain::noReductions(tv->getMaybeRFactorDomain())[dim_i];
         // If there's an unresolved bcast dim and it came from a strided dim,
         // assume output of it should be strided too
         if (dim->getIterType() == IterType::BroadcastWithStride) {
@@ -136,7 +138,8 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
     if (val->getValType().value() == ValType::TensorView) {
       n_dims = std::max(
           n_dims,
-          TensorDomain::noReductions(val->as<TensorView>()->getRootDomain())
+          TensorDomain::noReductions(
+              val->as<TensorView>()->getMaybeRFactorDomain())
               .size());
     }
   }
@@ -144,7 +147,8 @@ std::vector<Val*> maybeBroadcast(const std::vector<Val*>& vals) {
   for (const auto i : c10::irange(vals.size())) {
     if (vals[i]->getValType().value() == ValType::TensorView) {
       auto tv = vals[i]->as<TensorView>();
-      size_t tv_dims = TensorDomain::noReductions(tv->getRootDomain()).size();
+      size_t tv_dims =
+          TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size();
       if (tv_dims < n_dims) {
         std::vector<bool> bcast_flags(n_dims, false);
         for (const auto j : c10::irange(n_dims - tv_dims)) {
@@ -743,9 +747,9 @@ TensorView* broadcast(
       n_broadcasts++;
   TORCH_CHECK(
       nBCastDims - n_broadcasts ==
-          TensorDomain::noReductions(inp->getRootDomain()).size(),
+          TensorDomain::noReductions(inp->getMaybeRFactorDomain()).size(),
       "Invalid broadcast, number of false entries in is_broadcast_dim expected to be ",
-      TensorDomain::noReductions(inp->getRootDomain()).size(),
+      TensorDomain::noReductions(inp->getMaybeRFactorDomain()).size(),
       " but received ",
       nBCastDims - n_broadcasts);
 

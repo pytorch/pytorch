@@ -688,6 +688,14 @@ void Fusion::aliasOutputToInput(Val* output, Val* input) {
   io_alias_[output] = input;
 }
 
+Val* Fusion::getOutputAlias(Val* output) {
+  auto search = io_alias_.find(output);
+  if (search != io_alias_.end()) {
+    return search->second;
+  }
+  return nullptr;
+}
+
 std::unordered_set<int> Fusion::getOutputAliasIndices() const {
   if (io_alias_.empty()) {
     return {};

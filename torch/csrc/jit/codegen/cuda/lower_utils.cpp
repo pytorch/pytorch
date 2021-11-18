@@ -120,7 +120,8 @@ bool isTVOp(const Expr* expr) {
        expr->getExprType().value() == ExprType::BroadcastOp ||
        expr->getExprType().value() == ExprType::TransposeOp ||
        expr->getExprType().value() == ExprType::ShiftOp ||
-       expr->getExprType().value() == ExprType::GatherOp)) {
+       expr->getExprType().value() == ExprType::GatherOp ||
+       expr->getExprType().value() == ExprType::ViewOp)) {
     return true;
   }
   return false;

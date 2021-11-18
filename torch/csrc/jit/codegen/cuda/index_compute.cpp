@@ -257,8 +257,6 @@ void updateHaloInfoForReference(
       // initialization of a reduction buffer. In those cases, since
       // the domain is not going to be predicated, it's not necessary
       // to propagate halo information to the reference tensor.
-      TORCH_INTERNAL_ASSERT(
-          consumer_root_id->isBroadcast() || consumer_root_id->isReduction());
       continue;
     }
     auto reference_id = reference_it->second;
@@ -2210,10 +2208,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     // doesn't have a loop, so the reference tensor doesn't have a
     // mapped domain. The reduction axis can be safely ignored.
     if (it == reference.concrete_to_id.end()) {
-      TORCH_INTERNAL_ASSERT(
-          consumer_root->isReduction(),
-          "No mapped reference domain found for: ",
-          consumer_root);
       continue;
     }
     auto reference_root = it->second;
@@ -3010,7 +3004,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     }
 
     // Find a corresponding consumer root id if exists. Used to
-    // support shift. If ca ontig_id is a merged non-root domain, nothing
+    // support shift. If a contig_id is a merged non-root domain, nothing
     // is required to do for shift as shift-related domains are
     // excluded from contig domains.
     IterDomain* consumer_id = nullptr;

@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
 
 #include <c10/util/irange.h>
 
@@ -637,6 +638,18 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
+ViewOp::ViewOp(TensorView* out, TensorView* in)
+    : Expr(ExprType::ViewOp), out_(out), in_(in) {
+  addOutput(out);
+  addInput(in);
+  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
 IterDomain::IterDomain(
     Val* start,
     Val* extent,
@@ -970,7 +983,7 @@ TensorDomain::TensorDomain(
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
       contiguity_.size(),
       " but needed one of size ",
-      root_domain_.size());
+      getMaybeRFactorDomain().size());
 
   auto inps = IterVisitor::getInputsTo(
       std::vector<Val*>(domain_.begin(), domain_.end()));
@@ -1318,6 +1331,12 @@ bool TensorDomain::hasNontrivialReduction(const std::vector<IterDomain*>& td) {
     }
   }
   return false;
+}
+
+TensorDomain* TensorDomain::view(
+    const std::vector<std::shared_ptr<ViewTransform>>& transforms) {
+  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to view transform a 0-dim domain");
+  return transformView(this, transforms);
 }
 
 // TODO: Rfactor a Welford

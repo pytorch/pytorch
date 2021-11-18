@@ -226,6 +226,7 @@ class TORCH_CUDA_CU_API Fusion final {
   // TODO: alias should be made aware to segmentation, so we'll always include
   // the input tensor to the section where output is produced.
   void aliasOutputToInput(Val* output, Val* input);
+  Val* getOutputAlias(Val* output);
   std::unordered_set<int> getOutputAliasIndices() const;
   std::vector<std::pair<int, int>> getInputAliasIndices() const;
 

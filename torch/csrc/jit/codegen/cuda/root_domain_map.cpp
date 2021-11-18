@@ -351,11 +351,11 @@ bool ComputeAtRootDomainMap::canMap(
     const IterDomain* id_b) const {
   TORCH_INTERNAL_ASSERT(
       id_a->definition() == nullptr || id_a->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_a);
   TORCH_INTERNAL_ASSERT(
       id_b->definition() == nullptr || id_b->isRFactorProduct(),
-      "Non-root domain is not supproted: ",
+      "Non-root domain is not supported: ",
       id_b);
 
   // Forward to overloaded functions

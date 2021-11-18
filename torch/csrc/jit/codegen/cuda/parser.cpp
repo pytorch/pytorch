@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
+#include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/type_promotion.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -37,8 +38,17 @@ constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
+// constexpr auto kNumViewSize = 2;
 
 namespace {
+
+std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
+  TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
+  auto optional_sizes = tensor_type->sizes().concrete_sizes();
+  TORCH_INTERNAL_ASSERT(
+      optional_sizes.has_value(), "Missing size information for the tensor.");
+  return optional_sizes.value();
+}
 
 #define REGISTER_PARSE_RULE(op, func_body, ...)                                \
   registerParseRule(                                                           \
@@ -2136,6 +2146,38 @@ class IrParser {
             return OperatorType::Reduction;
           });
     }
+
+    /*
+    // TODO: Enable view in parser by detecting non-alias view operation
+    {
+      std::array<const char*, kNumViewSize> View = {
+          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
+          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)"};
+      for (auto signature : View) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto self_value = node->inputs()[0];
+              auto self = value_map[self_value->unique()]->as<TensorView>();
+
+              auto self_type = self_value->type()->cast<c10::TensorType>();
+              TORCH_INTERNAL_ASSERT(self_type != nullptr);
+              auto self_sizes = getTensorSizes(self_type);
+
+              auto size_optional =
+                  constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  size_optional.has_value(), "The size parameter is required.");
+
+              auto output = view(self, self_sizes, size_optional->vec());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            nullptr,
+            nullptr);
+      }
+    }
+    */
   }
 
   void processJitNode(const JitOp* node) {
@@ -2645,6 +2687,29 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     }
     return true;
   }
+
+  /*
+  // TODO: Enable view in parser by detecting non-alias view operation
+  static auto view_schema =
+      getOperatorForLiteral(
+          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
+          ->schema();
+  static auto reshape_schema =
+      getOperatorForLiteral(
+          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")
+          ->schema();
+  if (node->matches(view_schema) || node->matches(reshape_schema)) {
+    switch (offset) {
+      // argument 1: new tensor size;
+      case 1:
+        profileSize(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
+  */
 
   static auto batch_norm_impl_index_schema =
       getOperatorForLiteral(

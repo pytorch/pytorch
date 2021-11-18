@@ -14130,6 +14130,348 @@ TEST(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
+TEST(NVFuserTest, FusionViewOutput_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 4, 10};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  fusion.addOutput(x_view);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+  std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+  auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion);
+  auto outputs = fe.runFusion(aten_inputs, lparams);
+
+  auto at_x_add_bias = at_x + at_bias;
+  auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+
+  testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
+}
+
+TEST(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // The number of elements in input and output shapes do not match,
+  // so this view transformation is invalid.
+  // 2 * 10 * 40 != 2 * 50 * 4 * 10
+
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 50, 4, 10};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+}
+
+TEST(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Only one dimension can be inferred in the output shape.
+  // Otherwise, the size of the dimensions is ambiguous.
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, -1, 4, -1};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
+}
+
+TEST(NVFuserTest, FusionViewFailReduction_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  // View is only supported by the pointwise scheduler,
+  // so it should fail with any reduction operations
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 2, 20};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  auto x_sum = sum(x_view, {-1});
+
+  fusion.addOutput(x_sum);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+
+  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+}
+
+TEST(NVFuserTest, FusionViewFailPersistent_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  // View is only supported by the pointwise scheduler,
+  // so it should fail with any persistent normalization operations
+  std::vector<int64_t> input_shape{2, 10, 40};
+  std::vector<int64_t> output_shape{2, 10, 2, 20};
+
+  TensorView* x = makeSymbolicTensor(input_shape.size());
+  TensorView* bias = makeSymbolicTensor(input_shape.size());
+  fusion.addInput(x);
+  fusion.addInput(bias);
+
+  auto x_add_bias = add(x, bias);
+  auto x_view = view(x_add_bias, input_shape, output_shape);
+  auto x_softmax = softmax(x_view, {-1});
+
+  fusion.addOutput(x_softmax);
+
+  const auto options =
+      at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor at_x = at::randn(input_shape, options);
+  at::Tensor at_bias = at::randn(input_shape, options);
+
+  FusionExecutorCache fusion_executor_cache(std::move(fusion_ptr));
+  ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
+}
+
+void addViewGeluFusion(
+    std::vector<int64_t>& input_shape,
+    std::vector<int64_t>& output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_add_bias = add(x, bias);
+    auto x_view = view(x_add_bias, input_shape, output_shape);
+    auto y = gelu(x_view);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(input_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_add_bias = at_x + at_bias;
+    auto at_x_view = at::native::view(at_x_add_bias, output_shape);
+    auto at_y = at::gelu(at_x_view, false);
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewSplit_CUDA) {
+  std::vector<int64_t> input_shape{80};
+  std::vector<int64_t> output_shape{2, 4, 10};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewBroadcast_CUDA) {
+  std::vector<int64_t> input_shape{80};
+  std::vector<int64_t> output_shape{1, 80};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewMerge_CUDA) {
+  std::vector<int64_t> input_shape{2, 40, 7};
+  std::vector<int64_t> output_shape{560};
+  addViewGeluFusion(input_shape, output_shape);
+}
+
+TEST(NVFuserTest, FusionViewAllShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, 10}},
+      {{3, 17, 80, 1, 9}, {51, 1, 2, 4, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, 2, 2, 5, 1}},
+      {{22, 22, 2}, {22, 11, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, 2, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, 333, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, 8}},
+      {{1, 333, 1}, {1, 37, 9, 1}},
+      {{1, 333}, {1, 1, 1, 111, 1, 3}},
+      {{22, 1, 22, 1}, {484}},
+      {{1, 333, 1}, {333}},
+      {{1, 27454, 1, 2}, {1, 7844, 1, 7}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : examples) {
+    addViewGeluFusion(e.first, e.second);
+  }
+}
+
+TEST(NVFuserTest, FusionViewInferShmoo_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, -1, 3, 2772}},
+      {{3, 17, 80, 1}, {51, 1, 2, 4, -1}},
+      {{3, 17, 80, 1, 9}, {-1, 1, 2, 4, 10, 9}},
+      {{2, 3, 4, 5}, {1, 6, 1, -1, 2, 5, 1}},
+      {{22, 22, 2}, {22, -1, 1, 1, 4}},
+      {{37, 9, 7, 6, 10}, {333, 2, -1, 3, 35}},
+      {{1, 1, 333, 1}, {1, 1, -1, 1}},
+      {{8, 1, 1, 8, 1, 8}, {8, 2, 4, 1, -1}},
+      {{1, 333, 1}, {1, 37, -1, 1}},
+      {{1, 333}, {1, 1, 1, -1, 1, 3}},
+      {{22, 1, 22, 1}, {-1}},
+      {{1, 333, 1}, {-1}},
+      {{1, 27454, 1, 2}, {1, 7844, 1, -1}},
+      {{1, 7844, 1, 7}, {1, -1, 2}}};
+
+  for (auto e : examples) {
+    addViewGeluFusion(e.first, e.second);
+  }
+}
+
+void geluViewAddFusion(
+    std::vector<int64_t> input_shape,
+    std::vector<int64_t> output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape)
+        : makeSymbolicTensor(input_shape.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(output_shape)
+        : makeSymbolicTensor(output_shape.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_gelu = gelu(x);
+    auto x_view = view(x_gelu, input_shape, output_shape);
+    auto y = add(x_view, bias);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape, options);
+    at::Tensor at_bias = at::randn(output_shape, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_gelu = at::gelu(at_x, false);
+    auto at_x_view = at::native::view(at_x_gelu, output_shape);
+    auto at_y = at_x_view + at_bias;
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewStride_CUDA) {
+  typedef std::vector<int64_t> shape;
+  typedef std::pair<shape, shape> view_example;
+
+  std::vector<view_example> examples = {
+      {{1, 27454, 2}, {1, 7844, 7}},
+      {{1, 19, 1, 12, 7, 1, 99}, {1, 19, 1, 3, 2772}},
+      {{1, 7844, 1, 7}, {1, 27454, 2}}};
+
+  for (auto e : examples) {
+    geluViewAddFusion(e.first, e.second);
+  }
+}
+
+void geluViewBinaryAddFusion(
+    std::vector<int64_t> input_shape1,
+    std::vector<int64_t> input_shape2,
+    std::vector<int64_t> output_shape) {
+  for (auto hasImplicitBroadcast : {false, true}) {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* x = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape1)
+        : makeSymbolicTensor(input_shape1.size());
+    TensorView* bias = (hasImplicitBroadcast)
+        ? makeConcreteTensor(input_shape2)
+        : makeSymbolicTensor(input_shape2.size());
+    fusion.addInput(x);
+    fusion.addInput(bias);
+
+    auto x_gelu = gelu(x);
+    auto x_view = view(x_gelu, input_shape1, output_shape);
+    auto bias_view = view(bias, input_shape2, output_shape);
+    auto y = add(x_view, bias_view);
+    fusion.addOutput(y);
+
+    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+    at::Tensor at_x = at::randn(input_shape1, options);
+    at::Tensor at_bias = at::randn(input_shape2, options);
+    std::vector<IValue> aten_inputs = {at_x, at_bias};
+
+    auto lparams = schedulePointwise(&fusion, aten_inputs);
+
+    FusionExecutor fe;
+    fe.compileFusion(&fusion);
+    auto outputs = fe.runFusion(aten_inputs, lparams);
+
+    auto at_x_gelu = at::gelu(at_x, false);
+    auto at_x_view = at::native::view(at_x_gelu, output_shape);
+    auto at_bias_view = at::native::view(at_bias, output_shape);
+    auto at_y = at_x_view + at_bias_view;
+
+    testValidate(&fusion, outputs, aten_inputs, {at_y}, __LINE__, __FILE__);
+  }
+}
+
+TEST(NVFuserTest, FusionViewBinary_CUDA) {
+  geluViewBinaryAddFusion({27454, 2}, {54908}, {7844, 7});
+}
+
 TEST(NVFuserTest, FusionVectorization1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);

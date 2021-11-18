@@ -957,6 +957,32 @@ std::vector<TensorView*> getReductionTvs(Fusion* fusion) {
   return reduction_tvs;
 }
 
+bool isViewDefinition(TensorView* tv) {
+  auto def_expr = tv->definition();
+  if (def_expr != nullptr) {
+    auto def_expr_type = def_expr->getExprType();
+    if (def_expr_type.has_value() &&
+        def_expr_type.value() == ExprType::ViewOp) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::vector<TensorView*> getViewTVs(Fusion* fusion) {
+  std::vector<TensorView*> view_tvs;
+  auto fusion_vals = fusion->usedMathVals();
+  for (auto producer_tv : ir_utils::filterByType<TensorView>(fusion_vals)) {
+    auto consumer_tvs = ir_utils::consumerTvsOf(producer_tv);
+    for (auto consumer_tv : consumer_tvs) {
+      if (isViewDefinition(consumer_tv)) {
+        view_tvs.push_back(consumer_tv);
+      }
+    }
+  }
+  return view_tvs;
+}
+
 // Reset inputs and outputs to global memory, everything else to local.
 void clearMemorySpace(Fusion* fusion) {
   for (auto tv : ir_utils::allTvs(fusion)) {

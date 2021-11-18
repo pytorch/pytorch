@@ -70,6 +70,7 @@ enum class ExprType {
   TransposeOp,
   ShiftOp,
   GatherOp,
+  ViewOp,
   Split,
   Merge,
 };

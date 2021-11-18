@@ -308,6 +308,7 @@ void GpuLower::replaceSymbolicSizes() {
           (id->getIterType() == IterType::BroadcastWithoutStride)) {
         continue;
       } else if (
+          id->isRFactorProduct() ||
           // NOLINTNEXTLINE(bugprone-branch-clone)
           (id->getIterType() == IterType::BroadcastWithStride) ||
           orig_size->isConstScalar()) {
@@ -710,6 +711,12 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
   void handle(const GatherOp* node) final {
+    const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
+        UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
+    TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
+  }
+
+  void handle(const ViewOp* node) final {
     const auto lowered_node = ir_builder_.create<kir::UnaryOp>(
         UnaryOpType::Set, lowerValue(node->out()), lowerValue(node->in()));
     TORCH_CHECK(gpu_lower_->kir_expr_map_.insert({node, lowered_node}).second);
