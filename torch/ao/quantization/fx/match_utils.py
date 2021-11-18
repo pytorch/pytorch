@@ -79,9 +79,9 @@ def find_matches(
         modules: Dict[str, torch.nn.Module],
         patterns: Dict[Pattern, QuantizeHandler],
         qconfig_map: Dict[str, QConfigAny],
-        standalone_module_names: List[str] = None,
-        standalone_module_classes: List[Callable] = None,
-        custom_module_classes: List[Any] = None) -> Dict[str, MatchResult]:
+        standalone_module_names: Optional[List[str]] = None,
+        standalone_module_classes: Optional[List[Callable]] = None,
+        custom_module_classes: Optional[List[Any]] = None) -> Dict[str, MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
     outputs the information needed to quantize them in future steps.
