@@ -887,4 +887,4 @@ def _register_device_module(device_type, module):
     setattr(m, device_type, module)
 
 # expose return_types
-return_types = torch._C._return_types  # type: ignore[attr-defined]
+from . import return_types
