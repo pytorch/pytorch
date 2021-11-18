@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 
@@ -103,16 +102,9 @@ std::vector<int64_t> Helpers::GetPromotedShape(
   return dimensions;
 }
 
-torch::lazy::Shape Helpers::GetPromotedShape(
-    const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2) {
-  return lazy_tensors::ShapeUtil::MakeShape(
-      shape1.scalar_type(),
-      GetPromotedShape(shape1.sizes(), shape2.sizes()));
-}
-
 torch::lazy::Shape Helpers::GetPromotedBinaryOpShape(
     const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2) {
-  return lazy_tensors::ShapeUtil::MakeShape(
+  return torch::lazy::Shape(
       promoteTypes(shape1.scalar_type(), shape2.scalar_type()),
       GetPromotedShape(shape1.sizes(), shape2.sizes()));
 }

@@ -4,7 +4,6 @@
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -12,10 +11,9 @@ namespace ops {
 
 GetDimensionsSize::GetDimensionsSize(const torch::lazy::Value& input,
                                      std::vector<int64_t> dimensions)
-    : torch::lazy::TsNode(
-          ltc_get_dimensions_size, {input},
-          {lazy_tensors::ShapeUtil::MakeShape(c10::ScalarType::Int, {})},
-          /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
+    : TsNode(ltc_get_dimensions_size, {input},
+             {torch::lazy::Shape(c10::ScalarType::Int, {})},
+             /*num_outputs=*/1, torch::lazy::MHash(dimensions)),
       dimensions_(std::move(dimensions)) {}
 
 std::string GetDimensionsSize::ToString() const {

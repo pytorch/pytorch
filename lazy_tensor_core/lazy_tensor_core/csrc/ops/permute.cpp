@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -27,7 +26,7 @@ std::string Permute::ToString() const {
 torch::lazy::Shape Permute::MakePermuteShape(
     const torch::lazy::Shape& source_shape,
     c10::ArrayRef<int64_t> permutation) {
-  return lazy_tensors::ShapeUtil::MakeShape(
+  return torch::lazy::Shape(
       source_shape.scalar_type(),
       torch::lazy::Permute(permutation, source_shape.sizes()));
 }

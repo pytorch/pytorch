@@ -4,7 +4,6 @@
 
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -15,7 +14,7 @@ AsStrided::AsStrided(const torch::lazy::Value& input, std::vector<int64_t> size,
     : torch::lazy::TsNode(
           torch::lazy::OpKind(at::aten::as_strided), {input},
           [&]() {
-            return lazy_tensors::ShapeUtil::MakeShape(
+            return torch::lazy::Shape(
                 torch::lazy::GetShapeFromTsValue(input).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),
