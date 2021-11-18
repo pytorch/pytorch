@@ -8576,13 +8576,12 @@ Args:
     output_size (int, optional): the size of the output at dimension :attr`dim`.
         If set to :obj:`None`, will get automatically inferred according to
         :obj:`index.max() + 1`
-   out (Tensor, optional): the output tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
     >>> input = torch.tensor([1, 2, 3, 4, 5, 6])
     >>> index = torch.tensor([0, 1, 0, 1, 2, 1])
-
     >>> torch._scatter_reduce(input, 0, index, reduce="sum", output_size=3)
     tensor([3, 12, 5])
 
