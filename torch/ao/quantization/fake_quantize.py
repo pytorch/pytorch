@@ -26,6 +26,9 @@ def _is_per_tensor(qscheme: 'torch.qscheme') -> bool:
 def _is_symmetric_quant(qscheme: 'torch.qscheme') -> bool:
     return qscheme in [torch.per_tensor_symmetric, torch.per_channel_symmetric]
 
+def _is_float_qparams(qscheme: 'torch.qscheme') -> bool:
+    return qscheme in [torch.per_channel_affine_float_qparams, ]
+
 class FakeQuantizeBase(ABC, Module):
     r""" Base fake quantize module
     Any fake quantize implementation should derive from this class.
@@ -105,7 +108,6 @@ class FakeQuantize(FakeQuantizeBase):
           and zero-point.
         quant_min (int): The minimum allowable quantized value.
         quant_max (int): The maximum allowable quantized value.
-        zero_point_dtype(dtype): The dype for quantization zero point.
         observer_kwargs (optional): Arguments for the observer module
 
     Attributes:
@@ -127,7 +129,7 @@ class FakeQuantize(FakeQuantizeBase):
         self.activation_post_process = observer(**observer_kwargs)
         assert torch.iinfo(self.activation_post_process.dtype).min <= quant_min, 'quant_min out of bound'
         assert quant_max <= torch.iinfo(self.activation_post_process.dtype).max, 'quant_max out of bound'
-        if(self.activation_post_process.qscheme == torch.per_channel_affine_float_qparams):
+        if _is_float_qparams(self.activation_post_process.qscheme):
             zero_point_dtype = torch.float
         else:
             zero_point_dtype = torch.int
