@@ -10010,7 +10010,8 @@ op_db: List[OpInfo] = [
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
-        ref=lambda x, alpha=1.0, inplace=False: np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x) - 1)),
+        ref=lambda x, alpha=1.0, inplace=False:
+            np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x) - 1)),
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
@@ -10018,8 +10019,10 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'alpha': 0.8}, {'alpha': 0.8}),
-        inplace_variant=lambda x, alpha=1.0: torch.nn.functional.elu(x, alpha, inplace=True),
+        sample_kwargs=lambda device, dtype, input:
+            ({'alpha': 0.8}, {'alpha': 0.8}),
+        inplace_variant=lambda x, alpha=1.0:
+            torch.nn.functional.elu(x, alpha, inplace=True),
         decorators=[
             DecorateInfo(
                 toleranceOverride({
@@ -10032,7 +10035,8 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.celu',
-        ref=lambda x, alpha=1.0, inplace=False: np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x / alpha) - 1)),
+        ref=lambda x, alpha=1.0, inplace=False:
+            np.maximum(0., x) + np.minimum(0., alpha * (np.exp(x / alpha) - 1)),
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
@@ -10040,8 +10044,10 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'alpha': 0.8}, {'alpha': 0.8}),
-        inplace_variant=lambda x, alpha=1.0: torch.nn.functional.celu(x, alpha, inplace=True),
+        sample_kwargs=lambda device, dtype, input:
+            ({'alpha': 0.8}, {'alpha': 0.8}),
+        inplace_variant=lambda x, alpha=1.0:
+            torch.nn.functional.celu(x, alpha, inplace=True),
         decorators=[
             DecorateInfo(
                 toleranceOverride({
@@ -10065,7 +10071,8 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        sample_kwargs=lambda device, dtype, input: ({'lower': 0., 'upper': 1.}, {'lower': 0., 'upper': 1.}),
+        sample_kwargs=lambda device, dtype, input:
+            ({'lower': 0., 'upper': 1.}, {'lower': 0., 'upper': 1.}),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(partial(torch.nn.functional.rrelu, inplace=True), input, *args, **kwargs),
         decorators=[
@@ -10081,6 +10088,29 @@ op_db: List[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 'TestJit', 'test_variant_consistency_jit'
+            ), ],
+    ),
+    UnaryUfuncInfo(
+        'nn.functional.selu',
+        ref=lambda x, inplace=False:
+            1.0507009873554804934193349852946 * (
+                np.maximum(0., x) + np.minimum(0., 1.6732632423543772848170429916717 * (np.exp(x) - 1))
+            ),
+        dtypes=floating_types(),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        supports_forward_ad=False,
+        supports_autograd=True,
+        assert_autodiffed=False,
+        supports_gradgrad=True,
+        supports_out=False,
+        inplace_variant=lambda x: torch.nn.functional.selu(x, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-2, rtol=1.8e-2),
+                    torch.bfloat16: tol(atol=1e-2, rtol=1.8e-2)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
             ),
         ],
     ),
