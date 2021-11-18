@@ -810,8 +810,11 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   pnode.set_values(values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
@@ -828,8 +831,11 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   pnode.set_values(values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
@@ -852,12 +858,12 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     std::array<IValue, 3> values = {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
-    ProcessedNode list_unpack_pnode(
+    ProcessedFunction fn(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
-        1,
         /*enable_out_variant=*/true,
-        /* check_memory_overlap */ false);
+        /*check_memory_overlap */ false);
+    ProcessedNode list_unpack_pnode(
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
     list_unpack_pnode.set_values(values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
@@ -865,12 +871,12 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     std::array<IValue, 3> values = {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
-    ProcessedNode list_unpack_pnode(
+    ProcessedFunction fn(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
-        1,
         /*enable_out_variant=*/true,
-        /* check_memory_overlap */ false);
+        /*check_memory_overlap */ false);
+    ProcessedNode list_unpack_pnode(
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
     list_unpack_pnode.set_values(values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
@@ -947,4 +953,34 @@ TEST(StaticRuntime, GoodSchemaAliasInfo) {
   const auto x2 = at::randn({3, 6});
   testStaticRuntime(src, {x1, 0}, {x2, 10});
   testStaticRuntime(src, {x1, 10}, {x2, 0});
+}
+
+TEST(ProcessedFunction, ProcessedFunction) {
+  const auto script = R"JIT(
+    def forward(self, inp: Tensor):
+        b = torch.sigmoid(inp).clone()
+        c = torch.transpose(b, 0, 1)
+        return (c)
+  )JIT";
+  script::Module module("module");
+  module.define(script);
+  torch::jit::StaticModule smodule(module);
+
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  ProcessedFunction sigmoid_fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(sigmoid_fn.f());
+  EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
+  EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
+
+  Node* transpose_node = getNodeWithKind(smodule, "aten::transpose");
+  ProcessedFunction transpose_fn(
+      transpose_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(transpose_fn.f());
+  EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
+  EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
 }
