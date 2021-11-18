@@ -104,8 +104,8 @@ Tensor adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("max_pool2d", TORCH_FN(max_pool2d));
-  m.impl("adaptive_avg_pool2d", TORCH_FN(adaptive_avg_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::max_pool2d"), TORCH_FN(max_pool2d));
+  m.impl(TORCH_SELECTIVE_NAME("aten::adaptive_avg_pool2d"), TORCH_FN(adaptive_avg_pool2d));
 }
 
 }
