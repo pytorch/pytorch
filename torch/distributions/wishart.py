@@ -43,12 +43,12 @@ class Wishart(Distribution):
     Zhenxun Wang, Yunan Wu, Haitao Chu.
     """
     arg_constraints = {
-        'covariance_matrix': constraints.stack([constraints.symmetric, constraints.positive_definite]),
-        'precision_matrix': constraints.stack([constraints.symmetric, constraints.positive_definite]),
-        'scale_tril': constraints.stack([constraints.symmetric, constraints.positive_definite]),
+        'covariance_matrix': constraints.positive_definite,
+        'precision_matrix': constraints.positive_definite,
+        'scale_tril': constraints.positive_definite,
         'df': None,
     }
-    support = constraints.stack([constraints.symmetric, constraints.positive_definite])
+    support = constraints.positive_definite
     has_rsample = True
 
     def __init__(self, covariance_matrix=None, precision_matrix=None, scale_tril=None, df=None,
