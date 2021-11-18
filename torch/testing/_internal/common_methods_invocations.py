@@ -10115,7 +10115,7 @@ op_db: List[OpInfo] = [
         'nn.functional.silu',
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
-        dtypes=floating_types(),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
         supports_autograd=True,
@@ -10123,6 +10123,14 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({
+                    torch.float16: tol(atol=1e-5, rtol=3e-5),
+                    torch.bfloat16: tol(atol=1e-5, rtol=3e-5)
+                }),
+                'TestUnaryUfuncs', device_type='cuda',
+            ), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.softmin',
