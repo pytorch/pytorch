@@ -473,17 +473,17 @@ class TestLinalg(TestCase):
 
         # cholesky requires the input to be a square matrix or batch of square matrices
         A = torch.randn(2, 3, device=device, dtype=dtype)
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'must be batches of square matrices'):
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
             torch.linalg.cholesky(A)
         A = torch.randn(2, 2, 3, device=device, dtype=dtype)
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'must be batches of square matrices'):
+        with self.assertRaisesRegex(RuntimeError, r'must be batches of square matrices'):
             torch.linalg.cholesky(A)
         with self.assertRaisesRegex(np.linalg.LinAlgError, r'Last 2 dimensions of the array must be square'):
             np.linalg.cholesky(A.cpu().numpy())
 
         # cholesky requires the input to be at least 2 dimensional tensor
         A = torch.randn(2, device=device, dtype=dtype)
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'must have at least 2 dimensions'):
+        with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.cholesky(A)
         with self.assertRaisesRegex(np.linalg.LinAlgError,
                                     r'1-dimensional array given\. Array must be at least two-dimensional'):
@@ -492,7 +492,7 @@ class TestLinalg(TestCase):
         # if the input matrix is not positive definite, an error should be raised
         A = torch.eye(3, 3, dtype=dtype, device=device)
         A[-1, -1] = 0  # Now A is not positive definite
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'minor of order 3 is not positive-definite'):
+        with self.assertRaisesRegex(RuntimeError, r'minor of order 3 is not positive-definite'):
             torch.linalg.cholesky(A)
         with self.assertRaisesRegex(np.linalg.LinAlgError, r'Matrix is not positive definite'):
             np.linalg.cholesky(A.cpu().numpy())
@@ -502,7 +502,7 @@ class TestLinalg(TestCase):
         A = A.reshape((1, 3, 3))
         A = A.repeat(5, 1, 1)
         A[4, -1, -1] = 0  # Now A[4] is not positive definite
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 4\): The factorization could not be completed'):
+        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 4\): The factorization could not be completed'):
             torch.linalg.cholesky(A)
 
         # if out tensor with wrong shape is passed a warning is given
