@@ -32,7 +32,6 @@ from torch import nn
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    init_multigpu_helper,
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
@@ -204,45 +203,29 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
             c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
 
-class ProcessGroupNCCLTest(MultiProcessTestCase):
-    def _create_process_group_nccl(self, store, rank, world_size, opts):
-        # create nccl pg with opts
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size, opts)
-        return pg
-
-    def opts(self, high_priority_stream=False):
-        opts = c10d.ProcessGroupNCCL.Options()
-        opts.is_high_priority_stream = high_priority_stream
-        return opts
+class ProcessGroupNCCLTest(TestCase):
+    MAIN_PROCESS_RANK = 0
 
     def setUp(self):
-        super(ProcessGroupNCCLTest, self).setUp()
+        self.rank = self.MAIN_PROCESS_RANK
+        self.world_size = 1
+        self.file = tempfile.NamedTemporaryFile(delete=False)
+
         # NCCL_BLOCKING_WAIT overrides NCCL_ASYNC_ERROR_HANDLING hence tests
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
-        # self.num_gpus = torch.cuda.device_count()
-        self._spawn_processes()
+        self.num_gpus = torch.cuda.device_count()
 
     def tearDown(self):
-        super(ProcessGroupNCCLTest, self).tearDown()
-        try:
-            os.remove(self.file_name)
-        except OSError:
-            pass
-
-    @property
-    def world_size(self):
-        return 2
+        pass
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_empty_tensors(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_idx = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
-        xs = [torch.FloatTensor([]).cuda(local_device_idx)]
+        xs = [torch.cuda.FloatTensor([])]
         pg.broadcast(xs).wait()
         self.assertEqual(0, xs[0].numel())
 
@@ -252,61 +235,45 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         pg.reduce(xs).wait()
         self.assertEqual(0, xs[0].numel())
 
-        ys = [[torch.FloatTensor([]).cuda(local_device_idx) for _ in range(self.world_size)]]
+        ys = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
         pg.allgather(ys, xs).wait()
         for y in ys[0]:
             self.assertEqual(0, y.numel())
 
-        ys = [torch.FloatTensor([]).cuda(local_device_idx)]
-        xs = [[torch.FloatTensor([]).cuda(local_device_idx) for _ in range(self.world_size)]]
+        ys = [torch.cuda.FloatTensor([])]
+        xs = [[torch.cuda.FloatTensor([]) for _ in range(self.world_size)]]
         pg.reduce_scatter(ys, xs).wait()
         self.assertEqual(0, ys[0].numel())
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_broadcast_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
             opts.rootRank = rootRank
             opts.rootTensor = rootTensor
-            fut = pg.broadcast(xs, opts).get_future()
-            fut.wait()
-            return fut.value()
+            work = pg.broadcast(xs, opts)
+            work.wait()
 
-        # Every rank is root once
-        for i in range(self.world_size):
-            # Run with 1 input tensor
-            x = torch.tensor([self.rank]).cuda(rank_to_GPU[self.rank][0])
-            output = broadcast([x], i, 0)
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            self.assertEqualIgnoreType(torch.tensor([i]), output[0])
+        # for every root tensor
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.tensor([i]).cuda(i))
 
-            expected_tensor = torch.empty([i + 1, i + 1]).fill_(i + 1)
-            xs = [torch.empty([i + 1, i + 1]).fill_(-1).cuda(device=device_idx) for device_idx in rank_to_GPU[self.rank]]
+            broadcast(tensors, self.rank, rt)
 
-            # test with multiple input tensors
-            for j in range(len(xs)):
-                if self.rank == i:
-                    xs[j] = expected_tensor.cuda(device=rank_to_GPU[self.rank][j])
-
-                broadcast(xs, i, j)
-
-                for tensor in xs:
-                    self.assertEqual(tensor, expected_tensor)
-
+            for i in range(self.num_gpus):
+                self.assertEqual(tensors[i], tensors[rt])
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allreduce_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        device_count = torch.cuda.device_count()
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
@@ -315,50 +282,66 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
 
         # Sum
-        tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([i + 1]).cuda(i))
 
         allreduce(tensors, c10d.ReduceOp.SUM)
 
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
-            torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
-            tensors[0],
-        )
+        for i in range(self.num_gpus):
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
+                torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[i],
+            )
 
         # Avg (only available for NCCL 2.10+)
         if torch.cuda.nccl.version() >= (2, 10, 0):
-            tensors = [torch.tensor([self.rank + 1.]).cuda(local_device_id)]
+            tensors = [torch.tensor([i + 1.]).cuda(i) for i in range(self.num_gpus)]
 
             allreduce(tensors, c10d.ReduceOp.AVG)
 
-            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            ndev = float(self.world_size)
-            self.assertEqualIgnoreType(
-                torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
-                tensors[0],
-            )
+            for i in range(self.num_gpus):
+                # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+                ndev = float(self.num_gpus)
+                self.assertEqualIgnoreType(
+                    torch.tensor([ndev * (ndev + 1.) / (2. * ndev)]),
+                    tensors[i],
+                )
 
         # Product
-        tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([i + 1]).cuda(i))
 
         allreduce(tensors, c10d.ReduceOp.PRODUCT)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(
-            torch.tensor([float(math.factorial(self.world_size))]), tensors[0]
-        )
+
+        for i in range(self.num_gpus):
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(
+                torch.tensor([float(math.factorial(self.num_gpus))]), tensors[i]
+            )
 
         # Min
-        tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([i + 1]).cuda(i))
 
         allreduce(tensors, c10d.ReduceOp.MIN)
-        # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-        self.assertEqualIgnoreType(torch.tensor([1.0]), tensors[0])
+
+        for i in range(self.num_gpus):
+            # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
+            self.assertEqualIgnoreType(torch.tensor([1.0]), tensors[i])
 
         # Max
-        tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([i + 1]).cuda(i))
 
         allreduce(tensors, c10d.ReduceOp.MAX)
-        self.assertEqual(torch.tensor([self.world_size]), tensors[0])
+
+        for i in range(self.num_gpus):
+            self.assertEqual(torch.tensor([self.num_gpus]), tensors[i])
 
         for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
             with self.assertRaisesRegex(
@@ -369,10 +352,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def reduce(xs, rootRank, rootTensor, op=None):
             opts = c10d.ReduceOptions()
@@ -384,23 +365,18 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work.wait()
 
         # for every root tensor
-        for rt in range(self.world_size):
-            tensors = [torch.tensor([self.rank + 1]).cuda(local_device_id)]
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.tensor([i + 1]).cuda(i))
 
-            reduce(tensors, rt, 0)
+            reduce(tensors, self.rank, rt)
 
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
-            if self.rank == rt:
-                self.assertEqualIgnoreType(
-                    torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
-                    tensors[0],
-                )
-            else:
-                self.assertEqualIgnoreType(
-                    torch.tensor([self.rank + 1]),
-                    tensors[0],
-                )
-
+            self.assertEqualIgnoreType(
+                torch.tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[rt],
+            )
 
             for op in (c10d.ReduceOp.BAND, c10d.ReduceOp.BOR, c10d.ReduceOp.BXOR):
                 with self.assertRaisesRegex(
@@ -411,47 +387,45 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allgather_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_ids = rank_to_GPU[self.rank]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allgather(output_ts, input_ts):
             work = pg.allgather(output_ts, input_ts)
             work.wait()
 
-        tensors = [torch.empty(2, 2).fill_(2).cuda(device=i) for i in local_device_ids]
-        output_tensors = []
-        expected_output = []
+        tensors = []
+        output_ts = [[] for _ in range(self.num_gpus)]
 
-        output_per_gpu = ([torch.empty(2, 2).fill_(-1)] * len(local_device_ids) * self.world_size)
-        expected_per_gpu = ([torch.empty(2, 2).fill_(2)] * len(local_device_ids) * self.world_size)
+        for idx, ls in enumerate(output_ts):
+            for _ in range(self.world_size * self.num_gpus):
+                ls.append(torch.tensor([0]).cuda(idx))
 
-        for gpu in local_device_ids:
-            output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
-            expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
+        for i in range(self.num_gpus):
+            tensors.append(torch.tensor([i]).cuda(i))
 
-        allgather(output_tensors, tensors)
+        allgather(output_ts, tensors)
 
         # Verification
-        self.assertEqual(output_tensors, expected_output)
+        for device_ts in output_ts:
+            for s_idx, t in enumerate(device_ts):
+                self.assertEqual(torch.tensor([s_idx]), t)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allgather_base_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allgather_base(output_t, input_t):
             work = pg._allgather_base(output_t, input_t)
             work.wait()
 
+        device_id = self.rank % self.num_gpus
         # allgather_base is GPU number agnostic.
         # Each rank contribute one tensor regardless of GPU counts
-        tensor = torch.tensor([self.rank]).cuda(local_device_id)
-        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(local_device_id)
+        tensor = torch.tensor([self.rank]).cuda(device_id)
+        output_t = torch.empty((self.world_size), dtype=tensor.dtype).cuda(device_id)
 
         allgather_base(output_t, tensor)
 
@@ -461,23 +435,22 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_allgather_base_basics(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allgather_base(output_t, input_t):
             work = pg._allgather_base(output_t, input_t)
             work.wait()
 
+        device_id = self.rank % self.num_gpus
         # anticpate an error
         with self.assertRaisesRegex(
             RuntimeError,
             "output tensor size must be equal to world_size times input tensor size",
         ):
-            tensor = torch.tensor([self.rank]).cuda(local_device_id)
+            tensor = torch.tensor([self.rank]).cuda(device_id)
             output_t = torch.empty((self.world_size + 1), dtype=tensor.dtype).cuda(
-                local_device_id
+                device_id
             )
             # fails the check because output_t is not correctly sized
             allgather_base(output_t, tensor)
@@ -486,9 +459,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaisesRegex(
             RuntimeError, "output tensor must have the same type as input tensor"
         ):
-            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
-                local_device_id
+                device_id
             )
             # fails the check because the dtype is different
             allgather_base(output_t, tensor)
@@ -496,23 +469,22 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_base_basics(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def reduce_scatter_base(output_t, input_t):
             work = pg._reduce_scatter_base(output_t, input_t)
             work.wait()
 
+        device_id = self.rank % self.num_gpus
         # anticpate an error
         with self.assertRaisesRegex(
             RuntimeError,
             "input tensor must be the same size as output size times world size",
         ):
-            input_t = torch.tensor([self.rank]).cuda(local_device_id)
+            input_t = torch.tensor([self.rank]).cuda(device_id)
             output_t = torch.empty((self.world_size + 1), dtype=input_t.dtype).cuda(
-                local_device_id
+                device_id
             )
             # fails the check because output_t is not correctly sized
             reduce_scatter_base(output_t, input_t)
@@ -521,9 +493,9 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         with self.assertRaisesRegex(
             RuntimeError, "input tensor must be the same type as the outut tensor."
         ):
-            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(local_device_id)
+            tensor = torch.tensor([self.rank], dtype=torch.float).cuda(device_id)
             output_t = torch.empty((self.world_size + 1), dtype=torch.long).cuda(
-                local_device_id
+                device_id
             )
             # fails the check because the dtype is different
             reduce_scatter_base(output_t, tensor)
@@ -531,11 +503,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_ids = rank_to_GPU[self.rank]
-        num_gpus = len(local_device_ids)
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def reduce_scatter(outputs, input_lists, op):
             opts = c10d.ReduceScatterOptions()
@@ -543,7 +512,10 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             work = pg.reduce_scatter(outputs, input_lists, opts)
             work.wait()
 
-        output = [torch.tensor([0]).cuda(i) for i in local_device_ids]
+        virtual_rank = self.rank * self.world_size
+        virtual_world_size = self.num_gpus * self.world_size
+
+        output = [torch.tensor([0]).cuda(i) for i in range(self.num_gpus)]
 
         #           0                   1                   2
         #   0   [0..11]             [1..12]
@@ -552,71 +524,75 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         #   3
 
         # Sum
-        tensor_lists = []
-        input_per_gpu = []
-
-        for i in range(self.world_size):
-            input_per_gpu.append(torch.tensor([self.rank + i + 1]))
-
-        for gpu in local_device_ids:
-            tensor_lists.append([t.cuda(device=gpu) for t in input_per_gpu])
+        tensor_lists = [
+            [
+                torch.tensor([self.rank * self.num_gpus + i + j]).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
 
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.SUM)
 
-        for i in range(num_gpus):
+        for i in range(self.num_gpus):
             expected = torch.tensor(
                 [
-                    float((1 + self.world_size) * self.world_size / 2)
-                    + self.world_size * self.rank
-                ])
-
-
+                    float(self.num_gpus * (self.num_gpus - 1) / 2)
+                    + (virtual_rank + i) * virtual_world_size
+                ]
+            )
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
 
         # Min
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MIN)
 
-        for i in range(num_gpus):
-            expected = torch.tensor([self.rank + 1 + i])
+        for i in range(self.num_gpus):
+            expected = torch.tensor([self.rank * self.world_size + i])
             self.assertEqual(expected, output[i])
 
         # Max
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.MAX)
 
-        for i in range(num_gpus):
+        for i in range(self.num_gpus):
             expected = torch.tensor(
-                [self.rank + self.world_size + i]
+                [self.rank * self.world_size + i + virtual_world_size - 1]
             )
             self.assertEqual(expected, output[i])
 
         # Product
+        tensor_lists = [
+            [
+                torch.tensor(
+                    [(self.rank * self.num_gpus + i + j) % virtual_world_size + 1]
+                ).cuda(i)
+                for j in range(virtual_world_size)
+            ]
+            for i in range(self.num_gpus)
+        ]
+
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
 
-        for i in range(num_gpus):
-            prod_val = self.rank + 1
-            for _ in range(self.world_size - 1):
-                prod_val = prod_val * (prod_val + 1)
-            expected = torch.tensor([prod_val])
+        for i in range(self.num_gpus):
+            expected = torch.tensor([float(math.factorial(virtual_world_size))])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_base_ops(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_id = rank_to_GPU[self.rank][0]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def reduce_scatter_base(output_t, input_t):
             work = pg._reduce_scatter_base(output_t, input_t)
             work.wait()
 
+        device_id = self.rank % self.num_gpus
         # reduce_scatter_base is GPU number agnostic.
         # Each rank contribute one tensor regardless of GPU counts
-        output_t = torch.empty([1]).cuda(local_device_id)
-        tensor = torch.arange(self.world_size, dtype=output_t.dtype).cuda(local_device_id)
+        output_t = torch.empty([1]).cuda(device_id)
+        tensor = torch.arange(self.world_size, dtype=output_t.dtype).cuda(device_id)
 
         reduce_scatter_base(output_t, tensor)
 
@@ -626,10 +602,8 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_barrier(self):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_nccl(store, self.rank, self.world_size, self.opts())
-        rank_to_GPU = init_multigpu_helper(self.world_size, "nccl")
-        local_device_ids = rank_to_GPU[self.rank]
+        store = c10d.FileStore(self.file.name, self.world_size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce(tensors):
             opts = c10d.AllreduceOptions()
@@ -637,12 +611,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             return work
 
         # Making the collective to operate on
-        # 1, 2, 3, 4, .... len(local_device_ids) GPUs
-        tensors_list = [[] for _ in range(len(local_device_ids))]
-
-        for i in range(1, len(local_device_ids) + 1):
+        # 1, 2, 3, 4, .... self.num_gpus GPUs
+        tensors_list = [[] for _ in range(2, self.num_gpus + 1)]
+        for i in range(2, self.num_gpus + 1):
             for j in range(i):
-                tensors_list[i - 1].append(torch.tensor([j + 1]).cuda(local_device_ids[j]))
+                tensors_list[i - 2].append(torch.tensor([j + 1]).cuda(j))
 
         works = []
         for tensors in tensors_list:
@@ -652,11 +625,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Barrier will ensure that all previous work is completed
         pg.barrier().wait()
 
-        for i in range(1, len(local_device_ids) + 1):
+        for i in range(2, self.num_gpus + 1):
             for j in range(i):
                 # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
                 self.assertEqualIgnoreType(
-                    torch.tensor([(j + 1) * self.world_size]), tensors_list[i - 1][j]
+                    torch.tensor([float(i * (i + 1) / 2)]), tensors_list[i - 2][j]
                 )
 
 
