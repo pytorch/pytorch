@@ -193,7 +193,8 @@ py_library(
 
 py_binary(
     name = "jit_shapes",
-    srcs = ["torch/jit/_shapes.py"],
+    main = "_shapes.py",
+    srcs = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
     deps = [],
 )
 

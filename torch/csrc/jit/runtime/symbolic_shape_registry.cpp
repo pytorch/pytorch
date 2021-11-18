@@ -11,9 +11,15 @@ namespace jit {
 namespace {
 std::mutex lock;
 
+// split here to satisfy MSVC++
+// https://docs.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026?view=msvc-170
 const std::string _shape_compute_functions =
 #include "torch/jit/_shapes.py"
     ;
+
+const std::string _shape_compute_functions_1 =
+#include "torch/jit/_shapes_1.py"
+  ;
 
 const std::string _xnnpack_shape_compute_functions =
 #ifdef USE_XNNPACK
@@ -252,8 +258,15 @@ void loadFunctions() {
       "####    SHAPE COMPUTE FUNCTIONS START   ###");
   auto end = _shape_compute_functions.find(
       "####    SHAPE COMPUTE FUNCTIONS END   ###");
+  auto start_1 = _shape_compute_functions_1.find(
+      "####    SHAPE COMPUTE FUNCTIONS START   ###");
+  auto end_1 = _shape_compute_functions_1.find(
+      "####    SHAPE COMPUTE FUNCTIONS END   ###");
   TORCH_INTERNAL_ASSERT(start != std::string::npos && end != std::string::npos);
-  auto shape_compute_functions = _shape_compute_functions.substr(start, end - start) +
+  TORCH_INTERNAL_ASSERT(start_1 != std::string::npos && end_1 != std::string::npos);
+  auto shape_compute_functions =
+      _shape_compute_functions.substr(start, end - start) +
+      _shape_compute_functions_1.substr(start_1, end_1 - start_1) +
       _xnnpack_shape_compute_functions;
 
   auto src = std::make_shared<Source>(shape_compute_functions);
