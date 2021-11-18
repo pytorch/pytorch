@@ -9,7 +9,7 @@
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
-#include "ATen/core/interned_strings.h"
+
 namespace torch {
 namespace jit {
 
@@ -137,7 +137,7 @@ class SubgraphSlicer {
           // N.B. Note, |= since we don't want `unfuseAliasedOutputs`
           // to short-circuit
           any_changed |= SubgraphUtils::unmergeAliasedOutputs(n);
-          any_changed |= SubgraphUtils::unmergeOutputsAilisingInputs(n);
+          any_changed |= SubgraphUtils::unmergeOutputsAlisingInputs(n);
           GRAPH_DEBUG(
               "any_changed on ",
               any_changed,

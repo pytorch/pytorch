@@ -432,8 +432,8 @@ Node* createSingletonSubgraphAndUpdateAliasing(
       });
 }
 
-bool unmergeOutputsAilisingInputs(Node* subgraphNode) {
-  GRAPH_DEBUG("unfuseOutputsAilisingInputs on ", getHeader(subgraphNode));
+bool unmergeOutputsAlisingInputs(Node* subgraphNode) {
+  GRAPH_DEBUG("unfuseOutputsAlisingInputs on ", getHeader(subgraphNode));
   auto subgraph = subgraphNode->g(attr::Subgraph);
   AliasDb alias_db(subgraph);
 
