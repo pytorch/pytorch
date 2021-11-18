@@ -10815,6 +10815,12 @@ class TestNN(NNTestCase):
         expected = m(inp.view(6, 5)).view(2, 3, 8)
         self.assertEqual(expected, m(inp))
 
+    def test_bias_broadcasting(self):
+        m = nn.Bias(5)
+        inp = torch.randn(2, 3, 5)
+        expected = (inp.view(6, 5) + m.bias).view(2, 3, 5)
+        self.assertEqual(expected, m(inp))
+
     def test_bilinear(self):
         module = nn.Bilinear(10, 10, 8)
         input1 = torch.randn(4, 10, requires_grad=True)
@@ -14236,6 +14242,11 @@ class TestNNDeviceType(NNTestCase):
 
     def test_linear_empty(self, device):
         mod = torch.nn.Linear(7, 7).to(device)
+        inp = torch.randn(0, 7, device=device)
+        self._test_module_empty_input(mod, inp)
+
+    def test_bias_empty(self, device):
+        mod = torch.nn.Bias(7).to(device)
         inp = torch.randn(0, 7, device=device)
         self._test_module_empty_input(mod, inp)
 

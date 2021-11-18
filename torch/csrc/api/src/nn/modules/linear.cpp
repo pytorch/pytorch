@@ -67,6 +67,31 @@ Tensor LinearImpl::forward(const Tensor& input) {
 
 // ============================================================================
 
+BiasImpl::BiasImpl(const BiasOptions& options_) : options(options_) {
+  // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
+  reset();
+}
+
+void BiasImpl::reset() {
+  bias = register_parameter("bias", torch::empty(options.num_features()));
+  reset_parameters();
+}
+
+void BiasImpl::reset_parameters() {
+  torch::nn::init::normal_(bias);
+}
+
+void BiasImpl::pretty_print(std::ostream& stream) const {
+  stream << std::boolalpha
+         << "torch::nn::Bias(num_features=" << options.num_features() << ")";
+}
+
+Tensor BiasImpl::forward(const Tensor& input) {
+  return F::bias(input, bias);
+}
+
+// ============================================================================
+
 FlattenImpl::FlattenImpl(const FlattenOptions& options_) : options(options_) {}
 
 void FlattenImpl::reset() {}

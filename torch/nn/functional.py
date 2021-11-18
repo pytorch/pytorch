@@ -1925,6 +1925,22 @@ def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
     return torch._C._nn.hardsigmoid(input)
 
 
+def bias(input: Tensor, bias: Tensor) -> Tensor:
+    r"""
+    Applies a bias transformation to the incoming data: :math:`y = x + b`.
+
+    Shape:
+
+        - Input: :math:`(*, num\_features)` where `*` means any number of
+          additional dimensions, including none
+        - Bias: :math:`(num\_features)`
+        - Output: :math:`(*, num\_features)`
+    """
+    if has_torch_function_variadic(input, bias):
+        return handle_torch_function(bias, (input, bias), input, bias)
+    return torch._C._nn.bias(input, bias)
+
+
 def linear(input: Tensor, weight: Tensor, bias: Optional[Tensor] = None) -> Tensor:
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
