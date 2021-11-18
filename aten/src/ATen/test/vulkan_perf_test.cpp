@@ -36,18 +36,20 @@ static void cat_op_channel_perf(benchmark::State& state) {
 }
 
 static void CommonBenchmarkSettings(benchmark::internal::Benchmark* b) {
-  b->Threads(1);  // No multi-thread since Vulkan backend is not thread-safe.
   b->Unit(benchmark::kMillisecond);
   b->ArgNames({"N", "C", "H", "W"});
 }
 
 } // namespace
 
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Iterations(1000)->Args({3, 40, 221, 193}); // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Iterations(1000)->Args({3, 20, 221, 193}); // big multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Iterations(1000)->Args({3, 39, 221, 193}); // big non-multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Iterations(5000)->Args({3, 4, 221, 193}); // small multiple of 4 channels
-BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Iterations(5000)->Args({3, 3, 221, 193}); // small non-multiple of 4 channels
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 40, 221, 193}); // big multiple of 4 channels
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 20, 221, 193}); // big multiple of 4 channels
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(1000)->Args({3, 39, 221, 193}); // big non-multiple of 4 channels
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(5000)->Args({3, 4, 221, 193}); // small multiple of 4 channels
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(1)->Iterations(5000)->Args({3, 3, 221, 193}); // small non-multiple of 4 channels
+#ifdef MAKE_VULKAN_THREADSAFE
+BENCHMARK(cat_op_channel_perf)->Apply(CommonBenchmarkSettings)->Threads(3)->Iterations(1000)->Args({3, 40, 221, 193}); // big multiple of 4 channels (multi-thread)
+#endif
 BENCHMARK_MAIN();
 
 #endif /* USE_VULKAN_API */

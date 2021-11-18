@@ -78,6 +78,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlow(
   return current == index_size;
 }
 
+// clang-format off
 // Proxy back to generic implementation
 #define FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(IndexType, OutType)                  \
   bool                                                                                   \
@@ -201,6 +202,7 @@ static bool Fused8BitRowwiseEmbeddingLookupGenericSlow(
         "Your input seems to be incorrect: the sum of lengths values should be "         \
         "the size of the indices tensor, but it appears not.");                          \
   }
+// clang-format on
 
 FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(int32_t, float);
 FUSED_8BIT_ROWWISE_EMBEDDING_SPECIALIZATION(int64_t, float);
