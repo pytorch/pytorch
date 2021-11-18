@@ -40,6 +40,17 @@ const std::vector<std::string> gpu_metal_operators = {
     "aten::hardtanh_",
     "aten::reshape",
     "aten::flatten.using_ints",
+    "aten::__getitem__.t",
+    "aten::_set_item.str",
+    "aten::add.Tensor",
+    "aten::contiguous",
+    "aten::len.t",
+    "aten::mul.Tensor",
+    "aten::sigmoid",
+    "aten::sub.Tensor",
+    "aten::upsample_nearest2d.vec",
+    "metal_prepack::conv2d_run",
+    "prim::TupleIndex",
 };
 
 /**
