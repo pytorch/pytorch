@@ -464,7 +464,7 @@ Tensor computeFlatten(
   }
   std::vector<ArgValue> reshapeInputs;
   reshapeInputs.push_back(inputs[0]);
-  reshapeInputs.push_back(outputShapeVec);
+  reshapeInputs.emplace_back(outputShapeVec);
   return computeReshape(reshapeInputs, outputShape, outputType, device);
 }
 
