@@ -5,7 +5,6 @@
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-#include <array>
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -52,7 +51,7 @@ enum class PredicateType {
   ReductionWrite
 };
 
-enum class DataType { Double, Float, Half, Int, Int32, Bool, BFloat16, Null };
+enum class DataType { Double, Float, Half, Int, Int32, Bool, Null };
 
 // Returns if the datatype is a floating point type
 bool isFloatingPointType(DataType dtype);
@@ -170,6 +169,9 @@ bool isLogicalOp(const BinaryOpType bopt);
 // on input, for example bitwise_and is also used for boolean and in the jit
 bool alsoBooleanOperator(const BinaryOpType bopt);
 
+//! Operations that have tricky behaviors with all integer inputs
+bool noFullIntegerSupport(const BinaryOpType bopt);
+
 enum class TernaryOpType { Clamp, Threshold, Where };
 
 enum class ParallelType {
@@ -185,24 +187,6 @@ enum class ParallelType {
   Unswitch,
   Serial
 };
-
-static constexpr std::array<ParallelType, 6> kParallelTypeThreads = {
-    ParallelType::BIDx,
-    ParallelType::BIDy,
-    ParallelType::BIDz,
-    ParallelType::TIDx,
-    ParallelType::TIDy,
-    ParallelType::TIDz};
-
-static constexpr std::array<ParallelType, 6> kParallelTypeBIDs = {
-    ParallelType::BIDx,
-    ParallelType::BIDy,
-    ParallelType::BIDz};
-
-static constexpr std::array<ParallelType, 6> kParallelTypeTIDs = {
-    ParallelType::BIDx,
-    ParallelType::BIDy,
-    ParallelType::BIDz};
 
 enum class MemoryType { Local, Shared, Global };
 
@@ -280,8 +264,6 @@ enum class LaunchConfigType {
   TIDy,
   TIDx
 };
-
-const char* const kMagicZeroName = "nvfuser_zero";
 
 } // namespace cuda
 } // namespace fuser

@@ -53,19 +53,10 @@ include_patterns = [
     'test/cpp/tensorexpr/**/*.h',
     'test/cpp/tensorexpr/**/*.cpp',
 ]
-init_command = [
-    'python3',
-    'tools/linter/adapters/s3_init.py',
-    '--config-json=tools/linter/adapters/s3_init_config.json',
-    '--linter=clang-format',
-    '--dry-run={{DRYRUN}}',
-    '--output-dir=.lintbin',
-    '--output-name=clang-format',
-]
 command = [
     'python3',
     'tools/linter/adapters/clangformat_linter.py',
-    '--binary=.lintbin/clang-format',
+    '--binary=clang-format',
     '--',
     '@{{PATHSFILE}}'
 ]
@@ -168,17 +159,15 @@ exclude_patterns = [
 ]
 init_command = [
     'python3',
-    'tools/linter/adapters/s3_init.py',
-    '--config-json=tools/linter/adapters/s3_init_config.json',
-    '--linter=clang-tidy',
-    '--dry-run={{DRYRUN}}',
-    '--output-dir=.lintbin',
-    '--output-name=clang-tidy',
+    'tools/linter/adapters/clangtidy_init.py',
+    '--dry_run={{DRYRUN}}',
+    '--output_dir=.clang-tidy-bin',
+    '--output_name=clang-tidy',
 ]
 command = [
     'python3',
     'tools/linter/adapters/clangtidy_linter.py',
-    '--binary=.lintbin/clang-tidy',
+    '--binary=.clang-tidy-bin/clang-tidy',
     '--build_dir=./build',
     '--',
     '@{{PATHSFILE}}'
@@ -209,8 +198,8 @@ exclude_patterns = ['caffe2/**']
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
-    '--pattern=# noqa(?!: [A-Z]+\d{3})',
-    '--linter-name=NOQA',
+    '--pattern=# type:\s*ignore(?!\[)',
+    '--linter-name=TYPEIGNORE',
     '--error-name=unqualified noqa',
     """--error-description=\
         This line has an unqualified `noqa`; \

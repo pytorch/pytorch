@@ -24,10 +24,6 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
-  std::function<void(GraphFunction&)> function_creator() const {
-    return function_creator_;
-  }
-
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
@@ -104,10 +100,6 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void clear_optimized_graphs() {
-    optimized_graphs_.fill(c10::nullopt);
-  }
-
  private:
   enum SpecializationKey {
     AutocastOff,
@@ -141,9 +133,7 @@ struct TORCH_API GraphFunction : public Function {
   mutable std::recursive_mutex compile_mutex;
 
   // executor_[0] - autocast off
-  // executor_[1] - autocast cpu on
-  // executor_[2] - autocast gpu on
-  // executor_[3] - autocast cpu & gpu on
+  // executor_[1] - autocast on
   std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
       executors_;
 

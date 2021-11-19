@@ -33,7 +33,8 @@ TORCH_CUDA_CU_API TensorView* softmax(TensorView* x, int dim);
 TORCH_CUDA_CU_API TensorView* softmax_backward(
     TensorView* dy,
     TensorView* y,
-    const int dim);
+    const int dim,
+    TensorView* x);
 
 TORCH_CUDA_CU_API ForwardNormResult layer_norm(
     TensorView* x,
@@ -67,8 +68,7 @@ TORCH_CUDA_CU_API ForwardNormResult batch_norm(
     TensorView* running_var,
     const bool kTraining,
     Val* momentum,
-    Val* eps,
-    bool channels_last = false);
+    Val* eps);
 
 TORCH_CUDA_CU_API BackwardNormResult batch_norm_backward(
     TensorView* x,
@@ -80,8 +80,7 @@ TORCH_CUDA_CU_API BackwardNormResult batch_norm_backward(
     TensorView* save_invstd,
     const bool kTraining,
     Val* eps,
-    const std::vector<bool>& output_mask,
-    bool channels_last = false);
+    const std::vector<bool>& output_mask);
 
 TORCH_CUDA_CU_API ForwardNormResult instance_norm(
     TensorView* x,

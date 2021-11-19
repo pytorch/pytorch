@@ -649,7 +649,6 @@ class AttributePropagator {
       recordReferencedAttrs(graph);
       handleSharedClassType(module_, graph);
       removeExtraWaitCalls(graph->block());
-      toGraphFunction(*function).clear_optimized_graphs();
     }
     removeUnusedAttrs();
   }

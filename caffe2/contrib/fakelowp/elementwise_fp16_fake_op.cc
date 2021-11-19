@@ -22,6 +22,9 @@ int getSizeFromDims(const std::vector<int>& dims) {
 
 template <class Functor>
 struct FP16PairWiseCPUFunctor {
+  explicit FP16PairWiseCPUFunctor(bool allow_broadcast_fastpath=false)
+    : functor(allow_broadcast_fastpath) {}
+
   template <typename TIn, typename TOut>
   bool Forward(
       const std::vector<int>& A_dims,
@@ -69,7 +72,7 @@ OPERATOR_SCHEMA(SumFakeFp16).NumInputs(1, INT_MAX).NumOutputs(1, INT_MAX);
 
 REGISTER_CPU_OPERATOR(
     AddFakeFp16,
-    BinaryElementwiseOp<
+    BinaryElementwiseBroadcastOp<
         TensorTypes<float, int, long>,
         CPUContext,
         FP16PairWiseCPUFunctor<AddFunctor<CPUContext>>>);
@@ -77,7 +80,7 @@ OPERATOR_SCHEMA(AddFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     DivFakeFp16,
-    BinaryElementwiseOp<
+    BinaryElementwiseBroadcastOp<
         TensorTypes<float, double>,
         CPUContext,
         FP16PairWiseCPUFunctor<DivFunctor<CPUContext>>>);
@@ -85,7 +88,7 @@ OPERATOR_SCHEMA(DivFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     MulFakeFp16,
-    BinaryElementwiseOp<
+    BinaryElementwiseBroadcastOp<
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<MulFunctor<CPUContext>>>);
@@ -93,7 +96,7 @@ OPERATOR_SCHEMA(MulFakeFp16).NumInputs(2).NumOutputs(1);
 
 REGISTER_CPU_OPERATOR(
     SubFakeFp16,
-    BinaryElementwiseOp<
+    BinaryElementwiseBroadcastOp<
         TensorTypes<float>,
         CPUContext,
         FP16PairWiseCPUFunctor<SubFunctor<CPUContext>>>);

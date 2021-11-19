@@ -351,8 +351,6 @@ class _ProcessGroupWrapper(ProcessGroup):
         pg: ProcessGroup,
         gloo_pg: ProcessGroupGloo
     ): ...
-    wrapped_pg: ProcessGroup
-
 
 class ProcessGroupNCCL(ProcessGroup):
     class Options: ...

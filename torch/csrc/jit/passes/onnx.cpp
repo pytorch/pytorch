@@ -169,7 +169,6 @@ std::shared_ptr<Graph> ToONNX(
   std::unordered_map<Value*, Value*> env;
   BlockToONNX(graph->block(), new_graph->block(), operator_export_type, env);
   GRAPH_DUMP("after ToONNX: ", new_graph);
-  ConstantValueMap::ClearMaps();
   return new_graph;
 }
 

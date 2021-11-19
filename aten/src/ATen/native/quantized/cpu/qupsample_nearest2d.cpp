@@ -12,11 +12,8 @@
 namespace at {
 namespace native {
 
-// Define a typedef to dispatch to nearest_idx or nearest_exact_idx
-typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
-
 // at::native functions for the native_functions.yaml
-template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+template <typename scalar_t>
 static void upsample_nearest2d_out_frame(
     scalar_t* odata,
     scalar_t* idata,
@@ -46,11 +43,11 @@ static void upsample_nearest2d_out_frame(
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const int64_t h1 =
-        nn_compute_source_index_fn(height_scale, h2, input_height);
+        nearest_neighbor_compute_source_index(height_scale, h2, input_height);
 
     for (int64_t w2 = 0; w2 < output_width; ++w2) {
       const int64_t w1 =
-          nn_compute_source_index_fn(width_scale, w2, input_width);
+          nearest_neighbor_compute_source_index(width_scale, w2, input_width);
 
       const auto* pos1 = &i_p[h1 * input_width + w1];
       auto* pos2 = &o_p[h2 * output_width + w2];
@@ -64,7 +61,7 @@ static void upsample_nearest2d_out_frame(
   }
 }
 
-template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+template <typename scalar_t>
 static void upsample_nearest2d_out_frame_nhwc(
     scalar_t* odata,
     scalar_t* idata,
@@ -90,11 +87,11 @@ static void upsample_nearest2d_out_frame_nhwc(
 
     for (int64_t h2 = 0; h2 < output_height; ++h2) {
       const int64_t h1 =
-          nn_compute_source_index_fn(height_scale, h2, input_height);
+          nearest_neighbor_compute_source_index(height_scale, h2, input_height);
 
       for (int64_t w2 = 0; w2 < output_width; ++w2) {
         const int64_t w1 =
-            nn_compute_source_index_fn(width_scale, w2, input_width);
+            nearest_neighbor_compute_source_index(width_scale, w2, input_width);
 
         const auto* pos1 = &i_p[(h1 * input_width + w1)*channels];
         auto* pos2 = &o_p[(h2 * output_width + w2)*channels];
@@ -104,8 +101,7 @@ static void upsample_nearest2d_out_frame_nhwc(
   }
 }
 
-template <nn_compute_source_index_fn_t nn_compute_source_index_fn>
-Tensor _upsample_nearest2d_quantized_cpu(
+Tensor upsample_nearest2d_quantized_cpu(
     const Tensor& input,
     IntArrayRef output_size,
     c10::optional<double> scales_h,
@@ -139,7 +135,7 @@ Tensor _upsample_nearest2d_quantized_cpu(
     AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_nearest2d", [&] {
       auto* idata = static_cast<scalar_t*>(input.data_ptr());
       auto* odata = static_cast<scalar_t*>(output.data_ptr());
-      upsample_nearest2d_out_frame_nhwc<scalar_t, nn_compute_source_index_fn>(
+      upsample_nearest2d_out_frame_nhwc<scalar_t>(
           odata,
           idata,
           input_height,
@@ -164,7 +160,7 @@ Tensor _upsample_nearest2d_quantized_cpu(
     AT_DISPATCH_QINT_TYPES(input_contig.scalar_type(), "upsample_nearest2d", [&] {
       auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
       auto* odata = static_cast<scalar_t*>(output.data_ptr());
-      upsample_nearest2d_out_frame<scalar_t, nn_compute_source_index_fn>(
+      upsample_nearest2d_out_frame<scalar_t>(
           odata,
           idata,
           input_height,
@@ -185,38 +181,12 @@ using at::native::upsample::get_scale_value;
 
 Tensor upsample_nearest2d_quantized_cpu(
     const Tensor& input,
-    IntArrayRef osize,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
-  return _upsample_nearest2d_quantized_cpu<nearest_neighbor_compute_source_index>(input, osize, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact2d_quantized_cpu(
-    const Tensor& input,
-    IntArrayRef osize,
-    c10::optional<double> scale_h,
-    c10::optional<double> scale_w) {
-  return _upsample_nearest2d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(input, osize, scale_h, scale_w);
-}
-
-Tensor upsample_nearest2d_quantized_cpu(
-    const Tensor& input,
     c10::optional<IntArrayRef> output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
   return upsample_nearest2d_quantized_cpu(input, osize, scale_h, scale_w);
-}
-
-Tensor _upsample_nearest_exact2d_quantized_cpu(
-    const Tensor& input,
-    c10::optional<IntArrayRef> output_size,
-    c10::optional<ArrayRef<double>> scale_factors) {
-  auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
-  auto scale_h = get_scale_value(scale_factors, 0);
-  auto scale_w = get_scale_value(scale_factors, 1);
-  return _upsample_nearest_exact2d_quantized_cpu(input, osize, scale_h, scale_w);
 }
 
 } // namespace native

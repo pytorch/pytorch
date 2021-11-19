@@ -70,11 +70,11 @@ public:
   explicit DictEntryRef(Iterator iterator)
   : iterator_(std::move(iterator)) {}
 
-  decltype(auto) key() const {
+  Key key() const {
     return iterator_->first.template to<Key>();
   }
 
-  decltype(auto) value() const {
+  Value value() const {
     return iterator_->second.template to<Value>();
   }
 

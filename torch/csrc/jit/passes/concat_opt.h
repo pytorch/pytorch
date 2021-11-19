@@ -13,7 +13,5 @@ TORCH_API bool EliminateConcatCommonInputs(const std::shared_ptr<Graph>& graph);
 TORCH_API void ExpandConcatAndEliminateRedundancy(
     const std::shared_ptr<Graph>& graph);
 
-TORCH_API bool CombineConcats(const std::shared_ptr<Graph>& graph);
-
 } // namespace jit
 } // namespace torch

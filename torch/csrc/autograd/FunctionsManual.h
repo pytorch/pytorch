@@ -92,8 +92,6 @@ at::Tensor sparse_sparse_matmul_backward(const at::Tensor& grad, const at::Tenso
 at::Tensor renorm_backward(const at::Tensor & grad, const at::Tensor & self, const at::Scalar& p, int64_t dim, const at::Scalar& maxnorm);
 at::Tensor repeat_backward(at::Tensor grad, at::IntArrayRef repeats, at::IntArrayRef input_shape);
 at::Tensor _fused_dropout_backward(at::Tensor grad, at::Tensor mask, double p1m);
-at::Tensor infinitely_differentiable_native_dropout_backward(const at::Tensor& grad, const at::Tensor& mask, double scale);
-at::Tensor native_dropout_double_backward(const at::Tensor& ggI, const at::Tensor& grad, const at::Tensor& mask, double scale);
 at::Tensor evenly_distribute_backward(at::Tensor grad, const at::Tensor & input, const at::Tensor & value);
 at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(at::Tensor grad, const at::Tensor& self, c10::optional<IntArrayRef> dim, c10::optional<int64_t> correction, bool keepdim);
@@ -168,9 +166,6 @@ Tensor slice_backward_wrapper(
     int64_t step);
 Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                            const Tensor& L, const Tensor& V);
-std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
-                                          const Tensor& L,
-                                          const Tensor& V);
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
@@ -196,21 +191,6 @@ Tensor triangular_solve_jvp(
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, std::array<bool, 3> grad_mask);
-std::tuple<Tensor, Tensor> linalg_qr_jvp(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
-Tensor linalg_qr_jvp_Q(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
-Tensor linalg_qr_jvp_R(
-  const Tensor& dA,
-  const Tensor& Q,
-  const Tensor& R
-);
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
                           c10::string_view mode, const Tensor& Q, const Tensor& R);
 Tensor eig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,

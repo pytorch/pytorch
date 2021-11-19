@@ -5,40 +5,6 @@
 namespace torch {
 namespace jit {
 
-// A StorageGroup represents a collection of tensors that share backing storage.
-class StorageGroup {
- public:
-  // Every storage group must contain at least one tensor.
-  explicit StorageGroup(at::Tensor* tensor) : group_{tensor} {}
-
-  void addTensor(at::Tensor* tensor) {
-    group_.push_back(tensor);
-  }
-
-  const std::vector<at::Tensor*>& group() const {
-    return group_;
-  }
-
-  size_t maxTensorSize() const {
-    return max_tensor_size_;
-  }
-
-  void setMaxTensorSize(size_t new_size) {
-    max_tensor_size_ = new_size;
-  }
-
-  size_t numManagedTensors() const {
-    return group_.size();
-  }
-
- private:
-  // The size attribute represents the amount of memory that will be
-  // allocated for all tensors in this storage group. Initially it
-  // is zero, eventually it gets updated by the MemoryPlanner.
-  size_t max_tensor_size_ = 0;
-  std::vector<at::Tensor*> group_{};
-};
-
 /// There are three types of ops in a processed graph in Static Runtime:
 ///   1. op with _out variant
 ///   2. view producing op
@@ -91,16 +57,8 @@ class MemoryPlanner {
     return managed_output_tensors_.size();
   }
 
-  C10_NODISCARD size_t total_num_unmanaged() const {
-    return num_unmanaged_non_scalars() + num_unmanaged_scalars();
-  }
-
-  C10_NODISCARD size_t num_unmanaged_non_scalars() const {
-    return unmanaged_ivalues_.size() + unmanaged_borrowed_ivalues_.size();
-  }
-
-  C10_NODISCARD size_t num_unmanaged_scalars() const {
-    return num_unmanaged_scalar_ivalues_;
+  size_t total_num_unmanaged() const {
+    return unmanaged_ivalues_.size();
   }
 
   size_t total_managed() const {
@@ -163,16 +121,6 @@ class MemoryPlanner {
   // ivalues created in one run but not managed by MemoryPlanner
   std::vector<IValue*> unmanaged_ivalues_;
 
-  // Special class of unmanaged values: some native ops create IValues
-  // in a "borrowed" state that can and must be cleaned up without a
-  // reference count decrement.
-  std::vector<IValue*> unmanaged_borrowed_ivalues_;
-
-  // Even more special class of unmanaged values: if select_tensor
-  // outputs are outputs of the graph, then they need to be restored
-  // to an ordinary "strong reference" state.
-  std::vector<IValue*> borrowed_ivalues_needing_incref_;
-
   // each pair contains the size (in bytes) of data to be allocated
   // and a vector of Tensors' storages that should be backed by that
   // same data. Thus, if memonger is disabled, all vectors are of
@@ -188,14 +136,13 @@ class MemoryPlanner {
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.
-  std::vector<StorageGroup> managed_tensors_{};
+  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
   at::DataPtr buffer_; // allocated each time we call Run()
   uint8_t* buffer_start_{nullptr};
   uint8_t* buffer_end_{nullptr};
   size_t num_managed_tensors_{0};
   size_t managed_bytes_{0};
   size_t reused_tensors_{0};
-  size_t num_unmanaged_scalar_ivalues_{0};
 
   // Since output tensors are alive after one inference, their storage
   // is managed differently (e.g., deallocation happens on the client side).
