@@ -48,8 +48,97 @@ def lower_to_trt(model, inputs, shape_ranges):
     trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
     return trt_mod
 
+class TestConvertFxDoNotUse(QuantizationTestCase):
+    def _test_quantized_inputs_outputs(
+            self, prepare_custom_config_dict, prepare_count_check,
+            convert_count_check):
+        """
+        Test the option to have inputs and outputs of the graph quantized
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = torch.nn.Conv2d(1, 1, 1)
+                self.conv2 = torch.nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        # quantized input, quantized output
+        m = M()
+        qconfig_dict = {'': torch.ao.quantization.default_qconfig}
+        m.eval()
+        mp = torch.ao.quantization.quantize_fx.prepare_fx(
+            m, qconfig_dict,
+            prepare_custom_config_dict=prepare_custom_config_dict)
+        self.checkGraphModuleNodes(mp, expected_node_occurrence=prepare_count_check)
+        mp(torch.randn(1, 1, 4, 4))
+        mq = _convert_fx_do_not_use(mp, is_reference=True)
+        self.checkGraphModuleNodes(mq, expected_node_occurrence=convert_count_check)
+
+    def test_quantized_input_quantized_output(self):
+        prepare_custom_config_dict = {
+            'input_quantized_idxs': [0], 'output_quantized_idxs': [0]}
+        prepare_count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
+        }
+        convert_count_check = {
+            # output of conv1 and output of conv2
+            ns.call_function(torch.quantize_per_tensor): 2,
+            # input of conv2
+            ns.call_method('dequantize'): 1,
+        }
+        self._test_quantized_inputs_outputs(
+            prepare_custom_config_dict, prepare_count_check, convert_count_check)
+
+    def test_fp32_input_quantized_output(self):
+        prepare_custom_config_dict = {
+            'output_quantized_idxs': [0]}
+        prepare_count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 3,
+        }
+        convert_count_check = {
+            # input, output of conv1 and output of conv2
+            ns.call_function(torch.quantize_per_tensor): 3,
+            # input of conv1, conv2
+            ns.call_method('dequantize'): 2,
+        }
+        self._test_quantized_inputs_outputs(
+            prepare_custom_config_dict, prepare_count_check, convert_count_check)
+
+    def test_quantized_input_fp32_output(self):
+        prepare_custom_config_dict = {
+            'input_quantized_idxs': [0]}
+        prepare_count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 2,
+        }
+        convert_count_check = {
+            # output of conv1, conv2
+            ns.call_function(torch.quantize_per_tensor): 2,
+            # input of conv2, final output
+            ns.call_method('dequantize'): 2,
+        }
+        self._test_quantized_inputs_outputs(
+            prepare_custom_config_dict, prepare_count_check, convert_count_check)
+
+    def test_fp32_input_fp32_output(self):
+        prepare_custom_config_dict = {}
+        prepare_count_check = {
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 3,
+        }
+        convert_count_check = {
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_method('dequantize'): 3,
+        }
+        self._test_quantized_inputs_outputs(
+            prepare_custom_config_dict, prepare_count_check, convert_count_check)
+
 @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
 class TestQuantizeFxTRTOps(QuantizationTestCase):
+    """ Test TensorRT operator support
+    """
     def setUp(self):
         super().setUp()
         self.qconfig = torch.ao.quantization.QConfig(

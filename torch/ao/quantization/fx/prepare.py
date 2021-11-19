@@ -755,7 +755,7 @@ def maybe_insert_observers_before_graph_output(
                 old_arg, output_target_dtype, node_name_to_target_dtype,
                 qconfig_map, model, modules, graph))
 
-    graph_output_node.args = new_args  # type: ignore[assignment]
+    graph_output_node.args = tuple(new_args)  # type: ignore[assignment]
 
 
 def maybe_propagate_dtype_for_node(
