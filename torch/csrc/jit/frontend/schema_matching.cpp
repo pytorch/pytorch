@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/builtin_functions.h>
 #include <torch/csrc/jit/frontend/error_report.h>
@@ -467,10 +468,15 @@ static c10::optional<MatchedSchema> tryMatchSchema(
     return_field_names =
         fmap(returns, [&](const Argument& r) { return r.name(); });
   }
+
+  // construct the full name of the schema for easier look up
+  auto schema_name = schema.operator_name().name + "." + schema.overload_name();
+
   return MatchedSchema{
       std::move(positional_inputs),
       std::move(return_types),
-      std::move(return_field_names)};
+      std::move(return_field_names),
+      schema_name};
 }
 
 MatchedSchema matchSchema(
@@ -594,7 +600,8 @@ static Value* emitBuiltinNode(
     const MatchedSchema& matched_schema,
     const SourceRange& loc,
     Graph& graph,
-    Symbol name) {
+    Symbol name,
+    c10::optional<int64_t> version) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
                ->setSourceRange(loc);
 
@@ -603,8 +610,11 @@ static Value* emitBuiltinNode(
   }
 
   // assert that we did indeed create an op that has implementation
-  // otherwise schema and dispatch are not in sync
-  n->getOperation();
+  // otherwise schema and dispatch are not in sync ONLY if the op is up
+  // to date with the server version
+  if (!version.has_value() || isOpSymbolCurrent(matched_schema.schema_name, version.value())) {
+    n->getOperation();
+  }
 
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }
@@ -643,7 +653,7 @@ Value* emitBuiltinCall(
         auto old_schema_entry =
             findUpgrader(version_entry->second, version.value());
         if (!old_schema_entry.has_value()) {
-          if (isOpUptoDate(version_entry->second, version.value())) {
+          if (isOpEntryCurrent(version_entry->second, version.value())) {
             schemas.push_back(op->schema());
           } else {
             TORCH_INTERNAL_ASSERT(false, "Valid upgrader must be present");
@@ -688,7 +698,7 @@ Value* emitBuiltinCall(
   auto matched = matchSchemas(schemas, loc, graph, args, kwargs, self);
 
   if (matched.first < variants.size()) {
-    return emitBuiltinNode(matched.second, loc, graph, name);
+    return emitBuiltinNode(matched.second, loc, graph, name, version);
   } else {
     auto& fn = *builtin_functions[matched.first - variants.size()];
     // we inline builtin calls because they are normally very small
