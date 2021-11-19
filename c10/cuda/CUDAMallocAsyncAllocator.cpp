@@ -19,6 +19,11 @@ namespace CudaMallocAsync {
 // the same interface as CUDACachingAllocator.cpp.
 
 // Designed to be safe for CUDA graph capture.
+// Interactions with CUDA graph capture are mediated by
+// notifyCaptureBegin
+// notifyCaptureAboutToEnd
+// notifyCaptureEnded
+// notifyCaptureDestroy
 
 // Implementation details, not declared in CUDACachingAllocator.h
 namespace {
@@ -361,9 +366,16 @@ void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
+  std::lock_guard<std::mutex> lk(general_mutex);
+
+  auto it = ptr_info.find(ptr.get());
+  TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
+                        "ptr not found in ptr_info");
+
   if (size) {
-    // maybe we do need to track per-ptr sizes after all
+    *size = it->second.size;
   }
+
   return ptr;
 }
 
@@ -459,6 +471,7 @@ std::vector<SegmentInfo> snapshot() {
 void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {
   std::lock_guard<std::mutex> lk(general_mutex);
 
+  TORCH_INTERNAL_ASSERT(capture_free_streams.size() == 0);
   TORCH_CHECK(!capture_underway.
               "Only one capture at a time is allowed in a process.")
   capture_underway = true;
@@ -487,6 +500,8 @@ void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
     C10_CUDA_CHECK(cudaStreamWaitEvent(capture_stream.stream(), event));
     C10_CUDA_CHECK(cudaEventDestroy(event));
   }
+
+  capture_free_streams.clear();
 }
 
 void notifyCaptureEnded(int device, CaptureId_t graph_id) {
