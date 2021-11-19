@@ -5780,7 +5780,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             converted_ref = convert_fx(prepared_ref)
             inp = torch.rand(5, 5)
             out = converted(inp)
-            out_ref = converted(inp)
+            out_ref = converted_ref(inp)
 
             torch.testing.assert_allclose(out, out_ref)
 if __name__ == '__main__':

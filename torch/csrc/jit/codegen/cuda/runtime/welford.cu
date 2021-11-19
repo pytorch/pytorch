@@ -15,9 +15,10 @@ __inline__ __device__ void welfordCombine(
     return;
   }
   TN ab_N = a_N + b_N;
+  T b_N_div_ab_N = ((T)(nvfuser_index_t)(b_N)) / ((T)(nvfuser_index_t)(ab_N));
   T delta = b_avg - a_avg;
-  a_avg += delta * b_N / ab_N;
-  a_M2 += b_M2 + delta * delta * a_N * b_N / ab_N;
+  a_avg += delta * b_N_div_ab_N;
+  a_M2 += b_M2 + delta * delta * ((T)(nvfuser_index_t)(a_N)) * b_N_div_ab_N;
   a_N = ab_N;
 }
 

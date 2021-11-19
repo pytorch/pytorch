@@ -201,48 +201,31 @@ const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
   return getInterpretersExceptionDebugHandles();
 }
 
-Function& Function::get(
-    std::string qualified_name,
-    IValue bytecode,
-    int64_t model_version) {
-  static Function func = mobile::Function(c10::QualifiedName(qualified_name));
-  std::vector<IValue> bytecode_list = bytecode.toTuple()->elements().vec();
-  c10::ivalue::TupleElements debug_handles_m_tuple;
-
-  parseInstructions(
-      qualified_name,
-      std::move(
-          c10::ivalue::TupleElements(bytecode_list[BYTECODE_INDEX_INSTRUCTION]
-                                         .toTuple()
-                                         ->elements()
-                                         .vec())),
-      debug_handles_m_tuple,
-      &func);
-
-  parseOperators(
-      std::move(c10::ivalue::TupleElements(
-          bytecode_list[BYTECODE_INDEX_OPERATOR].toTuple()->elements().vec())),
-      model_version,
-      1,
-      &func);
-
-  parseConstants(
-      std::move(c10::ivalue::TupleElements(
-          bytecode_list[BYTECODE_INDEX_CONSTANT].toTuple()->elements().vec())),
-      &func);
-
-  parseTypes(
-      std::move(c10::ivalue::TupleElements(
-          bytecode_list[BYTECODE_INDEX_TYPE].toTuple()->elements().vec())),
-      &func);
-
-  size_t register_size = bytecode_list[BYTECODE_INDEX_REGISTER_SIZE]
-                             .toTuple()
-                             ->elements()
-                             .vec()[0]
-                             .toInt();
-
-  parseRegisterSize(register_size, &func);
+Function& Function::registerFunc(
+    const std::string qualified_name,
+    const std::vector<Instruction>& instructions,
+    const std::vector<OperatorString>& operators,
+    const std::vector<c10::IValue> constants,
+    const std::vector<c10::TypePtr> types,
+    const google::int64 register_size) {
+  static Function func = Function(c10::QualifiedName(qualified_name));
+  for (auto const& inst : instructions) {
+    func.append_instruction(inst.op, inst.X, inst.N);
+  }
+  for (auto const& op : operators) {
+    func.append_operator(
+        op.name,
+        op.overload_name,
+        op.num_specified_args,
+        caffe2::serialize::kMaxSupportedBytecodeVersion);
+  }
+  for (auto const& constant : constants) {
+    func.append_constant(constant);
+  }
+  for (auto const& type : types) {
+    func.append_type(type);
+  }
+  func.set_register_size(register_size);
   return func;
 }
 

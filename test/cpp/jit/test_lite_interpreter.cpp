@@ -21,8 +21,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
-#include <unordered_set>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <unordered_set>
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -1446,7 +1446,7 @@ TEST(RunTimeTest, RuntimeCall) {
   };
   int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
 
-  auto foo = std::make_shared<mobile::Function>(c10::QualifiedName("foo"));
+  auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
   c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
       "foo",
@@ -1480,7 +1480,7 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseRegisterSize(rsize, call.get());
 
-  foo->append_function(std::move(call));
+  foo->append_function(*call);
 
   std::vector<IValue> inputs{at::tensor(1)};
   foo->run(inputs);
@@ -1514,12 +1514,20 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
-  for (auto upgrader_function : kUpgraderFunctions) {
-    upgrader_functions.push_back(upgrader_function);
-  }
-  ASSERT_EQ(kUpgraderFunctions.size(), upgrader_functions.size());
-}
 
+
+  for (auto& mobile_code_data : kUpgraderByteCode) {
+    upgrader_functions.push_back(mobile::Function::registerFunc(
+        mobile_code_data.qualified_name,
+        mobile_code_data.instructions,
+        mobile_code_data.operators,
+        mobile_code_data.constants,
+        mobile_code_data.types,
+        mobile_code_data.register_size));
+  }
+
+  ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+}
 
 } // namespace jit
 } // namespace torch

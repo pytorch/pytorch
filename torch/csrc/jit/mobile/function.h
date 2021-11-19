@@ -10,6 +10,8 @@ namespace torch {
 namespace jit {
 using Stack = std::vector<c10::IValue>;
 enum OpCode : uint8_t;
+struct Instruction;
+struct OperatorString;
 
 namespace mobile {
 struct Code;
@@ -49,10 +51,13 @@ class TORCH_API Function : public torch::jit::Function {
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
   const std::vector<int64_t>& getExceptionDebugHandles() const;
-  static Function& get(
-      std::string qualified_name,
-      c10::IValue bytecode,
-      int64_t model_version);
+  static Function& registerFunc(
+      const std::string qualified_name,
+      const std::vector<Instruction>& instructions,
+      const std::vector<OperatorString>& operators,
+      const std::vector<c10::IValue> constants,
+      const std::vector<c10::TypePtr> types,
+      const google::int64 register_size);
 
  private:
   c10::QualifiedName name_;

@@ -305,8 +305,14 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
-  for (auto upgrader_function : kUpgraderFunctions) {
-    function->append_function(upgrader_function);
+  for (auto& mobile_code_data : kUpgraderByteCode) {
+    function->append_function(mobile::Function::registerFunc(
+        mobile_code_data.qualified_name,
+        mobile_code_data.instructions,
+        mobile_code_data.operators,
+        mobile_code_data.constants,
+        mobile_code_data.types,
+        mobile_code_data.register_size));
   }
 }
 
