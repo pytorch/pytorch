@@ -69,7 +69,7 @@ const Tensor& hardswish_out(const Tensor& input, const Tensor& result) {
   return result;
 }
 
-const Tensor& hardswish_(const Tensor& input) {
+const Tensor& hardswish_(Tensor& input) {
   return hardswish_out(input, input);
 }
 
