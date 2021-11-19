@@ -129,6 +129,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
 
   void reportClientActivity(
       const std::string& evt_name,
+      const at::RecordScope scope,
       const bool is_async,
       const KinetoObserverContext* ctx) {
     if (!ctx) {
@@ -139,15 +140,21 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     std::lock_guard<std::mutex> guard(state_mutex_);
 #ifdef USE_KINETO
     if (cpu_trace) {
-      libkineto::GenericTraceActivity op(
-          cpu_trace->span,
-          libkineto::ActivityType::CPU_OP,
-          evt_name);
+      auto type = scope == at::RecordScope::USER_SCOPE
+        ? libkineto::ActivityType::USER_ANNOTATION
+        : libkineto::ActivityType::CPU_OP;
+      libkineto::GenericTraceActivity op(cpu_trace->span, type, evt_name);
       op.device = libkineto::processId();
       op.resource = libkineto::systemThreadId();
       op.id = ctx->correlationId;
       op.startTime = ctx->startUs;
       op.endTime = end_time;
+      // optimization - postpone shapesToStr till finalizeCPUTrace
+      // is called from disableProfiler
+      // if (ctx->shapes && !ctx->shapes->empty()) {
+      //   op.inputDims = shapesToStr(*ctx->shapes);
+      // }
+
       libkineto::api().activityProfiler().recordThreadInfo();
       cpu_trace->activities.emplace_back(std::move(op));
     }
@@ -573,7 +580,11 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
             config.state == ProfilerState::KINETO_GPU_FALLBACK) {
           auto corr_id = next_correlation_id();
 #ifdef USE_KINETO
-          libkineto::api().activityProfiler().pushCorrelationId(corr_id);
+          if (fn.scope() == at::RecordScope::USER_SCOPE) {
+            libkineto::api().activityProfiler().pushUserCorrelationId(corr_id);
+          } else {
+            libkineto::api().activityProfiler().pushCorrelationId(corr_id);
+          }
 #endif // USE_KINETO
 
           auto ctx_ptr = std::make_unique<KinetoObserverContext>();
@@ -648,9 +659,14 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           }
 
           kineto_ctx_ptr->endUS = getTimeUs();
-          state_ptr->reportClientActivity(fn.name().str(), fn.isAsync(), kineto_ctx_ptr);
+          state_ptr->reportClientActivity(
+              fn.name().str(), fn.scope(), fn.isAsync(), kineto_ctx_ptr);
 #ifdef USE_KINETO
-          libkineto::api().activityProfiler().popCorrelationId();
+          if (fn.scope() == at::RecordScope::USER_SCOPE) {
+            libkineto::api().activityProfiler().popUserCorrelationId();
+          } else {
+            libkineto::api().activityProfiler().popCorrelationId();
+          }
 #endif // USE_KINETO
         } else if (config.state == ProfilerState::NVTX) {
           cudaStubs()->nvtxRangePop();
@@ -747,7 +763,7 @@ void reportBackendEventToActiveKinetoProfiler(
   ctx_ptr->startUs = start_time_us;
   ctx_ptr->endUS = end_time_us;
   ctx_ptr->endThreadId = at::RecordFunction::currentThreadId();
-  state_ptr->reportClientActivity(event_name, false, ctx_ptr.get());
+  state_ptr->reportClientActivity(event_name, scope, false, ctx_ptr.get());
   state_ptr->kineto_events_.back().backend(backend_name);
 }
 
