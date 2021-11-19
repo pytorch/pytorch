@@ -470,19 +470,19 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     if (!same_storage_values.count(v)) {
       same_storage_values[v] = {v};
     }
-    // skip always alive values (alias inputs/outputs/weights)
-    if (value_group.isAlwaysAlive(v)) {
-      continue;
-    }
-    for (const auto& p : same_storage_values) {
-      // NB: this means we cannot optimize operations that "sometimes alias"
-      // TODO: add a more robust check of this behavior at runtime
-      // FIXME (penguin): this handling makes v and MayAlias(v) share the
-      // same storage, which is not correct.
-      if (db.mayAlias(p.first, v)) {
-        share_storage_fn(v, p.first);
-      }
-    }
+    // NOTE: if we had AliasDb::mustAlias, we could do the following:
+    // // skip always alive values (alias inputs/outputs/weights)
+    // if (value_group.isAlwaysAlive(v)) {
+    //   continue;
+    // }
+    // for (const auto& p : same_storage_values) {
+    //   if (db.mustAlias(p.first, v)) {
+    //     share_storage_fn(v, p.first);
+    //   }
+    // }
+    // It also wouldn't matter because ops always create new Tensor
+    // objects as aliases; there is no point in trying to reuse their
+    // storage.
   }
 
   // to preserve determinism
