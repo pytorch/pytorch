@@ -581,6 +581,8 @@ class OpInfo(object):
                  supports_sparse=False,  # whether the op supports sparse inputs
 
                  supports_scripting=True,  # only run tracing tests
+                 # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
+                 supports_sparse_csr=False,  # whether the op supports sparse csr inputs
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
@@ -707,6 +709,7 @@ class OpInfo(object):
         self.supports_inplace_autograd = supports_inplace_autograd
 
         self.supports_sparse = supports_sparse
+        self.supports_sparse_csr = supports_sparse_csr
 
         self.aliases = ()
         if aliases is not None:
@@ -1085,12 +1088,18 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
 
-    return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
-                                    low=low, high=high,
-                                    requires_grad=requires_grad)),
-            SampleInput(make_tensor((), device=device, dtype=dtype,
-                                    low=low, high=high,
-                                    requires_grad=requires_grad)))
+    if op_info.supports_sparse_csr:
+        # Tensors with dim=2 for sparse CSR testing
+        return (SampleInput(make_tensor((L, L), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)),)
+    else:
+        return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)),
+                SampleInput(make_tensor((), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)))
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -9092,6 +9101,7 @@ op_db: List[OpInfo] = [
            # batched gradients do not work for empty inputs
            # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_qr,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.slogdet',
@@ -10350,6 +10360,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_permute),
@@ -10378,6 +10390,7 @@ op_db: List[OpInfo] = [
            # batched gradients do not work for empty inputs
            # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
            check_batched_gradgrad=False,
+           supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
@@ -10429,6 +10442,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    safe_casts_outputs=True,
+                   supports_sparse_csr=True,
                    supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
@@ -10503,6 +10517,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
            variant_test_name='list_args',
@@ -10512,6 +10528,8 @@ op_db: List[OpInfo] = [
     OpInfo('split_with_sizes',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_split_with_sizes,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            supports_out=False,
            assert_autodiffed=True),
     OpInfo('__radd__',
@@ -11918,6 +11936,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_squeeze),
@@ -12004,6 +12024,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
     OpInfo('xlogy',
            aliases=('special.xlogy',),
@@ -12414,6 +12436,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
            supports_forward_ad=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            assert_autodiffed=True,),
     UnaryUfuncInfo('special.erfcx',
@@ -13130,7 +13154,8 @@ op_db: List[OpInfo] = [
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
-sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
+sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
+sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]
