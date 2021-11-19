@@ -12,7 +12,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, DeterministicGuard, TEST_SKIP_NOARCH, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, DeterministicGuard, TEST_SKIP_NOARCH, \
     _TestParametrizer, dtype_name, TEST_WITH_MIOPEN_SUGGEST_NHWC
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -190,8 +190,8 @@ except ImportError:
 #         In addition to accepting multiple dtypes, the @dtypes decorator
 #         can accept a sequence of tuple pairs of dtypes. The test template
 #         will be called with each tuple for its "dtype" argument.
-#     - @onlyOnCPUAndCUDA
-#         Skips the test if the device is not a CPU or CUDA device
+#     - @onlyNativeDeviceTypes
+#         Skips the test if the device is not a native device type (currently CPU, CUDA, Meta)
 #     - @onlyCPU
 #         Skips the test if the device is not a CPU device
 #     - @onlyCUDA
@@ -326,7 +326,12 @@ class DeviceTypeTestBase(TestCase):
     def _get_dtypes(cls, test):
         if not hasattr(test, 'dtypes'):
             return None
-        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
+
+        default_dtypes = test.dtypes.get('all')
+        msg = f"@dtypes is mandatory when using @dtypesIf however '{test.__name__}' didn't specify it"
+        assert default_dtypes is not None, msg
+
+        return test.dtypes.get(cls.device_type, default_dtypes)
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, 'precision_overrides'):
@@ -792,6 +797,13 @@ class skipMetaIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='meta')
 
+# Skips a test on XLA if the condition is true.
+class skipXLAIf(skipIf):
+
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xla')
+
+
 def _has_sufficient_memory(device, size):
     if torch.device(device).type == 'cuda':
         if not torch.cuda.is_available():
@@ -909,12 +921,14 @@ class deviceCountAtLeast(object):
 
         return multi_fn
 
-# Only runs the test on the CPU and CUDA (the native device types)
-def onlyOnCPUAndCUDA(fn):
+# Only runs the test on the native device type (currently CPU, CUDA, Meta)
+def onlyNativeDeviceTypes(fn):
+    NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
+
     @wraps(fn)
     def only_fn(self, *args, **kwargs):
-        if self.device_type != 'cpu' and self.device_type != 'cuda':
-            reason = "onlyOnCPUAndCUDA: doesn't run on {0}".format(self.device_type)
+        if self.device_type not in NATIVE_DEVICES:
+            reason = "onlyNativeDeviceTypes: doesn't run on {0}".format(self.device_type)
             raise unittest.SkipTest(reason)
 
         return fn(self, *args, **kwargs)
@@ -1050,12 +1064,26 @@ def disablecuDNN(fn):
 
     return disable_cudnn
 
+def disableMkldnn(fn):
+
+    @wraps(fn)
+    def disable_mkldnn(self, *args, **kwargs):
+        if torch.backends.mkldnn.is_available():
+            with torch.backends.mkldnn.flags(enabled=False):
+                return fn(self, *args, **kwargs)
+        return fn(self, *args, **kwargs)
+
+    return disable_mkldnn
+
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
 
 def expectedFailureMeta(fn):
     return expectedFailure('meta')(fn)
+
+def expectedFailureXLA(fn):
+    return expectedFailure('xla')(fn)
 
 # This decorator checks that the decorated function produces a nondeterministic
 # alert for the expected device types
@@ -1129,6 +1157,16 @@ def skipCPUIfNoFFT(fn):
 # Skips a test on CPU if MKL is not available.
 def skipCPUIfNoMkl(fn):
     return skipCPUIf(not TEST_MKL, "PyTorch is built without MKL support")(fn)
+
+
+# Skips a test on CPU if MKL Sparse is not available (it's not linked on Windows).
+def skipCPUIfNoMklSparse(fn):
+    return skipCPUIf(IS_WINDOWS or not TEST_MKL, "PyTorch is built without MKL support")(fn)
+
+
+# Skips a test on CPU if mkldnn is not available.
+def skipCPUIfNoMkldnn(fn):
+    return skipCPUIf(not torch.backends.mkldnn.is_available(), "PyTorch is built without mkldnn support")(fn)
 
 
 # Skips a test on CUDA if MAGMA is not available.
@@ -1228,5 +1266,14 @@ def skipCUDAIfNoCusparseGeneric(fn):
 def skipCUDAIfNoCudnn(fn):
     return skipCUDAIfCudnnVersionLessThan(0)(fn)
 
+def skipCUDAIfMiopen(fn):
+    return skipCUDAIf(torch.version.hip is not None, "Marked as skipped for MIOpen")(fn)
+
+def skipCUDAIfNoMiopen(fn):
+    return skipCUDAIf(torch.version.hip is None, "MIOpen is not available")(skipCUDAIfNoCudnn(fn))
+
 def skipMeta(fn):
     return skipMetaIf(True, "test doesn't work with meta tensors")(fn)
+
+def skipXLA(fn):
+    return skipXLAIf(True, "Marked as skipped for XLA")(fn)

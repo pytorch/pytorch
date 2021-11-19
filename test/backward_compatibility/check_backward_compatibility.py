@@ -63,7 +63,17 @@ ALLOW_LIST = [
     ("aten::index_add.alpha", datetime.date(2021, 12, 31)),
     ("aten::index_add_.alpha", datetime.date(2021, 12, 31)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
+    ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
+    ("aten::split", datetime.date(2021, 11, 20)),
+    ("aten::vsplit", datetime.date(2021, 11, 20)),
+    ("aten::tensor_split", datetime.date(2021, 11, 20)),
+    ("aten::chunk", datetime.date(2021, 11, 20)),
+    ("aten::unbind", datetime.date(2021, 11, 20)),
+    ("aten::hsplit", datetime.date(2021, 11, 20)),
+    ("aten::dsplit", datetime.date(2021, 11, 20)),
     ("caffe2::", datetime.date(2021, 10, 23)),
+    ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
+    ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
