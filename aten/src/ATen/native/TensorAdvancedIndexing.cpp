@@ -747,7 +747,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
   if (result.dim() > 1) {
     // Equivalent to:
-    //   for (auto i = 0; i < numel; i++) {
+    //   for (const auto i : c10::irange(numel)) {
     //     auto selfSlice = self.select(dim, index_data[i]);
     //     auto sourceSlice = source.select(dim, i);
     //     selfSlice.add_(sourceSlice);
@@ -765,7 +765,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cpu_", [&] () {
       auto index_data = index_contig.data_ptr<index_t>();
-      for (auto i = 0; i < numel; i++) {
+      for (const auto i : c10::irange(numel)) {
           auto self_i = index_data[i];
           TORCH_CHECK_INDEX((self_i >= 0) && (self_i < self_dim_size), "index out of range in self");
           auto self_data = static_cast<char*>(selfSlice.data_ptr()) + self_i * self_stride_bytes;
@@ -793,7 +793,7 @@ TORCH_IMPL_FUNC(index_add_cpu_out)
       AT_DISPATCH_INDEX_TYPES(index_contig.scalar_type(), "index_add_cpu_",
         [&index_contig, &numel, &result, &result_ptr, &result_stride, &source_ptr, &source_stride, &alpha_value] {
         auto index_data = index_contig.data_ptr<index_t>();
-        for (auto i = 0; i < numel; i++) {
+        for (const auto i : c10::irange(numel)) {
             auto self_i = index_data[i];
             TORCH_CHECK_INDEX((self_i >= 0) && (self_i < result.numel()), "index out of range in self");
             scalar_t *self_ip = result_ptr + self_i * result_stride;
