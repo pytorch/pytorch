@@ -4934,6 +4934,7 @@ class TestLinalg(TestCase):
             for A, B, left, upper, uni in gen_inputs((b, n, k), dtype, device):
                 self._test_linalg_solve_triangular(A, B, upper, left, uni)
 
+    @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @onlyCUDA
     @skipCUDAIfNoMagma  # Magma needed for the PLU decomposition
     @skipCUDAIfRocm  # There is a memory access bug in rocBLAS in the (non-batched) solve_triangular
