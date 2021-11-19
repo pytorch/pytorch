@@ -127,6 +127,9 @@ jobs:
           if-no-files-found: error
           path:
             test-reports-*.zip
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
       - name: Display and upload test statistics (Click Me)
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         # temporary hack: set CIRCLE_* vars, until we update
