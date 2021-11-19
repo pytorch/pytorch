@@ -129,6 +129,7 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/monitor/counters.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
