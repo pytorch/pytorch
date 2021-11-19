@@ -441,3 +441,19 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         output_shapes = [[20, 10], [20, 10], [20, 1]]
 
         self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
+
+    def test_shape_function_includes(self):
+        inp_shape = [1, 16, 5, 10]
+        weight_shape = [33, 16, 3, 3]
+        bias = None
+        stride = [2,2]
+        padding = [0,0]
+        dilation = [1,1]
+        groups = 1
+        res = torch.jit._shapes.conv2d(inp_shape, weight_shape, bias, stride, padding, dilation, groups)
+        self.assertEqual(res, [1, 33, 2, 4])
+
+        m1_shape = [10, 20]
+        m2_shape = [20, 10]
+        res = torch.jit._shapes.matmul(m1_shape, m2_shape)
+        self.assertEqual(res, [10, 10])

@@ -57,7 +57,7 @@ from importlib.machinery import SourceFileLoader
 import os
 shape_function_fp = f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
 try:
-    _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module(None)
+    _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module() # type: ignore
 except FileNotFoundError:
     warnings.warn(f"Couldn't load shape functions from {shape_function_fp}")
 
