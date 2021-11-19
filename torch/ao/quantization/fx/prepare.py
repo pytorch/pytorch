@@ -368,12 +368,15 @@ def get_arg_target_dtype_as_output(
     else:
         return node_name_to_target_dtype[arg.name]["output_activation_dtype"]
 
-def get_arg_target_dtype_as_input(
+def get_arg_target_dtype_as_input_to_node(
     arg: Node,
     node: Node,
     modules: Dict[str, torch.nn.Module],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
 ) -> Optional[torch.dtype]:
+    """ Get the target argument dtype for the argument `arg`, as input
+    to node `node`
+    """
     assert isinstance(arg, Node)
     is_weight = node_arg_is_weight(node, arg)
     is_bias = node_arg_is_bias(node, arg)
@@ -432,7 +435,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             qconfig.activation
 
         arg_as_output_target_dtype = get_arg_target_dtype_as_output(arg, modules, node_name_to_target_dtype)
-        arg_as_input_target_dtype = get_arg_target_dtype_as_input(arg, node, modules, node_name_to_target_dtype)
+        arg_as_input_target_dtype = get_arg_target_dtype_as_input_to_node(arg, node, modules, node_name_to_target_dtype)
         needs_obs = (
             # if the dtypes are different, we need an observer
             (arg_as_output_target_dtype != arg_as_input_target_dtype) and
