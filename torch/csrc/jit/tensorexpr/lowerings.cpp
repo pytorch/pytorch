@@ -30,10 +30,10 @@ int nnc_lowerings_lazy_registration() {
       {"aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> (Tensor(a))"},
       computeNoop);
 
-  // TODO: convert to schema, add a test
-  // RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
-  //     {"prepacked::conv2d_clamp_run"},
-  //     computePrepackedConv2dClampRun);
+  // TODO: add a test
+  RegisterNNCLoweringsFunction prepacked_conv2d_clamp_run(
+      {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> (Tensor Y)"},
+      computePrepackedConv2dClampRun);
 
   // TODO: add a test
   RegisterNNCLoweringsFunction prepacked_linear_clamp_run(
@@ -1427,9 +1427,10 @@ int nnc_lowerings_lazy_registration() {
        "aten::expand_as(Tensor(a) self, Tensor other) -> (Tensor(a))"},
       computeExpand);
 
-  // TODO: convert to schema, add a test
-  // RegisterNNCLoweringsFunction aten_flatten({"aten::flatten"},
-  // computeFlatten);
+  // TODO: add a test
+  RegisterNNCLoweringsFunction aten_flatten(
+      {"aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> (Tensor(a))"},
+      computeFlatten);
   RegisterNNCLoweringsFunction aten_view(
       {"aten::reshape(Tensor(a) self, int[] shape) -> (Tensor(a))",
        "aten::reshape_as(Tensor(a) self, Tensor other) -> (Tensor(a))",
