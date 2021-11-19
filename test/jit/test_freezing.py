@@ -1655,6 +1655,7 @@ class TestFrozenOptimizations(JitTestCase):
                 super(ConvBN, self).__init__()
                 self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
                 self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
+                self.amt = 3.2
 
             def forward(self, x):
                 x = self.conv(x)
@@ -1662,14 +1663,15 @@ class TestFrozenOptimizations(JitTestCase):
 
             @torch.jit.export
             def make_prediction(self, x):
-                return self.forward(x)
+                return self.forward(x) + self.amt
 
         mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
         scripted_mod = torch.jit.script(mod_eager)
         torch._C._jit_pass_inline(scripted_mod.make_prediction.graph)
         FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
-        scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction"])
+        # _jit_pass_optimize_frozen_graph should not be called on non-method attributes (e.g. "amt")
+        scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction", "amt"])
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
     def test_conv_add_folding(self):
