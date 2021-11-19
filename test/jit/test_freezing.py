@@ -1649,6 +1649,27 @@ class TestFrozenOptimizations(JitTestCase):
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
             self.assertEqual(mod_eager(inp), scripted_mod(inp))
 
+    def test_conv_bn_folding_not_forward(self):
+        class ConvBN(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(ConvBN, self).__init__()
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=True, **kwargs)
+                self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return self.bn(x)
+
+            @torch.jit.export
+            def make_prediction(self, x):
+                return self.forward(x)
+
+        mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
+        scripted_mod = torch.jit.script(mod_eager)
+        FileCheck().check("conv").check("aten::batch_norm").run(scripted_mod.graph)
+
+        scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction"])
+        FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
 
     def test_conv_add_folding(self):
 

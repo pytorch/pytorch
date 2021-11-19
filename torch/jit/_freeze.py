@@ -114,11 +114,16 @@ def freeze(mod, preserved_attrs: Optional[List[str]] = None, optimize_numerics: 
 
     out = RecursiveScriptModule(torch._C._freeze_module(mod._c, preserved_attrs))
     RecursiveScriptModule._finalize_scriptmodule(out)
-    run_frozen_optimizations(out, optimize_numerics)
+
+    preserved_methods = [x for x in preserved_attrs if mod._c._has_method(x)]
+    run_frozen_optimizations(out, optimize_numerics, preserved_methods)
 
     return out
 
-def run_frozen_optimizations(mod, optimize_numerics: bool = True):
+
+def run_frozen_optimizations(
+    mod, optimize_numerics: bool = True, preserved_methods: Optional[List[str]] = None
+):
     r"""
     Runs a series of optimizations looking for patterns that occur in frozen graphs.
     The current set of optimizations includes:
@@ -160,6 +165,15 @@ def run_frozen_optimizations(mod, optimize_numerics: bool = True):
 
     """
     torch._C._jit_pass_optimize_frozen_graph(mod.graph, optimize_numerics)
+
+    if preserved_methods is None:
+        preserved_methods = []
+
+    for method in preserved_methods:
+        torch._C._jit_pass_optimize_frozen_graph(
+            mod.__getattr__(method).graph, optimize_numerics
+        )
+
 
 def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
     """
