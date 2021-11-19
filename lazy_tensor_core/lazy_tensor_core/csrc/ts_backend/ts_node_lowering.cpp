@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/jit.h>
+#include <numeric>
 
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
@@ -31,6 +32,7 @@
 #include "lazy_tensor_core/csrc/ops/update_slice.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/ts_backend/TsNode.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_lowering_context.h"
 
 namespace torch_lazy_tensors {
@@ -304,7 +306,17 @@ class TSNodeLowering : public TSNodeLoweringInterface {
             : LowerBuiltin(at::aten::cudnn_convolution_backward, arguments);
     // cudnn_convolution_backward/cudnn_convolution_transpose_backward only
     // returns 2 tensors
-    result.push_back(nullptr);
+
+    auto grad_rank = dynamic_cast<const ir::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
+    std::vector<int64_t> axes(grad_rank);
+    std::iota(axes.begin(), axes.end(), 0);
+    axes.erase(axes.begin() + 1);
+    //auto zero_val = loctx()->graph()->insertConstant(false);
+    auto axes_val = loctx()->graph()->insertConstant(axes);
+    //auto none_node = loctx()->graph()->createNone();
+    //loctx()->graph()->insertNode(none_node);
+    auto bias_grad = loctx()->graph()->insert(at::aten::sum, {loctx()->GetOutputOp(operands[0]), axes_val/*, zero_val, none_node->output()*/});
+    result.push_back(bias_grad);
     return result;
   }
 

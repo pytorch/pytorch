@@ -6,6 +6,12 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
+static torch::lazy::Shape inferBiasShape(const torch::lazy::Value& grad_output) {
+  auto grad_shape = ir::GetShapeFromTsValue(grad_output);
+  auto bias_dim = grad_shape.size(1);
+  return torch::lazy::Shape(grad_shape.scalar_type(), {bias_dim});
+}
+
 ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     const torch::lazy::Value& grad_output, const torch::lazy::Value& input,
     const torch::lazy::Value& weight, std::vector<int64_t> stride,
@@ -14,7 +20,7 @@ ConvolutionBackwardOverrideable::ConvolutionBackwardOverrideable(
     : TsNode(torch::lazy::OpKind(at::aten::convolution_backward_overrideable),
              {grad_output, input, weight},
              {ir::GetShapeFromTsValue(input), ir::GetShapeFromTsValue(weight),
-              ir::GetShapeFromTsValue(grad_output)},
+              inferBiasShape(grad_output)},
              /*num_outputs=*/3,
              torch::lazy::MHash(stride, padding, dilation, transposed,
                                 output_padding, groups)),
