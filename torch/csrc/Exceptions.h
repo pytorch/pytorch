@@ -82,6 +82,12 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       PyErr_SetString(PyExc_NotImplementedError, torch::processErrorMsg(msg)); \
       retstmnt;                                                      \
     }                                                                \
+    catch (const c10::LinAlgError& e) {                              \
+      auto msg = torch::get_cpp_stacktraces_enabled() ?              \
+                    e.what() : e.what_without_backtrace();           \
+      PyErr_SetString(torch::linalg::Pytorch_LinAlgError, torch::processErrorMsg(msg)); \
+      retstmnt;                                                      \
+    }                                                                \
     catch (const c10::Error& e) {                                    \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
@@ -143,10 +149,6 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     }                                                                \
   }                                                                  \
   CATCH_ALL_ERRORS(return retval)
-
-// Like TORCH_CHECK, but raises LinAlgError instead of Error.
-#define TORCH_CHECK_LINALG(cond, ...) \
-  TORCH_CHECK_WITH_MSG(::torch::linalg::LinAlgError, cond, "LINALG", __VA_ARGS__)
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 

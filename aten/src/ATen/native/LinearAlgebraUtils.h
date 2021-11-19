@@ -254,7 +254,7 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
   } else if (info > 0) {
     if (strstr(name, "inv")) {
       // inv, inverse, cholesky_inverse, etc.
-      TORCH_CHECK(false, name, batch_string,
+      TORCH_CHECK_LINALG(false, name, batch_string,
           ": The diagonal element ", info, " is zero, the inversion could not be completed because the input matrix is singular.");
     } else if (strstr(name, "solve")) {
       // solve, linalg_solve, cholesky_solve, etc.
