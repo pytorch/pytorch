@@ -107,7 +107,7 @@ _LinalgBackends = {
 }
 _LinalgBackends_str = ', '.join(_LinalgBackends.keys())
 
-def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] = None) -> torch._C._LinalgBackend:
+def preferred_linalg_library(backend: Union[None, str] = None):
     r'''
     .. warning:: This flag is experimental and subject to change.
 
@@ -117,11 +117,14 @@ def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] 
 
     * If `"cusolver"` is set then cuSOLVER will be used wherever possible.
     * If `"magma"` is set then MAGMA will be used wherever possible.
-    * If `"default"` (the default) is set then heuristics will be used to pick between cuSOLVER and MAGMA if both are available.
+    * If `"default"` (the default) is set then heuristics will be used to pick between
+      cuSOLVER and MAGMA if both are available.
     * When no input is given, this function returns the currently preferred library.
 
-    Note: When a library is preferred other libraries may still be used if the preferred library doesn't implement the operation(s) called.
-    This flag may achieve better performance if PyTorch's heuristic library selection is incorrect for your application's inputs.
+    Note: When a library is preferred other libraries may still be used if the preferred library
+    doesn't implement the operation(s) called.
+    This flag may achieve better performance if PyTorch's heuristic library selection is incorrect
+    for your application's inputs.
 
     Currently supported linalg operators:
 
