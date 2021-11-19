@@ -191,11 +191,6 @@ py_library(
     data = glob(["tools/jit/templates/*"]),
 )
 
-py_library(
-    name = "jit_shapes",
-    srcs = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
-)
-
 py_binary(
     name = "generate_code",
     srcs = ["tools/setup_helpers/generate_code.py"],
@@ -1875,7 +1870,6 @@ cc_library(
         "@local_config_python//:python_headers",
         "@onnx",
     ],
-    data = ["torch/jit/_shapes.py", "torch/jit/_shapes_1.py"],
     alwayslink = True,
 )
 

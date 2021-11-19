@@ -14,12 +14,12 @@ std::mutex lock;
 // split here to satisfy MSVC++
 // https://docs.microsoft.com/en-us/cpp/error-messages/compiler-errors-1/compiler-error-c2026?view=msvc-170
 const std::string _shape_compute_functions =
-#include "torch/jit/_shapes.py"
+#include <torch/csrc/jit/runtime/shape_functions.h>
     ;
 
 const std::string _shape_compute_functions_1 =
-#include "torch/jit/_shapes_1.py"
-  ;
+#include <torch/csrc/jit/runtime/shape_functions_1.h>
+    ;
 
 const std::string _xnnpack_shape_compute_functions =
 #ifdef USE_XNNPACK

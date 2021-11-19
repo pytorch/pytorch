@@ -6,13 +6,23 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # flake8: noqa
 
 from typing import List, Any, Optional, Tuple, TypeVar, Union
+number = TypeVar('number', bound=Union[int, float])
 
 import torch
 
-from torch.jit._shapes_1 import *
-from torch.jit._shapes_1 import _copy
+import inspect
+import warnings
+from importlib.machinery import SourceFileLoader
 
-number = TypeVar('number', bound=Union[int, float])
+import os
+shape_function_fp = f"{os.path.dirname(os.path.realpath(torch.__file__))}/csrc/jit/runtime/shape_functions_1.h"
+try:
+    _shapes_1 = SourceFileLoader("shape_functions", shape_function_fp).load_module()
+    globals().update(inspect.getmembers(_shapes_1))
+except Exception as e:
+    warnings.warn(f"Couldn't load shape functions from {shape_function_fp}")
+
+
 
 ####    SHAPE COMPUTE FUNCTIONS START   ###
 

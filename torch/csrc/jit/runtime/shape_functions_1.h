@@ -5,9 +5,8 @@ R"=====("  ### DO NOT REMOVE THIS STRING!!!
 # mypy: ignore-errors
 # flake8: noqa
 
-from typing import List, Any, Optional, Tuple
-
-from numpy import number
+from typing import List, Any, Optional, Tuple, TypeVar, Union
+number = TypeVar('number', bound=Union[int, float])
 
 import torch
 
