@@ -3,11 +3,13 @@
 // #include <ATen/core/ivalue.h>
 #include <ATen/core/ivalue_inl.h>
 
-#include <string>
-#include <vector>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace torch {
 namespace jit {
@@ -24,51 +26,49 @@ const std::unordered_map<std::string, std::vector<Upgrader>> kOperatorVersionMap
     {{std::string("aten::div_Tensor"),
       std::vector<Upgrader>({Upgrader({0, 3, "div_Tensor_0_3", 0})})}});
 
+struct OperatorString {
+  const std::string name;
+  const std::string overload_name;
+  const c10::optional<int> num_specified_args;
+};
 
-static std::vector<mobile::Function> kUpgraderFunctions(
-    {
-            mobile::Function::get(
-                "div_Tensor_0_3",
-                to_tuple(std::vector<c10::IValue>{
-                    //  instructions
-                    to_tuple(std::vector<c10::IValue>{
-                        to_tuple({"STOREN", 1, 2}), to_tuple({"LOAD", 1, 0}),
-                        to_tuple({"OP", 0, 0}),     to_tuple({"JF", 3, 0}),
-                        to_tuple({"LOADC", 1, 0}),  to_tuple({"JMP", 3, 0}),
-                        to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 0, 0}),
-                        to_tuple({"STORE", 3, 0}),  to_tuple({"MOVE", 3, 0}),
-                        to_tuple({"JF", 5, 0}),     to_tuple({"LOAD", 1, 0}),
-                        to_tuple({"LOAD", 2, 0}),   to_tuple({"OP", 1, 0}),
-                        to_tuple({"JMP", 5, 0}),    to_tuple({"LOAD", 1, 0}),
-                        to_tuple({"LOAD", 2, 0}),   to_tuple({"LOADC", 0, 0}),
-                        to_tuple({"OP", 2, 0}),     to_tuple({"STORE", 4, 0}),
-                        to_tuple({"DROPR", 2, 0}),  to_tuple({"DROPR", 1, 0}),
-                        to_tuple({"MOVE", 4, 0}),   to_tuple({"RET", 0, 0}),
-                    }),
-                    //  operators
-                    to_tuple(std::vector<c10::IValue>{
-                        to_tuple({"aten::is_floating_point", "", 1}),
-                        to_tuple({"aten::div", "Tensor", 2}),
-                        to_tuple({"aten::div", "Tensor_mode", 3}),
-                    }),
-                    //  constants
-                    to_tuple(std::vector<c10::IValue>{
-                        c10::IValue("trunc"),
-                        c10::IValue(true),
-                    }),
-                    //  types
-                    to_tuple(std::vector<c10::IValue>{
+struct MobileCodeData {
+  std::string qualified_name;
+  std::vector<Instruction> instructions;
+  std::vector<OperatorString> operators;
+  std::vector<c10::IValue> constants;
+  std::vector<c10::TypePtr> types;
+  size_t register_size;
+};
 
-                    }),
-                    //  register_size
-                    to_tuple(std::vector<c10::IValue>{
-                        4,
-                    }),
-                }),
-                3
-            )
-    }
-);
+static std::vector<MobileCodeData> kUpgraderByteCode({MobileCodeData({
+    "div_Tensor_0_3",
+    std::vector<Instruction>({
+        Instruction{OpCode::STOREN, 1, 2}, Instruction{OpCode::LOAD, 1, 0},
+        Instruction{OpCode::OP, 0, 0},     Instruction{OpCode::JF, 3, 0},
+        Instruction{OpCode::LOADC, 1, 0},  Instruction{OpCode::JMP, 3, 0},
+        Instruction{OpCode::LOAD, 2, 0},   Instruction{OpCode::OP, 0, 0},
+        Instruction{OpCode::STORE, 3, 0},  Instruction{OpCode::MOVE, 3, 0},
+        Instruction{OpCode::JF, 5, 0},     Instruction{OpCode::LOAD, 1, 0},
+        Instruction{OpCode::LOAD, 2, 0},   Instruction{OpCode::OP, 1, 0},
+        Instruction{OpCode::JMP, 5, 0},    Instruction{OpCode::LOAD, 1, 0},
+        Instruction{OpCode::LOAD, 2, 0},   Instruction{OpCode::LOADC, 0, 0},
+        Instruction{OpCode::OP, 2, 0},     Instruction{OpCode::STORE, 4, 0},
+        Instruction{OpCode::DROPR, 2, 0},  Instruction{OpCode::DROPR, 1, 0},
+        Instruction{OpCode::MOVE, 4, 0},   Instruction{OpCode::RET, 0, 0},
+    }), // instructions_
+    std::vector<OperatorString>({
+        OperatorString({"aten::is_floating_point", "", 1}),
+        OperatorString({"aten::div", "Tensor", 2}),
+        OperatorString({"aten::div", "Tensor_mode", 3}),
+    }), // op_names
+    std::vector<c10::IValue>({
+        c10::IValue("trunc"),
+        c10::IValue(true),
+    }), // constants
+    std::vector<c10::TypePtr>(), // types
+    4 // register_size_
+})});
 
 } // namespace jit
 } // namespace torch

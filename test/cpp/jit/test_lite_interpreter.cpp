@@ -21,8 +21,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
-#include <unordered_set>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
+#include <unordered_set>
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -1506,12 +1506,20 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
-  for (auto upgrader_function : kUpgraderFunctions) {
-    upgrader_functions.push_back(upgrader_function);
-  }
-  ASSERT_EQ(kUpgraderBytecode.size(), upgrader_functions.size());
-}
 
+
+  for (auto& mobile_code_data : kUpgraderByteCode) {
+    upgrader_functions.push_back(mobile::Function::registerFunc(
+        mobile_code_data.qualified_name,
+        mobile_code_data.instructions,
+        mobile_code_data.operators,
+        mobile_code_data.constants,
+        mobile_code_data.types,
+        mobile_code_data.register_size));
+  }
+
+  ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+}
 
 } // namespace jit
 } // namespace torch
