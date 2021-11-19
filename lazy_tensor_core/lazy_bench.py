@@ -18,12 +18,12 @@ from torch.jit import fuser
 from os.path import abspath
 from scipy.stats import ttest_ind
 
-# from caffe2.python import workspace
+from caffe2.python import workspace
 # workspace.GlobalInit(['caffe2', '--caffe2_log_level=-5'])
 
 import lazy_tensor_core
 import lazy_tensor_core.core.lazy_model as ltm
-import lazy_tensor_core.debug.metrics as met
+import lazy_tensor_core.debug.metrics as metrics
 lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
@@ -234,10 +234,15 @@ class ToDeviceSync:
         if current_device == 'cuda':
             torch.cuda.synchronize()
 
+def dump_lazy_metrics(reset=False):
+    met = {name: int(metrics.counter_value(name)) for name in metrics.counter_names() if int(metrics.counter_value(name) > 0)}
+    if reset:
+        metrics.reset_metrics()
+    return met
+
 def timed(model, example_inputs, sync, times=1):
     results = []
     sync.final_sync(results)
-    gc.collect()
     torch.manual_seed(1337)
     # keep the lazy tensor results alive until the final sync
     t0 = time.perf_counter()
@@ -308,10 +313,17 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
         # warmup
         timed(model, example_inputs, sync=ref_sync)
         timed(lazy_model, lazy_inputs, sync=lazy_sync)
+
+    # fresh metrics for each timed run
+    dump_lazy_metrics(reset=True)
     for rep in range(args.repeat):
         # measure
         _, timings[rep, 0] = timed(model, example_inputs, times=args.inner_loop_repeat, sync=ref_sync)
         _, timings[rep, 1] = timed(lazy_model, lazy_inputs, times=args.inner_loop_repeat, sync=lazy_sync)
+    lazy_metrics = dump_lazy_metrics(reset=True)
+    if lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
+        print("WARNING: lazy cached compile count indicates fallbacks, or something else")
+
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
