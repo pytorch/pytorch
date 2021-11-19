@@ -20,8 +20,10 @@ void topk_out_with_sort(
 }
 
 bool should_use_sort(const Tensor& self, int64_t dim) {
-  int64_t num_slices = self.numel() / self.size(dim);
-  return num_slices <= 16 && self.size(dim) >= 100000;
+  int64_t slice_size = self.size(dim);
+  if (slice_size == 0) return false;
+  int64_t num_slices = self.numel() / slice_size;
+  return num_slices <= 16 && slice_size >= 100000;
 }
 
 TORCH_IMPL_FUNC(topk_out_cuda)
