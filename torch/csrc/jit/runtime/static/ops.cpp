@@ -409,7 +409,7 @@ bool hasVarArgs(Node* n) {
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const FastMap<const Node*, bool>& node_has_out_variant) {
   auto it = node_has_out_variant.find(n);
   if (it != node_has_out_variant.end()) {
     return it->second;
@@ -422,7 +422,7 @@ bool canReuseInputsOutputs(
 // This means the IValues will not change run to run
 bool inputsCanRunOutOfPlace(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const FastMap<const Node*, bool>& node_has_out_variant) {
   for (auto* input : n->inputs()) {
     if (!canReuseInputsOutputs(input->node(), node_has_out_variant)) {
       return false;
@@ -433,7 +433,7 @@ bool inputsCanRunOutOfPlace(
 
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant) {
+    const FastMap<const Node*, bool>& node_has_out_variant) {
   const auto& type = n->output()->type();
   bool is_supported_type = false;
   if (type->kind() == TypeKind::ListType) {
@@ -457,7 +457,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_ListConstruct,
     [](Node* n) -> SROperator {
       const auto& type = n->output()->type()->expectRef<ListType>();
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize, &type](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
@@ -477,7 +477,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim::TupleConstruct,
     prim_TupleConstruct,
     [](Node* n) -> SROperator {
-      bool can_optimize = isOptimizableContainerType(n, FastMap<Node*, bool>());
+      bool can_optimize = isOptimizableContainerType(n);
       return [can_optimize](ProcessedNode* p_node) {
         const auto& out_l = p_node->Output(0);
         if (!out_l.isNone() && can_optimize) {
