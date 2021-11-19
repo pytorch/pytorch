@@ -132,6 +132,16 @@
   dispatch:
     CompositeExplicitAutograd: _new_zeros_with_same_feature_meta
 
+# Like the above, this function also does weird things to work with
+# jvp in functorch and batched tensors
+# - It is autograd explicit, because TensorWrapper has no storage
+# - The batching rule does not redispatch, it just returns True,
+#   because batched tensors don't have a concept of logical storage.
+- func: _has_same_storage_numel(Tensor self, Tensor other) -> bool
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _has_same_storage_numel
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
 

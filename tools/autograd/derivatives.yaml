@@ -2421,5 +2421,9 @@
   other: non_differentiable
   output_differentiability: [False]
 
+- name: _has_same_storage_numel(Tensor self, Tensor other) -> bool
+  self: non_differentiable
+  other: non_differentiable
+
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
   self: warn_backwards(grad)

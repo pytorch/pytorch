@@ -7314,6 +7314,33 @@ class TestAutogradForwardMode(TestCase):
 
             dual = fwAD.make_dual(foo, tangent[1:])
 
+    def test_layout_check(self):
+        # Check that a copy is performed when _set_fw_grad detects a layout mismatch
+        primal = torch.randn(5).resize_(4)
+        self.assertEqual(len(primal.storage()), 5)
+        tangent = torch.randn(4)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(primal, tangent)
+            _, unpacked_tangent = fwAD.unpack_dual(dual)
+
+            # Verify that mutating unpacked tangent does not affect the original tangent
+            tangent_clone = tangent.clone()
+            unpacked_tangent *= 2
+            self.assertTrue(torch.allclose(tangent_clone, tangent))
+
+    def test_layout_check_for_primal_with_conj_bit(self):
+        # Make sure the _has_same_meta is a fallthrough, so that
+        # conj bit does not materialize. If it materializes it would
+        # cause the layout check to fail for views that do not index the
+        # the entire storage.
+        a = torch.randn(2, 2, dtype=torch.cdouble).conj()
+        b = torch.rand_like(a)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            dual[1:]
+
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
     #   - Ensure that only level 0 exists and nesting is properly disabled
