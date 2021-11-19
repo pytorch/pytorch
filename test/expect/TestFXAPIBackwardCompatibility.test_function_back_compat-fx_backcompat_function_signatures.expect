@@ -51,7 +51,7 @@ torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
 torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
 torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.format_node(self, placeholder_names: List[str] = None, maybe_return_typename: List[str] = None) -> Optional[str]
+torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None) -> Optional[str]
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
 torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node') -> List[Node]
 torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node')
@@ -61,6 +61,7 @@ torch.fx.node.map_aggregate(a: torch.fx.node.Argument, fn: Callable[[torch.fx.no
 torch.fx.node.map_arg(a: torch.fx.node.Argument, fn: Callable[[torch.fx.node.Node], torch.fx.node.Argument]) -> torch.fx.node.Argument
 torch.fx.passes.split_module.split_module(m: torch.fx.graph_module.GraphModule, root_m: torch.nn.modules.module.Module, split_callback: Callable[[torch.fx.node.Node], int])
 torch.fx.proxy.Attribute.__init__(self, root: torch.fx.proxy.Proxy, attr: str)
+
 torch.fx.proxy.Proxy.__init__(self, node: torch.fx.node.Node, tracer: 'Optional[TracerBase]' = None)
 torch.fx.proxy.Proxy.keys(self)
 torch.fx.proxy.TracerBase.create_arg(self, a: Any) -> torch.fx.node.Argument
