@@ -10132,12 +10132,11 @@ op_db: List[OpInfo] = [
         'nn.functional.silu',
         ref=lambda x, inplace=False:
             x / (1 + np.exp(-x)),
-        dtypes=floating_types_and(torch.bfloat16),
+        dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=False,
-        supports_autograd=True,
+        supports_autograd=False,
         assert_autodiffed=False,
-        supports_gradgrad=True,
         supports_out=False,
         inplace_variant=lambda x: torch.nn.functional.silu(x, inplace=True),
         decorators=[
