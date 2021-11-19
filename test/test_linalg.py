@@ -16,8 +16,7 @@ from functools import reduce, partial
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
-     TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
-     iter_indices, gradcheck, gradgradcheck,
+     TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, iter_indices,
      make_fullrank_matrices_with_distinct_singular_values)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes,
@@ -522,22 +521,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_cholesky_hermitian_grad(self, device, dtype):
-        # Check that the gradient is Hermitian (or symmetric)
-        def run_test(shape):
-            root = torch.rand(*shape, dtype=dtype, device=device)
-            root = torch.matmul(root, root.mH)
-            root.requires_grad_()
-            chol = torch.linalg.cholesky(root).sum().backward()
-            self.assertEqual(root.grad, root.grad.mH)
-
-        shapes = ((3, 3), (1, 1, 3, 3))
-        for shape in shapes:
-            run_test(shape)
-
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
     @slowTest
     @skipCUDAIfNoMagma
@@ -704,30 +687,6 @@ class TestLinalg(TestCase):
         info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
         with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
             torch.linalg.cholesky_ex(A, out=(L, info))
-
-    @onlyCPU
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_old_cholesky_autograd(self, device, dtype):
-        def func(root, upper):
-            x = 0.5 * (root + root.mH)
-            return torch.cholesky(x, upper)
-
-        def run_test(upper, dims):
-            root = torch.rand(*dims, dtype=dtype, device=device, requires_grad=True)
-            root = root + torch.eye(dims[-1])
-
-            gradcheck(func, [root, upper])
-            gradgradcheck(func, [root, upper])
-
-            root = torch.rand(*dims, dtype=dtype, device=device)
-            root = torch.matmul(root, root.mH)
-            root.requires_grad_()
-            chol = root.cholesky().sum().backward()
-            self.assertEqual(root.grad, root.grad.mH)  # Check the gradient is hermitian
-
-        for upper, dims in itertools.product([True, False], [(3, 3), (4, 3, 2, 2)]):
-            run_test(upper, dims)
 
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
         def check(m, a, b, beta, alpha):
@@ -1005,20 +964,6 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigh(a, out=(out_w, out_v))
 
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_eigh_hermitian_grad(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        def run_test(dims, uplo):
-            x = random_hermitian_matrix(dims[-1], *dims[:-2], device=device, dtype=dtype).requires_grad_()
-            w, v = torch.linalg.eigh(x)
-            (w.sum() + abs(v).sum()).backward()
-            self.assertEqual(x.grad, x.grad.mH)  # Check the gradient is Hermitian
-
-        for dims, uplo in itertools.product([(3, 3), (1, 1, 3, 3)], ["L", "U"]):
-            run_test(dims, uplo)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3207,31 +3152,6 @@ class TestLinalg(TestCase):
             run_test((2, 1, 3, 4, 4), (4, 6), upper)  # broadcasting b
             run_test((4, 4), (2, 1, 3, 4, 2), upper)  # broadcasting A
             run_test((1, 3, 1, 4, 4), (2, 1, 3, 4, 5), upper)  # broadcasting A & b
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float64, torch.complex128)
-    def test_cholesky_solve_autograd(self, device, dtype):
-        def run_test(A_dims, B_dims, upper):
-            root = torch.randn(*A_dims, device=device, dtype=dtype).requires_grad_()
-            b = torch.randn(*B_dims, device=device, dtype=dtype).requires_grad_()
-
-            def func(root, b, upper):
-                if upper:
-                    A = root.triu()
-                else:
-                    A = root.tril()
-                return torch.cholesky_solve(b, A, upper)
-
-            gradcheck(func, [root, b, upper])
-            # TODO(#50743): the following fails with batched grad testing
-            # TODO(#56235): disabling temporarily
-            # gradgradcheck(func, [root, b, upper], atol=1e-3, check_batched_grad=False)
-
-        for (a_size, b_size), upper in itertools.product([((3, 3), (3, 4)), ((3, 3), (3, 2)),
-                                                          ((2, 3, 3), (2, 3, 4)), ((2, 3, 3), (2, 3, 2))],
-                                                         [True, False]):
-            run_test(a_size, b_size, upper)
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
