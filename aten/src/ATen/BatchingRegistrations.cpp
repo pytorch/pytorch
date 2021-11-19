@@ -541,6 +541,23 @@ static void checkBasicAsStridedValidForSlice(
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
+Tensor _new_zeros_with_same_feature_meta_batching_rule(
+    const Tensor& self,
+    const Tensor& other,
+    int64_t unused_num_batch_dims) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+
+  TORCH_INTERNAL_ASSERT(unused_num_batch_dims == 0,
+    "num_batch_dims should not be explicitly passed in because it will be overridden");
+  auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
+  const auto& self_physical_tensor = self_physical_view.tensor();
+  int64_t num_batch_dims = self_physical_view.numBatchDims();
+  checkBatchDimsAtFrontInLayout(self_physical_tensor.strides(), num_batch_dims);
+  auto result = at::_new_zeros_with_same_feature_meta(self_physical_tensor, other, num_batch_dims);
+  return self_physical_view.getPhysicalToLogicalMap().apply(result);
+}
+
 // What are the semantics of as_strided inside of vmap?
 // y = vmap(lambda x: x.as_strided(sizes, strides, offset))(xs)
 // This returns a view on `x`, `y`, such that each y[i] has:
@@ -1028,6 +1045,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", native::_make_dual);
   m.impl("is_same_size", native::is_same_size);
+  m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 
   m.impl("sum.dim_IntList", sum_batching_rule);
   m.impl("is_complex", native::is_complex);

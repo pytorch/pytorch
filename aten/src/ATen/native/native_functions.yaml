@@ -104,6 +104,32 @@
 - func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
 
+# NOTE: [_new_zeros_with_same_feature_meta]
+# This function creates a new tensor with the layout and TensorOptions
+# of `other` but also takes into account the batch dimensions of `self`
+#
+# This function has a couple extra constraints because it is also used for `jvp`
+# in functorch.
+# - is used for forward AD because there is the restriction
+#   that the primal and tangent must have the same layout
+# - We cannot assume that `self` and `other` have the same sizes or even dim
+#   because in the inplace over view case, `other` is the base tensor, and
+#   `self` is the forward grad with respect to the view, which can have an
+#   entirely different shape
+# - takes the number of batch dims for `self` because we also handle
+#   some batching logic. We handle that here instead of a batching rule because
+#   we'd like to avoid calling as_strided in the batching rule (as to enable
+#   nested vmap in functorch).
+# - needs to be CompositeExplicitAutograd for jvp support in functorch.
+#   functorch currently relies on TensorWrapper which does not have storage
+#   CompositeExplicitAutograd makes sure the TensorWrapper is unwrapped.
+# - this function may eventually take on another int argument to store the
+#   the number of batch dims for other once we support that use case
+- func: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, *, int self_num_batch_dims=0) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _new_zeros_with_same_feature_meta
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
 
