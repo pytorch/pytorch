@@ -101,7 +101,8 @@ class TORCH_API ManagedTensorRanges {
   ManagedTensorRanges() = default;
   ManagedTensorRanges(
       const std::shared_ptr<Graph>& graph,
-      const FastSet<const Value*>& managed_tensor_values);
+      const FastSet<const Value*>& managed_tensor_values,
+      const FastMap<const Node*, bool>& node_has_out_variant = {});
 
   // If true, then this node is the last use of at least one
   // managed tensor. availableTensorsAfterNode(node) will return a vector
@@ -327,7 +328,8 @@ class TORCH_API StaticModule {
  private:
   // Initialize various attributes that the memory planner will need.
   // To be called at the tail of the ctor.
-  void prepareForMemoryPlanner();
+  void prepareForMemoryPlanner(
+      const FastMap<const Node*, bool>& node_has_out_variant);
 
   StaticModuleOptions opts_;
   std::shared_ptr<torch::jit::Graph> graph_;

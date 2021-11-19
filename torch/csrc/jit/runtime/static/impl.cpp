@@ -273,17 +273,12 @@ bool mayContainAlias(const Value* v1, const Value* v2, const AliasDb& db) {
   return db.mayContainAlias(const_cast<Value*>(v1), const_cast<Value*>(v2));
 }
 
-bool isPureFunction(const Node* node) {
-  auto* schema = node->maybeSchema();
-  return schema &&
-      schema->aliasAnalysis() == c10::AliasAnalysisKind::PURE_FUNCTION;
-}
-
 } // namespace
 
 ManagedTensorRanges::ManagedTensorRanges(
     const std::shared_ptr<Graph>& graph,
-    const FastSet<const Value*>& managed_tensor_values) {
+    const FastSet<const Value*>& managed_tensor_values,
+    const FastMap<const Node*, bool>& node_has_out_variant) {
   AliasDb alias_db(graph);
   const std::vector<Node*> nodes(graph->nodes().begin(), graph->nodes().end());
   const FastSet<const Value*> graph_inputs(
@@ -292,6 +287,16 @@ ManagedTensorRanges::ManagedTensorRanges(
   auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
     return !alias_db.isMutableType(value) ||
         graph_inputs.find(value) != graph_inputs.end();
+  };
+
+  auto isPureFunction = [&node_has_out_variant](const Node* node) {
+    auto it = node_has_out_variant.find(node);
+    if (it != node_has_out_variant.end() && it->second) {
+      return true;
+    }
+    auto* schema = node->maybeSchema();
+    return schema &&
+        schema->aliasAnalysis() == c10::AliasAnalysisKind::PURE_FUNCTION;
   };
 
   const auto num_nodes = nodes.size();
@@ -526,7 +531,7 @@ StaticModule::StaticModule(
 
   // construct SSA definition for non-constant nodes
   int node_idx = 0;
-  FastMap<Node*, bool> node_has_out_variant;
+  FastMap<const Node*, bool> node_has_out_variant;
 
   const auto inputs_index_offset = 0;
   const auto constants_index_offset = inputs_index_offset + num_inputs();
@@ -635,10 +640,11 @@ StaticModule::StaticModule(
   value_group_.init(graph_, alias_db);
   GRAPH_DEBUG(value_group_.toString());
 
-  prepareForMemoryPlanner();
+  prepareForMemoryPlanner(node_has_out_variant);
 }
 
-void StaticModule::prepareForMemoryPlanner() {
+void StaticModule::prepareForMemoryPlanner(
+    const FastMap<const Node*, bool>& node_has_out_variant) {
   if (!opts_.enable_out_variant) {
     return;
   }
@@ -689,7 +695,8 @@ void StaticModule::prepareForMemoryPlanner() {
       "managed_output_tensor_values_: ",
       dumpValueSet(managed_output_tensor_values_));
 
-  ranges_ = ManagedTensorRanges(graph_, managed_tensor_values_);
+  ranges_ =
+      ManagedTensorRanges(graph_, managed_tensor_values_, node_has_out_variant);
 }
 
 const StaticModuleOptions& StaticModule::opts() const {

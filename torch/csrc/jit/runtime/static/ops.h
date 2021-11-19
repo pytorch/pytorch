@@ -141,10 +141,10 @@ bool nativeOpIsRegistered(const c10::Symbol& op_name);
 
 bool canReuseInputsOutputs(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const FastMap<const Node*, bool>& node_has_out_variant = {});
 bool isOptimizableContainerType(
     Node* n,
-    const FastMap<Node*, bool>& node_has_out_variant);
+    const FastMap<const Node*, bool>& node_has_out_variant = {});
 
 std::function<void(ProcessedNode*)> getOutOfPlaceOperation(Node* n);
 std::function<void(ProcessedNode*)> getNativeOperation(Node* n);
