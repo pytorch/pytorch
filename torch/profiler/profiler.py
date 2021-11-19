@@ -70,7 +70,6 @@ class kineto_profiler(object):
         self.with_stack = with_stack
         self.with_modules = with_modules
         self.profiler: Optional[prof.profile] = None
-        self.step_rec_fn: Optional[prof.record_function] = None
 
     def prepare_trace(self):
         self.profiler = prof.profile(
@@ -424,7 +423,11 @@ class profile(kineto_profiler):
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [self.stop_trace, self._trace_ready],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [self.stop_trace, self._trace_ready, self.prepare_trace],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
+                self.stop_trace,
+                self._trace_ready,
+                self.prepare_trace,
+                self.start_trace],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
                 self.stop_trace,
                 self._trace_ready,
