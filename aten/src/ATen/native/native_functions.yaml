@@ -3830,11 +3830,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3842,6 +3846,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sin_out
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_out
 
 - func: sinc(Tensor self) -> Tensor
   structured_delegate: sinc.out
