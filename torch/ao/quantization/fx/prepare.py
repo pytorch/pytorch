@@ -1286,10 +1286,10 @@ def prepare(
                 assert input_type in index_dicts.keys(), \
                     f"input type must be one of {index_dicts.keys()} but got: {input_type}"
                 index_dict = index_dicts[input_type]
-                if pattern in index_dict:
-                    index_dict[pattern].append(index)
+                if pattern in index_dict:  # type: ignore[operator]
+                    index_dict[pattern].append(index)  # type: ignore[index]
                 else:
-                    index_dict[pattern] = [index]
+                    index_dict[pattern] = [index]  # type: ignore[index]
 
     convert_dict_to_ordered_dict(qconfig_dict)
     convert_dict_to_ordered_dict(equalization_qconfig_dict)
