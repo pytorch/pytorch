@@ -1258,6 +1258,7 @@ void to_maybe_copy_out_functor<true, false>(ProcessedNode* p_node) {
     to_copy_functor_impl<true, false>(p_node, &args);
   }
 }
+
 bool node_has_constant_non_tensor_dtype_and_flags(Node* n) {
   const auto* input1 = n->inputs()[1];
   return input1->type()->kind() != TypeKind::TensorType &&
@@ -1327,7 +1328,7 @@ REGISTER_OPERATOR_FUNCTOR(
 // NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
 REGISTER_OPERATOR_FUNCTOR(
     static_runtime::to_copy,
-    aten_to_copy,
+    static_runtime_to_copy,
     [](Node* n) -> SROperator {
       // support 4- or 5-arg for adindexer/adfinder models
       // Keep TORCH_CHECK here because there is no alternative for fallback
