@@ -65,26 +65,25 @@ class ITensorListIterator;
 // Defines a "switch-case" for `TAG`. Inside, it executes `BODY`,
 // while bringing to scope:
 //     - `ImplT`: the implementation class for `TAG`
-//     - `ID`: the result of unwrapping `this`
-#define TORCH_ITENSORLIST_UNWRAP_CASE(TAG, ID, BODY) \
-  case c10::ITensorListTag::TAG: {                   \
-    using ImplT = TORCH_ITENSORLIST_IMPL(TAG);       \
-    auto& ID = ImplT::unwrap(*this);                 \
-    BODY                                             \
+//     - `this_`: the result of unwrapping `this`
+#define TORCH_ITENSORLIST_UNWRAP_CASE(TAG, BODY) \
+  case c10::ITensorListTag::TAG: {               \
+    using ImplT = TORCH_ITENSORLIST_IMPL(TAG);   \
+    auto& this_ = ImplT::unwrap(*this);          \
+    BODY                                         \
   } break;
 
 // Dispatches the unwrap call, depending on `TAG`, followed by
-// the execution of `BODY`. The unwrapped value gets saved in `ID`.
-// It also aborts if `TAG` is not a `ITensorListTag`.
-#define TORCH_ITENSORLIST_UNWRAP(ID, TAG, BODY)                            \
-  switch (TAG) {                                                           \
-    TORCH_ITENSORLIST_FORALL_TAGS(TORCH_ITENSORLIST_UNWRAP_CASE, ID, BODY) \
-    default:                                                               \
-      TORCH_INTERNAL_ASSERT(false, "invalid ITensorList tag.");            \
+// the execution of `BODY`. It aborts if `TAG` is not a `ITensorListTag`.
+#define TORCH_ITENSORLIST_UNWRAP(TAG, BODY)                            \
+  switch (TAG) {                                                       \
+    TORCH_ITENSORLIST_FORALL_TAGS(TORCH_ITENSORLIST_UNWRAP_CASE, BODY) \
+    default:                                                           \
+      TORCH_INTERNAL_ASSERT(false, "invalid ITensorList tag.");        \
   }
 
 enum class ITensorListTag {
-#define DEFINE_TAG(tag) tag,
+#define DEFINE_TAG(tag, ...) tag,
   TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_TAG)
 #undef DEFINE_TAG
       None
@@ -147,7 +146,7 @@ class ITensorListTagImpl<ITensorListTag::Boxed> {
 class ITensorListIterator
     : public std::iterator<std::bidirectional_iterator_tag, at::Tensor> {
  private:
-#define DEFINE_FRIEND_CLASS(TAG) friend class TORCH_ITENSORLIST_IMPL(TAG);
+#define DEFINE_FRIEND_CLASS(TAG, ...) friend class TORCH_ITENSORLIST_IMPL(TAG);
   TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
 
@@ -177,28 +176,28 @@ class ITensorListIterator
   }
 
   detail::ITensorListConstRef operator*() const {
-    TORCH_ITENSORLIST_UNWRAP(it, tag_, { return ImplT::iterator_get(it); });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { return ImplT::iterator_get(this_); });
   }
 
   ITensorListIterator& operator++() {
-    TORCH_ITENSORLIST_UNWRAP(it, tag_, { ++it; });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { ++this_; });
     return *this;
   }
 
   ITensorListIterator operator++(int) {
     auto old = *this;
-    TORCH_ITENSORLIST_UNWRAP(it, tag_, { ++it; });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { ++this_; });
     return old;
   }
 
   ITensorListIterator& operator--() {
-    TORCH_ITENSORLIST_UNWRAP(it, tag_, { --it; });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { --this_; });
     return *this;
   }
 
   ITensorListIterator operator--(int) {
     auto old = *this;
-    TORCH_ITENSORLIST_UNWRAP(it, tag_, { --it; });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { --this_; });
     return old;
   }
 
@@ -206,9 +205,9 @@ class ITensorListIterator
     if (tag_ != rhs.tag_) {
       return false;
     }
-    TORCH_ITENSORLIST_UNWRAP(lhs_it, tag_, {
+    TORCH_ITENSORLIST_UNWRAP(tag_, {
       auto& rhs_it = ImplT::unwrap(rhs);
-      return lhs_it == rhs_it;
+      return this_ == rhs_it;
     });
   }
 
@@ -235,7 +234,7 @@ class ITensorListIterator
  */
 class ITensorList {
  private:
-#define DEFINE_FRIEND_CLASS(TAG) friend class TORCH_ITENSORLIST_IMPL(TAG);
+#define DEFINE_FRIEND_CLASS(TAG, ...) friend class TORCH_ITENSORLIST_IMPL(TAG);
   TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
 
@@ -258,7 +257,7 @@ class ITensorList {
 
   ITensorList(const std::initializer_list<at::Tensor>& list)
       : tag_(ITensorListTag::Unboxed) {
-    payload_.unboxed = ArrayRef<at::Tensor>(list);
+    payload_.unboxed = at::ArrayRef<at::Tensor>(list);
   }
 
   ITensorList(const boxed_t& boxed) : tag_(ITensorListTag::Boxed) {
@@ -279,7 +278,7 @@ class ITensorList {
   }
 
   size_t size() const {
-    TORCH_ITENSORLIST_UNWRAP(lst, tag_, { return lst.size(); });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { return this_.size(); });
   }
 
   bool empty() const {
@@ -287,18 +286,18 @@ class ITensorList {
   }
 
   iterator begin() const {
-    TORCH_ITENSORLIST_UNWRAP(lst, tag_, { return lst.begin(); });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { return this_.begin(); });
   }
 
   iterator end() const {
-    TORCH_ITENSORLIST_UNWRAP(lst, tag_, { return lst.end(); });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { return this_.end(); });
   }
 
   detail::ITensorListConstRef operator[](size_t i) const {
-    TORCH_ITENSORLIST_UNWRAP(lst, tag_, { return lst[i]; });
+    TORCH_ITENSORLIST_UNWRAP(tag_, { return this_[i]; });
   }
 
-#define DEFINE_CHECK(TAG)               \
+#define DEFINE_CHECK(TAG, ...)          \
   bool is##TAG() const {                \
     return tag_ == ITensorListTag::TAG; \
   }
@@ -309,7 +308,7 @@ class ITensorList {
     return tag_ == ITensorListTag::None;
   }
 
-#define DEFINE_CASTING(TAG)                                             \
+#define DEFINE_CASTING(TAG, ...)                                        \
   const typename TORCH_ITENSORLIST_IMPL(TAG)::self_t& to##TAG() const { \
     TORCH_INTERNAL_ASSERT(is##TAG());                                   \
     return TORCH_ITENSORLIST_IMPL(TAG)::unwrap(*this);                  \
