@@ -927,6 +927,15 @@ Tensor _fused_dropout_backward(Tensor grad, Tensor mask, double p1m) {
   }
 }
 
+// scale == (1 / (1 - prob))
+Tensor infinitely_differentiable_native_dropout_backward(const Tensor& grad, const Tensor& mask, double scale) {
+  return grad * (mask.type_as(grad) * scale);
+}
+
+Tensor native_dropout_double_backward(const Tensor& ggI, const Tensor& grad, const Tensor& mask, double scale) {
+  return ggI.type_as(grad) * (mask.type_as(grad) * scale);
+}
+
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   if (input.is_cuda()) {
     auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
@@ -2493,6 +2502,22 @@ Tensor linalg_eig_backward(const std::vector<torch::autograd::Variable> &grads,
   }
 }
 
+// https://people.maths.ox.ac.uk/gilesm/files/NA-08-01.pdf, page 10
+// see also https://arxiv.org/pdf/1701.00392.pdf Eqs. (4.60) and (4.63)
+std::tuple<Tensor, Tensor> linalg_eig_jvp(const Tensor& dA,
+                                          const Tensor& L,
+                                          const Tensor& V) {
+  const auto dAComplex = dA.to(c10::toComplexType(dA.scalar_type()));
+  const auto dVfactor = at::linalg_solve(V, at::matmul(dAComplex, V));
+  const auto Lconj = L.conj();
+  auto FTimesdVfactor = dVfactor / (Lconj.unsqueeze(-2) - Lconj.unsqueeze(-1));
+  FTimesdVfactor.diagonal(0, -2, -1).zero_();
+
+  return std::make_tuple(
+    dVfactor.diagonal(0, -2, -1),
+    at::matmul(V, FTimesdVfactor));
+}
+
 Tensor linalg_lstsq_jvp(
   const Tensor& A,
   const Tensor& B,
@@ -2673,6 +2698,70 @@ Tensor eigh_backward(const std::vector<torch::autograd::Variable> &grads, const 
       return at::zeros_like(self, at::MemoryFormat::Contiguous);
     }
   }
+}
+
+std::tuple<Tensor, Tensor> linalg_qr_jvp(
+  const Tensor& dA,
+  const Tensor& Q,
+  const Tensor& R
+) {
+  auto m = dA.size(-2);
+  auto n = dA.size(-1);
+  auto k = std::min(m, n);
+
+  auto dA1 = dA.narrow(-1, 0, k);
+  auto R1 = R.narrow(-1, 0, k);
+
+  // dB1 = Q^H dA1 R1^{-1}
+  auto dB1 = std::get<0>(at::triangular_solve(
+    dA1.mT().matmul(Q.conj()),
+    R1,
+    /*upper=*/true,
+    /*transpose=*/true
+  )).mT();
+
+  // dC1 = (dB1 + dB1^H).triu(-1) + (dB1 + dB1^H) * 0.5 I
+  auto dC1 = (dB1 + dB1.mH()).triu();
+  dC1.diagonal(0, -2, -1).mul_(0.5);
+
+  auto dR1 = dC1.matmul(R1);
+
+  // dQ = (dA1 - Q dR1) R1^{-1}
+  auto dQ = std::get<0>(at::triangular_solve(
+    (dA1 - Q.matmul(dR1)).mT(),
+    R1,
+    /*upper=*/true,
+    /*transpose=*/true
+  )).mT();
+
+  Tensor dR;
+  if (m >= n) {
+    dR = dR1;
+  }
+  else {
+    auto dA2 = dA.narrow(-1, k, n - k);
+    auto R2 = R.narrow(-1, k, n - k);
+    auto dR2 = Q.mH().matmul(dA2 - dQ.matmul(R2));
+    dR = at::cat({dR1, dR2}, -1);
+  }
+
+  return std::make_tuple(dQ, dR);
+}
+
+Tensor linalg_qr_jvp_Q(
+  const Tensor& dA,
+  const Tensor& Q,
+  const Tensor& R
+) {
+  return std::get<0>(linalg_qr_jvp(dA, Q, R));
+}
+
+Tensor linalg_qr_jvp_R(
+  const Tensor& dA,
+  const Tensor& Q,
+  const Tensor& R
+) {
+  return std::get<1>(linalg_qr_jvp(dA, Q, R));
 }
 
 Tensor linalg_qr_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
