@@ -270,7 +270,7 @@ def to_device(inputs, device):
         import transformers
         if isinstance(inputs, transformers.modeling_outputs.MaskedLMOutput) \
         or isinstance(inputs, transformers.modeling_outputs.Seq2SeqLMOutput):
-            correct_result = correct_result.to_tuple()[0]
+            inputs = inputs.to_tuple()[0]
     except ImportError:
         pass
 
@@ -328,7 +328,11 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     lazy_metrics = dump_lazy_metrics(reset=True)
     if lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
-
+    fallbacks = {k:v for (k,v) in lazy_metrics.items() if 'aten::' in k}
+    if len(fallbacks):
+        print("WARNING: lazy-eager fallbacks detected for ["+ ",".join(fallbacks.keys()) + ']')
+    if args.dump_lazy_counters:
+        print(lazy_metrics)
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     speedup = median[0] / median[1]
@@ -367,6 +371,7 @@ if __name__ == "__main__" :
     parser.add_argument("--inner_loop_repeat", type=int, default=6, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
+    parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
     args = parser.parse_args()
     results = []
 
