@@ -321,6 +321,20 @@ class ObjectPair(Pair):
             raise self._make_error_meta(AssertionError, f"{self.actual} != {self.expected}")
 
 
+class NonePair(Pair):
+    """Pair for ``None`` inputs."""
+
+    def __init__(self, actual: Any, expected: Any, **other_parameters: Any) -> None:
+        if not (actual is None or expected is None):
+            raise UnsupportedInputs()
+
+        super().__init__(actual, expected, **other_parameters)
+
+    def compare(self) -> None:
+        if not (self.actual is None and self.expected is None):
+            raise self._make_error_meta(AssertionError, f"None mismatch: {self.actual} is not {self.expected}")
+
+
 class BooleanPair(Pair):
     """Pair for :class:`bool` inputs.
 
@@ -1128,7 +1142,12 @@ def assert_close(
     assert_equal(
         actual,
         expected,
-        pair_types=(BooleanPair, NumberPair, TensorLikePair),
+        pair_types=(
+            NonePair,
+            BooleanPair,
+            NumberPair,
+            TensorLikePair,
+        ),
         allow_subclasses=allow_subclasses,
         rtol=rtol,
         atol=atol,
