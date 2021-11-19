@@ -107,7 +107,7 @@ _LinalgBackends = {
 }
 _LinalgBackends_str = ', '.join(_LinalgBackends.keys())
 
-def preferred_linalg_library(backend: Union[None, str] = None):
+def preferred_linalg_library(backend: Union[None, str, torch._C._LinalgBackend] = None) -> torch._C._LinalgBackend:
     r'''
     .. warning:: This flag is experimental and subject to change.
 
