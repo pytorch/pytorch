@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 from typing import Tuple
 import io
 import itertools

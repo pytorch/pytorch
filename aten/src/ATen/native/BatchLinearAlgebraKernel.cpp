@@ -206,6 +206,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
   });
   // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
   singleCheckErrors(info, "eig_cpu");
+
   return std::tuple<Tensor, Tensor>(vals_, vecs_);
 }
 
@@ -795,7 +796,7 @@ This is an in-place routine, content of 'B' is overwritten.
 and the actual diagonal values are not used.
 */
 template<typename scalar_t>
-void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
 #if !AT_BUILD_WITH_BLAS()
   TORCH_CHECK(
       false,
@@ -826,7 +827,7 @@ void apply_triangular_solve(Tensor& A, Tensor& B, bool left, bool upper, Transpo
 #endif
 }
 
-void triangular_solve_kernel(Tensor& A, Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
+void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "triangular_solve_cpu", [&]{
     apply_triangular_solve<scalar_t>(A, B, left, upper, transpose, unitriangular);
   });
