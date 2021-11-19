@@ -4809,44 +4809,6 @@ def sample_inputs_linalg_solve(op_info, device, dtype, requires_grad=False, vect
         out.append(SampleInput(a, args=(b,)))
     return out
 
-def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=False, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device)
-    bs = (1, 2, 0)
-    ns = (3, 0)
-    ks = (1, 3, 0)
-
-    def gen_inputs():
-        for b, n, k, (left, upper, uni) in product(bs, ns, ks, product((True, False), repeat=3)):
-            with torch.no_grad():
-                if b == 1:
-                    A = make_arg((n, n)) if left else make_arg((k, k))
-                    B = make_arg((n, k))
-                else:
-                    A = make_arg((b, n, n)) if left else make_arg((b, k, k))
-                    B = make_arg((b, n, k))
-                if uni:
-                    # Not really necessary, but writing it for consistency
-                    A.diagonal(0, -2, -1).fill_(1.)
-                else:
-                    d = A.diagonal(0, -2, -1)
-                    d[d.abs() < 1e-6] = 1.
-                if upper:
-                    A.triu_()
-                else:
-                    A.tril_()
-            kwargs = {"upper": upper, "left": left, "unitriangular": uni}
-            if requires_grad:
-                for grad_A, grad_B in product((True, False), repeat=2):
-                    # Either A or B needs to have a gradient
-                    if not grad_A and not grad_B:
-                        continue
-                    A.requires_grad_(grad_A)
-                    B.requires_grad_(grad_B)
-                    yield SampleInput(A, args=(B,), kwargs=kwargs)
-            else:
-                yield SampleInput(A, args=(B,), kwargs=kwargs)
-
-    return list(gen_inputs())
 
 def sample_inputs_legacy_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     """
@@ -7566,7 +7528,8 @@ def gradcheck_wrapper_triangular_input(op, *args, upper=False, idx=0, **kwargs):
     `idx` is used to specific which `args[idx]` is to be triangularized.
     """
     triangular_arg = args[idx].triu() if upper else args[idx].tril()
-    return op(*args[:idx], triangular_arg, *args[idx + 1:], upper, **kwargs)
+    modified_args = args[:idx] + (triangular_arg,) + args[idx + 1:]
+    return op(*modified_args, upper)
 
 
 def gradcheck_wrapper_masked_operation(op, input, *args, **kwargs):
@@ -10427,6 +10390,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_permute),
@@ -10585,6 +10550,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
            variant_test_name='list_args',
@@ -10594,6 +10561,8 @@ op_db: List[OpInfo] = [
     OpInfo('split_with_sizes',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_split_with_sizes,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            supports_out=False,
            assert_autodiffed=True),
     OpInfo('__radd__',
@@ -11088,13 +11057,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
-    OpInfo('linalg.solve_triangular',
-           aten_name='linalg_solve_triangular',
-           op=torch.linalg.solve_triangular,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_solve_triangular,
-           # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
-           supports_forward_ad=True),
     OpInfo('linalg.matrix_rank',
            aten_name='linalg_matrix_rank',
            dtypes=floating_and_complex_types(),
@@ -12019,6 +11981,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -12111,6 +12075,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
     OpInfo('xlogy',
            aliases=('special.xlogy',),
@@ -12523,6 +12489,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
            supports_forward_ad=True,
+           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
+           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
