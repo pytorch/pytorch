@@ -6,7 +6,21 @@
 namespace torch {
 namespace jit {
 
-static void assign_storage_to_managed_tensors(
+namespace {
+
+bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
+  DCHECK(output_idx < pnode.outputs().size());
+  static const auto to_maybe_copy_out_symbol =
+      c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
+  // Heuristic and special case:
+  // If to_maybe_copy_out did not actually do anything in the
+  // first iteration, assume it will continue to not do anything
+  // and avoid managing its output.
+  return pnode.node()->kind() == to_maybe_copy_out_symbol &&
+      pnode.Output(output_idx).isNone();
+}
+
+void assign_storage_to_managed_tensors(
     StaticRuntime* runtime,
     const FastSet<const Value*>& managed_tensor_values,
     const FastMap<const Value*, std::vector<const Value*>>&
@@ -21,7 +35,8 @@ static void assign_storage_to_managed_tensors(
     for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
-      if (managed_tensor_values.count(val)) {
+      if (managed_tensor_values.count(val) &&
+          !isUnmanagedSpecialCase(pnode, i)) {
         TORCH_CHECK(ival.isTensor());
         at::Tensor* tensor = &ival.toTensor();
         auto f = value_to_storage_idx.find(val);
@@ -46,81 +61,55 @@ static void assign_storage_to_managed_tensors(
   }
 }
 
-static bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
+bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
   return set.find(v) != set.end();
 }
 
-static void assignStorageToOutputTensors(
+void assignStorageToOutputTensors(
     StaticRuntime* runtime,
     const FastSet<const Value*>& managed_output_tensor_values,
-    std::vector<std::pair<size_t, at::Tensor*>>* managed_output_tensors) {
+    std::vector<std::pair<size_t, at::Tensor*>>& managed_output_tensors) {
   for (auto& pnode : runtime->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
-      if (!setIncludes(managed_output_tensor_values, val)) {
+      if (!setIncludes(managed_output_tensor_values, val) ||
+          isUnmanagedSpecialCase(pnode, i)) {
         continue;
       }
       TORCH_CHECK(ival.isTensor());
       at::Tensor* tensor = &ival.toTensor();
-      managed_output_tensors->emplace_back(0, tensor);
+      managed_output_tensors.emplace_back(0, tensor);
     }
   }
 }
+
+} // namespace
 
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     const FastMap<const Value*, std::vector<const Value*>>&
         value_to_same_storage_values,
     const ValueGroup& value_group,
+    const FastSet<const Value*>& managed_tensor_values,
+    const FastSet<const Value*>& managed_output_tensor_values,
+    const FastSet<const Value*>& leaked_values,
     bool enable_out_variant,
     bool manage_output_tensors) {
-  // collect register indices of outputs of ops with out variant
-  FastSet<const Value*> managed_tensor_values;
-  FastSet<const Value*> leaked_values;
-  // Never manage graph outputs so that we can do std::move(output_ivalue).
-  // This does not affect performance if the graph returns a collection object.
-  FastSet<const Value*> graph_output_values(
-      runtime->graph().outputs().begin(), runtime->graph().outputs().end());
-  if (enable_out_variant) {
-    for (ProcessedNode& pnode : runtime->nodes()) {
-      if (!pnode.has_out_variant()) {
-        continue;
-      }
-      for (const auto i : c10::irange(pnode.outputs().size())) {
-        const Value* out_v = pnode.node()->outputs()[i];
-        // Types are stored in the underlying TorchScript IR
-        bool is_tensor_type = out_v->type()->castRaw<TensorType>();
-        if (manage_output_tensors && is_tensor_type &&
-            !setIncludes(graph_output_values, out_v) &&
-            value_group.isOutputAlias(out_v)) {
-          managed_output_tensor_values_.insert(out_v);
-          continue;
-        }
-        if (value_group.isAlwaysAlive(out_v)) {
-          continue;
-        }
-        if (is_tensor_type) {
-          managed_tensor_values.insert(out_v);
-        } else if (runtime->is_optimizable_container_type(pnode.node())) {
-          // We "leak" certain container types because their allocations
-          // take a long time
-          leaked_values.insert(out_v);
-        }
-      }
-    }
-  }
-
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
   FastSet<IValue*> unmanaged_borrowed_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
-      // Types are stored in the underlying TorchScript IR
       const Value* out_v = pnode.node()->outputs()[i];
-      if (setIncludes(managed_tensor_values, out_v) ||
-          setIncludes(managed_output_tensor_values_, out_v) ||
-          setIncludes(leaked_values, out_v)) {
+      const bool in_managed_sets = setIncludes(managed_tensor_values, out_v) ||
+          // Manage output tensors might have been turned off, so we have to
+          // check the flag here
+          (manage_output_tensors &&
+           setIncludes(managed_output_tensor_values, out_v)) ||
+          setIncludes(leaked_values, out_v);
+
+      if (in_managed_sets && !isUnmanagedSpecialCase(pnode, i)) {
         continue;
       }
       static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
@@ -143,12 +132,6 @@ MemoryPlanner::MemoryPlanner(
       }
     }
   }
-  // since runtime->outputs() escape from run(), remove them from
-  // managed_tensor_values and from unmanaged_ivalues
-  for (const Value* output : runtime->graph().outputs()) {
-    managed_tensor_values.erase(output);
-  }
-  FastSet<IValue*> borrowed_ivalues_needing_incref;
   for (IValue* output : runtime->outputs()) {
     auto it = unmanaged_borrowed_ivalues.find(output);
     if (it != unmanaged_borrowed_ivalues.end()) {
@@ -158,11 +141,6 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_ivalues.erase(output);
     }
   }
-
-  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values));
-  GRAPH_DEBUG(
-      "managed_output_tensor_values_: ",
-      dumpValueSet(managed_output_tensor_values_));
 
   // copy to unmanaged_ivalues_
   unmanaged_ivalues_.reserve(unmanaged_ivalues.size());
@@ -186,7 +164,7 @@ MemoryPlanner::MemoryPlanner(
 
   if (enable_out_variant && manage_output_tensors) {
     ::torch::jit::assignStorageToOutputTensors(
-        runtime, managed_output_tensor_values_, &managed_output_tensors_);
+        runtime, managed_output_tensor_values, managed_output_tensors_);
   }
 
   num_managed_tensors_ = 0;
