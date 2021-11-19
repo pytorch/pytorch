@@ -287,12 +287,12 @@ def sgd(params: List[Tensor],
         if has_sparse_grad:
             d_p_list = [d_p.add(p, alpha=weight_decay) for d_p, p in zip(d_p_list, params)]
         else:
-            d_p_list = torch._foreach_add(d_p_list, params, alpha=weight_decay)
+            d_p_list = torch._foreach_add(d_p_list, params, alpha=weight_decay)  # type: ignore[assignment]
 
     if momentum != 0:
         if all(isinstance(t, torch.Tensor) for t in momentum_buffer_list):
-            torch._foreach_mul_(momentum_buffer_list, momentum)
-            torch._foreach_add_(momentum_buffer_list, d_p_list, alpha=1 - dampening)
+            torch._foreach_mul_(momentum_buffer_list, momentum)  # type: ignore[arg-type]
+            torch._foreach_add_(momentum_buffer_list, d_p_list, alpha=1 - dampening)  # type: ignore[arg-type]
         else:
             for i, (buf, d_p) in enumerate(zip(momentum_buffer_list, d_p_list)):
                 if buf is None:
@@ -303,14 +303,14 @@ def sgd(params: List[Tensor],
 
         if nesterov:
             if not has_sparse_grad:
-                d_p_list = torch._foreach_add(d_p_list, momentum_buffer_list, alpha=momentum)
+                d_p_list = torch._foreach_add(d_p_list, momentum_buffer_list, alpha=momentum)  # type: ignore[arg-type, assignment]
             else:
                 d_p_list = [
-                    d_p.add(momentum_buffer, alpha=momentum)
+                    d_p.add(momentum_buffer, alpha=momentum)  # type: ignore[arg-type]
                     for d_p, momentum_buffer in zip(d_p_list, momentum_buffer_list)
                 ]
         else:
-            d_p_list = momentum_buffer_list
+            d_p_list = momentum_buffer_list  # type: ignore[assignment]
     alpha = lr if maximize else -lr
     if not has_sparse_grad:
         torch._foreach_add_(params, d_p_list, alpha=alpha)
