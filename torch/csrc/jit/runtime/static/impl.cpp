@@ -603,7 +603,15 @@ StaticModule::StaticModule(
     nodes_.emplace_back(
         node, fn, std::move(input_indices), node_output_idx_map[node_idx]);
 
-    node_has_out_variant.emplace(node, nodes_.back().has_out_variant());
+    const bool has_out_variant = nodes_.back().has_out_variant();
+    node_has_out_variant.emplace(node, has_out_variant);
+    auto* schema = node->maybeSchema();
+    if (has_out_variant && schema &&
+        schema->aliasAnalysis() != c10::AliasAnalysisKind::PURE_FUNCTION) {
+      VLOG(1)
+          << node->kind().toQualString()
+          << " has out variant but is not marked as pure function, please correct schema";
+    }
     for (const auto i : c10::irange(node->outputs().size())) {
       value_to_ssa_def[node->outputs()[i]] = std::make_pair(node_idx, i);
     }
