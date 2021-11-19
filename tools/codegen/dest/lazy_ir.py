@@ -159,11 +159,10 @@ class GenLazyNativeFuncDefinition:
         if func.structured or func.structured_delegate is not None:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
-                this_shape = lambda i: f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+                def this_shape(i):
+                    return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
-                # meta_out = f"""std::vector<Shape> shapes{Shape(std::get<i>(out_meta).scalar_type(), std::get<i>(out_meta.sizes().vec())};"""
-                # meta_out = """auto shapes = CreateComputationShapeFromMetaTensors(out_meta);"""
 
             meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
         {meta_out}"""
