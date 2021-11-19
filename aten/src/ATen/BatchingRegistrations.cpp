@@ -1,4 +1,5 @@
 #include <torch/library.h>
+#include <ATen/RedispatchFunctions.h>
 #include <ATen/VmapTransforms.h>
 #include <ATen/BatchedFallback.h>
 #include <ATen/native/ResizeCommon.h>
@@ -812,6 +813,17 @@ Tensor mv_batching_rule(const Tensor& self, const Tensor& other) {
   TORCH_INTERNAL_ASSERT(false, "either self or other must be a BatchedTensor");
 }
 
+Tensor _make_dual_batching_rule(
+  c10::DispatchKeySet ks,
+  const Tensor& primal,
+  const Tensor& tangent,
+  int64_t level
+) {
+  DispatchKeySet after_batched_keyset =
+      DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Batched);
+  return at::redispatch::_make_dual(ks & after_batched_keyset, primal, tangent, level);
+}
+
 Tensor dot_batching_rule(const Tensor& self, const Tensor& other) {
   auto self_batched = isBatchedTensor(self);
   auto other_batched = isBatchedTensor(other);
@@ -1043,7 +1055,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("size.int", static_cast<int64_t (*)(const Tensor&, int64_t)>(native::size));
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
-  m.impl("_make_dual", native::_make_dual);
+  m.impl("_make_dual", _make_dual_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 

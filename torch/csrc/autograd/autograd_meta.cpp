@@ -168,6 +168,11 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
 
     // Enforce the basic layout constraint
     if (!has_same_meta(new_grad, self)) {
+      if (is_view_) {
+        auto this_view_meta = static_cast<DifferentiableViewMeta*>(this);
+        TORCH_INTERNAL_ASSERT(!this_view_meta->has_fw_view(),
+            "Expected the output of forward differentiable view operations to have the tangent have the same layout as primal")
+      }
       auto res = at::_new_zeros_with_same_feature_meta(new_grad, self);
       res.copy_(new_grad);
       new_grad = res;

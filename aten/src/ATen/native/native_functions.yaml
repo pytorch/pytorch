@@ -100,6 +100,8 @@
 
 - func: _make_dual(Tensor(a) primal, Tensor tangent, int level) -> Tensor(a)
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: _make_dual
 
 - func: _unpack_dual(Tensor(a) dual, int level) -> (Tensor(a) primal, Tensor tangent)
   variants: function
