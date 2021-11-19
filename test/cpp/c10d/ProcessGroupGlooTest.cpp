@@ -127,6 +127,7 @@ class CollectiveTest {
       bool delayed = false) {
     std::vector<CollectiveTest> tests;
     for (const auto i : c10::irange(num)) {
+      std::ignore = i;
       tests.push_back(CollectiveTest(path));
     }
 
