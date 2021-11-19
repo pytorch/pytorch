@@ -3320,7 +3320,7 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
             if sample.input.dim() != pool_dim + 2:
                 continue
 
-            # No dilation for max_unpool,
+            # No dilation > 1 for max_unpool,
             # see https://github.com/pytorch/pytorch/issues/68420
             if sample.kwargs['dilation'] != 1:
                 continue
@@ -10044,6 +10044,10 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
+           skips=(
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
+           ),
            sample_inputs_func=sample_inputs_max_unpool),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
@@ -10052,6 +10056,10 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
+           skips=(
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
+           ),
            sample_inputs_func=sample_inputs_max_unpool),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
@@ -10060,6 +10068,10 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypesIfCPU=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.float16),
+           skips=(
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_grad', dtypes=(torch.float64,)),
+               DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
+           ),
            sample_inputs_func=sample_inputs_max_unpool),
     OpInfo('nn.functional.linear',
            aten_name='linear',
