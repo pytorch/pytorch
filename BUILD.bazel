@@ -1895,7 +1895,7 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + [
-        ":cpp_generated_code"
+        ":cpp_generated_code",
     ],
     copts = TORCH_COPTS + if_cuda(["-DUSE_CUDA=1"]),
     defines = [
