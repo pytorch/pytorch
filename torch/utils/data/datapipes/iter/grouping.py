@@ -1,7 +1,6 @@
 import random
 
 from collections import defaultdict
-from heapq import heappush, heappop
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
