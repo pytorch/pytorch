@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/kernel.h>
-#include <torch/csrc/jit/codegen/onednn/runtime.h>
 
 #include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -190,6 +189,16 @@ void LlgaKernel::run(Stack& stack) {
   for (auto& o : outputs)
     push_one(stack, std::move(o));
   GRAPH_DEBUG("Stack updated");
+}
+
+engine& Engine::getEngine() {
+  static engine cpu_engine(dnnl::graph::engine::kind::cpu, 0);
+  return cpu_engine;
+}
+
+stream& Stream::getStream() {
+  static stream cpu_stream{Engine::getEngine(), nullptr};
+  return cpu_stream;
 }
 
 } // namespace onednn
