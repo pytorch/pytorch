@@ -505,7 +505,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -545,7 +545,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -584,7 +584,7 @@ if __name__ == '__main__':
     run_tests()
 """)
         # we are currently disabling CUDA early termination for distributed tests.
-        self.assertIn('Ran 2 test', stderr)
+        self.assertIn('errors=2', stderr)
 
     @expectedFailureMeta  # This is only supported for CPU and CUDA
     @onlyNativeDeviceTypes
