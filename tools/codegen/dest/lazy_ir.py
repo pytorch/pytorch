@@ -1,6 +1,6 @@
 from typing import List, Union
 from dataclasses import dataclass
-from tools.codegen.context import method_with_native_function, with_native_function_and_index
+from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
 from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
@@ -126,18 +126,18 @@ class {schema.node_name} : public {self.node_base} {{
 """, ]
 
 
-def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
+def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str) -> str:
     lazy_tensor_decls: List[str] = []
     for t in value_types:
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
-                f"LazyTensor lazy_{t.name} = "
+                f"{tensor_class} lazy_{t.name} = "
                 f"GetLtcTensorOrCreateForWrappedNumber({t.name}, *device);")
         elif isinstance(t.type, OptionalCType):
             # TODO(alanwaketan): Maybe we want to apply GetLtcTensorOrCreateForWrappedNumber here, but hold it
             # until we encounter a real world example.
             lazy_tensor_decls.append(
-                f"    LazyTensor lazy_{t.name} = TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
+                f"    {tensor_class} lazy_{t.name} = TryGetLtcTensor({t.name}.value_or(at::Tensor()));")
         else:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     return "\n    ".join(lazy_tensor_decls)
@@ -146,6 +146,7 @@ def lazy_tensor_decls(value_types: List[NamedCType]) -> str:
 class GenLazyNativeFuncDefinition:
     class_method_name: str
     backend_index: BackendIndex
+    tensor_class: str
 
     @method_with_native_function
     def __call__(self, func: NativeFunction) -> List[str]:
@@ -159,7 +160,7 @@ class GenLazyNativeFuncDefinition:
         returns_length = len(schema.returns)
 
         get_device_str = f"""auto device = bridge::GetSameBackendDeviceOrUseDefault({", ".join([f"{t.name}" for t in value_types])});"""
-        lazy_tensor_decls_str = lazy_tensor_decls(value_types)
+        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
@@ -187,7 +188,7 @@ class GenLazyNativeFuncDefinition:
         first_tensor = value_types[0]
         bridge_str = f"""auto result = CreateAtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
         if returns_length > 1:
-            bridge_str = f"""std::vector<LazyTensor> lazy_tensors;
+            bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
             lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i)));
         }}
@@ -236,20 +237,27 @@ class ComputeShapeSignature:
     def shape_call(self) -> str:
         return f"torch_lazy_tensors::ir::ops::compute_shape_{self.__call_suffix()}"
 
-@with_native_function_and_index
-def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex) -> List[str]:
-    sig = kernel_signature(f, backend_index)
 
-    # Lazy IR stuff
-    schema = LazyIrSchema(f.func)
-    value_types = schema.filtered_types(values=True, scalars=False)
-    lazy_tensor_decls_str = lazy_tensor_decls(value_types)
-    node_ctor_input_str = node_ctor_inputs(schema)
+@dataclass(frozen=True)
+class GenLazyShapeInferenceDefinition:
+    backend_index: BackendIndex
+    tensor_class: str
 
-    # Only generate shape/dtype fn for non-structured kernels,
-    # since we just use the meta function for structured kernels
-    if not f.structured and f.structured_delegate is None:
-        shape_sig = ComputeShapeSignature(f)
-        return ["\n".join([f"{shape_sig.shape_decl};"])]
-    else:
-        return []
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> List[str]:
+    # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
+        sig = kernel_signature(f, self.backend_index)
+
+        # Lazy IR stuff
+        schema = LazyIrSchema(f.func)
+        value_types = schema.filtered_types(values=True, scalars=False)
+        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
+        node_ctor_input_str = node_ctor_inputs(schema)
+
+        # Only generate shape/dtype fn for non-structured kernels,
+        # since we just use the meta function for structured kernels
+        if not f.structured and f.structured_delegate is None:
+            shape_sig = ComputeShapeSignature(f)
+            return ["\n".join([f"{shape_sig.shape_decl};"])]
+        else:
+            return []
