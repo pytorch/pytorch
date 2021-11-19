@@ -17,24 +17,10 @@
 
 namespace torch {
 namespace lazy {
-// Adapters that provide torch::lazy Hash functions for xla types
-
-template <typename T>
-torch::lazy::hash_t Hash(c10::ArrayRef<T> values) {
-  return torch::lazy::ContainerHash(values);
-}
-
-// When specializing Hash(T) also specialize MHash(T, ...) since
-// torch::lazy::MHash template won't be aware of the Hash(T) here
-template <typename T, typename... Targs>
-hash_t MHash(c10::ArrayRef<T> value, Targs... Fargs) {
-  return HashCombine(Hash(value), MHash(Fargs...));
-}
-
 template<typename T>
 c10::optional<std::vector<T>> ToOptionalVector(c10::optional<c10::ArrayRef<T>> arrayRef) {
-  if (arrayRef.has_value()) {
-    return std::vector<T>(arrayRef.value().begin(), arrayRef.value().end());
+  if (arrayRef) {
+    return arrayRef->vec();
   }
   return c10::nullopt;
 }
@@ -44,6 +30,8 @@ c10::optional<std::vector<T>> ToOptionalVector(c10::optional<c10::ArrayRef<T>> a
 namespace lazy_tensors {
 namespace util {
 
+// Similar to c10::scope_exit but with a status.
+// TODO(alanwaketan): Consolidate it with c10::scope_exit.
 template <typename T>
 class Cleanup {
  public:
@@ -86,6 +74,8 @@ using ExceptionCleanup = Cleanup<std::exception_ptr>;
 
 // Allows APIs which might return const references and values, to not be forced
 // to return values in the signature.
+// TODO(alanwaketan): This is clever, but is there really no std or c10 supports?
+// Needs more investigations.
 template <typename T>
 class MaybeRef {
  public:
@@ -105,63 +95,6 @@ class MaybeRef {
   const T& ref_;
 };
 
-struct MidPolicy {
-  size_t operator()(size_t size) const { return size / 2; }
-};
-
-template <class T>
-class MaybePtr {
- public:
-  MaybePtr(T* ptr) : ptr_(ptr) {
-    if (ptr_ == nullptr) {
-      storage_ = T();
-      ptr_ = &storage_.value();
-    }
-  }
-
-  T* get() const { return ptr_; }
-
-  T* operator->() const { return get(); }
-
-  T& operator*() const { return *get(); }
-
- private:
-  T* ptr_ = nullptr;
-  c10::optional<T> storage_;
-};
-
-template <typename C>
-std::vector<const typename C::value_type::element_type*> GetConstSharedPointers(
-    const C& shared_pointers) {
-  std::vector<const typename C::value_type::element_type*> pointers;
-  pointers.reserve(shared_pointers.size());
-  for (auto& shared_pointer : shared_pointers) {
-    pointers.push_back(shared_pointer.get());
-  }
-  return pointers;
-}
-
-template <typename C>
-std::vector<typename C::value_type::element_type*> GetSharedPointers(
-    const C& shared_pointers) {
-  std::vector<typename C::value_type::element_type*> pointers;
-  pointers.reserve(shared_pointers.size());
-  for (auto& shared_pointer : shared_pointers) {
-    pointers.push_back(shared_pointer.get());
-  }
-  return pointers;
-}
-
-template <typename C, typename K, typename T, typename F>
-void InsertCombined(C* map, const K& key, const T& value, const F& combiner) {
-  auto it = map->find(key);
-  if (it == map->end()) {
-    map->emplace(key, value);
-  } else {
-    it->second = combiner(it->second, value);
-  }
-}
-
 template <typename T>
 std::vector<T> Iota(size_t size, T init = 0, T incr = 1) {
   std::vector<T> result(size);
@@ -172,52 +105,17 @@ std::vector<T> Iota(size_t size, T init = 0, T incr = 1) {
   return result;
 }
 
-template <typename T>
-std::vector<T> Range(T start, T end, T step = 1) {
-  std::vector<T> result;
-  result.reserve(static_cast<size_t>((end - start) / step));
-  if (start < end) {
-    for (; start < end; start += step) {
-      result.push_back(start);
-    }
-  } else {
-    for (; start > end; start += step) {
-      result.push_back(start);
-    }
-  }
-  return result;
-}
-
 template <typename T, typename S>
 std::vector<T> ToVector(const S& input) {
   return std::vector<T>(input.begin(), input.end());
 }
 
 template <typename T>
-std::vector<T> GetValuesVector(
-    const std::vector<T>& values,
-    const std::vector<const c10::optional<T>*>& opt_values) {
-  std::vector<T> result(values.begin(), values.end());
-  for (auto opt : opt_values) {
-    if (*opt) {
-      result.push_back(*(*opt));
-    }
-  }
-  return result;
+typename std::underlying_type<T>::type GetEnumValue(T value) {
+  return static_cast<typename std::underlying_type<T>::type>(value);
 }
 
-template <typename T, typename S>
-bool Equal(const T& v1, const S& v2) {
-  return std::equal(v1.begin(), v1.end(), v2.begin());
-}
-
-template <typename T>
-typename T::mapped_type FindOr(const T& cont, const typename T::key_type& key,
-                               const typename T::mapped_type& defval) {
-  auto it = cont.find(key);
-  return it != cont.end() ? it->second : defval;
-}
-
+// The following is only used within computation_client.
 template <typename T, typename G>
 const typename T::mapped_type& MapInsert(T* cont,
                                          const typename T::key_type& key,
@@ -227,17 +125,6 @@ const typename T::mapped_type& MapInsert(T* cont,
     it = cont->emplace(key, gen()).first;
   }
   return it->second;
-}
-
-template <typename T>
-typename std::underlying_type<T>::type GetEnumValue(T value) {
-  return static_cast<typename std::underlying_type<T>::type>(value);
-}
-
-template <typename T, typename S>
-T Multiply(const S& input) {
-  return std::accumulate(input.begin(), input.end(), T(1),
-                         std::multiplies<T>());
 }
 
 }  // namespace util

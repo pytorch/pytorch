@@ -396,7 +396,7 @@ at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
   LTC_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::expand(
-      TryGetLtcTensor(self), lazy_tensors::util::ToVector<int64_t>(size)));
+      TryGetLtcTensor(self), size.vec()));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,

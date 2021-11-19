@@ -49,7 +49,7 @@ torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
     return input;
   }
   return torch::lazy::MakeNode<ir::ops::Expand>(
-      input, lazy_tensors::util::ToVector<int64_t>(target_shape.sizes()),
+      input, target_shape.sizes().vec(),
       /*is_scalar_expand=*/false);
 }
 
@@ -362,10 +362,8 @@ void copy_(LazyTensor& input, LazyTensor& src) {
   } else {
     auto input_shape = input.shape();
     at::Tensor src_tensor = src.ToTensor(/*detached=*/true);
-    if (!lazy_tensors::util::Equal(src_tensor.sizes(),
-                                   input_shape.get().sizes())) {
-      src_tensor = src_tensor.expand(lazy_tensors::util::ToVector<int64_t>(
-          input_shape.get().sizes()));
+    if (src_tensor.sizes() != input_shape.get().sizes()) {
+      src_tensor = src_tensor.expand(input_shape.get().sizes().vec());
     }
     input.UpdateFromTensor(std::move(src_tensor), /*sync=*/false);
   }
