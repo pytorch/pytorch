@@ -2987,6 +2987,41 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, FUSION_GROUP, True)
         self.assertGraphContains(graph, 'aten::matmul', True)
 
+    def _run_fwd_helper(self, func, ops, *args):
+        jitted = torch.jit.script(func)
+        for i in range(3):
+            jit_o = jitted(*args)
+        jit_o = jitted(*args)
+        o = func(*args)
+        for oo, jit_oo in zip(o, jit_o):
+            self.assertEqual(oo.dtype, jit_oo.dtype)
+            self.assertEqual(oo, jit_oo)
+        graph = jitted.graph_for(*args)
+        self.assertGraphContains(graph, FUSION_GROUP, True)
+        for op in ops:
+            self.assertGraphContainsExactly(graph, op, 0)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_sibling_fusion(self):
+        device = "cuda"
+        dtype = torch.float
+        x = torch.randn(2, 5, dtype=dtype, device=device)
+        y = torch.randn(2, 5, dtype=dtype, device=device)
+
+        def t(x: torch.Tensor):
+            o1 = x + 1.0
+            o2 = x * 0.5
+            return o1, o2
+        self._run_fwd_helper(t, ['aten::add'], x)
+
+        def t2(x: torch.Tensor, y: torch.Tensor):
+            o1 = x.sum(0)
+            o2 = (x * y).sum(0)
+            return o1, o2
+        self._run_fwd_helper(t2, ['aten::sum', 'aten::mul'], x, y)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
