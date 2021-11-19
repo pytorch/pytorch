@@ -927,6 +927,12 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
+add_docstr(torch.arctan2,
+           r"""
+arctan2(input, other, *, out=None) -> Tensor
+Alias for :func:`torch.atan2`.
+""")
+
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
@@ -2695,11 +2701,19 @@ cross(input, other, dim=None, *, out=None) -> Tensor
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
 
-:attr:`input` and :attr:`other` must have the same size, and the size of their
-:attr:`dim` dimension should be 3.
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
+
+.. seealso::
+        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
+
+.. warning:: This function may change in a future PyTorch release to match
+        the default behaviour in :func:`torch.linalg.cross`. We recommend using
+        :func:`torch.linalg.cross`.
 
 Args:
     {input}
@@ -3156,6 +3170,58 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """.format(**common_args))
 
+add_docstr(torch.diagonal_scatter,
+           r"""
+diagonal_scatter(input, src, offset=0, dim1=0, dim2=1) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` along
+the diagonal elements of :attr:`input`, with respect to :attr:`dim1`
+and :attr:`dim2`.
+
+This function returns a tensor with fresh storage; it does not
+return a view.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+Args:
+    {input} Must be at least 2-dimensional.
+    src (Tensor): the tensor to embed into :attr:`input`.
+    offset (int, optional): which diagonal to consider. Default: 0
+        (main diagonal).
+    dim1 (int, optional): first dimension with respect to which to
+        take diagonal. Default: 0.
+    dim2 (int, optional): second dimension with respect to which to
+        take diagonal. Default: 1.
+
+.. note::
+
+    :attr:`src` must be of the proper size in order to be embedded
+    into :attr:`input`. Specifically, it should have the same shape as
+    ``torch.diagonal(input, offset, dim1, dim2)``
+
+Examples::
+
+    >>> a = torch.zeros(3, 3)
+    >>> a
+    tensor([[0., 0., 0.],
+            [0., 0., 0.],
+            [0., 0., 0.]])
+
+    >>> torch.diagonal_scatter(a, torch.ones(3), 0)
+    tensor([[1., 0., 0.],
+            [0., 1., 0.],
+            [0., 0., 1.]])
+
+    >>> torch.diagonal_scatter(a, torch.ones(2), 1)
+    tensor([[0., 1., 0.],
+            [0., 0., 1.],
+            [0., 0., 0.]])
+""".format(**common_args))
+
 add_docstr(torch.diff, r"""
 diff(input, n=1, dim=-1, prepend=None, append=None) -> Tensor
 
@@ -3163,8 +3229,6 @@ Computes the n-th forward difference along the given dimension.
 
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
-
-.. note::  Only `n = 1` is currently supported
 
 Args:
     input (Tensor): the tensor to compute the differences on
@@ -3732,6 +3796,9 @@ It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
 ``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
 and ``numpy.bool``.
+
+.. warning::
+    Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
 
 Example::
 
@@ -4349,8 +4416,8 @@ Elements lower than min and higher than max are ignored.
 Args:
     {input}
     bins (int): number of histogram bins
-    min (int): lower end of the range (inclusive)
-    max (int): upper end of the range (inclusive)
+    min (Scalar): lower end of the range (inclusive)
+    max (Scalar): upper end of the range (inclusive)
 
 Keyword args:
     {out}
@@ -5941,6 +6008,41 @@ Example::
     >>> torch.argmax(a, dim=1)
     tensor([ 0,  2,  0,  1])
 """.format(**single_dim_common))
+
+add_docstr(torch.argwhere,
+           r"""
+argwhere(input) -> Tensor
+
+Returns a tensor containing the indices of all non-zero elements of
+:attr:`input`.  Each row in the result contains the indices of a non-zero
+element in :attr:`input`. The result is sorted lexicographically, with
+the last index changing the fastest (C-style).
+
+If :attr:`input` has :math:`n` dimensions, then the resulting indices tensor
+:attr:`out` is of size :math:`(z \times n)`, where :math:`z` is the total number of
+non-zero elements in the :attr:`input` tensor.
+
+.. note::
+    This function is similar to NumPy's `argwhere`.
+
+    When :attr:`input` is on CUDA, this function causes host-device synchronization.
+
+Args:
+    {input}
+
+Example::
+
+    >>> t = torch.tensor([1, 0, 1])
+    >>> torch.argwhere(t)
+    tensor([[0],
+            [2]])
+    >>> t = torch.tensor([[1, 0, 1], [0, 1, 1]])
+    >>> torch.argwhere(t)
+    tensor([[0, 0],
+            [0, 2],
+            [1, 1],
+            [1, 2]])
+""")
 
 add_docstr(torch.mean, r"""
 mean(input, *, dtype=None) -> Tensor
@@ -8352,6 +8454,97 @@ add_docstr(torch.scatter_add,
 scatter_add(input, dim, index, src) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.scatter_add_`
+""")
+
+add_docstr(torch.select,
+           r"""
+select(input, dim, index) -> Tensor
+
+Slices the :attr:`input` tensor along the selected dimension at the given index.
+This function returns a view of the original tensor with the given dimension removed.
+
+Args:
+    {input} (Tensor)
+    dim (int): the dimension to slice
+    index (int): the index to select with
+
+.. note::
+
+    :meth:`select` is equivalent to slicing. For example,
+    ``tensor.select(0, index)`` is equivalent to ``tensor[index]`` and
+    ``tensor.select(2, index)`` is equivalent to ``tensor[:,:,index]``.
+""")
+
+add_docstr(torch.select_scatter,
+           r"""
+select_scatter(input, src, dim, index) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` at the given index.
+This function returns a tensor with fresh storage; it does not create a view.
+
+
+Args:
+    {input} (Tensor)
+    src (Tensor): The tensor to embed into :attr:`input`
+    dim (int): the dimension to insert the slice into.
+    index (int): the index to select with
+
+.. note::
+
+    :attr:`src` must be of the proper size in order to be embedded
+    into :attr:`input`. Specifically, it should have the same shape as
+    ``torch.select(input, dim, index)``
+
+Example::
+
+    >>> a = torch.zeros(2, 2)
+    >>> b = torch.ones(2)
+    >>> a.select_scatter(b, 0, 0)
+    tensor([[1., 1.],
+            [0., 0.]])
+""")
+
+add_docstr(torch.slice_scatter,
+           r"""
+slice_scatter(input, src, dim=0, start=None, end=None, step=1) -> Tensor
+
+Embeds the values of the :attr:`src` tensor into :attr:`input` at the given
+dimension.
+This function returns a tensor with fresh storage; it does not create a view.
+
+
+Args:
+    {input} (Tensor)
+    src (Tensor): The tensor to embed into :attr:`input`
+    dim (int): the dimension to insert the slice into
+    start (Optional[int]): the start index of where to insert the slice
+    end (Optional[int]): the end index of where to insert the slice
+    step (int): the how many elements to skip in
+
+Example::
+
+    >>> a = torch.zeros(8, 8)
+    >>> b = torch.ones(8)
+    >>> a.slice_scatter(b, start=6)
+    tensor([[0., 0., 0., 0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0., 0., 0., 0.],
+            [0., 0., 0., 0., 0., 0., 0., 0.],
+            [1., 1., 1., 1., 1., 1., 1., 1.],
+            [1., 1., 1., 1., 1., 1., 1., 1.]])
+
+    >>> b = torch.ones(2)
+    >>> a.slice_scatter(b, dim=1, start=2, end=6, step=2)
+    tensor([[0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.],
+            [0., 0., 1., 0., 1., 0., 0., 0.]])
 """)
 
 add_docstr(torch.set_flush_denormal,
@@ -11495,14 +11688,14 @@ Args:
 
 add_docstr(torch.searchsorted,
            r"""
-searchsorted(sorted_sequence, values, *, out_int32=False, right=False, out=None) -> Tensor
+searchsorted(sorted_sequence, values, *, out_int32=False, right=False, side='left', out=None, sorter=None) -> Tensor
 
 Find the indices from the *innermost* dimension of :attr:`sorted_sequence` such that, if the
-corresponding values in :attr:`values` were inserted before the indices, the order of the
-corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
-Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False (default),
-then the left boundary of :attr:`sorted_sequence` is closed. More formally, the returned index
-satisfies the following rules:
+corresponding values in :attr:`values` were inserted before the indices, when sorted, the order
+of the corresponding *innermost* dimension within :attr:`sorted_sequence` would be preserved.
+Return a new tensor with the same size as :attr:`values`. If :attr:`right` is False or side is
+'left (default), then the left boundary of :attr:`sorted_sequence` is closed. More formally,
+the returned index satisfies the following rules:
 
 .. list-table::
    :widths: 12 10 78
@@ -11526,7 +11719,8 @@ satisfies the following rules:
 
 Args:
     sorted_sequence (Tensor): N-D or 1-D tensor, containing monotonically increasing sequence on the *innermost*
-                              dimension.
+                              dimension unless :attr:`sorter` is provided, in which case the sequence does not
+                              need to be sorted
     values (Tensor or Scalar): N-D tensor or a Scalar containing the search value(s).
 
 Keyword args:
@@ -11538,11 +11732,15 @@ Keyword args:
                             (one pass the last index of the *innermost* dimension). In other words, if False,
                             gets the lower bound index for each value in :attr:`values` on the corresponding
                             *innermost* dimension of the :attr:`sorted_sequence`. If True, gets the upper
-                            bound index instead. Default value is False.
+                            bound index instead. Default value is False. :attr:`side` does the same and is
+                            preferred. It will error if :attr:`side` is set to "left" while this is True.
+    side (str, optional): the same as :attr:`right` but preferred. "left" corresponds to False for :attr:`right`
+                            and "right" corresponds to True for :attr:`right`. It will error if this is set to
+                            "left" while :attr:`right` is True.
     out (Tensor, optional): the output tensor, must be the same size as :attr:`values` if provided.
-
-.. note:: If your use case is always 1-D sorted sequence, :func:`torch.bucketize` is preferred,
-          because it has fewer dimension checks resulting in slightly better performance.
+    sorter (LongTensor, optional): if provided, a tensor matching the shape of the unsorted
+                            :attr:`sorted_sequence` containing a sequence of indices that sort it in the
+                            ascending order on the innermost dimension
 
 
 Example::
@@ -11558,7 +11756,7 @@ Example::
     >>> torch.searchsorted(sorted_sequence, values)
     tensor([[1, 3, 4],
             [1, 2, 4]])
-    >>> torch.searchsorted(sorted_sequence, values, right=True)
+    >>> torch.searchsorted(sorted_sequence, values, side='right')
     tensor([[2, 3, 5],
             [1, 3, 4]])
 

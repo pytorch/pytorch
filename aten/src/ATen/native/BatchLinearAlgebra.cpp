@@ -214,23 +214,31 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
 
   at::native::linearSolveCheckInputs(self, A, "triangular_solve");
 
-  std::vector<int64_t> self_broadcast_size, A_broadcast_size;
-  std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
+  if (A.layout() == Layout::Strided) {
+    std::vector<int64_t> self_broadcast_size, A_broadcast_size;
+    std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
-  auto ndim = self_broadcast_size.size();
-  auto nrows = A.size(-2);
+    auto ndim = self_broadcast_size.size();
+    auto nrows = A.size(-2);
 
-  // make column major strides for BLAS
-  auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
-  solution_strides[ndim - 2] = 1;
-  solution_strides[ndim - 1] = nrows;
-  set_output(0, self_broadcast_size, solution_strides, self.options(), {});
+    // make column major strides for BLAS
+    auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
+    solution_strides[ndim - 2] = 1;
+    solution_strides[ndim - 1] = nrows;
+    set_output(0, self_broadcast_size, solution_strides, self.options(), {});
 
-  // make column major strides for BLAS
-  auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
-  clone_A_strides[ndim - 2] = 1;
-  clone_A_strides[ndim - 1] = nrows;
-  set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
+    // make column major strides for BLAS
+    auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
+    clone_A_strides[ndim - 2] = 1;
+    clone_A_strides[ndim - 1] = nrows;
+    set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
+  } else if (A.layout() == Layout::SparseCsr) {
+    // no broadcasting for non-strided layout
+    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
+  }
 }
 
 } // namespace meta
@@ -2704,6 +2712,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
   squareCheckInputs(input, "linalg.eig");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued

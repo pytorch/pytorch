@@ -5,8 +5,11 @@ namespace jit {
 
 TORCH_API void FuseInferenceOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph);
+
+TORCH_API void EliminateTrivialEquallySplit(
+    std::shared_ptr<torch::jit::Graph>& graph);
+
 TORCH_API void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph);
-TORCH_API void FuseListUnpackV2(std::shared_ptr<torch::jit::Graph>& graph);
 
 // If outputs_are_immutable is set to false, don't replace the view ops that
 // produce aliases of graph outputs with the copy version.
@@ -35,6 +38,8 @@ TORCH_API void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph);
 inline c10::Symbol fromQualString(const std::string& qual_string) {
   return c10::Symbol::fromQualString(qual_string);
 }
+
+TORCH_API void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph);
 
 } // namespace jit
 } // namespace torch

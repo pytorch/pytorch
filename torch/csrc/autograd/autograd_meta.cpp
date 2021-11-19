@@ -102,6 +102,8 @@ namespace {
 // This function is will ensure that the fw_grad_ is properly a view of the base for inplace ops on
 // Tensors that do not have forward grad originally.
 void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::TensorBase& self_base, uint64_t level, bool is_inplace_op) {
+  TORCH_CHECK(!new_grad_base._fw_grad(level).defined(), "Setting a forward grad that "
+              "itself has a forward gradient at the same level", level, " is not supported.");
   // Lazy initialization
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -149,7 +151,7 @@ void AutogradMeta::set_fw_grad(const at::TensorBase& new_grad_base, const at::Te
         if (!base._fw_grad(level).defined()) {
           // Enforce same meta here to make sure that the view op below is always valid
           Tensor new_base_fw_grad;
-          if (has_same_meta(new_grad, base)) {
+          if (has_same_meta(new_grad, base) && has_same_meta(new_grad, self)) {
             // TODO extend this special case to when the underlying storage of new_grad
             // can be re-used.
             new_base_fw_grad = new_grad;
