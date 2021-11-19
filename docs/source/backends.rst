@@ -25,6 +25,10 @@ torch.backends.cuda
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
     multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
 
+.. attribute::  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+
+    A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
+
 .. attribute::  torch.backends.cuda.cufft_plan_cache
 
     ``cufft_plan_cache`` caches the cuFFT plans
