@@ -7,10 +7,6 @@ import torch.distributed as dist
 from torch.distributed._sharded_tensor import (
     shard_parameter,
 )
-from torch.distributed._sharding_spec._internals import (
-    get_chunked_dim_size,
-    get_split_size,
-)
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
