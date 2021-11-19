@@ -174,8 +174,8 @@ __global__ void CatArrayBatchedCopy(
 }
 
 template <typename scalar_t>
-void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
-                  int nDims, c10::MemoryFormat memory_format) {
+void hip_parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
+                      int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
   scalar_t *data = out.data_ptr<scalar_t>();
@@ -295,7 +295,7 @@ void hip_parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 }
 
 template <typename scalar_t, int batch_size, int stride_size>
-void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
+void parallel_cat(const Tensor &out, ITensorList inputs, int64_t dimension,
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
@@ -405,122 +405,22 @@ void parallel_cat(Tensor &out, const TensorList &inputs, int64_t dimension,
 }
 } // namespace
 
-Tensor cat_cuda(TensorList inputs, int64_t dimension) {
-  ScalarType high_type = result_type(inputs);
-  Tensor out = at::empty({0}, inputs.front().options().dtype(high_type));
-  at::native::cat_out_cuda(inputs, dimension, out);
-  return out;
-}
-
-inline c10::MemoryFormat compute_output_memory_format(const TensorList &inputs) {
-  c10::optional<c10::MemoryFormat> format = c10::nullopt;
-  for (auto &t : inputs) {
-    auto f = t.suggest_memory_format();
-    if (!format.has_value()) {
-      format = f;
-      continue;
-    }
-    if (format.value() == f) {
-      continue;
-    }
-    bool contiguous = (format.value() == c10::MemoryFormat::Contiguous || f == c10::MemoryFormat::Contiguous || format.value() != f);
-    if (contiguous) {
-      return c10::MemoryFormat::Contiguous;
-    }
-  }
-  return format.value();
-}
-
-Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
-
-  // previously, size [0] tensors were the only possible empty tensors; thus, it
-  // wasn't possible to cat empty tensors unless all the other tensors were
-  // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
-  // this behavior for backwards compatibility, but only for this specific size
-  // (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
-  auto should_skip = [](const Tensor &t) {
-    return t.dim() == 1 && at::native::size(t, 0) == 0;
-  };
-
-  const Tensor *notSkippedTensor = NULL;  // non-owning reference
-  int nDims = 0;
-
-  // Check for type promotion
-  TORCH_CHECK(canCast(result_type(inputs), out.scalar_type()), "torch.cat(): input types ",
-                      " can't be cast to the desired output type ",
-                      out.scalar_type());
-
-  // Inputs cannot alias the output tensor
-  for (int i = 0; i < inputs.size(); i++) {
-    auto lap = at::get_overlap_status(out, inputs[i]);
-    TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
-                lap != at::MemOverlapStatus::FULL,
-                "torch.cat(): unsupported operation: the input tensors cannot refer to any "
-                "of the output memory locations. Found overlap in input "
-                "tensor ", i);
-  }
-  at::assert_no_internal_overlap(out);
-
-  for (int i = 0; i < inputs.size(); i++) {
-    if (should_skip(inputs[i])) {
-      continue;
-    }
-    nDims = inputs[i].dim();
-    notSkippedTensor = &inputs[i];
-    break;
+TORCH_IMPL_FUNC(cat_out_cuda)
+(ITensorList tensors,
+ int64_t dim,
+ int64_t valid,
+ bool all_contiguous,
+ bool all_same_dtype,
+ bool all_same_sizes_and_stride,
+ MemoryFormat memory_format,
+ const Tensor& result) {
+  // This is true only if there are no valid tensors (i.e. we skipped all of them)
+  if (static_cast<size_t>(valid) == tensors.size()) {
+    return;
   }
 
-  // If all inputs are empty tensors, return an empty tensor
-  if (notSkippedTensor == NULL) {
-    return out;
-  }
-
-  TORCH_CHECK(inputs.size() > 0, "torch.cat(): invalid number of inputs ", inputs.size());
-  TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
-
-  for (const Tensor& t: inputs) {
-    TORCH_CHECK(t.device() == notSkippedTensor->device(),
-                "torch.cat(): all input tensors must be on the same device. Received ",
-                t.device(), " and ", notSkippedTensor->device());
-  }
-
-  TORCH_CHECK(
-      out.device() == notSkippedTensor->device(),
-      "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
-      notSkippedTensor->device(), " and out is on ", out.device());
-
-  c10::MemoryFormat memory_format = compute_output_memory_format(inputs);
-
-  std::vector<int64_t> size(notSkippedTensor->sizes().vec());
-
-  // Compute size of the result in the cat dimension
-  int64_t cat_dim_size = 0;
-  for (int i = 0; i < inputs.size(); i++) {
-    const Tensor &tensor = inputs[i];
-    if (should_skip(tensor)) {
-      continue;
-    }
-    check_cat_shape_except_dim(*notSkippedTensor, tensor, dimension, i);
-    cat_dim_size += at::native::size(tensor, dimension);
-  }
-
-  // Compute the size of the result
-  size[dimension] = cat_dim_size;
-
-  // skip resizing if size of result is same as expected
-  // raise a warning while resizing if output has one or more elements
-  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
-  // for understanding why at::native::resize_output is not called directly.
-  // if (at::native::resize_output_check(out, size)) {
-  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
-
-  if (out.sizes() != size) {
-    out.resize_(size, memory_format);
-  }
-
-  if (out.numel() == 0) {
-    return out;
+  if (result.numel() == 0) {
+    return;
   }
 
   // We parallelize the copy if all 6 conditions pass:
@@ -531,32 +431,24 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   // 4. All input tensors are contiguous (output tensor may be non-contig)
   // 5. All input tensors can use 32-bit indexing
 
-  const bool all32BitIndexable = std::all_of(inputs.begin(), inputs.end(),
+  const bool all32BitIndexable = std::all_of(tensors.begin(), tensors.end(),
     [] (const Tensor& t) {
       return at::cuda::detail::canUse32BitIndexMath(t);
     });
-  const bool allContiguous = std::all_of(inputs.begin(), inputs.end(),
-    [=](const Tensor& t) {
-      return !t.defined() || t.is_contiguous(memory_format);
-    });
-  ScalarType firstType = inputs[0].scalar_type();
-  bool allSameType = std::all_of(inputs.begin(), inputs.end(),
-    [firstType](const Tensor& t) {
-      return t.scalar_type() == firstType;
-    });
-  allSameType = allSameType && (out.scalar_type() == firstType);
+
+  int nDims = tensors[valid].dim();
 
 #if defined(USE_ROCM)
-  if (inputs.size() > 1 &&
-      out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      at::cuda::detail::canUse32BitIndexMath(out) &&
-      allContiguous &&
+  if (tensors.size() > 1 &&
+      result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      at::cuda::detail::canUse32BitIndexMath(result) &&
+      all_contiguous &&
       all32BitIndexable &&
-      allSameType) {
+      all_same_dtype) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-          out.scalar_type(), "cat_cuda", [&]() {
-        hip_parallel_cat<scalar_t>(out, inputs, dimension, nDims, memory_format);
+          result.scalar_type(), "cat_cuda", [&]() {
+        hip_parallel_cat<scalar_t>(result, tensors, dim, nDims, memory_format);
       });
 #else
   // We support the contiguous inputs and non-contiguous input (<=4 dims) in different ways
@@ -564,43 +456,40 @@ Tensor& cat_out_cuda(TensorList inputs, int64_t dimension, Tensor& out) {
   // memory. Therefore, we could pass more inputs to cuda threads.
   // For non-contiguous, we reduce the number of inputs passed to cuda kernel due to the limitation
   // of constant memory.
-  if (inputs.size() > 1 &&
-      out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      at::cuda::detail::canUse32BitIndexMath(out) &&
-      allContiguous &&
+  if (tensors.size() > 1 &&
+      result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      at::cuda::detail::canUse32BitIndexMath(result) &&
+      all_contiguous &&
       all32BitIndexable &&
-      allSameType) {
+      all_same_dtype) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-          out.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(out, inputs, dimension, nDims, memory_format);
+          result.scalar_type(), "cat_cuda", [&]() {
+        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(result, tensors, dim, nDims, memory_format);
       });
-  } else if (inputs.size() > 1 &&
-      out.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      at::cuda::detail::canUse32BitIndexMath(out) &&
+  } else if (tensors.size() > 1 &&
+      result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      at::cuda::detail::canUse32BitIndexMath(result) &&
       nDims <= CAT_ARRAY_MAX_INPUT_DIMS &&
       all32BitIndexable &&
-      allSameType &&
+      all_same_dtype &&
       memory_format == c10::MemoryFormat::Contiguous) {
       AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
           at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16,
-          out.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(out, inputs, dimension, nDims, memory_format);
+          result.scalar_type(), "cat_cuda", [&]() {
+        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, tensors, dim, nDims, memory_format);
       });
 #endif
   } else {
     int64_t offset = 0;
-    for (int j = 0; j < inputs.size(); j++)
-    {
-      if (should_skip(inputs[j])) continue;
-      int64_t dimSize = at::native::size(inputs[j], dimension);
-      Tensor nt = at::narrow(out, dimension, offset, dimSize);
-      copy_(nt, inputs[j]);
+    for (int j = 0; j < tensors.size(); j++) {
+      if (cat_should_skip_tensor(tensors[j])) continue;
+      int64_t dimSize = at::native::size(tensors[j], dim);
+      Tensor nt = at::narrow(result, dim, offset, dimSize);
+      copy_(nt, tensors[j]);
       offset += dimSize;
     }
   }
-
-  return out;
 }
 
 } // namespace native

@@ -1914,13 +1914,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
     const auto inputs = p_node->Input(0).toTensorVector();
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
+      p_node->Output(0) = at::cpu::cat(inputs, dim);
       return;
     }
 
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
-    at::native::_cat_out_cpu(inputs, dim, output);
+    at::cpu::cat_outf(inputs, dim, output);
   };
 });
 
@@ -2001,7 +2001,7 @@ REGISTER_OPERATOR_FUNCTOR(
           dim = legacy_cat_wrap_dim(dim, inputs);
           auto& out_t = p_node->Output(0).toTensor();
           fastResizeToZero(out_t);
-          at::native::_cat_out_cpu(inputs, dim, out_t);
+          at::cpu::cat_outf(inputs, dim, out_t);
         }
       };
     });
