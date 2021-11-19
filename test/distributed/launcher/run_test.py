@@ -596,3 +596,6 @@ class ElasticLaunchTest(unittest.TestCase):
             ]
         )
         # nothing to validate, just make sure it runs
+
+    def test_get_default_executable(self):
+        self.assertEqual(sys.executable, launch.get_executable())

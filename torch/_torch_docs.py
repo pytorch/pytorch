@@ -927,12 +927,6 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
-add_docstr(torch.arctan2,
-           r"""
-arctan2(input, other, *, out=None) -> Tensor
-Alias for :func:`torch.atan2`.
-""")
-
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
@@ -3230,6 +3224,8 @@ Computes the n-th forward difference along the given dimension.
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
 
+.. note::  Only `n = 1` is currently supported
+
 Args:
     input (Tensor): the tensor to compute the differences on
     n (int, optional): the number of times to recursively compute the difference
@@ -4416,8 +4412,8 @@ Elements lower than min and higher than max are ignored.
 Args:
     {input}
     bins (int): number of histogram bins
-    min (Scalar): lower end of the range (inclusive)
-    max (Scalar): upper end of the range (inclusive)
+    min (int): lower end of the range (inclusive)
+    max (int): upper end of the range (inclusive)
 
 Keyword args:
     {out}

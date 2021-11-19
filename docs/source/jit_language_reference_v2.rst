@@ -1905,4 +1905,4 @@ Type Refinement
 
 - ``torch.jit.isinstance()``
     - Returns a boolean indicating whether a variable is of the specified type.
-    - More details about its usage and examples can be found in :meth:`~torch.jit.isinstance`.
+    - More deatils about its usage and examples can be found in :meth:`~torch.jit.isinstance`.

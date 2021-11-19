@@ -610,15 +610,9 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph, py::object threshold) {
-            if (threshold.is(py::none())) {
-              CreateAutodiffSubgraphs(graph);
-            } else {
-              CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
-            }
-          },
-          py::arg("graph"),
-          py::arg("threshold") = py::none())
+          [](const std::shared_ptr<Graph>& graph) {
+            CreateAutodiffSubgraphs(graph);
+          })
 #if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",

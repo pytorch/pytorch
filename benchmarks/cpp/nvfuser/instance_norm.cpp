@@ -135,7 +135,6 @@ static void Baseline_InstanceNorm(
   auto ato_running_mean = c10::optional<at::Tensor>(at_mean);
   auto ato_running_var = c10::optional<at::Tensor>(at_var);
 
-  clearL2Cache();
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
@@ -183,38 +182,38 @@ static void Baseline_InstanceNorm_fp16(benchmark::State& benchmark_state) {
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_InstanceNorm_fp32,
+    NvFuserScheduler_fp32_InstanceNorm,
     setupInstanceNorm,
     NvFuserScheduler_InstanceNorm,
     DataType::Float);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp32)
-    // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp32_InstanceNorm)
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_InstanceNorm_fp16,
+    NvFuserScheduler_fp16_InstanceNorm,
     setupInstanceNorm,
     NvFuserScheduler_InstanceNorm,
     DataType::Half);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_InstanceNorm_fp16)
-    // ->RangeMultiplier(2)
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp16_InstanceNorm)
+    ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_InstanceNorm_fp32)
-    // ->RangeMultiplier(2)
-    ->Ranges({{8, 8}, {640, 640}, {64, 128}})
+    ->RangeMultiplier(2)
+    ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_InstanceNorm_fp16)
-    // ->RangeMultiplier(2)
+    ->RangeMultiplier(2)
     ->Ranges({{8, 8}, {640, 640}, {64, 256}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();

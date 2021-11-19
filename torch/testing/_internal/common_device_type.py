@@ -326,12 +326,7 @@ class DeviceTypeTestBase(TestCase):
     def _get_dtypes(cls, test):
         if not hasattr(test, 'dtypes'):
             return None
-
-        default_dtypes = test.dtypes.get('all')
-        msg = f"@dtypes is mandatory when using @dtypesIf however '{test.__name__}' didn't specify it"
-        assert default_dtypes is not None, msg
-
-        return test.dtypes.get(cls.device_type, default_dtypes)
+        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, 'precision_overrides'):

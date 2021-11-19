@@ -18,17 +18,17 @@ namespace cuda {
 class SchedulerRuntimeInfo;
 class HeuristicSummary;
 
-TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
     const at::ArrayRef<c10::IValue>& runtime_inputs,
     HeuristicSummary* data_cache = nullptr);
 
-TORCH_CUDA_CU_API c10::optional<ReductionParams> getPersistentHeuristics(
+TORCH_CUDA_CU_API c10::optional<ReductionParams> getNormalizationHeuristics(
     Fusion* fusion,
     SchedulerRuntimeInfo& runtime_info,
     HeuristicSummary* data_cache = nullptr);
 
-TORCH_CUDA_CU_API void schedulePersistentKernel(
+TORCH_CUDA_CU_API void scheduleNormalization(
     Fusion* fusion,
     const ReductionParams& rparams);
 

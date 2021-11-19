@@ -2,7 +2,6 @@
 #include <ATen/MapAllocator.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <torch/csrc/utils/python_arg_parser.h>
 
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
@@ -26,32 +25,14 @@ static PyObject * THPStorage_(dataPtr)(PyObject *_self, PyObject *noargs)
 {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  return PyLong_FromVoidPtr(self->cdata->data<scalar_t>());
+  return PyLong_FromVoidPtr(THWStorage_(data)(LIBRARY_STATE self->cdata));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-
-  at::Storage self_ = torch::createStorage(self);
-
-  static torch::PythonArgParser parser({
-    "copy_(Storage src, bool? non_blocking=None)",
-  });
-  torch::ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-
-  at::Storage src = r.storage(0);
-  bool non_blocking = r.toBoolOptional(1).value_or(false);
-
-  TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
-
-  storage_copy(self_, src, non_blocking);
-
-  Py_INCREF(self);
-  return self;
-
+  return THPStorageCopyMethod(THWStorage_(copy_functions), self, args, kwargs);
   END_HANDLE_TH_ERRORS
 }
 
@@ -60,7 +41,7 @@ static PyObject * THPStorage_(isPinned)(PyObject *_self, PyObject *noargs)
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
 #if defined(USE_CUDA)
-  return PyBool_FromLong(at::globalContext().isPinnedPtr(self->cdata->data<scalar_t>()));
+  return PyBool_FromLong(at::globalContext().isPinnedPtr(THWStorage_(data)(LIBRARY_STATE self->cdata)));
 #else
   Py_RETURN_FALSE;
 #endif
@@ -200,49 +181,49 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   THWStorage* storage = THWStorage_(newWithSize)(size_bytes);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
-    memcpy(storage->data(), src + offset, count);
+    memcpy(THWStorage_(data)(storage), src + offset, count);
   } else if (scalar_type == at::kBool) {
     // Because of ASAN checks, that are failing in the THStorage.cpp whenever
     // we are trying to get a value which is not 0 or 1, we have to manually
     // convert original values to boolean ones.
     torch::utils::THP_decodeBoolBuffer(
-        storage->data<bool>(),
+        reinterpret_cast<bool*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kShort) {
     torch::utils::THP_decodeInt16Buffer(
-        storage->data<int16_t>(),
+        reinterpret_cast<int16_t*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kInt) {
     torch::utils::THP_decodeInt32Buffer(
-        storage->data<int32_t>(),
+        reinterpret_cast<int32_t*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kLong) {
     torch::utils::THP_decodeInt64Buffer(
-        storage->data<int64_t>(),
+        reinterpret_cast<int64_t*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kHalf) {
     torch::utils::THP_decodeHalfBuffer(
-        storage->data<c10::Half>(),
+        reinterpret_cast<c10::Half*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kBFloat16) {
     torch::utils::THP_decodeBFloat16Buffer(
-        storage->data<c10::BFloat16>(),
+        reinterpret_cast<c10::BFloat16*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kFloat) {
     torch::utils::THP_decodeFloatBuffer(
-        storage->data<float>(),
+        reinterpret_cast<float*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kDouble) {
     torch::utils::THP_decodeDoubleBuffer(
-        storage->data<double>(),
+        reinterpret_cast<double*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kComplexFloat) {
     torch::utils::THP_decodeComplexFloatBuffer(
-        storage->data<c10::complex<float>>(),
+        reinterpret_cast<c10::complex<float>*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else if (scalar_type == at::kComplexDouble) {
     torch::utils::THP_decodeComplexDoubleBuffer(
-        storage->data<c10::complex<double>>(),
+        reinterpret_cast<c10::complex<double>*>(THWStorage_(data)(storage)),
         src + offset, byte_order, count);
   } else {
     TORCH_CHECK(false, "Unknown type: ", scalar_type);

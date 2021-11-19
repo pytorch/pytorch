@@ -5,7 +5,6 @@ import operator
 import torch
 import torch.fx
 from torch.fx.experimental import const_fold
-from torch.fx.experimental.fx_acc import acc_tracer, acc_ops
 from torch.testing._internal.common_utils import TestCase
 
 

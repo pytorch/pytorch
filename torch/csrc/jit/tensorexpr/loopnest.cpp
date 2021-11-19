@@ -59,16 +59,13 @@ LoopNest::LoopNest(const std::vector<Tensor>& output_tensors) {
   verify(root_stmt_);
 }
 
-std::vector<BufPtr> LoopNest::getIntermediateBufs() const {
-  std::vector<BufPtr> result;
-  std::unordered_set<BufPtr> result_set;
+std::unordered_set<BufPtr> LoopNest::getIntermediateBufs() const {
+  std::unordered_set<BufPtr> result;
   auto input_bufs = getInputBufs();
   auto bufs = NodeFinder<Buf>::find(root_stmt_);
   for (auto buf : bufs) {
-    if (!output_bufs_.count(buf) && !input_bufs.count(buf) &&
-        !result_set.count(buf)) {
-      result.push_back(buf);
-      result_set.insert(buf);
+    if (!output_bufs_.count(buf) && !input_bufs.count(buf)) {
+      result.insert(buf);
     }
   }
   return result;
@@ -105,8 +102,7 @@ class IndexFlattener : public IRMutator {
     return alloc<Load>(
         v->dtype(),
         v->buf(),
-        std::vector<ExprPtr>({flatten_index(
-            v->buf()->dims(), v->indices(), v->buf()->strides())}));
+        std::vector<ExprPtr>({flatten_index(v->buf()->dims(), v->indices())}));
   }
 
   StmtPtr mutate(StorePtr v) override {
@@ -116,7 +112,7 @@ class IndexFlattener : public IRMutator {
       return v;
     }
     std::vector<ExprPtr> indices = {
-        flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides())};
+        flatten_index(v->buf()->dims(), v->indices())};
     v->set_indices(indices);
     v->set_value(new_value);
     return v;
@@ -1135,8 +1131,9 @@ BlockPtr findLowestContainingBlock(const std::vector<BufLoadOrStoreUse>& uses) {
 
 StmtPtr LoopNest::insertAllocFree(
     StmtPtr stmt,
-    const c10::optional<std::vector<BufPtr>>& interm_bufs /* = c10::nullopt*/) {
-  std::vector<BufPtr> intermediate_bufs;
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /* = c10::nullopt*/) {
+  std::unordered_set<BufPtr> intermediate_bufs;
   if (interm_bufs) {
     intermediate_bufs = *interm_bufs;
   } else {
@@ -1220,7 +1217,8 @@ void LoopNest::eliminateDeadStores() {
 }
 
 void LoopNest::prepareForCodegen(
-    const c10::optional<std::vector<BufPtr>>& interm_bufs /*= c10::nullopt*/) {
+    const c10::optional<std::unordered_set<BufPtr>>&
+        interm_bufs /*= c10::nullopt*/) {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);

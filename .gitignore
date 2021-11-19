@@ -287,7 +287,6 @@ TAGS
 # clang tooling storage location
 .clang-format-bin
 .clang-tidy-bin
-.lintbin
 
 # clangd background index
 .clangd/

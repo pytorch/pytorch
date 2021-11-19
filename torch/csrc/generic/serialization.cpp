@@ -21,14 +21,14 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size, uint64_t
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
 #ifndef THC_GENERIC_FILE
-  data = self->data<scalar_t>();
+  data = THWStorage_(data)(LIBRARY_STATE self);
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<char[]> cpu_data(new char[size_bytes]);
   data = (scalar_t*)cpu_data.get();
   C10_CUDA_CHECK(cudaMemcpy(
       data,
-      self->data<scalar_t>(),
+      THWStorage_(data)(LIBRARY_STATE self),
       size_bytes,
       cudaMemcpyDeviceToHost));
 #endif
@@ -125,7 +125,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
   }
 
 #ifndef THC_GENERIC_FILE
-  data = storage->data<scalar_t>();
+  data = THWStorage_(data)(LIBRARY_STATE storage);
 #else
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::unique_ptr<char[]> cpu_data(new char[nbytes]);
@@ -171,7 +171,7 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
   }
 
 #ifdef THC_GENERIC_FILE
-  C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
+  C10_CUDA_CHECK(cudaMemcpy(THWStorage_(data)(LIBRARY_STATE storage), data, nbytes, cudaMemcpyHostToDevice));
 #endif
   return storage.release();
 }

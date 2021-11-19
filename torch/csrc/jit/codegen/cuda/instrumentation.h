@@ -45,15 +45,11 @@ class Trace : public NonCopyable {
     if (log_file_ != nullptr) {
       logEvent('B', name);
     }
-    if (record_nvtx_range_) {
-      nvtxRangePushA(name);
-    }
+    nvtxRangePushA(name);
   }
 
   void endEvent(const char* name) {
-    if (record_nvtx_range_) {
-      nvtxRangePop();
-    }
+    nvtxRangePop();
     if (log_file_ != nullptr) {
       logEvent('E', name);
     }
@@ -68,7 +64,6 @@ class Trace : public NonCopyable {
  private:
   FILE* log_file_ = nullptr;
   Clock::time_point start_timestamp_;
-  bool record_nvtx_range_ = true;
 };
 
 //! \internal Automatic scope for a perf marker

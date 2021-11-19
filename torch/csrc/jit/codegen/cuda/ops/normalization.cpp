@@ -20,20 +20,25 @@ TensorView* softmax(TensorView* x, int dim) {
   auto max_val = max(x, {kReductionAxis});
   auto bcast_max = broadcast(max_val, broadcast_mask);
   auto x_max_sub = sub(x, bcast_max);
-  auto exp_val = exp(x_max_sub);
-  auto sum_exp = sum(exp_val, {kReductionAxis});
+  auto exp = unaryOp(UnaryOpType::Exp, x_max_sub);
+  auto sum_exp = sum(exp, {kReductionAxis});
   auto bcast_sum = broadcast(sum_exp, broadcast_mask);
-  auto y = div(exp_val, bcast_sum);
+  auto y = div(exp, bcast_sum);
 
   return y;
 }
 
-TensorView* softmax_backward(TensorView* dy, TensorView* y, int dim) {
+TensorView* softmax_backward(
+    TensorView* dy,
+    TensorView* y,
+    int dim,
+    TensorView* x) {
   TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(y != nullptr, "Output is invalid.");
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
 
   const int kNumberOfDims =
-      TensorDomain::noReductions(y->getRootDomain()).size();
+      TensorDomain::noReductions(x->getRootDomain()).size();
   const int kReductionAxis = (dim < 0) ? dim + kNumberOfDims : dim;
   TORCH_INTERNAL_ASSERT(kReductionAxis >= 0 && kReductionAxis < kNumberOfDims);
 
@@ -81,7 +86,7 @@ ForwardNormResult layer_norm(
 
   std::vector<int> outer_reduction_axes(kOuterNumDims);
   std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-  for (const auto idx : c10::irange(kOuterNumDims)) {
+  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
     outer_reduction_axes[idx] = idx;
     outer_broadcast_mask[idx] = true;
   }
@@ -89,7 +94,7 @@ ForwardNormResult layer_norm(
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-  for (const auto idx : c10::irange(kNormShapeNumDims)) {
+  for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
@@ -104,7 +109,7 @@ ForwardNormResult layer_norm(
   auto var_sum_bcast = broadcast(welford_out.var_sum, inner_broadcast_mask);
   auto var = div(var_sum_bcast, num_features);
   auto var_eps = add(var, eps);
-  auto invstd = rsqrt(var_eps);
+  auto invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
 
   auto y = mul(x_sub_mean, invstd);
 
@@ -149,7 +154,7 @@ BackwardNormResult layer_norm_backward(
 
   std::vector<int> outer_reduction_axes(kOuterNumDims);
   std::vector<bool> outer_broadcast_mask(kNumberOfDims, false);
-  for (const auto idx : c10::irange(kOuterNumDims)) {
+  for (size_t idx = 0; idx < kOuterNumDims; ++idx) {
     outer_reduction_axes[idx] = idx;
     outer_broadcast_mask[idx] = true;
   }
@@ -157,7 +162,7 @@ BackwardNormResult layer_norm_backward(
   std::vector<int> inner_reduction_axes(kNormShapeNumDims);
   std::vector<bool> inner_broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-  for (const auto idx : c10::irange(kNormShapeNumDims)) {
+  for (size_t idx = 0; idx < kNormShapeNumDims; ++idx) {
     const size_t axis = kNumberOfDims - 1 - idx;
     inner_reduction_axes[idx] = axis;
     inner_broadcast_mask[axis] = true;
@@ -185,7 +190,7 @@ BackwardNormResult layer_norm_backward(
   auto c3 = mul(x_hat, bcast_c2);
 
   auto inner = sub(sub(a, bcast_b), c3);
-  auto reciprocal_size = reciprocal(num_features);
+  auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, num_features);
 
   TensorView* dx = nullptr;
   if (output_mask[0]) {
@@ -212,8 +217,7 @@ ForwardNormResult batch_norm(
     TensorView* running_var,
     const bool kTraining,
     Val* momentum,
-    Val* eps,
-    bool channels_last) {
+    Val* eps) {
   auto fusion = FusionGuard::getCurFusion();
 
   TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
@@ -236,17 +240,15 @@ ForwardNormResult batch_norm(
   // M = outer = channels
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
+  // const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
       TensorDomain::noReductions(x->getRootDomain()).size();
-  // channels last format means C dimension is at axis kNumberOfDims-1 at x
-  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
   Val* num_features = new Double(1);
-
-  for (const auto axis : c10::irange(kNumberOfDims)) {
-    if (axis != c_axis) {
+  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+    if (axis != 1) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
       num_features = mul(num_features, x->domain()->domain()[axis]->extent());
@@ -262,58 +264,20 @@ ForwardNormResult batch_norm(
 
     // updating running mean and running var
     if (running_mean != nullptr && running_var != nullptr) {
-      // Note: kTraining is true here!
-      TORCH_INTERNAL_ASSERT(
-          kTraining,
-          "When running stats are provided, batch stats should only be computed during training");
-
       auto rev_momentum = sub(new Double(1.0), momentum);
       auto current_mean_hat = mul(welford_out.avg, momentum);
       auto mean_hat = mul(running_mean, rev_momentum);
       auto new_mean_hat = add(mean_hat, current_mean_hat);
+      fusion->addOutput(new_mean_hat);
+      fusion->aliasOutputToInput(new_mean_hat, running_mean);
 
       auto num_feature_decrement = sub(num_features, new Int(1));
       auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
-
-      // when inputs have been casted by parser. We want to alias the output to
-      // the pre-casted input, so we can still update running stats
-      auto cast_to_input_dtype = [fusion](
-                                     Val* casted_input, Val* aliased_output) {
-        auto unary_op = casted_input->definition();
-        TORCH_INTERNAL_ASSERT(
-            unary_op->isA<UnaryOp>() &&
-                unary_op->as<UnaryOp>()->getUnaryOpType() == UnaryOpType::Cast,
-            "check for cast op");
-        auto input_to_cast = unary_op->input(0);
-        TORCH_INTERNAL_ASSERT(
-            input_to_cast->isFusionInput(),
-            "IO_tensor batch_norm::running_stats can only updating input tensor to fusion");
-        auto rm_dtype = input_to_cast->getDataType();
-        TORCH_INTERNAL_ASSERT(
-            rm_dtype.has_value(),
-            "Input running stats must have dtype defined");
-        auto casted_output = castOp(*rm_dtype, aliased_output);
-
-        fusion->addOutput(casted_output);
-        fusion->aliasOutputToInput(casted_output, input_to_cast);
-      };
-
-      if (fusion->hasInput(running_mean)) {
-        fusion->addOutput(new_mean_hat);
-        fusion->aliasOutputToInput(new_mean_hat, running_mean);
-      } else {
-        cast_to_input_dtype(running_mean, new_mean_hat);
-      }
-
-      if (fusion->hasInput(running_var)) {
-        fusion->addOutput(new_var_hat);
-        fusion->aliasOutputToInput(new_var_hat, running_var);
-      } else {
-        cast_to_input_dtype(running_var, new_var_hat);
-      }
+      fusion->addOutput(new_var_hat);
+      fusion->aliasOutputToInput(new_var_hat, running_var);
     }
 
     mean = welford_out.avg;
@@ -322,7 +286,7 @@ ForwardNormResult batch_norm(
 
     auto var = div(welford_out.var_sum, num_features);
     auto var_eps = add(var, eps);
-    invstd = rsqrt(var_eps);
+    invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
     auto invstd_bcast = broadcast(invstd, broadcast_mask);
 
     y = mul(x_sub_mean, invstd_bcast);
@@ -332,7 +296,7 @@ ForwardNormResult batch_norm(
     auto x_sub_mean = sub(x, r_mean_bcasted);
 
     auto var_eps = add(running_var, eps);
-    auto unbiased_invstd = rsqrt(var_eps);
+    auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
     auto invstd_bcast = broadcast(unbiased_invstd, broadcast_mask);
 
     // During inference, mean/invstd output are empty tensors
@@ -356,8 +320,8 @@ ForwardNormResult batch_norm(
 }
 
 BackwardNormResult batch_norm_backward(
-    TensorView* input,
-    TensorView* grad_output,
+    TensorView* x,
+    TensorView* dy,
     TensorView* weight,
     TensorView* running_mean,
     TensorView* running_var,
@@ -365,10 +329,9 @@ BackwardNormResult batch_norm_backward(
     TensorView* save_invstd,
     const bool kTraining,
     Val* eps,
-    const std::vector<bool>& output_mask,
-    bool channels_last) {
-  TORCH_INTERNAL_ASSERT(input != nullptr, "Input is invalid.");
-  TORCH_INTERNAL_ASSERT(grad_output != nullptr, "Grad Output is invalid.");
+    const std::vector<bool>& output_mask) {
+  TORCH_INTERNAL_ASSERT(x != nullptr, "Input is invalid.");
+  TORCH_INTERNAL_ASSERT(dy != nullptr, "Grad Output is invalid.");
   TORCH_INTERNAL_ASSERT(
       eps != nullptr && eps->getDataType().has_value() &&
           eps->getDataType().value() == DataType::Double,
@@ -378,84 +341,90 @@ BackwardNormResult batch_norm_backward(
   // M = outer = channels
   // N = reduction = B * H * W * D
   // weight = bias = (C) tensor
+  const size_t kChannelsDim = 1;
   const size_t kNumberOfDims =
-      TensorDomain::noReductions(input->getMaybeRFactorDomain()).size();
-  // channels last format means C dimension is at axis kNumberOfDims-1 at x /
-  // grad_out
-  size_t c_axis = channels_last ? kNumberOfDims - 1 : 1;
+      TensorDomain::noReductions(x->getRootDomain()).size();
 
   std::vector<int> reduction_axes;
   std::vector<bool> broadcast_mask(kNumberOfDims, false);
-  Val* num_features = nullptr;
-  for (const auto axis : c10::irange(kNumberOfDims)) {
-    if (axis != c_axis) {
+  Val* num_features = new Double(1);
+  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
+    if (axis != kChannelsDim) {
       reduction_axes.push_back(axis);
       broadcast_mask[axis] = true;
-      if (num_features == nullptr) {
-        num_features =
-            castOp(DataType::Double, input->domain()->domain()[axis]->extent());
-      } else {
-        num_features =
-            mul(num_features, input->domain()->domain()[axis]->extent());
-      }
+      num_features = mul(num_features, x->domain()->domain()[axis]->extent());
     }
   }
 
-  auto mean = save_mean;
-  auto invstd = save_invstd;
+  Val* bcast_weight = nullptr;
+  if (weight != nullptr) {
+    bcast_weight = broadcast(weight, broadcast_mask);
+  } else {
+    bcast_weight = new Double(1);
+  }
+
+  TensorView* dx = nullptr;
+  TensorView* dw = nullptr;
+  TensorView* db = nullptr;
   if (kTraining) {
     TORCH_INTERNAL_ASSERT(
         save_mean != nullptr && save_invstd != nullptr,
         "When training=True, save_mean and save_invstd are required.");
+
+    auto bcast_rstd = broadcast(save_invstd, broadcast_mask);
+    auto bcast_mean = broadcast(save_mean, broadcast_mask);
+    auto x_hat = mul(sub(x, bcast_mean), bcast_rstd);
+    auto grad_x_hat = mul(dy, bcast_weight);
+
+    auto a = mul(num_features, grad_x_hat);
+
+    auto b = sum(grad_x_hat, reduction_axes);
+    auto bcast_b = broadcast(b, broadcast_mask);
+
+    auto c1 = mul(grad_x_hat, x_hat);
+    auto c2 = sum(c1, reduction_axes);
+    auto bcast_c2 = broadcast(c2, broadcast_mask);
+    auto c3 = mul(x_hat, bcast_c2);
+
+    auto inner = sub(sub(a, bcast_b), c3);
+
+    auto reciprocal_size = unaryOp(UnaryOpType::Reciprocal, num_features);
+
+    if (output_mask[0]) {
+      dx = mul(mul(reciprocal_size, bcast_rstd), inner);
+    }
+
+    if (output_mask[1]) {
+      dw = sum(mul(dy, x_hat), reduction_axes);
+    }
   } else {
-    mean = running_mean;
-    invstd = rsqrt(add(running_var, eps));
+    // TODO: this is not a legit assumption? Can't we run with
+    // track_running_stats == false && training == false
+    // which should just run through the case above.
+    TORCH_INTERNAL_ASSERT(
+        running_mean != nullptr && running_var != nullptr,
+        "When training=False, running_mean and running_invstd are required.");
+
+    auto bcast_var = broadcast(running_var, broadcast_mask);
+    auto var_eps = add(bcast_var, eps);
+    auto bcast_rstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
+    auto bcast_mean = broadcast(running_mean, broadcast_mask);
+
+    if (output_mask[0]) {
+      dx = mul(mul(dy, bcast_rstd), bcast_weight);
+    }
+
+    if (output_mask[1]) {
+      auto x_hat = mul(sub(x, bcast_mean), bcast_rstd);
+      dw = sum(mul(dy, x_hat), reduction_axes);
+    }
   }
 
-  mean = broadcast(mean, broadcast_mask);
-
-  TensorView* weight_val = nullptr;
-  if (weight == nullptr) {
-    weight_val = TensorViewBuilder()
-                     .ndims(kNumberOfDims)
-                     .dtype(input->getDataType().value())
-                     .shape(std::vector<int64_t>(kNumberOfDims, 1))
-                     .build();
-    new UnaryOp(
-        UnaryOpType::Set, weight_val->as<Val>(), (new Double(1.0))->as<Val>());
-  } else {
-    weight_val = broadcast(weight, broadcast_mask);
-  }
-
-  auto norm = reciprocal(num_features);
-
-  auto grad_output_sum = sum(grad_output, reduction_axes);
-  auto dot_p = sum(mul(grad_output, sub(input, mean)), reduction_axes);
-
-  auto grad_mean = broadcast(mul(grad_output_sum, norm), broadcast_mask);
-  auto proj_scale =
-      broadcast(mul(mul(dot_p, norm), mul(invstd, invstd)), broadcast_mask);
-  auto grad_scale = mul(broadcast(invstd, broadcast_mask), weight_val);
-
-  TensorView* grad_input = nullptr;
-  if (kTraining) {
-    auto proj = mul(sub(input, mean), proj_scale);
-    grad_input = mul(sub(sub(grad_output, proj), grad_mean), grad_scale);
-  } else {
-    grad_input = mul(grad_output, grad_scale);
-  }
-
-  TensorView* grad_weight = nullptr;
-  if (output_mask[1]) {
-    grad_weight = mul(dot_p, invstd);
-  }
-
-  TensorView* grad_bias = nullptr;
   if (output_mask[2]) {
-    grad_bias = grad_output_sum;
+    db = sum(dy, reduction_axes);
   }
 
-  return {grad_input, grad_weight, grad_bias};
+  return {dx, dw, db};
 }
 
 ForwardNormResult instance_norm(
@@ -497,7 +466,7 @@ ForwardNormResult instance_norm(
   std::vector<int> x_reduction_axes;
   std::vector<bool> x_broadcast_mask(kNumberOfDims, false);
   Val* N = new Double(1);
-  for (const auto axis : c10::irange(kNumberOfDims)) {
+  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
     if (axis != kBatchDim && axis != kChannelsDim) {
       x_reduction_axes.push_back(axis);
       x_broadcast_mask[axis] = true;
@@ -508,7 +477,7 @@ ForwardNormResult instance_norm(
   B = mul(B, x->domain()->domain()[kBatchDim]->extent());
 
   std::vector<bool> channels_only_broadcast_mask(kNumberOfDims, false);
-  for (const auto axis : c10::irange(kNumberOfDims)) {
+  for (size_t axis = 0; axis < kNumberOfDims; ++axis) {
     if (axis != kChannelsDim) {
       channels_only_broadcast_mask[axis] = true;
     }
@@ -555,7 +524,7 @@ ForwardNormResult instance_norm(
 
     auto var = div(welford_out.var_sum, N);
     auto var_eps = add(var, eps);
-    invstd = rsqrt(var_eps);
+    invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
     auto invstd_bcast = broadcast(invstd, x_broadcast_mask);
 
     y = mul(x_sub_mean, invstd_bcast);
@@ -565,7 +534,7 @@ ForwardNormResult instance_norm(
     auto x_sub_mean = sub(x, r_mean_bcasted);
 
     auto var_eps = add(running_var, eps);
-    auto unbiased_invstd = rsqrt(var_eps);
+    auto unbiased_invstd = unaryOp(UnaryOpType::Rsqrt, var_eps);
     auto invstd_bcast =
         broadcast(unbiased_invstd, channels_only_broadcast_mask);
 

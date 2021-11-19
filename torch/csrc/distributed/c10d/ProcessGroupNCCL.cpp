@@ -12,16 +12,15 @@
 #include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
+#include <c10d/ParamCommsUtils.hpp>
+#include <c10d/Utils.hpp>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
-#include <c10/util/irange.h>
-#include <c10d/ParamCommsUtils.hpp>
-#include <c10d/TraceUtils.h>
-#include <c10d/Utils.hpp>
 
 #include <torch/csrc/cuda/nccl.h>
 
@@ -250,9 +249,7 @@ std::ostream& operator<<(
   if (workNCCL.outputs_) {
     workInfo = c10::str(
         "WorkNCCL(",
-        "SeqNum=",
-        workNCCL.seq_,
-        ", OpType=",
+        "OpType=",
         opTypeToString(workNCCL.opType_),
         ", TensorShape=",
         (*workNCCL.outputs_)[0].sizes(),
@@ -262,9 +259,7 @@ std::ostream& operator<<(
   } else {
     workInfo = c10::str(
         "WorkNCCL(",
-        "SeqNum=",
-        workNCCL.seq_,
-        ", OpType=",
+        "OpType=",
         opTypeToString(workNCCL.opType_),
         ", Timeout(ms)=",
         workNCCL.opTimeout_.count(),
@@ -277,22 +272,15 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(
     const std::vector<at::Device>& devices,
     int rank,
     OpType opType,
-    uint64_t seq,
     const char* profilingTitle,
-    const c10::optional<std::vector<at::Tensor>>& inputs,
-    bool desyncDebug)
+    const c10::optional<std::vector<at::Tensor>>& inputs)
     : Work(rank, opType, profilingTitle, inputs),
       devices_(devices),
-      workStartTime_(std::chrono::steady_clock::now()),
-      seq_(seq) {
+      workStartTime_(std::chrono::steady_clock::now()) {
   // Creates the CUDA event wrappers
   // Note: The actual events are lazily created when first recorded to with
   // DEFAULT_FLAGS = cudaEventDisableTiming.
-  if (desyncDebug) {
-    ncclStartEvents_ =
-        std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
-  }
-  ncclEndEvents_ =
+  cudaEvents_ =
       std::make_shared<std::vector<at::cuda::CUDAEvent>>(devices.size());
   ncclComms_.resize(devices.size());
 }
@@ -301,15 +289,11 @@ ProcessGroupNCCL::WorkNCCL::WorkNCCL(const WorkNCCL& w)
     : Work(w.rank_, w.opType_),
       std::enable_shared_from_this<WorkNCCL>(w),
       devices_(w.devices_),
-      ncclStartEvents_(w.ncclStartEvents_),
-      ncclEndEvents_(w.ncclEndEvents_),
+      cudaEvents_(w.cudaEvents_),
       ncclComms_(w.ncclComms_),
       blockingWait_(w.blockingWait_),
       opTimeout_(w.opTimeout_),
-      workStartTime_(w.workStartTime_),
-      seq_(w.seq_),
-      startTraceUpdated_(w.startTraceUpdated_),
-      store_(w.store_) {
+      workStartTime_(w.workStartTime_) {
   exception_ = w.exception_;
 }
 
@@ -318,11 +302,6 @@ ProcessGroupNCCL::WorkNCCL::~WorkNCCL() {}
 bool ProcessGroupNCCL::WorkNCCL::isCompleted() {
   checkAndSetException();
   return exception() || finishedGPUExecutionInternal();
-}
-
-bool ProcessGroupNCCL::WorkNCCL::isStarted() {
-  checkAndSetException();
-  return exception() || startedGPUExecutionInternal();
 }
 
 bool ProcessGroupNCCL::WorkNCCL::isSuccess() const {
@@ -362,20 +341,10 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecution() {
   return finishedGPUExecutionInternal();
 }
 
-bool ProcessGroupNCCL::WorkNCCL::startedGPUExecutionInternal() const {
-  for (const auto i : c10::irange(devices_.size())) {
-    // Checking the work's corresponding CUDA events' status
-    if (!(*ncclStartEvents_)[i].query()) {
-      return false;
-    }
-  }
-  return true;
-}
-
 bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
   for (const auto i : c10::irange(devices_.size())) {
     // Checking the work's corresponding CUDA events' status
-    if (!(*ncclEndEvents_)[i].query()) {
+    if (!(*cudaEvents_)[i].query()) {
       return false;
     }
   }
@@ -416,7 +385,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   for (const auto i : c10::irange(devices_.size())) {
     auto currentStream = at::cuda::getCurrentCUDAStream(devices_[i].index());
     // Block the current stream on the NCCL stream
-    (*ncclEndEvents_)[i].block(currentStream);
+    (*cudaEvents_)[i].block(currentStream);
   }
 }
 
@@ -529,33 +498,19 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       store_(store),
       options_(options),
       ncclCommCounter_(0),
-      traceKeyStart_(getTraceStartKey("NCCL", rank)),
-      traceKeyEnd_(getTraceEndKey("NCCL", rank)),
       terminateProcessGroup_(false) {
   TORCH_CHECK(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   blockingWait_ = parseEnvVarFlag(NCCL_BLOCKING_WAIT);
   asyncErrorHandling_ = parseEnvVarFlag(NCCL_ASYNC_ERROR_HANDLING);
-  desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG);
 
-  if (blockingWait_) {
-    if (asyncErrorHandling_ || desyncDebug_) {
-      LOG(INFO) << "[Rank " << rank_ << "] NCCL_BLOCKING_WAIT and "
-                << "NCCL_ASYNC_ERROR_HANDLING|NCCL_DESYNC_DEBUG"
-                << "should not both be enabled. "
-                << "Only NCCL_BLOCKING_WAIT is being used in this process.";
-      asyncErrorHandling_ = false;
-      desyncDebug_ = false;
-    }
-  } else {
-    if (desyncDebug_ && !asyncErrorHandling_) {
-      LOG(INFO) << "[Rank " << rank_
-                << "] NCCL_DESYNC_DEBUG and NCCL_ASYNC_ERROR_HANDLING "
-                << "must both be enabled. "
-                << "Enabling NCCL_ASYNC_ERROR_HANDLING.";
-      asyncErrorHandling_ = true;
-    }
+  if (blockingWait_ && asyncErrorHandling_) {
+    LOG(INFO) << "[Rank " << rank_
+              << "] NCCL_BLOCKING_WAIT and NCCL_ASYNC_ERROR_HANDLING "
+              << "should not both be enabled. "
+              << "Only NCCL_BLOCKING_WAIT is being used in this process.";
+    asyncErrorHandling_ = false;
   }
 
   if (parseEnvVarFlag(ENABLE_NCCL_HEALTH_CHECK)) {
@@ -585,7 +540,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   LOG(INFO) << "[Rank " << rank_
             << "] ProcessGroupNCCL initialized with following options:"
             << "\nNCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << "\nNCCL_DESYNC_DEBUG: " << desyncDebug_
             << "\nNCCL_BLOCKING_WAIT: " << blockingWait_
             << "\nTIMEOUT(ms): " << options_->timeout.count()
             << "\nUSE_HIGH_PRIORITY_STREAM: "
@@ -651,10 +605,28 @@ void ProcessGroupNCCL::runHealthCheck() {
       rank_);
 }
 
-void ProcessGroupNCCL::setSequenceNumberForGroup() {}
+void ProcessGroupNCCL::setSequenceNumberForGroup() {
+  if (rank_ == 0) {
+    // Create and broadcast sequence number
+    auto seq = 1 + rand();
+    sequenceNum_ = c10d::SequenceNum(seq);
+    std::vector<uint8_t> values = c10d::toVec<uint8_t>(seq, kBytes);
+    store_->set(kSeqNumStoreKey, values);
+  } else {
+    // Read rank 0's sequence number from store.
+    sequenceNum_ = c10d::SequenceNum();
+    store_->wait({kSeqNumStoreKey}, options_->timeout);
+    std::vector<uint8_t> values = store_->get(kSeqNumStoreKey);
+    uint64_t num = c10d::fromVec<uint8_t>(values);
+    sequenceNum_->set(num);
+  }
+}
 
 uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
-  return seq_;
+  if (sequenceNum_ == c10::nullopt) {
+    return 0;
+  }
+  return sequenceNum_->get();
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {
@@ -710,9 +682,6 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
           " ran for ",
           timeElapsed.count(),
           " milliseconds before timing out.");
-      if (desyncDebug_) {
-        exceptionMsg += retrieveDesyncReport(store_, "NCCL", rank_, size_);
-      }
       LOG(ERROR) << exceptionMsg;
       std::exception_ptr exception_ptr =
           std::make_exception_ptr(std::runtime_error(exceptionMsg));
@@ -889,39 +858,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
       for (auto it = workMetaList_.begin(); it != workMetaList_.end();
            /* no increment*/) {
         auto& work = *it;
-
-        if (desyncDebug_ && !work.exception()) {
-          if (!work.startTraceUpdated_ && work.isStarted() &&
-              !terminateProcessGroup_.load() && !storeError_) {
-            work.startTraceUpdated_ = true;
-            storeError_ = !c10d::traceUpdate(
-                store_,
-                traceKeyStart_,
-                work.seq_,
-                opTypeToString(work.opType_));
-          }
-        }
-
         if (work.isCompleted()) {
-          if (desyncDebug_ && !work.exception()) {
-            // To close the window between the check of work.isStarted() and
-            // the check of work.isCompleted().
-            if (!work.startTraceUpdated_ && !terminateProcessGroup_.load() &&
-                !storeError_) {
-              storeError_ = !c10d::traceUpdate(
-                  store_,
-                  traceKeyStart_,
-                  work.seq_,
-                  opTypeToString(work.opType_));
-            }
-            if (!terminateProcessGroup_.load() && !storeError_) {
-              storeError_= !c10d::traceUpdate(
-                  store_,
-                  traceKeyEnd_,
-                  work.seq_,
-                  opTypeToString(work.opType_));
-            }
-          }
           // Handle Exceptions on failed GPU operations and remove completed
           // workNCCL objects from work vector.
           if (!terminateProcessGroup_.load()) {
@@ -1009,32 +946,9 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
     store_->set(storeKey, vec);
   } else {
-    try {
-      auto vec = store_->get(storeKey);
-      TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
-      std::memcpy(ncclID, vec.data(), vec.size());
-    } catch (const std::exception& e) {
-      std::string exceptionMsg = c10::str(
-          "[",
-          rank_,
-          "] is setting up NCCL communicator and "
-          "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
-          storeKey,
-          "', but store->get('",
-          storeKey,
-          "') got error: ");
-      TORCH_CHECK(false, exceptionMsg + e.what());
-    } catch (...) {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "Unknown exception while [",
-              rank_,
-              "] is setting up NCCL communicator and "
-              "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
-              storeKey,
-              "'"));
-    }
+    auto vec = store_->get(storeKey);
+    TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+    std::memcpy(ncclID, vec.data(), vec.size());
   }
 }
 
@@ -1296,13 +1210,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputs) {
   return c10::make_intrusive<ProcessGroupNCCL::WorkNCCL>(
-      devices,
-      rank,
-      opType,
-      seq_,
-      profilingTitle,
-      inputs,
-      desyncDebug_);
+      devices, rank, opType, profilingTitle, inputs);
 }
 
 std::vector<at::Tensor> ProcessGroupNCCL::WorkNCCL::result() {
@@ -1343,8 +1251,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   errorIfCapturingNonCapturableNCCL();
 
   // Bump collective counter
-  seq_++;
-
+  if (sequenceNum_) {
+    sequenceNum_->increment();
+  }
   const auto devices = getDeviceList(inputs);
   const auto key = getKeyFromDevices(devices);
   auto& ncclComms = getNCCLComm(key, devices, opType);
@@ -1366,14 +1275,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
   work->outputs_ = std::make_shared<std::vector<at::Tensor>>(outputs);
 
   at::cuda::OptionalCUDAGuard gpuGuard;
-
-  // Start event should only be recorded before the ncclGroupStart()
-  if (desyncDebug_) {
-    for (const auto i : c10::irange(inputs.size())) {
-      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      (*work->ncclStartEvents_)[i].record(ncclStream);
-    }
-  }
 
   pre(ncclStreams_[key]);
 
@@ -1405,10 +1306,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
   post(ncclStreams_[key]);
 
-  // End event should only be recorded after the ncclGroupEnd()
+  // Event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(inputs.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    (*work->ncclEndEvents_)[i].record(ncclStream);
+    (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
   }
 
@@ -1420,7 +1321,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::collective(
 
     // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
     // future blocks the stream this callback runs on the corresponding
-    // ncclEndEvents_ ensuring appropriate synchronization.
+    // cudaEvents_ ensuring appropriate synchronization.
     if (work->recordFunctionEndCallback_) {
       work->future_->addCallback(
           [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });
@@ -1476,14 +1377,6 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   at::cuda::OptionalCUDAGuard gpuGuard;
 
-  // Start event should only be recorded before the ncclGroupStart()
-  if (desyncDebug_) {
-    for (const auto i : c10::irange(tensors.size())) {
-      at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-      (*work->ncclStartEvents_)[i].record(ncclStream);
-    }
-  }
-
   pre(ncclStreams_[key]);
 
   for (const auto i : c10::irange(tensors.size())) {
@@ -1514,10 +1407,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   post(ncclStreams_[key]);
 
-  // End event should only be recorded after the ncclGroupEnd()
+  // Event should only be recorded after the ncclGroupEnd()
   for (const auto i : c10::irange(tensors.size())) {
     at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
-    (*work->ncclEndEvents_)[i].record(ncclStream);
+    (*work->cudaEvents_)[i].record(ncclStream);
     work->ncclComms_[i] = ncclComms[i];
     work->blockingWait_ = blockingWait_;
     work->opTimeout_ = options_->timeout;
@@ -1537,7 +1430,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::pointToPoint(
 
   // Add a callback that runs profiling end callbacks. wrapCallback() in CUDA
   // future blocks the stream this callback runs on the corresponding
-  // ncclEndEvents_ ensuring appropriate synchronization.
+  // cudaEvents_ ensuring appropriate synchronization.
   if (work->recordFunctionEndCallback_) {
     work->future_->addCallback(
         [work](at::ivalue::Future& /* unused */) { work->recordFunctionEndCallback_(); });

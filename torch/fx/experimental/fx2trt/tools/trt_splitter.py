@@ -51,7 +51,7 @@ class TRTSplitter(splitter_base._SplitterBase):
             operator_support = create_trt_operator_support()
         if not settings:
             settings = splitter_base._SplitterSettingBase()
-        super().__init__(module, sample_input, operator_support, settings, non_acc_submodule_name="_run_on_gpu_")
+        super().__init__(module, sample_input, operator_support, settings)
 
     def _lower_model_to_backend(
         self,

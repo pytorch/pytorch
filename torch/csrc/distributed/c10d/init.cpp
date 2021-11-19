@@ -911,7 +911,7 @@ Example::
       )")
       .def(
           py::init([](const std::string& host,
-                      uint16_t port,
+                      ::c10d::PortType port,
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
@@ -1390,10 +1390,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               }),
               py::arg("pg"),
               py::arg("gloo_pg"),
-              py::call_guard<py::gil_scoped_release>())
-         .def_property_readonly(
-              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
-         );
+              py::call_guard<py::gil_scoped_release>());
 #endif
 
 #ifdef USE_C10D_NCCL

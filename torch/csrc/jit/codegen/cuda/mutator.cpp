@@ -13,21 +13,13 @@ namespace cuda {
 // MUTATE FUNCTIONS FOR VALS
 
 Statement* OptOutMutator::mutate(IterDomain* id) {
-  Val* start = mutateAsVal(id->start())->asVal();
-  Val* extent = mutateAsVal(id->extent())->asVal();
-  Val* stop_offset = mutateAsVal(id->stopOffset())->asVal();
-  if (start->sameAs(id->start()) && extent->sameAs(id->extent()) &&
-      stop_offset->sameAs(id->stopOffset())) {
+  Val* s = mutateAsVal(id->start())->asVal();
+  Val* e = mutateAsVal(id->extent())->asVal();
+  if (s->sameAs(id->start()) && e->sameAs(id->extent()))
     return id;
-  }
 
   Val* mutated_val = new IterDomain(
-      start,
-      extent,
-      stop_offset,
-      id->getParallelType(),
-      id->getIterType(),
-      id->isRFactorProduct());
+      s, e, id->getParallelType(), id->getIterType(), id->isRFactorProduct());
   registerMutation(id, mutated_val);
   return mutated_val;
 }
@@ -213,7 +205,7 @@ Statement* OptOutMutator::mutate(ShiftOp* sop) {
     return sop;
   auto offsets = sop->offsets();
   FusionGuard::getCurFusion()->removeExpr(sop);
-  return new ShiftOp(out, in, offsets, sop->pad());
+  return new ShiftOp(out, in, offsets);
 }
 
 Statement* OptOutMutator::mutate(GatherOp* op) {

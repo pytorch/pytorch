@@ -20,12 +20,11 @@ void nnc_aten_abs(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -38,12 +37,11 @@ void nnc_aten_absolute(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -56,12 +54,11 @@ void nnc_aten_angle(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -74,12 +71,11 @@ void nnc_aten_sgn(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -92,12 +88,11 @@ void nnc_aten_acos(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -110,12 +105,11 @@ void nnc_aten_arccos(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -128,12 +122,11 @@ void nnc_aten_acosh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -146,12 +139,11 @@ void nnc_aten_arccosh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -164,12 +156,11 @@ void nnc_aten_asinh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -182,12 +173,11 @@ void nnc_aten_arcsinh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -200,12 +190,11 @@ void nnc_aten_atanh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -218,12 +207,11 @@ void nnc_aten_arctanh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -236,12 +224,11 @@ void nnc_aten_asin(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -254,12 +241,11 @@ void nnc_aten_arcsin(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -272,12 +258,11 @@ void nnc_aten_atan(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -290,12 +275,11 @@ void nnc_aten_arctan(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -308,12 +292,11 @@ void nnc_aten_bitwise_not(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -326,12 +309,11 @@ void nnc_aten_copysign(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -345,12 +327,11 @@ void nnc_aten_logical_not(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -363,12 +344,11 @@ void nnc_aten_logical_xor(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -382,12 +362,11 @@ void nnc_aten_logical_and(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -401,12 +380,11 @@ void nnc_aten_logical_or(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -420,12 +398,11 @@ void nnc_aten_bmm(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& mat2 = tensors[2];
@@ -439,12 +416,11 @@ void nnc_aten_ceil(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -457,12 +433,11 @@ void nnc_aten_clamp_max(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& max = tensors[2];
@@ -476,12 +451,11 @@ void nnc_aten_clamp_min(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& min = tensors[2];
@@ -495,12 +469,11 @@ void nnc_aten_complex(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& real = tensors[1];
   const at::Tensor& imag = tensors[2];
@@ -514,12 +487,11 @@ void nnc_aten_polar(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& abs = tensors[1];
   const at::Tensor& angle = tensors[2];
@@ -533,12 +505,11 @@ void nnc_aten_cos(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -551,12 +522,11 @@ void nnc_aten_cosh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -569,12 +539,11 @@ void nnc_aten_div(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -588,12 +557,11 @@ void nnc_aten_divide(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -607,12 +575,11 @@ void nnc_aten_true_divide(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -626,12 +593,11 @@ void nnc_aten_dot(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& tensor = tensors[2];
@@ -645,12 +611,11 @@ void nnc_aten_vdot(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -664,12 +629,11 @@ void nnc_aten_erf(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -682,12 +646,11 @@ void nnc_aten_erfc(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -700,12 +663,11 @@ void nnc_aten_exp(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -718,12 +680,11 @@ void nnc_aten_exp2(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -736,12 +697,11 @@ void nnc_aten_expm1(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -754,12 +714,11 @@ void nnc_aten_floor(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -772,12 +731,11 @@ void nnc_aten_floor_divide(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -791,12 +749,11 @@ void nnc_aten_frac(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -809,12 +766,11 @@ void nnc_aten_gcd(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -828,12 +784,11 @@ void nnc_aten_lcm(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -847,12 +802,11 @@ void nnc_aten_inverse(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -865,12 +819,11 @@ void nnc_aten_kron(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -884,12 +837,11 @@ void nnc_aten_ldexp(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -903,12 +855,11 @@ void nnc_aten_log(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -921,12 +872,11 @@ void nnc_aten_log10(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -939,12 +889,11 @@ void nnc_aten_log1p(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -957,12 +906,11 @@ void nnc_aten_log2(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -975,12 +923,11 @@ void nnc_aten_logaddexp(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -994,12 +941,11 @@ void nnc_aten_logaddexp2(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1013,12 +959,11 @@ void nnc_aten_xlogy(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1032,12 +977,11 @@ void nnc_aten_matmul(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1051,12 +995,11 @@ void nnc_aten__compute_linear_combination(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& input = tensors[1];
   const at::Tensor& coefficients = tensors[2];
@@ -1070,12 +1013,11 @@ void nnc_aten_mm(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& mat2 = tensors[2];
@@ -1089,12 +1031,11 @@ void nnc_aten_mul(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1108,12 +1049,11 @@ void nnc_aten_multiply(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1127,12 +1067,11 @@ void nnc_aten_mv(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& vec = tensors[2];
@@ -1146,12 +1085,11 @@ void nnc_aten_rad2deg(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1164,12 +1102,11 @@ void nnc_aten_deg2rad(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1182,12 +1119,11 @@ void nnc_aten_reciprocal(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1200,12 +1136,11 @@ void nnc_aten_neg(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1218,12 +1153,11 @@ void nnc_aten_negative(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1236,12 +1170,11 @@ void nnc_aten_round(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1254,12 +1187,11 @@ void nnc_aten_rsqrt(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1272,12 +1204,11 @@ void nnc_aten_silu(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1290,12 +1221,11 @@ void nnc_aten_mish(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1308,12 +1238,11 @@ void nnc_aten_sigmoid(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1326,12 +1255,11 @@ void nnc_aten_sin(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1344,12 +1272,11 @@ void nnc_aten_sinc(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1362,12 +1289,11 @@ void nnc_aten_sinh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1380,12 +1306,11 @@ void nnc_aten_sqrt(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1398,12 +1323,11 @@ void nnc_aten_square(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1416,12 +1340,11 @@ void nnc_aten_tan(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1434,12 +1357,11 @@ void nnc_aten_tanh(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1452,12 +1374,11 @@ void nnc_aten_trunc(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1470,12 +1391,11 @@ void nnc_aten_fix(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1488,12 +1408,11 @@ void nnc_aten_heaviside(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& values = tensors[2];
@@ -1507,12 +1426,11 @@ void nnc_aten_hspmm(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& mat1 = tensors[1];
   const at::Tensor& mat2 = tensors[2];
@@ -1526,12 +1444,11 @@ void nnc_aten_bitwise_and(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1545,12 +1462,11 @@ void nnc_aten_bitwise_or(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1564,12 +1480,11 @@ void nnc_aten_bitwise_xor(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1583,12 +1498,11 @@ void nnc_aten_ne(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1602,12 +1516,11 @@ void nnc_aten_not_equal(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1621,12 +1534,11 @@ void nnc_aten_eq(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1640,12 +1552,11 @@ void nnc_aten_ge(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1659,12 +1570,11 @@ void nnc_aten_greater_equal(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1678,12 +1588,11 @@ void nnc_aten_le(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1697,12 +1606,11 @@ void nnc_aten_less_equal(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1716,12 +1624,11 @@ void nnc_aten_gt(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1735,12 +1642,11 @@ void nnc_aten_greater(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1754,12 +1660,11 @@ void nnc_aten_lt(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1773,12 +1678,11 @@ void nnc_aten_less(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -1792,12 +1696,11 @@ void nnc_aten_take(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& index = tensors[2];
@@ -1811,12 +1714,11 @@ void nnc_aten_masked_select(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& mask = tensors[2];
@@ -1830,12 +1732,11 @@ void nnc_aten_nonzero(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1848,12 +1749,11 @@ void nnc_aten_orgqr(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& input2 = tensors[2];
@@ -1867,12 +1767,11 @@ void nnc_aten_lu_solve(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& LU_data = tensors[2];
@@ -1887,12 +1786,11 @@ void nnc_aten_lgamma(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1905,12 +1803,11 @@ void nnc_aten_digamma(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1923,12 +1820,11 @@ void nnc_aten_erfinv(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1941,12 +1837,11 @@ void nnc_aten_i0(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1959,12 +1854,11 @@ void nnc_aten_sign(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1977,12 +1871,11 @@ void nnc_aten_signbit(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -1995,12 +1888,11 @@ void nnc_aten_atan2(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2014,12 +1906,11 @@ void nnc_aten_lerp(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& end = tensors[2];
@@ -2034,12 +1925,11 @@ void nnc_aten_fmod(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2053,12 +1943,11 @@ void nnc_aten_hypot(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2072,12 +1961,11 @@ void nnc_aten_igamma(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2091,12 +1979,11 @@ void nnc_aten_igammac(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2110,12 +1997,11 @@ void nnc_aten_nextafter(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2129,12 +2015,11 @@ void nnc_aten_remainder(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2148,12 +2033,11 @@ void nnc_aten_fmin(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2167,12 +2051,11 @@ void nnc_aten_fmax(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2186,12 +2069,11 @@ void nnc_aten_maximum(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2205,12 +2087,11 @@ void nnc_aten_max(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2224,12 +2105,11 @@ void nnc_aten_minimum(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2243,12 +2123,11 @@ void nnc_aten_min(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2262,12 +2141,11 @@ void nnc_aten_msort(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2280,12 +2158,11 @@ void nnc_aten_pow(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& exponent = tensors[2];
@@ -2299,12 +2176,11 @@ void nnc_aten_float_power(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& exponent = tensors[2];
@@ -2318,12 +2194,11 @@ void nnc_aten_hardsigmoid(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2336,12 +2211,11 @@ void nnc_aten_hardswish(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2354,12 +2228,11 @@ void nnc_aten_log_sigmoid(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2372,12 +2245,11 @@ void nnc_aten_log_sigmoid_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& self = tensors[2];
@@ -2392,12 +2264,11 @@ void nnc_aten_adaptive_avg_pool3d_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& self = tensors[2];
@@ -2411,12 +2282,11 @@ void nnc_aten_adaptive_max_pool2d_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& self = tensors[2];
@@ -2431,12 +2301,11 @@ void nnc_aten_adaptive_max_pool3d_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& self = tensors[2];
@@ -2451,12 +2320,11 @@ void nnc_aten_sigmoid_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& output = tensors[2];
@@ -2470,12 +2338,11 @@ void nnc_aten_tanh_backward(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& grad_output = tensors[1];
   const at::Tensor& output = tensors[2];
@@ -2489,12 +2356,11 @@ void nnc_aten_isposinf(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2507,12 +2373,11 @@ void nnc_aten_isneginf(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2525,12 +2390,11 @@ void nnc_aten_special_entr(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2543,12 +2407,11 @@ void nnc_aten_special_expm1(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2561,12 +2424,11 @@ void nnc_aten_special_exp2(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2579,12 +2441,11 @@ void nnc_aten_special_gammaln(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2597,12 +2458,11 @@ void nnc_aten_special_erf(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2615,12 +2475,11 @@ void nnc_aten_special_erfc(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2633,12 +2492,11 @@ void nnc_aten_special_erfinv(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2651,12 +2509,11 @@ void nnc_aten_special_xlog1py(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2670,12 +2527,11 @@ void nnc_aten_special_i0e(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2688,12 +2544,11 @@ void nnc_aten_special_expit(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2706,12 +2561,11 @@ void nnc_aten_linalg_cholesky(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2724,12 +2578,11 @@ void nnc_aten_linalg_det(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2742,12 +2595,11 @@ void nnc_aten_linalg_eigvals(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2760,12 +2612,11 @@ void nnc_aten_linalg_householder_product(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& input = tensors[1];
   const at::Tensor& tau = tensors[2];
@@ -2779,12 +2630,11 @@ void nnc_aten_linalg_inv(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   try {
@@ -2797,12 +2647,11 @@ void nnc_aten_inner(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& other = tensors[2];
@@ -2816,12 +2665,11 @@ void nnc_aten_outer(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& vec2 = tensors[2];
@@ -2835,12 +2683,11 @@ void nnc_aten_ger(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& self = tensors[1];
   const at::Tensor& vec2 = tensors[2];
@@ -2854,12 +2701,11 @@ void nnc_aten_linalg_svdvals(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& input = tensors[1];
   try {
@@ -2872,12 +2718,11 @@ void nnc_aten_linalg_solve(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
-    int64_t* buf_strides,
     int8_t* buf_dtypes,
     int64_t args_num,
     int64_t* extra_args) {
-  std::vector<at::Tensor> tensors = constructTensors(
-      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  std::vector<at::Tensor> tensors =
+      constructTensors(bufs_num, buf_data, buf_ranks, buf_dims, buf_dtypes);
   at::Tensor& r = tensors[0];
   const at::Tensor& input = tensors[1];
   const at::Tensor& other = tensors[2];

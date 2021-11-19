@@ -1422,7 +1422,7 @@ class TestClassType(JitTestCase):
         Test that the error message displayed when convering a class type
         to an IValue that has an attribute of the wrong type.
         """
-        @torch.jit.script  # noqa: B903
+        @torch.jit.script
         class ValHolder(object):  # noqa: B903
             def __init__(self, val):
                 self.val = val

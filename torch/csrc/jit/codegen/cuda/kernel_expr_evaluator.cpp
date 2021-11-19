@@ -1,4 +1,3 @@
-
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
@@ -19,51 +18,33 @@ void ExpressionEvaluator::bind(
   TORCH_CHECK(!value->isConst(), "Tried to bind to a constant value");
   TORCH_CHECK(
       value->definition() == nullptr,
-      "Tried to bind to a value that is computed in the kernel IR: ",
-      toString(value),
-      " with ",
-      concrete_value);
+      "Tried to bind to a value that is computed in the kernel IR");
   known_values_[value] = concrete_value;
 }
 
-void ExpressionEvaluator::bind(
-    ParallelType pt,
-    Int::ScalarType concrete_value) {
-  TORCH_INTERNAL_ASSERT(isParallelTypeThread(pt));
-  if (precomputed_integers_) {
-    // Need to bind the thread value to integer machine
-    //  in pre-computed mode.
-    precomputed_integers_->bindConcreteParallelTypeValue(pt, concrete_value);
-  } else {
-    known_parallel_dimensions_[pt] = concrete_value;
-  }
-}
-
 c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
-  if (precomputed_integers_ && precomputed_integers_->ready()) {
-    return precomputed_integers_->getMaybeValueFor(value);
-  } else if (value->isScalar() && value->isConst()) {
+  FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
+
+  TORCH_CHECK(value->isScalar());
+  TORCH_CHECK(value->dtype() == DataType::Int);
+
+  // Const scalar?
+  if (value->isScalar() && value->isConst()) {
     return value->as<Int>()->value();
-  } else {
-    FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
-
-    TORCH_CHECK(value->isScalar());
-    TORCH_CHECK(value->dtype() == DataType::Int);
-
-    // Is the value known (either explicit binding or memoized)?
-    const auto pre_eval_it = known_values_.find(value);
-    if (pre_eval_it != known_values_.end()) {
-      return pre_eval_it->second;
-    }
-
-    value->accept(this);
-
-    const auto post_eval_it = known_values_.find(value);
-    return post_eval_it != known_values_.end()
-        ? c10::optional<Int::ScalarType>(post_eval_it->second)
-        : c10::nullopt;
   }
-  return c10::nullopt;
+
+  // Is the value known (either explicit binding or memoized)?
+  const auto pre_eval_it = known_values_.find(value);
+  if (pre_eval_it != known_values_.end()) {
+    return pre_eval_it->second;
+  }
+
+  value->accept(this);
+
+  const auto post_eval_it = known_values_.find(value);
+  return post_eval_it != known_values_.end()
+      ? c10::optional<Int::ScalarType>(post_eval_it->second)
+      : c10::nullopt;
 }
 
 bool ExpressionEvaluator::isConst(const Val* value) {
@@ -92,17 +73,7 @@ void ExpressionEvaluator::visit(const Int* value) {
 }
 
 void ExpressionEvaluator::visit(const NamedScalar* named_scalar) {
-  const auto& name = named_scalar->name();
-  for (auto pt : kParallelTypeThreads) {
-    auto pt_val_it = known_parallel_dimensions_.find(pt);
-    if (pt_val_it == known_parallel_dimensions_.end()) {
-      continue;
-    }
-    if (name == stringifyThreadSize(pt)) {
-      known_values_[named_scalar] = pt_val_it->second;
-      return;
-    }
-  }
+  // It's a legal expresison node so we must handle it
 }
 
 void ExpressionEvaluator::visit(const UnaryOp* unary_op) {

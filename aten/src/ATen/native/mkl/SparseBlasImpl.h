@@ -8,13 +8,6 @@ namespace sparse {
 namespace impl {
 namespace mkl {
 
-void addmm_out_sparse_csr(
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    const Tensor& result);
-
 void addmv_out_sparse_csr(
     const Tensor& mat,
     const Tensor& vec,

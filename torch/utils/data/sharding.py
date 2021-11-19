@@ -2,7 +2,7 @@ import torch.utils.data.graph
 
 
 def apply_sharding(datapipe, num_of_instances, instance_id):
-    graph = torch.utils.data.graph.traverse(datapipe, exclude_primitive=True)
+    graph = torch.utils.data.graph.traverse(datapipe)
 
     def traverse_graph(graph):
         results = set()

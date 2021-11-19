@@ -210,14 +210,12 @@ void CppPrinter::visit(FreePtr v) {
 }
 
 void CppPrinter::visit(LoadPtr v) {
-  auto flat_idx =
-      flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
+  auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
   os() << *v->base_handle() << "[" << *flat_idx << "]";
 }
 
 void CppPrinter::visit(StorePtr v) {
-  auto flat_idx =
-      flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
+  auto flat_idx = flatten_index(v->buf()->dims(), v->indices());
   const int lanes = v->value()->dtype().lanes();
   for (int lane = 0; lane < lanes; lane++) {
     lane_ = lane;

@@ -103,17 +103,10 @@ void IrPrinter::handle(const IterDomain* id) {
     print_inline(id->start());
     os_ << " : ";
   }
-  if (id->stop() != id->extent()) {
-    print_inline(id->stop());
-    os_ << " : ";
-  }
   print_inline(id->extent());
   os_ << "}";
   if (id->isRFactorProduct())
     os_ << "rf";
-  if (id->hasPaddingToMultipleOfWarp()) {
-    os_ << "_p";
-  }
 }
 
 void IrPrinter::handle(const Bool* b) {
@@ -217,8 +210,10 @@ void IrPrinter::handle(const UnaryOp* uop) {
         os_ << "f";
       }
     }
-    os_ << "(";
-    handle(uop->in());
+    if (op_type == UnaryOpType::RandLike) {
+      os_ << "(";
+      handle(uop->in());
+    }
     os_ << ")";
   }
 
@@ -365,7 +360,7 @@ void IrPrinter::handle(const TransposeOp* top) {
 void IrPrinter::handle(const ShiftOp* sop) {
   indent();
   os_ << sop->out() << " = shift( " << sop->in() << ", {" << sop->offsets()
-      << "}, padding = " << (sop->pad() ? "true" : "false") << " )\n";
+      << "} )\n";
 }
 
 void IrPrinter::handle(const GatherOp* op) {
@@ -398,14 +393,6 @@ void IrPrinter::handle(const Split* s) {
   handle(s->outer());
   os_ << ", ";
   handle(s->inner());
-  if (s->startOffset()) {
-    os_ << ", start offset: ";
-    handle(s->startOffset());
-  }
-  if (s->stopOffset()) {
-    os_ << ", stop offset: ";
-    handle(s->stopOffset());
-  }
   os_ << "\n";
 }
 
@@ -436,7 +423,7 @@ void IrTransformPrinter::printTransforms(TensorView* tv) {
       {tv->domain()->domain().begin(), tv->domain()->domain().end()});
 
   os() << " root domain : (";
-  for (const auto root_idx : c10::irange(root_domain.size())) {
+  for (size_t root_idx = 0; root_idx < root_domain.size(); root_idx++) {
     IrPrinter::handle(root_domain[root_idx]);
     if (root_idx + 1 < root_domain.size()) {
       os() << ",";
