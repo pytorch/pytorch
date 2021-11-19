@@ -59,14 +59,21 @@ def main() -> None:
         '--node_base', type=str, default="Node", help='Name of backend specific custom Lazy IR Node base class')
     parser.add_argument(
         '--node_base_hdr', type=str, default=None, help='Path to header file defining custom Lazy IR Node base class')
+    parser.add_argument(
+        '--tensor_class', type=str, default="LazyTensor", help='Name of backend specific custom Lazy Tensor class')
+    parser.add_argument(
+        '--tensor_class_hdr', type=str, default="lazy_tensor_core/csrc/tensor.h",
+        help='Path to header file defining custom Lazy Tensor class')
     options = parser.parse_args()
 
     run(options.source_yaml, options.output_dir, options.dry_run, options.impl_path,
-        options.gen_ts_lowerings, options.node_base, options.node_base_hdr)
+        options.gen_ts_lowerings, options.node_base, options.node_base_hdr,
+        options.tensor_class, options.tensor_class_hdr)
 
 
 def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[str],
-        gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str]) -> None:
+        gen_ts_lowerings: bool, node_base: str, node_base_hdr: Optional[str],
+        tensor_class: str, tensor_class_hdr: str) -> None:
 
     # Assumes that this file lives at PYTORCH_ROOT/tools/codegen/gen_backend_stubs.py
     pytorch_root = pathlib.Path(__file__).parent.parent.parent.absolute()
@@ -155,10 +162,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # Generate native function impls that build IR nodes
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
             'includes': [f'#include "{path}"' for path in [
+                tensor_class_hdr,
                 "ATen/MetaFunctions.h",
                 "torch/csrc/lazy/core/shape.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-                "lazy_tensor_core/csrc/tensor.h",
                 "lazy_tensors/computation_client/metrics.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
@@ -169,7 +176,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'native_function_definitions':
             list(concat_map_codegen(
                 dest.GenLazyNativeFuncDefinition(f'{backend_dispatch_key}NativeFunctions',
-                                                 backend_indices[backend_dispatch_key]),
+                                                 backend_indices[backend_dispatch_key],
+                                                 tensor_class),
                 grouped_native_functions,
                 codegenInplaceVariant=True
             )),
@@ -189,7 +197,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
             'func_declarations': list(concat_map_codegen(
-                lambda f: dest.gen_lazy_shape_inference_decl(f, backend_indices[backend_dispatch_key]),
+                dest.GenLazyShapeInferenceDefinition(backend_indices[backend_dispatch_key],
+                                                     tensor_class),
                 grouped_native_functions
             )),
         })
