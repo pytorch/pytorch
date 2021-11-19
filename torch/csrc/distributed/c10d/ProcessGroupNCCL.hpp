@@ -376,6 +376,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
       const std::string& devicesKey,
       int p2pRank);
 
+  // Helper that checks if there is any duplicated device across all the ranks.
+  void duplicatedDeviceCheck(const std::string& devicesKey);
+
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(

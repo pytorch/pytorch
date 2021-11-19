@@ -1038,6 +1038,48 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
   }
 }
 
+void ProcessGroupNCCL::duplicatedDeviceCheck(const std::string& devicesKey) {
+  std::array<char, HOST_NAME_MAX> myHostname{};
+  int ret = gethostname(myHostname.data(), HOST_NAME_MAX);
+  if (ret != 0) {
+    throw std::system_error(errno, std::system_category());
+  }
+  std::string storeKey = c10::str("nccl_device_", rank_);
+  std::vector<uint8_t> storeValue(myHostname.size() + devicesKey.size());
+  memcpy(storeValue.data(), myHostname.data(), myHostname.size());
+  memcpy(
+      storeValue.data() + myHostname.size(),
+      devicesKey.data(),
+      devicesKey.size());
+  store_->set(storeKey, storeValue);
+  std::map<std::pair<std::string, std::string>, int> deviceMap;
+  for (int i = 0; i < size_; i++) {
+    std::vector<uint8_t> valueBytes = store_->get(c10::str("nccl_device_", i));
+    std::string hostname((char*)valueBytes.data());
+    std::string devices((char*)valueBytes.data() + HOST_NAME_MAX);
+    std::stringstream ss(devices);
+    while (ss.good()) {
+      std::string deviceId;
+      getline(ss, deviceId, ',');
+      std::pair<std::string, std::string> key{hostname, deviceId};
+      auto it = deviceMap.find(key);
+      TORCH_CHECK(
+          it == deviceMap.end(),
+          c10::str(
+              "Duplicated GPU device is not allowed by NCCL. Rank [",
+              it->second,
+              "] and rank [",
+              i,
+              "] both attached to GPU device ",
+              deviceId,
+              " on the same host ",
+              hostname,
+              ". Most likely your world_size is larger than"
+              " the total number of GPUs"));
+      deviceMap[key] = i;
+    }
+  }
+}
 
 void ProcessGroupNCCL::destroyNCCLComms(const std::string& devNCCLCommMapKey) {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -1103,6 +1145,8 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   if (!isSendRecvSelf) {
     // Broadcast so that each process can have a unique NCCL ID
     broadcastUniqueNCCLID(&ncclID, opType, devicesKey, p2pRank);
+    // Check if there is any duplicated devices across all the ranks.
+    duplicatedDeviceCheck(devicesKey);
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
