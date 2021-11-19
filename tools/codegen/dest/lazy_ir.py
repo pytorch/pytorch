@@ -80,7 +80,7 @@ class LazyIR:
         has_optional_decls = "\n  ".join([f"bool has_{value}: 1;" for value in optional_values])
         has_optional_defs = "\n    ".join([f"has_{value} = !!{value};" for value in optional_values])
         members_to_string = "\n    ".join(
-            [(f'ss << ", {t.name}=" << {t.name}_.value();' if isinstance(t.type, OptionalCType)
+            [(f'if ({t.name}_) {{ ss << ", {t.name}=" << {t.name}_.value(); }} else {{ ss << ", {t.name}={{}}"; }}' if isinstance(t.type, OptionalCType)
                 else f'ss << ", {t.name}=" << {t.name}_;')
              for t in scalar_types])
 
