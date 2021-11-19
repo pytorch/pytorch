@@ -10149,8 +10149,7 @@ op_db: List[OpInfo] = [
             ), ],
         skips=[
             # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
-            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', dtypes=(torch.complex64,)),
-        ],
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', dtypes=(torch.complex64,)), ],
     ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
