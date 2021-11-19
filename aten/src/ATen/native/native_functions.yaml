@@ -176,6 +176,17 @@
   dispatch:
     CUDA: masked_scale_cuda
 
+- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: native_dropout_cpu
+    CUDA: native_dropout_cuda
+
+- func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
+  dispatch:
+    CPU: native_dropout_backward_cpu
+    CUDA: native_dropout_backward_cuda
+
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
@@ -3819,11 +3830,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3831,6 +3846,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sin_out
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_out
 
 - func: sinc(Tensor self) -> Tensor
   structured_delegate: sinc.out
@@ -4960,8 +4976,8 @@
     CUDA: addmm_out_cuda
     SparseCPU: addmm_out_sparse_dense_cpu
     SparseCUDA: addmm_out_sparse_dense_cuda
-    SparseCsrCPU: addmm_out_sparse_csr_dense_cpu
-    SparseCsrCUDA: addmm_out_sparse_csr_dense_cuda
+    SparseCsrCPU: addmm_out_sparse_csr_cpu
+    SparseCsrCUDA: addmm_out_sparse_csr_cuda
 
 - func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   structured_delegate: addmm.out
@@ -5849,6 +5865,16 @@
 
 - func: scatter_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor src) -> Tensor
   variants: function, method
+
+- func: _scatter_reduce(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None) -> Tensor
+  structured_delegate: _scatter_reduce.out
+  variants: function, method
+
+- func: _scatter_reduce.out(Tensor self, int dim, Tensor index, str reduce, *, int? output_size=None, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  dispatch:
+    CPU: _scatter_reduce_structured_cpu
 
 - func: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   structured_delegate: eq.Scalar_out
@@ -7082,6 +7108,16 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: atan2.out
   variants: method, function
+
+# arctan2, alias of atan2
+- func: arctan2(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: arctan2.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+
+- func: arctan2_(Tensor(a!) self, Tensor other) -> Tensor(a!)
+  variants: method
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -8352,6 +8388,15 @@
     CPU: _convert_indices_from_coo_to_csr_structured_cpu
     CUDA: _convert_indices_from_coo_to_csr_structured_cuda
 
+- func: _convert_indices_from_csr_to_coo(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False) -> Tensor
+  structured_delegate: _convert_indices_from_csr_to_coo.out
+
+- func: _convert_indices_from_csr_to_coo.out(Tensor crow_indices, Tensor col_indices, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: _convert_indices_from_csr_to_coo_structured_cpu
+    CUDA: _convert_indices_from_csr_to_coo_structured_cuda
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
@@ -9330,6 +9375,16 @@
   dispatch:
     CompositeExplicitAutograd: upsample_bilinear2d_backward
 
+- func: _upsample_bilinear2d_aa.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: _upsample_bilinear2d_aa
+
+- func: _upsample_bilinear2d_aa_backward.vec(Tensor grad_output, int[]? output_size, int[] input_size, bool align_corners, float[]? scale_factors) -> Tensor
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: _upsample_bilinear2d_aa_backward
+
 - func: upsample_trilinear3d.vec(Tensor input, int[]? output_size, bool align_corners, float[]? scale_factors) -> Tensor
   python_module: nn
   dispatch:
@@ -9462,6 +9517,30 @@
 - func: upsample_bilinear2d_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
   structured_delegate: upsample_bilinear2d_backward.grad_input
+
+- func: _upsample_bilinear2d_aa.out(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: _upsample_bilinear2d_aa_out_cpu
+    # CUDA: upsample_bilinear2d_out_cuda
+
+- func: _upsample_bilinear2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  python_module: nn
+  structured_delegate: _upsample_bilinear2d_aa.out
+  # dispatch:
+  #   QuantizedCPU: _upsample_bilinear2d_aa_quantized_cpu
+
+- func: _upsample_bilinear2d_aa_backward.grad_input(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) grad_input) -> Tensor(a!)
+  python_module: nn
+  structured: True
+  dispatch:
+    CPU: _upsample_bilinear2d_aa_backward_out_cpu
+    # CUDA: upsample_bilinear2d_backward_out_cuda
+
+- func: _upsample_bilinear2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
+  python_module: nn
+  structured_delegate: _upsample_bilinear2d_aa_backward.grad_input
 
 - func: upsample_bicubic2d.out(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
