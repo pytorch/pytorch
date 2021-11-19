@@ -5,6 +5,9 @@ from io import BytesIO
 from sys import version_info
 from textwrap import dedent
 from unittest import skipIf
+from string import Template
+from pathlib import Path
+import pdb
 
 from torch.package import EmptyMatchError, Importer, PackageExporter, PackageImporter
 from torch.package.package_exporter import PackagingError
@@ -330,6 +333,7 @@ class TestDependencyAPI(PackageTestCase):
             exporter.intern("package_a")
             exporter.mock("**")
             exporter.save_source_string("foo", "import package_a")
+            # pdb.set_trace()
 
         buffer2.seek(0)
         importer2 = PackageImporter(buffer2)
@@ -339,6 +343,113 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+    def test_selective_intern_toplevel(self):
+        # smoke test for selective intern
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he._selective_intern("package_d",["package_d.test_selective_intern"])
+            # pdb.set_trace()
+            he.save_source_string("foo", "import package_d")
+            # pdb.set_trace()
+        buffer.seek(0)
+        # pdb.set_trace()
+        hi = PackageImporter(buffer)
+        foo = hi.import_module("foo")
+
+        # number is not getting overwritten
+        import package_d.test_selective_intern
+        import package_d.test_extern
+        import package_d.extern_package
+        import package_d.selective_intern_package
+
+        # test access
+        # pdb.set_trace()
+        a = foo.package_d.test_selective_intern.test_number
+        self.assertEqual(foo.package_d.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(foo.package_d.test_selective_intern.test_number, package_d.test_selective_intern.test_number)
+
+        # test that that test_selective_intern is actually interned properly
+        self.assertIs(foo.package_d.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.package_d.test_selective_intern, package_d.test_selective_intern)
+
+        # test external dependencies are still externed
+        self.assertIs(foo.package_d.test_extern.test_selective_intern, package_d.test_selective_intern)
+
+    def test_selective_intern(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he._selective_intern("package_d",["package_d.test_selective_intern", "package_d.selective_intern_package"])
+            # pdb.set_trace()
+            he.save_source_string("foo", "import package_d; \
+            import package_d.test_selective_intern as test_selective_intern; \
+            import package_d.test_extern as test_extern; \
+            import package_d.extern_package as extern_package; \
+            import package_d.selective_intern_package as selective_intern_package")
+            # pdb.set_trace()
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        # pdb.set_trace()
+        foo = hi.import_module("foo")
+
+        # number is not getting overwritten
+        import package_d.test_selective_intern
+        import package_d.test_extern
+        import package_d.extern_package
+        import package_d.selective_intern_package
+
+        # test access
+        self.assertEqual(foo.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(foo.test_selective_intern.test_number, package_d.test_selective_intern.test_number)
+        self.assertEqual(foo.extern_package.test_number, package_d.extern_package.test_number)
+        self.assertEqual(foo.selective_intern_package.test_number, package_d.selective_intern_package.test_number)
+
+
+        # test that that test_selective_intern is actually interned properly
+        self.assertIs(foo.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.test_selective_intern, package_d.test_selective_intern)
+        self.assertIs(foo.extern_package, package_d.extern_package)
+        self.assertIsNot(foo.selective_intern_package, package_d.selective_intern_package)
+
+        # test external dependencies are still externed
+        self.assertIs(foo.test_extern.test_selective_intern, package_d.test_selective_intern)
+
+    def test_selective_intern_subpackage(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            # pdb.set_trace()
+            he._selective_intern("package_b", ["package_b.subpackage_0"])
+            # pdb.set_trace()
+            he.save_source_string("foo", "import package_b; import package_b.subpackage_0 as subpackage_0;import package_b.subpackage_1 as subpackage_1; import package_b.subpackage_0.subsubpackage_0")
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        import package_b
+
+        foo =  hi.import_module("foo")
+
+        # subpackage_0 should be interned, subpackage_1 should not.
+        self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
+        # self.assertIsNot(foo.subpackage_0.subsubpackage_0, package_b.subpackage_0.subsubpackage_0)
+        # self.assertIs(package_b.subpackage_1, foo.subpackage_1)
+
+        # Check that attribute access still works on selectively interned module.
+        self.assertEqual(foo.subpackage_0.subpackage_0_li[0], package_b.subpackage_0.subpackage_0_li[0])
+        self.assertEqual(foo.subpackage_0.subsubpackage_0.subsubpackage_0_li[0], package_b.subpackage_0.subsubpackage_0.subsubpackage_0_li[0])
+        self.assertIsNot(foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li)
+        self.assertEqual(foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li)
+
+        # Check that attribute access works correctly on the shim.
+        # self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
+
+def _read_file(filename: str) -> str:
+    with open(filename, "rb") as f:
+        b = f.read()
+        return b.decode("utf-8")
+
+def _write_file(filename:str, filecontent:str):
+    f = open(filename, "w")
+    f.write(filecontent)
+    f.close()
 
 if __name__ == "__main__":
     run_tests()
