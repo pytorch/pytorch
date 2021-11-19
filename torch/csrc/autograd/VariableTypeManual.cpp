@@ -327,10 +327,7 @@ namespace ADInplaceOrView {
   Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
+      return self._fw_primal(level);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!self.unsafeGetTensorImpl()->support_as_strided()) {
@@ -349,10 +346,7 @@ namespace ADInplaceOrView {
   Tensor _make_dual(c10::DispatchKeySet ks, const Tensor & primal, const Tensor & tangent, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(primal.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
+      return at::_make_dual(primal, tangent, level);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!primal.unsafeGetTensorImpl()->support_as_strided()) {

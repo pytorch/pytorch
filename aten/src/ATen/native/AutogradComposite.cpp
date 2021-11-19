@@ -4,12 +4,8 @@
 namespace at {
 namespace native {
 
-// _make_dual is actually implemented in VariableTypeManual.cpp, this is just a stub
-// because codegen assumes that a function of this name exists in the native namespace
-// TODO: check the behavior of this and _fw_primal in inference mode
 Tensor _make_dual(const Tensor& primal, const Tensor& tangnet, int64_t level) {
-  TORCH_INTERNAL_ASSERT(false, "This is just a stub.");
-  return Tensor();
+  return at::alias(primal);
 }
 
 /// This function can be used to unpack a given dual Tensor to get its primal and tangent. The returned primal
