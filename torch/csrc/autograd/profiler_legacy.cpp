@@ -221,7 +221,7 @@ void ProfilerThreadLocalState::pushRange(
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
-        at::StringView(fn.name()),
+        at::StringView(std::string(fn.name())),
         at::RecordFunction::currentThreadId(),
         record_cuda,
         fn.handle(),

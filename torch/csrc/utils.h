@@ -180,4 +180,6 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
 
+void storage_copy(at::Storage dst, at::Storage src, bool non_blocking=false);
+
 #endif
