@@ -102,10 +102,10 @@ Tensor detach(const Tensor& input) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Metal, m) {
-  m.impl("detach", TORCH_FN(detach));
-  m.impl("view", TORCH_FN(view));
-  m.impl("reshape", TORCH_FN(reshape));
-  m.impl("flatten.using_ints", TORCH_FN(flatten_using_ints));
+  m.impl(TORCH_SELECTIVE_NAME("aten::detach"), TORCH_FN(detach));
+  m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
+  m.impl(TORCH_SELECTIVE_NAME("aten::reshape"), TORCH_FN(reshape));
+  m.impl(TORCH_SELECTIVE_NAME("aten::flatten.using_ints"), TORCH_FN(flatten_using_ints));
 };
 
 }

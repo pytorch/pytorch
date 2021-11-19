@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 from torchvision.models.alexnet import alexnet
 from torchvision.models.inception import inception_v3
 from torchvision.models.densenet import densenet121
