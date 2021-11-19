@@ -10142,11 +10142,15 @@ op_db: List[OpInfo] = [
         decorators=[
             DecorateInfo(
                 toleranceOverride({
-                    torch.float16: tol(atol=1e-5, rtol=3e-5),
-                    torch.bfloat16: tol(atol=1e-5, rtol=3e-5)
+                    torch.float16: tol(atol=1e-3, rtol=1e-3),
+                    torch.bfloat16: tol(atol=1e-4, rtol=1e-4)
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
+        skips=[
+            # FIXME: numpy reference diverges: Comparing (nan+nanj) and (-0+0j)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', dtypes=(torch.complex64,)),
+        ],
     ),
     UnaryUfuncInfo(
         'nn.functional.hardsigmoid',
