@@ -21,6 +21,7 @@ void topk_out_with_sort(
 
 bool should_use_sort(const Tensor& self, int64_t dim) {
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
+  if (self.dim() == 0) return false;
   int64_t slice_size = self.size(dim);
   if (slice_size == 0) return false;
   int64_t num_slices = self.numel() / slice_size;
@@ -35,12 +36,12 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   TensorArg topK_arg{values, "topK", 1}, indices_arg{indices, "indices", 2}, input_arg{self, "self", 3};
   checkAllSameGPU(__func__, {topK_arg, indices_arg, input_arg});
 
+  dim = at::maybe_wrap_dim(dim, self);
+
   if (should_use_sort(self, dim)) {
     topk_out_with_sort(self, k, dim, largest, values, indices);
     return;
   }
-
-  dim = at::maybe_wrap_dim(dim, self);
 
   // If k is 0 the result is an empty tensor, so we don't need to launch a kernel.
   if (k == 0) {
