@@ -135,7 +135,8 @@ C10_CUDA_API void resetAccumulatedStats(int device); \
 C10_CUDA_API void resetPeakStats(int device); \
 C10_CUDA_API std::vector<SegmentInfo> snapshot(); \
 C10_CUDA_API void notifyCaptureBegin( int device, CaptureId_t graph_id, MempoolId_t mempool_id); \
-C10_CUDA_API void notifyCaptureEnd(int device, CaptureId_t graph_id); \
+C10_CUDA_API void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id); \
+C10_CUDA_API void notifyCaptureEnded(int device, CaptureId_t graph_id); \
 C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id); \
 C10_CUDA_API std::mutex* getFreeMutex();
 
@@ -276,13 +277,13 @@ inline void notifyCaptureBegin(
 
 inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
   static auto f = (allocatorBackend() == "native") ?
-    THC::notifyCaptureEnd : CudaMallocAsync::notifyCaptureAboutToEnd;
+    THC::notifyCaptureAboutToEnd : CudaMallocAsync::notifyCaptureAboutToEnd;
   return f(device, graph_id);
 }
 
 inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
   static auto f = (allocatorBackend() == "native") ?
-    THC::notifyCaptureEnd : CudaMallocAsync::notifyCaptureEnded;
+    THC::notifyCaptureEnded : CudaMallocAsync::notifyCaptureEnded;
   return f(device, graph_id);
 }
 
