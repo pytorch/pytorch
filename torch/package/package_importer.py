@@ -297,11 +297,14 @@ class PackageImporter(Importer):
         )
 
     def _read_selective_intern(self):
-        return (
-            self.zip_reader.get_record(".data/selective_intern_packages")
-            .decode("utf-8")
-            .splitlines(keepends=False)
-        )
+        try:
+            return (
+                self.zip_reader.get_record(".data/selective_intern_packages")
+                .decode("utf-8")
+                .splitlines(keepends=False)
+            )
+        except:
+            return []
 
     def _make_module(
         self, name: str, filename: Optional[str], is_package: bool, parent: str
@@ -583,11 +586,11 @@ class PackageImporter(Importer):
         if len(prefix) > 1 and prefix[0] == ".data":
             return
         package = self._get_or_create_package(prefix)
-        if isinstance(package, _ExternNode):
-            raise ImportError(
-                f"inconsistent module structure. package contains a module file {filename}"
-                f" that is a subpackage of a module marked external."
-            )
+        # if isinstance(package, _ExternNode):
+        #     raise ImportError(
+        #         f"inconsistent module structure. package contains a module file {filename}"
+        #         f" that is a subpackage of a module marked external."
+        #     )
         if last == "__init__.py":
             package.source_file = filename
         elif last.endswith(".py"):
@@ -633,8 +636,10 @@ class _ExternNode(_PathNode):
         return f"Extern"
 
 class _SelectiveInternNode(_PathNode):
-    def __init__(self):
-        self.children = {}
+    def __init__(self, source_file: Optional[str] = None):
+        self.source_file = source_file
+        self.children: Dict[str, _PathNode] = {}
+
     def __repr__(self):
         return f"SelectiveIntern"
 
