@@ -361,6 +361,8 @@ def check_fuser(args):
         assert args.fuser in ['fuser0', 'fuser1']
     if args.device == 'cuda':
         assert args.fuser in ['fuser0', 'fuser2']
+    if args.fuser == 'fuser1':
+        assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) without building torch with llvm."
 
 if __name__ == "__main__" :
     parser = argparse.ArgumentParser()
