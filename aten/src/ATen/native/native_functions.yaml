@@ -176,6 +176,17 @@
   dispatch:
     CUDA: masked_scale_cuda
 
+- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: native_dropout_cpu
+    CUDA: native_dropout_cuda
+
+- func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
+  dispatch:
+    CPU: native_dropout_backward_cpu
+    CUDA: native_dropout_backward_cuda
+
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
