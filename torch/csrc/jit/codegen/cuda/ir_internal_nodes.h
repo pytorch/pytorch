@@ -315,7 +315,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! \param out
   //! \param in
   //! \param offsets
-  ShiftOp(Val* out, Val* in, std::vector<int> offsets);
+  ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad);
 
   ShiftOp(const ShiftOp* src, IrCloner* ir_cloner);
 
@@ -334,6 +334,10 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
     return offsets_;
   }
 
+  bool pad() const {
+    return pad_;
+  }
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -343,6 +347,7 @@ class TORCH_CUDA_CU_API ShiftOp : public Expr {
   //! offsets_. The sign of each value indicates the direction of
   //! shifting.
   const std::vector<int> offsets_;
+  const bool pad_;
 };
 
 //! Gather a window around each element.
@@ -402,6 +407,14 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       IterType iter_type = IterType::Iteration,
       bool is_rfactor_domain = false);
 
+  IterDomain(
+      Val* start,
+      Val* extent,
+      Val* stop_offset,
+      ParallelType parallel_type = ParallelType::Serial,
+      IterType iter_type = IterType::Iteration,
+      bool is_rfactor_domain = false);
+
   IterDomain(const IterDomain* src, IrCloner* ir_cloner);
 
   bool sameAs(const Statement* other) const override;
@@ -409,12 +422,17 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   // Returns a new IterDomain matching properties of this
   // TODO: parallel_method->getParallelType
   IterDomain* clone() const {
-    return new IterDomain(
+    auto cloned = new IterDomain(
         start(),
         extent(),
+        stopOffset(),
         getParallelType(),
         getIterType(),
         isRFactorProduct());
+
+    cloned->is_padded_dimension_ = is_padded_dimension_;
+    cloned->padded_to_size_ = padded_to_size_;
+    return cloned;
   }
 
   //! Clone a vector domains
@@ -422,9 +440,6 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
       const std::vector<IterDomain*>& domains);
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
-
-  //! Run concretization pass and return the concretized domain of broadcast id
-  static const IterDomain* concretizeDomain(IterDomain* bcast_dom);
 
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
@@ -495,10 +510,56 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return start_;
   }
 
+  Val* stop() const;
+
+  Val* stopOffset() const;
+
   Val* extent() const {
     TORCH_INTERNAL_ASSERT(extent_ != nullptr);
     return extent_;
   }
+
+  //! Dimension padding interface:
+  //!  2 modes are currently supported:
+  //!
+  //!   - mode 1: if to_size is given as a positive number,
+  //!      the dimension will be padded to the size so that
+  //!      this iterdomain will be compile-time constant
+  //!      size and it is the scheduler's responsibility
+  //!      to ensure no input larger than the padded size
+  //!      will be observed
+  //!
+  //!   - mode 2: if no to_size is given, this dimension
+  //!      is "dynamically" padded to next smallest multiple
+  //!      of a warp size, i.e. 17 padded to 32, 33 padded to 64
+  //!      based on the given input.
+  void padToMultipleOfWarp(c10::optional<int64_t> maybe_to_size = {}) {
+    // Currently only restricted to TIDx to generate warp reduce
+    TORCH_CHECK(
+        parallel_type_ == ParallelType::TIDx,
+        "padToMultipleOfWarp : warp padding only supported on TIDx parallel dimension");
+    is_padded_dimension_ = true;
+    if (maybe_to_size.has_value()) {
+      if (maybe_to_size.value() > 0) {
+        padded_to_size_ = maybe_to_size.value();
+      }
+    }
+  }
+
+  //! Indicates if this iterdomain had padding
+  //!  dynamical or statical
+  bool hasPaddingToMultipleOfWarp() const {
+    return is_padded_dimension_;
+  }
+
+  //! Returns a concrete value if this iterdomain
+  //!  has been padded to a statical size.
+  c10::optional<int64_t> getMaybeSizeAfterPadding() const {
+    return padded_to_size_;
+  }
+
+  //! True if range of iteration domain isn't across the full extent
+  bool maybePartial() const;
 
   //! Check if IterDomain is a broadcast axis with compile-time
   //! known extent. This is the case with all size-1 IterDomains on
@@ -524,17 +585,38 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
   friend ReplayTransformations;
   friend IndexReferenceReplay;
 
+  //! start_offset and stop_offset defines partial split. Only root
+  //! domains are allowed to have non-zero start and stop offsets.
   static std::pair<IterDomain*, IterDomain*> split(
       IterDomain* in,
       Val* factor,
-      bool inner_split);
+      bool inner_split,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
+
+  //! trim_out_of_bounds controls how the values outside start and stop
+  //! positions are treated. The option is only valid with root
+  //! domains as non-root domains do not have valid start and stop
+  //! positions.
+  //!
+  //! \param trim_out_of_bounds Trims [0, start_] and [-stop_offset_, extent_]
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds);
 
  private:
+  //! Valid range is defined as [start:-stop_offset]
   Val* const start_ = nullptr;
   Val* const extent_ = nullptr;
+  //! Distance of stop from the end
+  Val* const stop_offset_ = nullptr;
   ParallelType parallel_type_ = ParallelType::Serial;
   IterType iter_type_ = IterType::Iteration;
   bool is_rfactor_domain_ = false;
+  bool is_padded_dimension_ = false;
+  c10::optional<int64_t> padded_to_size_ = c10::nullopt;
 };
 
 //! TensorDomain holds a vector of IterDomains. It holds an IterDomain for every
@@ -593,6 +675,8 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
     return contiguity_;
   }
 
+  void setContiguity(const std::vector<bool>& contig);
+
   std::string getContiguityString() const {
     std::stringstream ss;
     for (auto b : contiguity()) {
@@ -644,6 +728,9 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   size_t posOf(IterDomain* id) const;
 
+  //! Returns a position of a root domain
+  size_t rootPosOf(IterDomain* id) const;
+
   // Split "axis" into 2 axes
   //! inner_split dictates if the factor section of the split should be inside
   //! the
@@ -652,7 +739,11 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   //! tv[id{extent}] -> tv[id{ceilDiv(extent, factor)}, id{factor}]
   //! e.g. split(0, 4, inner_split = false) will result in:
   //! tv[id{extent}] -> tv[id{factor}, id{ceilDiv(extent, factor)}]
-  void split(int axis_, Val* factor, bool inner_split);
+  void split(
+      int axis_,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds = false);
 
   // Merge axis_o and axis_i. axis_i is the fast changing dimension. Resulting
   // axis is by default placed at original position axis_o
@@ -681,7 +772,7 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
   std::vector<IterDomain*> no_bcast_domain_;
   std::vector<IterDomain*> no_reduction_domain_;
   const std::vector<IterDomain*> rfactor_domain_;
-  const std::vector<bool> contiguity_;
+  std::vector<bool> contiguity_;
   bool has_nontrivial_reduction_;
 };
 
@@ -690,12 +781,19 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 //! remainer or outside.
 class TORCH_CUDA_CU_API Split : public Expr {
  public:
+  // start_offset and stop_offset are used to express partial
+  // split. Only the partial domain from start_offset to stop_offset
+  // is split and the outer sub-regions are ignored. Note that both
+  // start_offset and stop_offset are distance from the left end and
+  // right ends, respectively.
   Split(
       IterDomain* outer,
       IterDomain* inner,
       IterDomain* in,
       Val* factor,
-      bool inner_split = true);
+      bool inner_split = true,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
 
   Split(const Split* src, IrCloner* ir_cloner);
 
@@ -716,6 +814,19 @@ class TORCH_CUDA_CU_API Split : public Expr {
     return inner_split_;
   }
 
+  Val* startOffset() const {
+    TORCH_INTERNAL_ASSERT(start_offset_ != nullptr);
+    return start_offset_;
+  }
+
+  Val* stopOffset() const {
+    TORCH_INTERNAL_ASSERT(stop_offset_ != nullptr);
+    return stop_offset_;
+  }
+
+  //! Utility function to compute the split extent.
+  static Val* extent(Val* in_extent, Val* start_offset, Val* stop_offset);
+
   bool sameAs(const Statement* other) const override;
 
  private:
@@ -724,6 +835,12 @@ class TORCH_CUDA_CU_API Split : public Expr {
   IterDomain* const in_ = nullptr;
   Val* const factor_ = nullptr;
   bool inner_split_ = true;
+  //! Start position of the input domain. Non-zero means partial
+  //! split. Elements until this offset are ignored.
+  Val* const start_offset_ = nullptr;
+  //! Offset from extent of the input domain. Non-zero means partial
+  //! split. Elements after this offset are ignored.
+  Val* const stop_offset_ = nullptr;
 };
 
 //! Merge the IterDomains outer and inner into one domain, outer and inner
