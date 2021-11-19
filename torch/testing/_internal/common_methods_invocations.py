@@ -5989,6 +5989,7 @@ def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs)
         ((S, S), (25,)),
         ((1, 2, 3), (2, 6)),
         ((0), (1,)),
+        ((1, 2, 3), 4),
         ((45, 47), (1, 10, 10)),
         (((1, 2, 3), (4, 5, 6)), (1, 10)),
     )
@@ -7363,6 +7364,14 @@ def reference_searchsorted(sorted_sequence, boundary, out_int32=False, right=Fal
                      for (s_seq, b, s_sort) in zip(split_sequence, split_boundary, split_sorter)]
         split_ret = [i.astype(np.int32) for i in split_ret] if out_int32 else split_ret
         return np.stack(split_ret).reshape(orig_shape)
+
+
+def reference_unravel_index_without_tuple(inp, *args):
+    out_arr = np.unravel_index(inp, *args)
+    if (inp.ndim == 0):
+        return np.stack(out_arr, axis=0).reshape(-1, len(out_arr))
+    else:
+        return np.stack(out_arr, axis=1).reshape(-1, len(out_arr))
 
 
 def gradcheck_wrapper_hermitian_input(op, input, *args, **kwargs):
@@ -11675,6 +11684,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_unravel_index),
     OpInfo('unravel_index',
            op=lambda x, *args: torch.unravel_index(x, *args, as_tuple=False),
+           # TODO: Need to find a way to stack tuples properly for this
+           # ref=reference_unravel_index_without_tuple,
            variant_test_name='without_as_tuple',
            dtypes=integral_types(),
            supports_autograd=False,
