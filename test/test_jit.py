@@ -28,6 +28,7 @@ from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: 
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
+from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_bindings import TestPythonBindings  # noqa: F401
@@ -68,6 +69,7 @@ from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_dce import TestDCE  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -14625,7 +14627,7 @@ dedent """
         @torch.jit._overload
         def null_overload(x: int) -> int: ...  # noqa: E704
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def null_overload(x: str) -> str:  # noqa: F811
             pass
 
@@ -14643,7 +14645,7 @@ dedent """
             def forward(self, x: int):
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x: Tensor):  # noqa: F811
                 pass
 
