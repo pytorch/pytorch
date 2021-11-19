@@ -1,6 +1,7 @@
 import random
 
 from collections import defaultdict
+from heapq import heappush, heappop
 
 from torch.utils.data import IterDataPipe, functional_datapipe, DataChunk
 from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
@@ -315,7 +316,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                 if result_to_yield is not None:
                     yield self.wrapper_class(result_to_yield)
 
-        while buffer_size:
-            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
-            if result_to_yield is not None:
-                yield self.wrapper_class(result_to_yield)
+        for key in tuple(buffer_elements.keys()):
+            res = buffer_elements.pop(key)
+            buffer_size -= len(res)
+            yield self.wrapper_class(res)
