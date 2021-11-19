@@ -251,10 +251,12 @@ def timed(model, example_inputs, sync, times=1):
     torch.manual_seed(1337)
     # keep the lazy tensor results alive until the final sync
     t0 = time.perf_counter()
-    for _ in range(times):
+    for i in range(times):
         results.append(call_model_with(model, example_inputs))
-        # may be just an async 'mark_step' for lazy, or no-op for cuda
-        sync.iter_sync(results)
+        # for the last i, let final_sync take care of it
+        if i < times - 1:
+            # may be just an async 'mark_step' for lazy, or no-op for cuda
+            sync.iter_sync(results)
 
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
