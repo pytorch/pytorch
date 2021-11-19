@@ -2342,7 +2342,7 @@ def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     @wraps(func)
     def wrapper(*args, **kwargs):
         n_retries = 10
-        tries_remaining = n_retries 
+        tries_remaining = n_retries
         while True:
             try:
                 return func(*args, **kwargs)
