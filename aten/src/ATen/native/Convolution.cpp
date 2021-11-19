@@ -1500,8 +1500,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
   switch(backend) {
     case ConvBackend::Slow2d:
     {
-      /* CPU implementation has specialized MM kernels
-         for non-dilated case here */
       Tensor columns = compute_columns2d(input, params, kernel_size);
       return at::_slow_conv2d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, columns, output_mask);
@@ -1525,7 +1523,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
     }
     case ConvBackend::SlowTranspose3d:
     {
-      Tensor columns = compute_columns3d(input, params, kernel_size, /*groups=*/ 1);
+      Tensor columns = compute_columns3d(input, params, kernel_size, /*groups=*/ 1,
+                                         /*n_output_plane=*/ weight.size(1));
       Tensor fgrad_input = at::empty({0}, input.options());
       return at::slow_conv_transpose3d_backward(
         grad_output, input, weight, kernel_size, params.stride, params.padding, params.output_padding,
@@ -1662,7 +1661,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     case ConvBackend::Slow3d:
     {
-      Tensor columns = compute_columns3d(input, params, kernel_size, params.groups);
+      Tensor columns = compute_columns3d(input, params, kernel_size, params.groups,
+                                         /*n_output_plane=*/ weight.size(1));
       Tensor fgrad_input = at::empty({0}, input.options());
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding,

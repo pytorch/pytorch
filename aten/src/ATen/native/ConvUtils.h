@@ -250,6 +250,9 @@ static Tensor compute_columns2d(
       {batch_size,
       n_input_plane,
       output_height * output_width}).detach();
+  } else if (input.is_cuda()) {
+    // CUDA kernel computes column data internally so just allocate a correctly-shaped tensor.
+    columns = at::empty({n_input_plane * kernel_width * kernel_height, output_height * output_width}, input.options());
   } else {
     columns = at::im2col(input, kernel_size, params.dilation, params.padding, params.stride);
   }
@@ -260,11 +263,11 @@ static Tensor compute_columns2d(
 // Computes columns used in slow 3D kernel computation.
 // This is computed separately in the forward and backward passes.
 static Tensor compute_columns3d(
-    const Tensor& input_,
+    const Tensor& input,
     const ConvParams& params,
     IntArrayRef kernel_size,
-    const int64_t groups) {
-  const Tensor input = input_.contiguous();
+    const int64_t groups,
+    const int64_t n_output_plane) {
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -290,19 +293,25 @@ static Tensor compute_columns3d(
       (input_width + 2 * pad_width - kernel_width) / stride_width + 1;
   const int64_t batch_size = input.size(0);
 
-  Tensor columns = at::empty({0}, input.options());
+  Tensor columns;
   if ((kernel_depth == 1) && (kernel_height == 1) && (kernel_width == 1) &&
       (pad_depth == 0) && (pad_height == 0) && (pad_width == 0) &&
       (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
     // Columns are just a view on the input for this special case.
     columns = input.view({batch_size, n_input_plane, output_height * output_width * output_depth}).detach();
+  } else if (input.is_cuda()) {
+    // CUDA kernel computes column data internally so just allocate a correctly-shaped tensor.
+    columns = at::empty({n_output_plane * kernel_width * kernel_height * kernel_depth,
+                        input_depth * input_height * input_width}, input.options());
   } else {
-    columns.resize_({batch_size,
-                    n_input_plane * kernel_depth * kernel_height * kernel_width,
-                    output_depth * output_height * output_width});
+    columns = at::empty({batch_size,
+                        n_input_plane * kernel_depth * kernel_height * kernel_width,
+                        output_depth * output_height * output_width},
+                        input.options());
 
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "compute_columns3d", [&] {
-      auto input_a = input.accessor<scalar_t, 5>();
+    const Tensor input_ = input.contiguous();
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input_.scalar_type(), "compute_columns3d", [&] {
+      auto input_a = input_.accessor<scalar_t, 5>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       constexpr int64_t CONV3D_GRAIN_SALT = 20;
