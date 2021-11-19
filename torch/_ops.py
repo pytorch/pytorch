@@ -7,7 +7,7 @@ import types
 
 import torch.jit
 import torch._utils_internal
-
+from torch.jit.annotations import is_function_or_method
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
@@ -74,7 +74,6 @@ class OpOverloadBundle():
 
         try:
             use_key = "" if key == 'default' else key
-            print(self.qualified_op_name, key)
             op = torch._C.get_operation_overload(self.qualified_op_name, use_key)
             schema = torch.get_schema(self.qualified_op_name, use_key)
 
@@ -141,8 +140,14 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        opoverloadbundle = OpOverloadBundle(qualified_op_name, op_name, op)
-        setattr(self, op_name, opoverloadbundle)
+        if is_function_or_method(op):
+            setattr(self, op_name, op)
+            return op
+        else:
+            opoverloadbundle = OpOverloadBundle(qualified_op_name, op_name, op)
+            setattr(self, op_name, opoverloadbundle)
+            return opoverloadbundle
+
 
 '''
 FYI:
