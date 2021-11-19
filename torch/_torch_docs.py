@@ -8550,7 +8550,7 @@ argument (:obj:`"sum"`).
 For non-existing indices, the output will be filled with the identity of the
 applied reduction.
 
-For a 3-D tensor with :obj:`reduce="sum"`, the output is given as:
+For a 3-D tensor with :obj:`reduce="sum"`, the output is given as::
 
     out[index[i][j][k]][j][k] += input[i][j][k]  # if dim == 0
     out[i][index[i][j][k]][k] += input[i][j][k]  # if dim == 1
@@ -8560,7 +8560,7 @@ Note:
     This out-of-place operation is similar to the in-place versions of
     :meth:`~torch.Tensor.scatter_` and :meth:`~torch.Tensor.scatter_add_`,
     in which the output tensor is automatically created according to the
-    maximum values in :attr`index` and filled based on the identity of the
+    maximum values in :attr:`index` and filled based on the identity of the
     applied reduction.
 
 Note:
@@ -8573,7 +8573,7 @@ Args:
     src (Tensor): the source elements to scatter and reduce
     reduce (str): the reduction operation to apply for non-unique indices
         (:obj:`"sum"`)
-    output_size (int, optional): the size of the output at dimension :attr`dim`.
+    output_size (int, optional): the size of the output at dimension :attr:`dim`.
         If set to :obj:`None`, will get automatically inferred according to
         :obj:`index.max() + 1`
     out (Tensor, optional): the output tensor
