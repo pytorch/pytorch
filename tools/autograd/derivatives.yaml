@@ -1454,10 +1454,6 @@
   solution: triangular_solve_jvp(solution, A_p, A_t, self_t, upper, transpose, unitriangular)
   cloned_coefficient: A_t
 
-- name: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
-  self, B: linalg_solve_triangular_backward(grad, self, result, upper, left, unitriangular, grad_input_mask)
-  result: linalg_solve_triangular_forward_AD(self_t, B_t, self_p, result, upper, left, unitriangular)
-
 - name: tril(Tensor self, int diagonal=0) -> Tensor
   self: grad.tril(diagonal)
   result: auto_linear
