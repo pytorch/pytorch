@@ -26,6 +26,7 @@ from torch.testing._internal.distributed._sharded_tensor import (
 )
 from torch.testing._internal.distributed._sharded_tensor._test_ops_common import (
     generate_chunk_sharding_specs_for_test,
+    generate_local_weight_sharding_params_for_test,
 )
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -92,21 +93,12 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
 
         # Shard the local linear's weight grad so that we can compare.
         dist.all_reduce(local_grad)
-        sharding_dim_size = local_grad.size(sharded_dim)
-        split_size = get_split_size(sharding_dim_size, TEST_GPU_NUM)
-        current_offsets = 0
-        start_pos = current_offsets
-        for idx, placement in enumerate(spec.placements):
-            chunked_dim_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
-            if self.rank == placement.rank():
-                start_pos = current_offsets
-                break
-            current_offsets += chunked_dim_size
-        local_grad_narrowed = local_grad.narrow(
-            sharded_dim, start_pos, chunked_dim_size
+        (start_pos, chunk_size) = generate_local_weight_sharding_params_for_test(
+            local_linear.weight, sharded_dim, TEST_GPU_NUM, spec, self.rank
         )
+        local_grad_narrowed = local_grad.narrow(sharded_dim, start_pos, chunk_size)
         local_weight_narrowed = local_linear.weight.narrow(
-            sharded_dim, start_pos, chunked_dim_size
+            sharded_dim, start_pos, chunk_size
         )
 
         # Test backward gradient calculation.

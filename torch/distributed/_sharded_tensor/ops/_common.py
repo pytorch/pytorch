@@ -378,6 +378,8 @@ def _handle_max_norm_col_wise(
     normalized_tensor = torch.where(
         local_shard_norm > max_norm_tensor, max_norm_tensor, local_shard_norm
     )
+    # Make sure divisor is not zero.
+    local_shard_norm[local_shard_norm == 0.0] = 1.0
     local_shard_norm_renormed = (
         torch.div(torch.mul(local_shard_t, normalized_tensor), local_shard_norm)
         .t()
