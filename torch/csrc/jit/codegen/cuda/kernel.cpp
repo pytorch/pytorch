@@ -127,7 +127,7 @@ class KernelIrScanner : private kir::IrVisitor {
     ++summary_.number_of_grid_reductions;
 
     const auto gpu_lower = GpuLower::current();
-    for (size_t i = 0; i < dom->nDims(); ++i) {
+    for (const auto i : c10::irange(dom->nDims())) {
       const auto id =
           gpu_lower->caParallelMap().getConcreteMappedID(dom->domain()[i]);
       summary_.has_grid_reduction_in_loop =
@@ -189,7 +189,10 @@ class ValidateAllocation : private kir::IrVisitor {
     const auto gpu_lower = GpuLower::current();
     for (const auto& allocations : live_allocations_) {
       for (const auto& allocate : allocations) {
-        const auto tv = allocate->buffer()->as<kir::TensorView>();
+        const auto tv = dynamic_cast<kir::TensorView*>(allocate->buffer());
+        if (tv == nullptr) {
+          continue;
+        }
         for (const auto& axis : tv->domain()->domain()) {
           if (!gpu_lower->caParallelMap().areMapped(loop_id, axis)) {
             continue;
@@ -197,7 +200,10 @@ class ValidateAllocation : private kir::IrVisitor {
           if (isParallelTypeThreadDim(loop_id->parallelType())) {
             TORCH_INTERNAL_ASSERT(
                 tv->memoryType() == MemoryType::Shared ||
-                tv->memoryType() == MemoryType::Global);
+                    tv->memoryType() == MemoryType::Global,
+                "Tensor t",
+                tv->name(),
+                " must be allocated on SMEM or GMEM.");
           } else if (isParallelTypeBlockDim(loop_id->parallelType())) {
             TORCH_INTERNAL_ASSERT(tv->memoryType() == MemoryType::Global);
           }
@@ -240,6 +246,7 @@ void Kernel::finalize(std::vector<kir::Expr*> top_level_exprs) {
   top_level_exprs_ = std::move(top_level_exprs);
   predicate_map_ = std::make_unique<ThreadPredicateMap>(
       GpuLower::current()->threadPredMap());
+  warp_padded_parallel_info_ = GpuLower::current()->getWarpPaddedParallelInfo();
   ValidateAllocation::validate(this);
   analyze();
 }
