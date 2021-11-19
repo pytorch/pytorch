@@ -139,8 +139,5 @@ void unsqueeze_(LazyTensor& input, int64_t dim);
 // Like reshape, but it returns a view into the original tensor.
 LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size);
 
-LazyTensor where(const LazyTensor& condition, const LazyTensor& input,
-                 const LazyTensor& other);
-
 }  // namespace lazy_tensor_aten_ops
 }  // namespace torch_lazy_tensors
