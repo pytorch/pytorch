@@ -155,7 +155,7 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
   linalg_preferred_backend = b;
   if (b != at::LinalgBackend::Default) {
     TORCH_WARN_ONCE(
-      "torch.backends.cuda.linalg.preferred_library is an experimental feature. "
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
       "If you see any error or regression when this flag is set "
       "please file an issue on GitHub."
     );

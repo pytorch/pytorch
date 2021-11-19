@@ -111,7 +111,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.has_openmp,
         torch.iinfo,
         torch.memory_format,
-        torch.linalg_backend,
         torch.qscheme,
         torch.set_grad_enabled,
         torch.no_grad,

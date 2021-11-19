@@ -9,24 +9,17 @@ namespace at {
 
 enum class LinalgBackend : int8_t { Default, Cusolver, Magma };
 
-// WARNING: These exact strings, e.g. "torch.linalg_default", are also used in
-// python bindings. Modifying output strings is **very** likely to cause
-// BC-breaking in python side.
 inline std::string LinalgBackendToString(at::LinalgBackend backend) {
   switch (backend) {
     case LinalgBackend::Default:
-      return "linalg_default";
+      return "at::LinalgBackend::Default";
     case LinalgBackend::Cusolver:
-      return "linalg_cusolver";
+      return "at::LinalgBackend::Cusolver";
     case LinalgBackend::Magma:
-      return "linalg_magma";
+      return "at::LinalgBackend::Magma";
     default:
       TORCH_CHECK(false, "Unknown linalg backend");
   }
-}
-
-inline std::string LinalgBackendToRepr(at::LinalgBackend backend) {
-  return std::string("torch.") + at::LinalgBackendToString(backend);
 }
 
 inline std::ostream& operator<<(

@@ -9,6 +9,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/VmapMode.h>
@@ -32,7 +33,6 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
-#include <torch/csrc/LinalgBackend.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
@@ -44,7 +44,6 @@
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/disable_torch_function.h>
-#include <torch/csrc/utils/linalg_backends.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_strings.h>
@@ -127,7 +126,6 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     return nullptr;
   }
   torch::utils::initializeLayouts();
-  torch::utils::initializeLinalgBackends();
   torch::utils::initializeMemoryFormats();
   torch::utils::initializeQSchemes();
   torch::utils::initializeDtypes();
@@ -526,23 +524,6 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   Py_RETURN_FALSE;
 }
 
-PyObject *THPModule_setLinalgPreferredBackend(PyObject *_unused, PyObject *arg)
-{
-  THPUtils_assert(THPLinalgBackend_Check(arg), "set_linalg_preferred_backend expects a linalg_backend, "
-          "but got %s", THPUtils_typename(arg));
-  at::globalContext().setLinalgPreferredBackend(reinterpret_cast<THPLinalgBackend*>(arg)->linalg_backend);
-  Py_RETURN_NONE;
-}
-
-PyObject *THPModule_linalgPreferredBackend(PyObject *_unused, PyObject *noargs)
-{
-  HANDLE_TH_ERRORS
-  auto res = (PyObject*)THPLinalgBackend_New(at::globalContext().linalgPreferredBackend());
-  Py_INCREF(res);
-  return res;
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject *THPModule_setAllowFP16ReductionCuBLAS(PyObject *_unused, PyObject *arg)
 {
   THPUtils_assert(PyBool_Check(arg), "set_allow_fp16_reduction_cublas expects a bool, "
@@ -713,8 +694,6 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
-  {"_get_linalg_preferred_backend", THPModule_linalgPreferredBackend, METH_NOARGS,     nullptr},
-  {"_set_linalg_preferred_backend", THPModule_setLinalgPreferredBackend, METH_O,  nullptr},
   {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},
   {"_set_cublas_allow_fp16_reduced_precision_reduction", THPModule_setAllowFP16ReductionCuBLAS, METH_O, nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
@@ -841,7 +820,6 @@ PyObject* initModule() {
   THPDTypeInfo_init(module);
   THPLayout_init(module);
   THPMemoryFormat_init(module);
-  THPLinalgBackend_init(module);
   THPQScheme_init(module);
   THPDevice_init(module);
   THPStream_init(module);
@@ -1018,6 +996,18 @@ Call this whenever a new thread is created in order to propagate values from
         bool transposed_, at::IntArrayRef output_padding_, int64_t groups_) {
       return at::native::select_conv_backend(
           input, weight, bias_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
+  });
+
+  py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
+    .value("Default", at::LinalgBackend::Default)
+    .value("Cusolver", at::LinalgBackend::Cusolver)
+    .value("Magma", at::LinalgBackend::Magma);
+
+  py_module.def("_set_linalg_preferred_backend", [](at::LinalgBackend b) {
+    at::globalContext().setLinalgPreferredBackend(b);
+  });
+  py_module.def("_get_linalg_preferred_backend", []() {
+    return at::globalContext().linalgPreferredBackend();
   });
 
 #ifdef USE_CUDA
