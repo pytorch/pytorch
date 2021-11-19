@@ -3,7 +3,6 @@
 #include <cmath>
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -47,7 +46,7 @@ torch::lazy::Shape Diagonal::MakeDiagonalShape(
         std::min(shape.size(dim1) + offset, shape.size(dim2)), 0);
   }
   dimensions.push_back(dsize);
-  return lazy_tensors::ShapeUtil::MakeShape(shape.scalar_type(), dimensions);
+  return torch::lazy::Shape(shape.scalar_type(), dimensions);
 }
 
 }  // namespace ops

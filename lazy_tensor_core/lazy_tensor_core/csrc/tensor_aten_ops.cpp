@@ -32,7 +32,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 #include "torch/csrc/lazy/core/ir_util.h"
@@ -89,7 +88,7 @@ ViewInfo CreateAsStridedViewInfo(const torch::lazy::Shape& input_shape,
                                  std::vector<int64_t> stride,
                                  c10::optional<int64_t> storage_offset) {
   torch::lazy::Shape result_shape =
-      lazy_tensors::ShapeUtil::MakeShape(input_shape.scalar_type(), size);
+      torch::lazy::Shape(input_shape.scalar_type(), size);
   AsStridedInfo as_strided_info;
   as_strided_info.stride = std::move(stride);
   if (storage_offset) {
@@ -244,8 +243,7 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
   narrow_shape.set_size(dim, length);
 
   ViewInfo::Type view_type =
-      (lazy_tensors::ShapeUtil::ElementsIn(input_shape) ==
-       lazy_tensors::ShapeUtil::ElementsIn(narrow_shape))
+      (input_shape.get().numel() == narrow_shape.numel())
           ? ViewInfo::Type::kReshape
           : ViewInfo::Type::kNarrow;
   ViewInfo view_info(view_type, std::move(narrow_shape), input_shape);
@@ -500,7 +498,7 @@ void unsqueeze_(LazyTensor& input, int64_t dim) {
 
 LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape().get();
-  torch::lazy::Shape shape = lazy_tensors::ShapeUtil::MakeShape(
+  torch::lazy::Shape shape = torch::lazy::Shape(
       input_shape.scalar_type(), at::infer_size(output_size, input_shape.numel()));
   ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));

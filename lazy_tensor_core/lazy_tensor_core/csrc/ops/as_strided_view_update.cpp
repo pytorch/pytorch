@@ -3,7 +3,6 @@
 #include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -17,7 +16,7 @@ AsStridedViewUpdate::AsStridedViewUpdate(const torch::lazy::Value& target,
     : torch::lazy::TsNode(
           ltc_as_strided_view_update, {target, input},
           [&]() {
-            return lazy_tensors::ShapeUtil::MakeShape(
+            return torch::lazy::Shape(
                 torch::lazy::GetShapeFromTsValue(target).scalar_type(), size);
           },
           /*num_outputs=*/1, torch::lazy::MHash(size, stride, storage_offset)),

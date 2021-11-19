@@ -12,7 +12,6 @@
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/view.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/shape_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
@@ -105,7 +104,7 @@ lazy_tensors::util::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
   }
   CHECK(data()->tensor_data);
   const torch::lazy::BackendDevice& device = GetDevice();
-  return lazy_tensors::ShapeUtil::MakeShape(
+  return torch::lazy::Shape(
       data()->tensor_data->type().scalarType(),
       Helpers::I64List(data()->tensor_data->sizes()));
 }
@@ -405,17 +404,14 @@ void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
 }
 
 void LazyTensor::UpdateFromTensorOut(at::Tensor tensor) {
-  if (data()->view != nullptr &&
-      lazy_tensors::ShapeUtil::ElementsIn(shape()) != tensor.numel()) {
+  if (data()->view != nullptr && shape().get().numel() != tensor.numel()) {
     data()->view = nullptr;
   }
   UpdateFromTensor(std::move(tensor), /*sync=*/false);
 }
 
 void LazyTensor::UpdateFromTensorOut(const LazyTensor& tensor) {
-  if (data()->view != nullptr &&
-      lazy_tensors::ShapeUtil::ElementsIn(shape()) !=
-          lazy_tensors::ShapeUtil::ElementsIn(tensor.shape())) {
+  if (data()->view != nullptr && shape().get().numel() != tensor.shape().get().numel()) {
     data()->view = nullptr;
   }
   SetIrValue(tensor.GetIrValue());

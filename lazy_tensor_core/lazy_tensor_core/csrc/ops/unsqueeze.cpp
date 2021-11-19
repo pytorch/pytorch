@@ -1,7 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/shape_util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -20,7 +19,7 @@ namespace {
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input, int dim) {
   const torch::lazy::Shape& shape = torch::lazy::GetShapeFromTsValue(input);
   auto dimensions = BuildUnsqueezeDimensions(shape.sizes(), dim);
-  return lazy_tensors::ShapeUtil::MakeShape(shape.scalar_type(), dimensions);
+  return torch::lazy::Shape(shape.scalar_type(), dimensions);
 }
 
 }  // namespace
