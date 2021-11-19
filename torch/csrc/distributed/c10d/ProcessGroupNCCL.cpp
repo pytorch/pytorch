@@ -1009,9 +1009,32 @@ void ProcessGroupNCCL::broadcastUniqueNCCLID(
         reinterpret_cast<uint8_t*>(ncclID) + NCCL_UNIQUE_ID_BYTES);
     store_->set(storeKey, vec);
   } else {
-    auto vec = store_->get(storeKey);
-    TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
-    std::memcpy(ncclID, vec.data(), vec.size());
+    try {
+      auto vec = store_->get(storeKey);
+      TORCH_CHECK(vec.size() == NCCL_UNIQUE_ID_BYTES);
+      std::memcpy(ncclID, vec.data(), vec.size());
+    } catch (const std::exception& e) {
+      std::string exceptionMsg = c10::str(
+          "[",
+          rank_,
+          "] is setting up NCCL communicator and "
+          "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+          storeKey,
+          "', but store->get('",
+          storeKey,
+          "') got error: ");
+      TORCH_CHECK(false, exceptionMsg + e.what());
+    } catch (...) {
+      TORCH_CHECK(
+          false,
+          c10::str(
+              "Unknown exception while [",
+              rank_,
+              "] is setting up NCCL communicator and "
+              "retreiving ncclUniqueId from [0] via c10d key-value store by key '",
+              storeKey,
+              "'"));
+    }
   }
 }
 
