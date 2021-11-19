@@ -77,7 +77,7 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
-cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, const uint8_t alignment) {
+cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const bool _virtual) {
   auto shape = t.sizes();
   auto strides = t.strides();
   auto r = cudnn_frontend::TensorBuilder()
@@ -85,9 +85,14 @@ cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, co
     .setStrides(strides.size(), strides.data())
     .setId(id)
     .setAlignment(alignment)
-    .setDataType(getCudnnDataType(t))
+    .setDataType(dataType)
+    .setVirtual(_virtual)
     .build();
   return r;
+}
+
+cudnn_frontend::Tensor getTensorDescriptor(const Tensor &t, const int64_t id, const uint8_t alignment) {
+  return getTensorDescriptorWithTypeVirtual(t, id, alignment, getCudnnDataType(t), false);
 }
 
 cudnn_frontend::ConvDesc_v8 getConvDescriptor(cudnnDataType_t dataType, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, const at::ScalarType scalar_type) {
@@ -234,33 +239,36 @@ auto build_opgraph(const cudnnHandle_t handle, const cudnnBackendDescriptorType_
 }
 
 auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFused& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation) {
+  // need computation to be done in FLOAT type regardless of reduced precision input
+  const auto precision = CUDNN_DATA_FLOAT;
   auto addDesc = cudnn_frontend::PointWiseDescBuilder()
                            .setMode(CUDNN_POINTWISE_ADD)
-                           .setMathPrecision(CUDNN_DATA_FLOAT)
+                           .setMathPrecision(precision)
                            .build();
   auto addBiasDesc = cudnn_frontend::PointWiseDescBuilder()
                             .setMode(CUDNN_POINTWISE_ADD)
-                            .setMathPrecision(CUDNN_DATA_FLOAT)
+                            .setMathPrecision(precision)
                             .build();
   auto actDesc = cudnn_frontend::PointWiseDescBuilder()
                            .setMode(CUDNN_POINTWISE_RELU_FWD)
-                           .setMathPrecision(CUDNN_DATA_FLOAT)
+                           .setMathPrecision(precision)
                            .build();
   auto convDesc = getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type());
   const float alpha1 = 1.0;
   const float alpha2 = alpha;
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                    .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
-                   .setyDesc(getTensorDescriptor(y, 'C', key.y_alignment))
+		   // virtual output of conv
+                   .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.y_alignment, precision, true))
                    .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
                    .setAlpha(alpha1)
-                   .setcDesc(getConvDescriptor(key.params.dataType, padding, stride, dilation, x.scalar_type()))
+                   .setcDesc(convDesc)
                    .build();
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(conv_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment))
-                           // TODO: is reusing y's alignment good here?
-                           .setyDesc(getTensorDescriptor(y, 'A', key.y_alignment))
+			   // another virtual output (of add)
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.y_alignment, precision, true))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
                            .setAlpha2(alpha2)
@@ -269,12 +277,13 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
-                           // TODO: is reusing y's alignment good here?
-                           .setyDesc(getTensorDescriptor(y, 'B', key.y_alignment))
+			   // another virtual output (of add bias)
+                           .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.y_alignment, precision, true))
                            .setpwDesc(addBiasDesc)
                            .build();
   auto act_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                           .setxDesc(add_bias_op.getOutputTensor())
+			  // final output is in original datatype
                           .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
                           .setpwDesc(actDesc)
                           .build();
