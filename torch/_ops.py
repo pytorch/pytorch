@@ -140,7 +140,7 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        if is_function_or_method(op):
+        if not is_function_or_method(op):
             setattr(self, op_name, op)
             return op
         else:

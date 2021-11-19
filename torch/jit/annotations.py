@@ -14,7 +14,6 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
     NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType
 
-
 from textwrap import dedent
 from torch._sources import get_source_lines_and_file
 from typing import Type
@@ -23,6 +22,9 @@ if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
 
+
+class OpOverloadBundle:
+    pass
 
 class Module(object):
     def __init__(self, name, members):
@@ -62,7 +64,10 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    signature = try_real_annotations(fn.default, loc)
+    if isinstance(fn, OpOverloadBundle):
+        signature = try_real_annotations(fn.default, loc)
+    else:
+        signature = try_real_annotations(fn, loc)
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -106,11 +111,12 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
+    if isinstance(fn, OpOverloadBundle):
+        fn = fn.default
+
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
-    else:
-        fn = fn.default
     if is_function_or_method(fn):
         if is_ignored_fn(fn):
             fn = inspect.unwrap(fn)
