@@ -2988,7 +2988,7 @@ TEST_F(FunctionalTest, Bias) {
     const auto result = F::bias(x, b);
     const auto expected = torch::tensor({11, 17});
     torch::test::assert_tensor_equal(result, expected);
-  },
+  }
   {
     const auto x = torch::arange(100., 118.).resize_({3, 3, 2});
     const auto b = torch::tensor({1., 2.});
