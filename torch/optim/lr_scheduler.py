@@ -110,8 +110,10 @@ class _LRScheduler(object):
                 print('Adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(group, lr))
             else:
-                print('Epoch {:5f}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch, group, lr))
+                epoch_str = ("%.2f" if isinstance(epoch, float) else
+                             "%.5d") % epoch
+                print('Epoch {}: adjusting learning rate'
+                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
 
 
     def step(self, epoch=None):
