@@ -44,8 +44,8 @@ def lower_to_trt(model, inputs, shape_ranges):
         model,
         input_specs,
         explicit_batch_dimension=True, explicit_precision=True)
-    engine, input_names, output_names = interp.run(fp16_mode=False, int8_mode=True)
-    trt_mod = TRTModule(engine, input_names, output_names)
+    result = interp.run(fp16_mode=False, int8_mode=True)
+    trt_mod = TRTModule(result.engine, result.input_names, result.output_names)
     return trt_mod
 
 @unittest.skipIf(not TEST_CUDA, "gpu is not available.")
