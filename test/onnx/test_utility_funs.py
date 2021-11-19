@@ -4,8 +4,14 @@ from test_pytorch_common import TestCase, run_tests
 
 import torch
 import torch.onnx
-from torch.onnx import utils, OperatorExportTypes, TrainingMode, register_custom_op_symbolic
-from torch.onnx.symbolic_helper import _set_opset_version, _set_operator_export_type, _set_onnx_shape_inference
+from torch.onnx import (utils,
+                        OperatorExportTypes,
+                        TrainingMode,
+                        register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
+from torch.onnx.symbolic_helper import (_set_opset_version,
+                                        _set_operator_export_type,
+                                        _set_onnx_shape_inference)
 import torch.utils.cpp_extension
 from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion,
                                  skipIfUnsupportedMaxOpsetVersion)
@@ -19,7 +25,6 @@ import onnx
 import io
 import copy
 import unittest
-
 
 skip = unittest.skip
 
@@ -126,27 +131,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
                                            dynamic_axes={"x": [0, 1], "y": [0, 1], "t": [0, 1]})
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::SplitToSequence")
-
-    def test_output_list(self):
-        class PaddingLayer(torch.jit.ScriptModule):
-            @torch.jit.script_method
-            def forward(self, input_t, n):
-                # type: (Tensor, int) -> Tensor
-                for i in range(n):
-                    input_t = input_t * 2
-                return input_t
-
-        input_t = torch.ones(size=[10], dtype=torch.long)
-        n = 2
-        model = torch.jit.script(PaddingLayer())
-        example_output = model(input_t, n)
-
-        with self.assertRaises(RuntimeError):
-            torch.onnx._export(model,
-                               (input_t, n),
-                               "test.onnx",
-                               opset_version=self.opset_version,
-                               example_outputs=[example_output])
 
     def test_constant_fold_transpose(self):
         class TransposeModule(torch.nn.Module):
@@ -817,6 +801,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(next(iter).kind(), "custom_namespace::custom_op")
 
     def test_custom_opsets_gelu(self):
+        self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
+
         def gelu(g, self):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
@@ -832,6 +818,23 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.opset_import[0].version, self.opset_version)
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
+
+
+    def test_register_aten_custom_op_symbolic(self):
+        self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
+
+        def gelu(g, self):
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
+
+        register_custom_op_symbolic("aten::gelu", gelu, 1)
+        model = torch.nn.GELU()
+        x = torch.randn(3, 3)
+        f = io.BytesIO()
+        torch.onnx.export(model, (x, ), f, opset_version=self.opset_version)
+        graph = onnx.load(io.BytesIO(f.getvalue()))
+
+        self.assertEqual(graph.graph.node[0].op_type, "Gelu")
+        self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
 
     def test_custom_opsets_inverse(self):
         class CustomInverse(torch.nn.Module):
