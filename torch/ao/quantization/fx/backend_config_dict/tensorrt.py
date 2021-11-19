@@ -5,6 +5,7 @@ def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
     NOTE: Current api will change in the future, it's just to unblock experimentation for
     new backends, please don't use it right now.
+    TODO: add a README when it's more stable
     """
     # dtype configs
     weighted_op_qint8_dtype_config = {
