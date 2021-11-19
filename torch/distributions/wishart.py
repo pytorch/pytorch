@@ -18,7 +18,7 @@ class Wishart(Distribution):
     an outer product of general square root matrix e,g.,
     :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top` or
     an outer product of cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
-    can be obtained via Cholesky decomposition of the covariance.  
+    can be obtained via Cholesky decomposition of the covariance.
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
         >>> m.sample()  #Wishart distributed with mean=`df * I` and
@@ -151,7 +151,7 @@ class Wishart(Distribution):
         return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
-        shape = self._extended_shape(sample_shape)   
+        shape = self._extended_shape(sample_shape)
 
         # Implemented Bartlett decomposition
         if self.bartlett_decomposition:
