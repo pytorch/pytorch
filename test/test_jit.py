@@ -1650,6 +1650,30 @@ graph(%Ra, %Rb):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
+    @unittest.skipIf(not RUN_CUDA, "test requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_native_dropout_corner_case(self):
+        with disable_autodiff_subgraph_inlining():
+            def t(x, p: float, t: bool):
+                o = torch.dropout(x, p, t)
+                return o
+
+            jit_t = torch.jit.script(t)
+            x = torch.randn(5).requires_grad_()
+            FileCheck().check("prim::DifferentiableGraph").run(jit_t.graph_for(x, 1.0, True, profile_and_replay=True))
+
+            for train in [True, False]:
+                for p in [0.0, 1.0]:
+                    for device in ["cuda", "cpu"]:
+                        x = torch.randn(5).to(device=device).requires_grad_()
+                        x_ref = x.detach().requires_grad_()
+                        o = jit_t(x, p, train)
+                        o_ref = t(x_ref, p, train)
+                        o.sum().backward()
+                        o_ref.sum().backward()
+                        assert(o.equal(o_ref))
+                        assert(x.grad.equal(x_ref.grad))
+
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
@@ -1690,7 +1714,7 @@ graph(%Ra, %Rb):
                 for requires_grad in (True, False):
                     X = torch.randn(M, M, requires_grad=requires_grad)
                     if requires_grad:
-                        FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
+                        FileCheck().check("aten::native_dropout").run(scripted.graph_for(X, profile_and_replay=True))
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
@@ -1714,7 +1738,7 @@ graph(%Ra, %Rb):
             for requires_grad in (True, False):
                 X = torch.randn(M, M, requires_grad=requires_grad)
                 if requires_grad:
-                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+                    FileCheck().check("aten::native_dropout").run(scripted_training.graph_for(X, profile_and_replay=True))
                 self.assertIn('aten::bernoulli_', profile(scripted_training, X))
                 self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
