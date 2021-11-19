@@ -30,6 +30,8 @@ CONSTRAINTS = [
     (constraints.half_open_interval, -2, -1),
     (constraints.half_open_interval, 1, 2),
     (constraints.simplex,),
+    (constraints.symmetric,),
+    (constraints.positive_definite,),
     (constraints.corr_cholesky,),
     (constraints.lower_cholesky,),
 ]
