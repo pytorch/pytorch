@@ -41,7 +41,6 @@ Tensor _new_zeros_with_same_feature_meta(
   }
 
   auto self_sizes = self.sizes();
-  auto self_strides = self.strides();
 
   // NB: We don't check that the sizes of self is the same as that of other
   //     because this function is also used in the inplace over view case
