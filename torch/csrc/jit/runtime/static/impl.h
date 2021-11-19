@@ -7,6 +7,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -284,6 +285,10 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
+  graph_node_list node_ptrs() const {
+    return graph_->nodes();
+  }
+
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
@@ -291,11 +296,6 @@ class TORCH_API StaticModule {
 
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
-  }
-
-  const FastMap<const Value*, std::vector<const Value*>>&
-  values_share_same_storage() const {
-    return value_to_same_storage_values_;
   }
 
   const ValueGroup& value_group() const {
@@ -312,6 +312,10 @@ class TORCH_API StaticModule {
 
   const FastSet<const Value*>& leaked_values() const {
     return leaked_values_;
+  }
+
+  const ManagedTensorRanges& ranges() const {
+    return ranges_;
   }
 
   bool first_input_is_self() const {
@@ -343,15 +347,12 @@ class TORCH_API StaticModule {
 
   ValueGroup value_group_;
 
-  // map a value to the set of values that may share the same storage with it
-  FastMap<const Value*, std::vector<const Value*>>
-      value_to_same_storage_values_;
-
   FastSet<const Node*> node_is_optimizable_container_type_;
 
   FastSet<const Value*> managed_tensor_values_{};
   FastSet<const Value*> managed_output_tensor_values_{};
   FastSet<const Value*> leaked_values_{};
+  ManagedTensorRanges ranges_{};
 };
 
 class TORCH_API StaticRuntime {
@@ -426,6 +427,10 @@ class TORCH_API StaticRuntime {
 
   std::vector<ProcessedNode>& nodes() {
     return nodes_;
+  }
+
+  graph_node_list node_ptrs() const {
+    return static_module_.node_ptrs();
   }
 
   const Graph& graph() const {
