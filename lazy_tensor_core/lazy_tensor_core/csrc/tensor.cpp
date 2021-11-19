@@ -291,9 +291,8 @@ std::shared_ptr<View> LazyTensor::UpdateView(
     std::shared_ptr<View> view, torch::lazy::Value ir_value) const {
   if (torch::lazy::GetShapeFromTsValue(ir_value).sizes() !=
       view->shape().sizes()) {
-    CHECK_EQ(lazy_tensors::util::Multiply<int64_t>(
-                 torch::lazy::GetShapeFromTsValue(ir_value).sizes()),
-             lazy_tensors::util::Multiply<int64_t>(view->shape().sizes()));
+    CHECK_EQ(torch::lazy::GetShapeFromTsValue(ir_value).numel(),
+             view->shape().numel());
 
     ViewInfo view_info(ViewInfo::Type::kReshape,
                        torch::lazy::GetShapeFromTsValue(ir_value),

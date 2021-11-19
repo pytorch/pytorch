@@ -7,6 +7,15 @@
 namespace torch_lazy_tensors {
 namespace cpp_test {
 
+namespace {
+template <typename T>
+typename T::mapped_type FindOr(const T& cont, const typename T::key_type& key,
+                               const typename T::mapped_type& defval) {
+  auto it = cont.find(key);
+  return it != cont.end() ? it->second : defval;
+}
+}  // namespace
+
 MetricsSnapshot::MetricsSnapshot() {
   for (auto& name : lazy_tensors::metrics::GetMetricNames()) {
     lazy_tensors::metrics::MetricData* metric =
@@ -33,7 +42,7 @@ std::vector<MetricsSnapshot::ChangedCounter> MetricsSnapshot::CounterChanged(
     if ((ignore_set == nullptr || ignore_set->count(name_counter.first) == 0) &&
         std::regex_match(name_counter.first, match, cregex)) {
       int64_t start_value =
-          lazy_tensors::util::FindOr(counters_map_, name_counter.first, 0);
+          FindOr(counters_map_, name_counter.first, 0);
       if (name_counter.second != start_value) {
         changed.push_back(
             {name_counter.first, start_value, name_counter.second});
@@ -50,7 +59,7 @@ std::string MetricsSnapshot::DumpDifferences(
   for (auto& name_counter : after.counters_map_) {
     if (ignore_set == nullptr || ignore_set->count(name_counter.first) == 0) {
       int64_t start_value =
-          lazy_tensors::util::FindOr(counters_map_, name_counter.first, 0);
+          FindOr(counters_map_, name_counter.first, 0);
       if (name_counter.second != start_value) {
         ss << "Counter '" << name_counter.first << "' changed from "
            << start_value << " to " << name_counter.second << "\n";

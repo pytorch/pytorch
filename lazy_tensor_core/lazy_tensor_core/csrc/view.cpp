@@ -39,15 +39,15 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
     case ViewInfo::Type::kReshape:
       return torch::lazy::MakeNode<ir::ops::View>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()));
+          view_info.shape.sizes().vec());
     case ViewInfo::Type::kResize:
       return torch::lazy::MakeNode<ir::ops::Resize>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()));
+          view_info.shape.sizes().vec());
     case ViewInfo::Type::kAsStrided:
       return torch::lazy::MakeNode<ir::ops::AsStrided>(
           ir_value,
-          lazy_tensors::util::ToVector<int64_t>(view_info.shape.sizes()),
+          view_info.shape.sizes().vec(),
           view_info.as_strided->stride, view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
       return torch::lazy::MakeNode<ir::ops::Diagonal>(
@@ -91,19 +91,16 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
         break;
       case ViewInfo::Type::kReshape:
         result = torch::lazy::MakeNode<ir::ops::View>(
-            result, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.source_shape.sizes()));
+            result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kResize:
         result = torch::lazy::MakeNode<ir::ops::Resize>(
-            result, lazy_tensors::util::ToVector<int64_t>(
-                        view_info.source_shape.sizes()));
+            result, view_info.source_shape.sizes().vec());
         break;
       case ViewInfo::Type::kAsStrided:
         result = torch::lazy::MakeNode<ir::ops::AsStridedViewUpdate>(
             tmp_values[i - 1], result,
-            lazy_tensors::util::ToVector<int64_t>(
-                view_info.source_shape.sizes()),
+            view_info.source_shape.sizes().vec(),
             view_info.as_strided->stride, view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:
