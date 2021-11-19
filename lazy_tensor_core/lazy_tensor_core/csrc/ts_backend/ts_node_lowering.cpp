@@ -316,9 +316,17 @@ class TSNodeLowering : public TSNodeLoweringInterface {
             ? LowerBuiltin(at::aten::cudnn_convolution_transpose_backward,
                            arguments)
             : LowerBuiltin(at::aten::cudnn_convolution_backward, arguments);
-    // cudnn_convolution_backward/cudnn_convolution_transpose_backward only
-    // returns 2 tensors
-    result.push_back(nullptr);
+
+    // N.B. rank is specialized even with dynamic shapes
+    // all axes but channel to reduce to the bias size
+    auto grad_rank = dynamic_cast<const ir::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
+    std::vector<int64_t> axes(grad_rank);
+    std::iota(axes.begin(), axes.end(), 0);
+    TORCH_INTERNAL_ASSERT(grad_rank >= 3, "Convolution outputs should have 3+ dimensions");
+    axes.erase(axes.begin() + 1);
+    auto axes_val = loctx()->graph()->insertConstant(axes);
+    auto bias_grad = loctx()->graph()->insert(at::aten::sum, {loctx()->GetOutputOp(operands[0]), axes_val});
+    result.push_back(bias_grad);
     return result;
   }
 
