@@ -61,8 +61,7 @@ set_module(ScriptFunction, "torch.jit")
 def _reduce(cls):
     raise pickle.PickleError("ScriptFunction cannot be pickled")
 
-setattr(ScriptFunction, "__reduce__", _reduce)
-
+ScriptFunction.__reduce__ = _reduce  # type: ignore[assignment]
 
 if _enabled:
     Attribute = collections.namedtuple("Attribute", ["value", "type"])
