@@ -105,7 +105,11 @@ class TORCH_CUDA_CU_API IterVisitor : public OptOutDispatch {
   // values more than once.
   void traverseAllPaths(Fusion* fusion);
 
-  static std::vector<Val*> getInputsTo(const std::vector<Val*>& vals);
+  //! Get inputs to vals. Possible input vals can be optionally
+  //! given. If not, vals with no defining expression are returned.
+  static std::vector<Val*> getInputsTo(
+      const std::vector<Val*>& vals,
+      const std::vector<Val*>& inputs = {});
 };
 
 /*
@@ -220,7 +224,7 @@ class TORCH_CUDA_CU_API DependencyCheck {
   static std::deque<std::deque<Val*>> getAllUseChains(Val* dependency);
 
   // Grab all values that exist between and including provided
-  // vals. Returned values are topologicaly ordered.
+  // vals. Returned values are topologicaly ordered, and unique.
   static std::vector<Val*> getAllValsBetween(
       const std::unordered_set<Val*>& dependencies,
       const std::vector<Val*>& of);

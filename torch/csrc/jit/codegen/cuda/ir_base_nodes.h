@@ -170,7 +170,7 @@ class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
 class TORCH_CUDA_CU_API Val : public Statement {
  public:
   // We may not want to register this value during Val's constructor. The reason
-  // for this is that if we register the val, then ina derived constructor try
+  // for this is that if we register the val, then in a derived constructor try
   // to throw, fusion's destructor will get called, but the pointer to this Val
   // will be invalid. When fusion tries to delete this value it will cause a seg
   // fault, instead of showing the thrown error.
@@ -245,6 +245,15 @@ class TORCH_CUDA_CU_API Val : public Statement {
     return this == other;
   }
 
+  void setEvaluatorIndex(int to) {
+    TORCH_INTERNAL_ASSERT(evaluator_index_ == -1);
+    evaluator_index_ = to;
+  }
+
+  int evaluatorIndex() const {
+    return evaluator_index_;
+  }
+
   // Dispatch functions, definitions in dispatch.cpp
   template <typename T>
   static void dispatch(T handler, Val*);
@@ -287,6 +296,8 @@ class TORCH_CUDA_CU_API Val : public Statement {
 
   Expr* definition_ = nullptr;
   std::vector<Expr*> uses_;
+
+  int evaluator_index_ = -1;
 };
 
 //!  A Expr represents a "computation." These are functions that takes inputs
