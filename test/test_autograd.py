@@ -7290,6 +7290,16 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
                 nest_level = fwAD.enter_dual_level()
 
+    def test_set_fw_grad_having_own_fw_grad_at_same_level(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+            with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
+                fwAD.make_dual(baz, dual)
+
     def test_print(self):
         with fwAD.dual_level() as level:
             a = torch.rand(3)
