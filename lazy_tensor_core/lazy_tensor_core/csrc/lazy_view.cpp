@@ -1,4 +1,4 @@
-#include "lazy_tensor_core/csrc/view.h"
+#include "lazy_tensor_core/csrc/lazy_view.h"
 
 #include <torch/csrc/lazy/core/permutation_util.h>
 
@@ -180,31 +180,31 @@ torch::lazy::Value Alias::SyncUpdateOperations() {
   return root_ir_value_;
 }
 
-View::View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
+LazyView::LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
            ViewInfo view_info)
     : shape_(std::move(shape)), alias_(std::move(alias)) {
   view_infos_.push_back(std::move(view_info));
 }
 
-View::View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
+LazyView::LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
            std::vector<ViewInfo> view_infos)
     : view_infos_(std::move(view_infos)),
       shape_(std::move(shape)),
       alias_(std::move(alias)) {}
 
-void View::Update(torch::lazy::Value ir_value) {
+void LazyView::Update(torch::lazy::Value ir_value) {
   alias_->Update(std::move(ir_value), view_infos_);
 }
 
-std::shared_ptr<View> View::CreateSubView(torch::lazy::Shape shape,
+std::shared_ptr<LazyView> LazyView::CreateSubView(torch::lazy::Shape shape,
                                           ViewInfo view_info) {
   std::vector<ViewInfo> view_infos(view_infos_);
   view_infos.push_back(std::move(view_info));
-  return std::make_shared<View>(std::move(shape), alias_,
+  return std::make_shared<LazyView>(std::move(shape), alias_,
                                 std::move(view_infos));
 }
 
-std::tuple<torch::lazy::Value, bool> View::GetViewIrNode() {
+std::tuple<torch::lazy::Value, bool> LazyView::GetViewIrNode() {
   if (IsUpToDate()) {
     return {ir_value_, false};
   }

@@ -123,11 +123,11 @@ class Alias {
   size_t generation_ = 0;
 };
 
-class View {
+class LazyView {
  public:
-  View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
+  LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
        ViewInfo view_info);
-  View(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
+  LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
        std::vector<ViewInfo> view_infos);
 
   void Update(torch::lazy::Value ir_value);
@@ -136,7 +136,7 @@ class View {
 
   const std::shared_ptr<Alias>& alias() const { return alias_; }
 
-  std::shared_ptr<View> CreateSubView(torch::lazy::Shape shape,
+  std::shared_ptr<LazyView> CreateSubView(torch::lazy::Shape shape,
                                       ViewInfo view_info);
 
   // Extracts the current IrNode out of a view, into a IrNode structure
