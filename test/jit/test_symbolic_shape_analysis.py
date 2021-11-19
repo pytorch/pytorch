@@ -446,9 +446,9 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         inp_shape = [1, 16, 5, 10]
         weight_shape = [33, 16, 3, 3]
         bias = None
-        stride = [2,2]
-        padding = [0,0]
-        dilation = [1,1]
+        stride = [2, 2]
+        padding = [0, 0]
+        dilation = [1, 1]
         groups = 1
         res = torch.jit._shapes.conv2d(inp_shape, weight_shape, bias, stride, padding, dilation, groups)
         self.assertEqual(res, [1, 33, 2, 4])
