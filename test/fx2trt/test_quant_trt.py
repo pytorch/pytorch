@@ -247,5 +247,34 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
 
+    def test_addmm(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.randn(5, 5)
+                self.bias = torch.randn(5)
+
+            def forward(self, x):
+                return torch.addmm(self.bias, x, self.weight)
+
+        m = M().eval()
+        prepared = prepare_fx(
+            m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
+        node_occurrence = {
+            # weight
+            ns.call_module(torch.ao.quantization.MinMaxObserver): 1,
+            # activation
+            ns.call_module(torch.ao.quantization.HistogramObserver): 2,
+        }
+        self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
+        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        node_occurrence = {
+            # input activation, output activation and weight
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_function(torch.addmm): 1,
+            ns.call_method("dequantize"): 3,
+        }
+        self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
+
 if __name__ == "__main__":
     run_tests()
