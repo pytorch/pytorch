@@ -1666,10 +1666,11 @@ class TestFrozenOptimizations(JitTestCase):
 
         mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).eval()
         scripted_mod = torch.jit.script(mod_eager)
-        FileCheck().check("conv").check("batch").run(scripted_mod.graph)
+        torch._C._jit_pass_inline(scripted_mod.make_prediction.graph)
+        FileCheck().check("conv").check("batch").run(scripted_mod.make_prediction.graph)
 
         scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction"])
-        FileCheck().check("conv").check_not("batch").run(scripted_mod.graph)
+        FileCheck().check("conv").check_not("batch").run(scripted_mod.make_prediction.graph)
 
     def test_conv_add_folding(self):
 
