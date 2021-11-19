@@ -262,25 +262,28 @@ def timed(model, example_inputs, sync, times=1):
     t1 = time.perf_counter()
     return results[-1], t1 - t0
 
-def to_device(inputs, device):
-    if inputs is None:
-        return None
-
+def to_device(tensors, device):
+    """Handles moving tensor or tensors (in various containers) to a new device.
+        Used for various purposes (either correctness checking, or even as an impromptu
+        means of synchronization.) Note: this method doesn't apply a cuda sync, do that outside.
+    """
     try:
         import transformers
-        if isinstance(inputs, transformers.modeling_outputs.MaskedLMOutput) \
-        or isinstance(inputs, transformers.modeling_outputs.Seq2SeqLMOutput):
-            inputs = inputs.to_tuple()[0]
+        if isinstance(tensors, transformers.modeling_outputs.MaskedLMOutput) \
+        or isinstance(tensors, transformers.modeling_outputs.Seq2SeqLMOutput):
+            # huggingface transformers return classes as model output with many attributes
+            # we don't want to sync (such as hidden states of every layer) - just sync the logits
+            tensors = tensors.logits
     except ImportError:
         pass
 
-    if isinstance(inputs, tuple) or isinstance(inputs, list):
-        return tuple(to_device(i, device) for i in inputs)
-    elif isinstance(inputs, dict):
-        return {k: to_device(inputs[k], device) for k in inputs}
-    elif isinstance(inputs, torch.Tensor):
-        return inputs.to(device)
-    raise RuntimeError("invalid example inputs ", inputs)
+    if isinstance(tensors, tuple) or isinstance(tensors, list):
+        return tuple(to_device(i, device) for i in tensors)
+    elif isinstance(tensors, dict):
+        return {k: to_device(tensors[k], device) for k in tensors}
+    elif isinstance(tensors, torch.Tensor):
+        return tensors.to(device)
+    raise RuntimeError("invalid example tensors ", tensors)
 
 def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs):
     timings = np.zeros((args.repeat, 2), np.float64)
@@ -345,12 +348,8 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
-    import transformers  # noqa
-    if isinstance(correct_result, transformers.modeling_outputs.MaskedLMOutput) \
-      or isinstance(correct_result, transformers.modeling_outputs.Seq2SeqLMOutput):
-        correct_result = correct_result.to_tuple()[0]
-        lazy_result = lazy_result.to_tuple()[0]
-    lazy_result = lazy_result.to(device)
+    correct_result = to_device(correct_result, device)
+    lazy_result = to_device(lazy_result, device)
     return torch.allclose(correct_result, lazy_result)
 
 def check_fuser(args):
