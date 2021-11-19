@@ -22,6 +22,7 @@ void topk_out_with_sort(
 bool should_use_sort(const Tensor& self, int64_t dim) {
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/68632
   if (self.dim() == 0) return false;
+  if (self.dtype() == kBool) return false; // Bool is not support by topk
   int64_t slice_size = self.size(dim);
   if (slice_size == 0) return false;
   int64_t num_slices = self.numel() / slice_size;
