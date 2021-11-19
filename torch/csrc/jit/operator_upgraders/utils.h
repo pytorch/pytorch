@@ -16,27 +16,39 @@ static c10::optional<UpgraderEntry> findUpgrader(
   //    1. the version entry must be greater than current_version
   //    2. Among the version entries, we need to see if the current version
   //       is in the upgrader name range
-
-  auto upgrader_entry_copy = upgraders_for_schema;
-  std::sort(
-      upgrader_entry_copy.begin(),
-      upgrader_entry_copy.end(),
-      [](const UpgraderEntry& lhs, const UpgraderEntry& rhs) {
-        return lhs.version_bump < rhs.version_bump;
-      });
-
   auto pos = std::find_if(
-      upgrader_entry_copy.begin(),
-      upgrader_entry_copy.end(),
+      upgraders_for_schema.begin(),
+      upgraders_for_schema.end(),
       [current_version](const UpgraderEntry& entry) {
         return entry.version_bump > current_version;
       });
 
-  if (pos != upgrader_entry_copy.end()) {
+  if (pos != upgraders_for_schema.end()) {
     return *pos;
   }
 
   return c10::nullopt;
+}
+
+static bool isOpEntryCurrent(
+    std::vector<UpgraderEntry> upgraders_for_schema,
+    int current_version) {
+
+  for (const auto& entry: upgraders_for_schema) {
+    if (entry.version_bump > current_version) {
+      return false;
+    }
+
+  }
+  return true;
+}
+
+static bool isOpSymbolCurrent(std::string name, int current_version) {
+  auto it = operator_version_map.find(name);
+  if (it != operator_version_map.end()) {
+    return isOpEntryCurrent(it->second, current_version);
+  }
+  return true;
 }
 
 } // namespace jit
