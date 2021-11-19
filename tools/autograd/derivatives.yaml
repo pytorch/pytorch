@@ -2414,5 +2414,10 @@
   self: non_differentiable
   output_differentiability: [False]
 
+- name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, *, int self_num_batch_dims=0) -> Tensor
+  self: non_differentiable
+  other: non_differentiable
+  output_differentiability: [False]
+
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
   self: warn_backwards(grad)
