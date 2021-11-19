@@ -927,6 +927,12 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """.format(**common_args))
 
+add_docstr(torch.arctan2,
+           r"""
+arctan2(input, other, *, out=None) -> Tensor
+Alias for :func:`torch.atan2`.
+""")
+
 add_docstr(torch.atanh, r"""
 atanh(input, *, out=None) -> Tensor
 
@@ -2695,11 +2701,19 @@ cross(input, other, dim=None, *, out=None) -> Tensor
 Returns the cross product of vectors in dimension :attr:`dim` of :attr:`input`
 and :attr:`other`.
 
-:attr:`input` and :attr:`other` must have the same size, and the size of their
-:attr:`dim` dimension should be 3.
+Supports input of float, double, cfloat and cdouble dtypes. Also supports batches
+of vectors, for which it computes the product along the dimension :attr:`dim`.
+In this case, the output has the same batch dimensions as the inputs.
 
 If :attr:`dim` is not given, it defaults to the first dimension found with the
 size 3. Note that this might be unexpected.
+
+.. seealso::
+        :func:`torch.linalg.cross` which requires specifying dim (defaulting to -1).
+
+.. warning:: This function may change in a future PyTorch release to match
+        the default behaviour in :func:`torch.linalg.cross`. We recommend using
+        :func:`torch.linalg.cross`.
 
 Args:
     {input}
@@ -3215,8 +3229,6 @@ Computes the n-th forward difference along the given dimension.
 
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
-
-.. note::  Only `n = 1` is currently supported
 
 Args:
     input (Tensor): the tensor to compute the differences on
@@ -3784,6 +3796,9 @@ It currently accepts :attr:`ndarray` with dtypes of ``numpy.float64``,
 ``numpy.float32``, ``numpy.float16``, ``numpy.complex64``, ``numpy.complex128``,
 ``numpy.int64``, ``numpy.int32``, ``numpy.int16``, ``numpy.int8``, ``numpy.uint8``,
 and ``numpy.bool``.
+
+.. warning::
+    Writing to a tensor created from a read-only NumPy array is not supported and will result in undefined behavior.
 
 Example::
 
@@ -4401,8 +4416,8 @@ Elements lower than min and higher than max are ignored.
 Args:
     {input}
     bins (int): number of histogram bins
-    min (int): lower end of the range (inclusive)
-    max (int): upper end of the range (inclusive)
+    min (Scalar): lower end of the range (inclusive)
+    max (Scalar): upper end of the range (inclusive)
 
 Keyword args:
     {out}
