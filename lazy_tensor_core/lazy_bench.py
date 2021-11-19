@@ -103,14 +103,19 @@ class DivAddMul(nn.Module):
         return out3
 
 def list_toy_models():
-    yield HardSwishBenchmark(dims=[1, 1, 1, 1])
-    yield HardSwishBenchmark(dims=[1, 16, 128, 128])
-    yield HardSwishBenchmark(dims=[64, 16,  128,  128])
-    yield HardSwishBenchmark(dims=[256, 16, 128, 128])
-    yield DivAddMulBenchmark(dims=[1, 1, 1, 1])
-    yield DivAddMulBenchmark(dims=[1, 16, 128, 128])
-    yield DivAddMulBenchmark(dims=[64, 16,  128,  128])
-    yield DivAddMulBenchmark(dims=[256, 16, 128, 128])
+    toy_models = [
+        HardSwishBenchmark,
+        DivAddMulBenchmark,
+    ]
+    toy_dims = [
+        [1, 1, 1, 1],
+        [32, 16, 128, 128],
+        [128, 16, 128, 128],
+        [256, 16, 128, 128],
+    ]
+    for dims in toy_dims:
+        for model in toy_models:
+            yield model(dims=dims)
 
 def pick_grad(name):
     if name in ("maml",):
