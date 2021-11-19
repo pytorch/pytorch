@@ -626,16 +626,22 @@ class TestTensorCreation(TestCase):
         y = torch.randn((4, 6), device=device)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation: some elements of the input tensor and the written-to tensor refer to a single memory location."):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=x)
 
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation: some elements of the input tensor and the written-to tensor refer to a single memory location."):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([x, y], dim=0, out=y)
 
         z = torch.zeros((4, 6), device=device)
         with self.assertRaisesRegex(
-                RuntimeError, r"unsupported operation: some elements of the input tensor and the written-to tensor refer to a single memory location."):
+                RuntimeError,
+                r"unsupported operation: some elements of the input tensor and "
+                r"the written-to tensor refer to a single memory location."):
             torch.cat([y, z], out=z[:2, :])
 
         w = y.view(-1).clone()
