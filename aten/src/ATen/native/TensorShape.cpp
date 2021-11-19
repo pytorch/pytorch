@@ -85,12 +85,12 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   auto memory_format = cat_compute_output_memory_format(tensors);
 
   // Compute what the output dtype should be:
-  //   1. The actual type of the output tensor (if it's defined)
-  //   2. Whatever `result_type` returns (otherwise)
   const auto& result = maybe_get_output();
   auto is_out_defined = result.defined();
   auto out_dtype = at::native::result_type(tensors);
 
+  // If the output tensor is defined, we need to take it into account
+  // when computing the actual output dtype and the flags.
   if (is_out_defined) {
     // Check for type promotion, if the output tensor is defined.
     TORCH_CHECK(
@@ -98,6 +98,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
         "torch.cat(): input types can't be cast to the desired output type ",
         result.scalar_type());
     out_dtype = result.scalar_type();
+    all_contiguous = result.is_contiguous(memory_format);
   }
 
   // Fallback 'set_output' parameters.
@@ -150,7 +151,6 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   }
 
   set_output(sizes, options);
-
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
     at::assert_no_internal_overlap(result);
@@ -158,6 +158,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
       at::assert_no_overlap(result, t);
     }
   }
+
   return TORCH_PRECOMPUTE_STRUCT(cat)()
       .set_dim(dim)
       .set_valid(valid)
