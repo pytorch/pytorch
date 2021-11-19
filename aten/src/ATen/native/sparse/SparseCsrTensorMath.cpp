@@ -70,6 +70,29 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
     data_out[i] = static_cast<output_t>(numel);
 }
 
+template <typename F, typename ...Args>
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... args) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+
+  if (!result.is_same(self)) {
+    // For the case of (0x0) result tensor, manually resize `result` tensor
+    // to the size of `self` tensor
+    if (result.numel() == 0) {
+      at::native::resize_as_sparse_csr_(result, self);
+    }
+    // copy_sparse_csr_ internally checks the sizes of result and self tensors
+    // Hence no external size check required
+    at::native::copy_sparse_csr_(result, self);
+  }
+
+  auto self_values = self.values();
+  auto result_values = result.values();
+
+  op_out(self_values, std::forward<Args>(args)..., result_values);
+  return result;
+}
+
 template <typename input_t, typename output_t>
 void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
   int64_t nrows = crow_indices.numel() - 1;
@@ -99,6 +122,30 @@ using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
 
+namespace {
+
+template <typename F>
+inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
+  auto values = input.values();
+
+  // To handle type promotion for inputs to unary ops,
+  // we first get the result from the underlined op, and use the result
+  // to create a sparse CSR tensor, which is used as the input to the out= variant
+  auto result_values = op(values);
+
+  auto result = at::native::_sparse_csr_tensor_unsafe(
+    input.crow_indices().clone(),
+    input.col_indices().clone(),
+    result_values,
+    input.sizes(),
+    result_values.scalar_type(),
+    input.layout(),
+    result_values.device());
+
+  return result;
+}
+}
+
 static constexpr bool is_mkl_supported() {
 #ifdef _MSC_VER
   return false;
@@ -114,6 +161,18 @@ static constexpr bool is_mkl_supported() {
 // See: https://github.com/pytorch/pytorch/issues/58770
 bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
+}
+
+Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
+  return unary_op_out(&at::sin_outf, self, result);
+}
+
+Tensor sin_sparse_csr(const Tensor& self) {
+  return get_result_tensor_for_unary_op(&at::sin, self);
+}
+
+Tensor& sin_sparse_csr_(Tensor& self) {
+  return sin_sparse_csr_out(self, self);
 }
 
 template <typename scalar_t>
