@@ -4117,14 +4117,14 @@ class TestAutograd(TestCase):
         # multiple inputs and outputs with non-tensors inputs
         def fn1(a: torch.Tensor, b: int):
             return a.clone(), a + 1
-        gradcheck(fn1, (x, 1), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
-                  check_undefined_grad=False)
+        gradcheck(fn1, (x, 1), check_forward_ad=True, check_backward_ad=False, check_batched_grad=False,
+                  check_undefined_grad=False, check_batched_forward_grad=True)
 
         # unrelated inputs: tangent for c is None
         def fn2(a: torch.Tensor, c: torch.Tensor):
             return a.clone()
-        gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
-                  check_undefined_grad=False)
+        gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=False,
+                  check_undefined_grad=False, check_batched_forward_grad=True)
 
         class Fn(Function):
             @staticmethod
@@ -4142,7 +4142,7 @@ class TestAutograd(TestCase):
 
         msg = "vmap: We do not yet support calling random operations inside of vmap"
         with self.assertRaisesRegex(RuntimeError, msg):
-            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_grad=True, check_batched_forward_grad=True)
+            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_forward_grad=True)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)

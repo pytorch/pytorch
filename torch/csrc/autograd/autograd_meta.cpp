@@ -81,7 +81,7 @@ namespace {
       if (base.sizes()[i] != other.sizes()[i]) {
         return false;
       }
-      if (base.strides()[i] != other.strides()[i]) {
+      if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1) {
         return false;
       }
     }
