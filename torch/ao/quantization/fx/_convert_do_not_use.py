@@ -8,7 +8,6 @@ from torch.fx.graph import (
     Node,
 )
 from ..qconfig import QConfigAny
-from ..quantization_mappings import get_static_quant_module_class
 from ..utils import (
     activation_is_int8_quantized,
     weight_is_statically_quantized,
