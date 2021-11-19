@@ -941,8 +941,8 @@ def _create_graph_by_tracing(
     func: Callable[..., Any],
     inputs: Any,
     var_name_lookup_fn: Callable[[Tensor], str],
-    strict: bool = False,
-    force_outplace: bool = False,
+    strict: _bool = False,
+    force_outplace: _bool = False,
     self: Any = None,
     argument_names: List[str] = []
 ) -> Tuple[Graph, Stack]: ...
