@@ -2,7 +2,7 @@ r"""Functional interface"""
 import math
 import torch
 from torch import Tensor
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
@@ -266,3 +266,55 @@ def nadam(params: List[Tensor],
                         for mu_product, mu_next in zip(mu_products, mu_nexts)]
     torch._foreach_addcdiv_(params, grads, denom, step_size_grads)
     torch._foreach_addcdiv_(params, exp_avg, denom, step_size_expavg)
+
+
+def sgd(params: List[Tensor],
+        d_p_list: List[Tensor],
+        momentum_buffer_list: List[Optional[Tensor]],
+        *,
+        weight_decay: float,
+        momentum: float,
+        lr: float,
+        dampening: float,
+        nesterov: bool,
+        maximize: bool,
+        has_sparse_grad: bool):
+    r"""Functional API that performs SGD algorithm computation.
+
+    See :class:`~torch.optim.SGD` for details.
+    """
+    if weight_decay != 0:
+        if has_sparse_grad:
+            d_p_list = [d_p.add(p, alpha=weight_decay) for d_p, p in zip(d_p_list, params)]
+        else:
+            d_p_list = torch._foreach_add(d_p_list, params, alpha=weight_decay)
+
+    if momentum != 0:
+        if all(isinstance(t, torch.Tensor) for t in momentum_buffer_list):
+            torch._foreach_mul_(momentum_buffer_list, momentum)
+            torch._foreach_add_(momentum_buffer_list, d_p_list, alpha=1 - dampening)
+        else:
+            for i, (buf, d_p) in enumerate(zip(momentum_buffer_list, d_p_list)):
+                if buf is None:
+                    buf = torch.clone(d_p.clone().detach())
+                    momentum_buffer_list[i] = buf
+                else:
+                    buf.mul_(momentum).add_(d_p, alpha=1 - dampening)
+
+        if nesterov:
+            if not has_sparse_grad:
+                d_p_list = torch._foreach_add(d_p_list, momentum_buffer_list, alpha=momentum)
+            else:
+                d_p_list = [
+                    d_p.add(momentum_buffer, alpha=momentum)
+                    for d_p, momentum_buffer in zip(d_p_list, momentum_buffer_list)
+                ]
+        else:
+            d_p_list = momentum_buffer_list
+    alpha = lr if maximize else -lr
+    if not has_sparse_grad:
+        torch._foreach_add_(params, d_p_list, alpha=alpha)
+    else:
+        # foreach APIs don't support sparse
+        for p, d_p in zip(params, d_p_list):
+            p.add_(d_p, alpha=alpha)
