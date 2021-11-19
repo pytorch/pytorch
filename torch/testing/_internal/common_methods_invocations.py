@@ -3336,10 +3336,35 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
                     'padding': sample.kwargs['padding'],
                     # output_size could be None but we specify it explicitly
                     # to compensate for the information lose in pool due
-                    # to the floor operation used to compute the shapes
+                    # to the floor/ceil operation used to compute the shapes
                     'output_size': sample.input.size()
                 }
                 yield SampleInput(arg, args=(indices,), kwargs=sample_kwargs)
+
+    return list(generator())
+
+def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwargs):
+    def generator():
+        for sample in sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
+            indices = sample.args[0]
+            # The samples for max_unpool are generated with max_pool.
+            # It could be that a single element from the max_pool's
+            # input is mapped to several locations in its output.
+            # This situation leads to failed gradchecks because
+            # the finite difference algorithm perturbes the elements
+            # of the output one by one, and not in classes of
+            # equivalences determined by whether two elements
+            # in the output are coming from the same location in the
+            # input (simply put, they have the same corresponding index).
+            # So, there are two ways to resolve this issue:
+            # 1. Extract a pertubation for one element and apply it all
+            #    the elements from the same equivalence class, or
+            # 2. Make sure that the equivalence classes are all singletons,
+            # i.e. the index tensor has to be comprised of only unique
+            # indices.
+            # Here we go with the solution 2, the easiest of all.
+            if indices.unique().numel() == indices.numel():
+                yield sample
 
     return list(generator())
 
@@ -10049,6 +10074,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
            ),
            sample_inputs_func=sample_inputs_max_unpool),
+    OpInfo('nn.functional.max_unpool1d',
+           variant_test_name='grad',
+           aten_name='max_unpool1d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
            supports_autograd=True,
@@ -10061,6 +10095,17 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
            ),
            sample_inputs_func=sample_inputs_max_unpool),
+    OpInfo('nn.functional.max_unpool2d',
+           variant_test_name='grad',
+           aten_name='max_unpool2d',
+           supports_autograd=True,
+           # Vmap is not happy with non-contiguous (channels_last) inputs
+           check_batched_grad=False,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
            supports_autograd=True,
@@ -10073,6 +10118,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped! Tested in a dedicated suite"), 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.float64,)),
            ),
            sample_inputs_func=sample_inputs_max_unpool),
+    OpInfo('nn.functional.max_unpool3d',
+           variant_test_name='grad',
+           aten_name='max_unpool3d',
+           supports_autograd=True,
+           supports_out=False,
+           assert_jit_shape_analysis=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
            supports_autograd=True,
