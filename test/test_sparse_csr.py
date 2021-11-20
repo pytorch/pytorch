@@ -9,7 +9,7 @@ from torch.testing._internal.common_utils import \
     (TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
+     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
 from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
@@ -936,6 +936,7 @@ class TestSparseCSR(TestCase):
                                                                            itertools.product([True, False], repeat=3)):
             run_test(n, k, upper, unitriangular, transpose)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
@@ -981,6 +982,7 @@ class TestSparseCSR(TestCase):
                 for op_a, op_b in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_a, op_b)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
@@ -1000,6 +1002,7 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
 
+    @skipCUDAIfRocm
     @onlyCUDA
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
