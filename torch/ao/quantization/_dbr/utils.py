@@ -274,31 +274,37 @@ class FuncOutputObsType(enum.Enum):
     REUSES_FIRST_INPUT_OBS = 2
 
 def get_func_output_obs_type(
-    op: Callable,
-    args: Tuple[Any, ...],
-    op_packing_only_uses_module_attributes: bool,
+    seen_op_info: SeenOpInfo,
 ) -> FuncOutputObsType:
-    if isinstance(op, torch.nn.Module):
+    op_type = seen_op_info.type
+    is_module = isinstance(op_type, type(torch.nn.Module))
+    if is_module:
         return FuncOutputObsType.NONE
 
     # check for ops which need packed weights but the weights are
     # coming from another function
-    if not op_packing_only_uses_module_attributes:
+    if not seen_op_info.op_packing_only_uses_module_attributes:
         return FuncOutputObsType.NONE
 
-    if op in add_and_mul_ops:
-        if len(args) > 0 and args[0].dtype in (torch.int32, torch.int64):
+    if op_type in add_and_mul_ops:
+        if (
+            len(seen_op_info.input_tensor_infos) > 0 and
+            seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
+        ):
             # this is handling ops on dtypes such as torch.int
             return FuncOutputObsType.NONE
         elif (
-            len(args) > 1 and
-            (not isinstance(args[1], torch.Tensor))
+            len(seen_op_info.input_tensor_infos) > 1 and
+            seen_op_info.input_tensor_infos[1] is None
         ):
             return FuncOutputObsType.REUSES_FIRST_INPUT_OBS
-    elif op in (torch.relu, F.relu):
+    elif op_type in (torch.relu, F.relu):
         return FuncOutputObsType.NONE
-    elif op == torch.cat:
-        if len(args[0]) > 0 and args[0][0].dtype in (torch.int32, torch.int64):
+    elif op_type == torch.cat:
+        if (
+            len(seen_op_info.input_tensor_infos) > 0 and
+            seen_op_info.input_tensor_infos[0].inf_dtype in (torch.int32, torch.int64)
+        ):
             return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
