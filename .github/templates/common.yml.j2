@@ -19,13 +19,10 @@ concurrency:
           retry docker pull "!{{ image }}"
 {%- endmacro -%}
 
-{%- macro display_ec2_information(test_runner_type="") -%}
+{%- macro display_ec2_information() -%}
       - name: Display EC2 information
         shell: bash
         run: |
-{%- if 'rocm' in test_runner_type %}
-          echo "no ec2 info for rocm"
-{%- else %}
           set -euo pipefail
           function get_ec2_metadata() {
             # Pulled from instance metadata endpoint for EC2
@@ -36,7 +33,6 @@ concurrency:
           echo "ami-id: $(get_ec2_metadata ami-id)"
           echo "instance-id: $(get_ec2_metadata instance-id)"
           echo "instance-type: $(get_ec2_metadata instance-type)"
-{%- endif %}
 {%- endmacro -%}
 
 {%- macro parse_ref() -%}
@@ -65,25 +61,14 @@ concurrency:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
-{%- macro setup_ec2_linux(test_runner_type="") -%}
-      !{{ display_ec2_information(test_runner_type) }}
+{%- macro setup_ec2_linux() -%}
+      !{{ display_ec2_information() }}
       - name: Log in to ECR
         env:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
-{%- if 'rocm' in test_runner_type %}
-          AWS_ECR_GC_ACCESS_KEY_ID: ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
-          AWS_ECR_GC_SECRET_KEY: ${{ secrets.AWS_ECR_GC_SECRET_KEY }}
-{%- endif %}
         run: |
-{%- if 'rocm' in test_runner_type %}
-          AWS_ACCOUNT_ID=308535385114
-          aws configure set aws_access_key_id "$AWS_ECR_GC_ACCESS_KEY_ID"
-          aws configure set aws_secret_access_key "$AWS_ECR_GC_SECRET_KEY"
-          aws configure set default.region "$AWS_DEFAULT_REGION"
-{%- else %}
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-{%- endif %}
           aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
               --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
@@ -104,6 +89,29 @@ concurrency:
           env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
 {%- endmacro -%}
 
+{%- macro setup_rocm_linux() -%}
+      - name: Log in to ECR
+        env:
+          AWS_RETRY_MODE: standard
+          AWS_MAX_ATTEMPTS: 5
+          AWS_ECR_GC_ACCESS_KEY_ID: ${{ secrets.AWS_ECR_GC_ACCESS_KEY_ID }}
+          AWS_ECR_GC_SECRET_KEY: ${{ secrets.AWS_ECR_GC_SECRET_KEY }}
+        run: |
+          AWS_ACCOUNT_ID=308535385114
+          aws configure set aws_access_key_id "$AWS_ECR_GC_ACCESS_KEY_ID"
+          aws configure set aws_secret_access_key "$AWS_ECR_GC_SECRET_KEY"
+          aws configure set default.region "$AWS_DEFAULT_REGION"
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE:?}/*"
+          rm -f ~/.ssh/authorized_keys
+      - name: Preserve github env variables for use in docker
+        run: |
+          env | grep '^GITHUB' > "/tmp/github_env_${GITHUB_RUN_ID}"
+{%- endmacro -%}
+
 {%- macro teardown_ec2_linux() -%}
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
@@ -114,6 +122,17 @@ concurrency:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Kill containers, clean up images
+        if: always()
+        run: |
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true
+          # Prune all of the docker images
+          docker system prune -af
+{%- endmacro -%}
+
+{%- macro teardown_rocm_linux() -%}
       - name: Kill containers, clean up images
         if: always()
         run: |
