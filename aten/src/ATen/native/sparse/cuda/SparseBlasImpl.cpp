@@ -1,4 +1,5 @@
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
@@ -792,7 +793,7 @@ void sampled_addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
+#if AT_ROCM_ENABLED() || (defined(CUDART_VERSION) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400)
   TORCH_CHECK(
       false,
       "Calling sampled_addmm with sparse GPU tensors requires compiling ",
