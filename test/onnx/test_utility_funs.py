@@ -803,17 +803,17 @@ class TestUtilityFuns_opset9(_BaseTestCase):
     def test_custom_opsets_gelu(self):
         self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
         def gelu(g, self, approximate):
-            return g.op("com.microsoft::Gelu", self, approximate).setType(self.type())
+            return g.op("com.microsoft::Gelu", self).setType(self.type())
 
         register_custom_op_symbolic("::gelu", gelu, 1)
-        model = torch.nn.GELU()
+        model = torch.nn.GELU(approximate='none')
         x = torch.randn(3, 3)
         f = io.BytesIO()
         torch.onnx.export(model, (x, ), f,
                           opset_version=self.opset_version, custom_opsets={"com.microsoft": 1})
 
         graph = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertEqual(graph.graph.node[1].op_type, "Gelu")
+        self.assertEqual(graph.graph.node[0].op_type, "Gelu")
         self.assertEqual(graph.opset_import[0].version, self.opset_version)
         self.assertEqual(graph.opset_import[1].domain, "com.microsoft")
         self.assertEqual(graph.opset_import[1].version, 1)
@@ -821,12 +821,11 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
-
-        def gelu(g, self):
+        def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
         register_custom_op_symbolic("aten::gelu", gelu, 1)
-        model = torch.nn.GELU()
+        model = torch.nn.GELU(approximate='none')
         x = torch.randn(3, 3)
         f = io.BytesIO()
         torch.onnx.export(model, (x, ), f, opset_version=self.opset_version)
