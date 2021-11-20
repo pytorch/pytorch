@@ -11,6 +11,7 @@ from .utils import (
     trace_with_inputs,
     is_leaf,
     pack_weights_for_functionals,
+    attach_scale_zp_values_to_model,
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
@@ -549,6 +550,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return auto_trace_rewriter.rewrite_for_scripting(self)
 
     pack_weights_for_functionals(module)
+    attach_scale_zp_values_to_model(module)
     module.__class__ = QuantizationDispatchModule
 
     return module

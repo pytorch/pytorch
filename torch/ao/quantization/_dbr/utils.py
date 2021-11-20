@@ -236,6 +236,26 @@ def pack_weights_for_functionals(
     for _, child in module.named_children():
         pack_weights_for_functionals(child)
 
+def attach_scale_zp_values_to_model(
+    module: torch.nn.Module,
+) -> None:
+    """
+    Calculates the scale and zero_point from each observer and attaches
+    these values to the parent module. This is done to avoid recalculating
+    these values at inference.
+    """
+    if hasattr(module, '_auto_quant_state'):
+        qstate = module._auto_quant_state
+        # TODO(future PR): refactor this code to be aware of the
+        # AutoQuantizationStateType and remove the mypy ignore statements
+        for tensor_id, observer in qstate.tensor_id_to_observer.items():  # type: ignore[union-attr, operator]
+            scale, zp = observer.calculate_qparams()
+            qstate.tensor_id_to_scale_zp[tensor_id] = (scale, zp)  # type: ignore[union-attr, operator, assignment]
+        qstate.tensor_id_to_observer.clear()  # type: ignore[union-attr, operator]
+
+    for _, child in module.named_children():
+        attach_scale_zp_values_to_model(child)
+
 # TODO(future PR): verify correctness of this for all
 # quantizeable modules
 def is_leaf(m: torch.nn.Module) -> bool:
@@ -282,10 +302,12 @@ def get_func_output_obs_type(
             return FuncOutputObsType.NONE
     return FuncOutputObsType.NEW_OBS
 
-def converted_func_needs_scale_zp(op: Callable, seen_op_info: SeenOpInfo) -> bool:
-    if isinstance(op, torch.nn.Module):
+def converted_func_needs_scale_zp(seen_op_info: SeenOpInfo) -> bool:
+    op_type = seen_op_info.type
+    is_module = isinstance(op_type, type(torch.nn.Module))
+    if is_module:
         return False
-    if op in add_and_mul_ops:
+    if op_type in add_and_mul_ops:
         # check if both arguments are tensors
         inputs = seen_op_info.input_tensor_infos
         both_args_tensors = len(inputs) == 2 and inputs[0] is not None and \
@@ -294,17 +316,15 @@ def converted_func_needs_scale_zp(op: Callable, seen_op_info: SeenOpInfo) -> boo
         first_dtype_is_not_int = len(inputs) > 0 and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return both_args_tensors and first_dtype_is_not_int
-    elif op == torch.cat:
+    elif op_type == torch.cat:
         inputs = seen_op_info.input_tensor_infos
         first_dtype_is_not_int = len(inputs) > 0 and \
             inputs[0].inf_dtype not in (torch.int32, torch.int64)
         return first_dtype_is_not_int
-    elif op in (F.conv2d, F.linear):
+    elif op_type in (F.conv2d, F.linear):
         outputs = seen_op_info.output_tensor_infos
         is_int8 = outputs[0].inf_dtype == torch.quint8
         return is_int8
-    # TODO: add more ops
-    # print('op', op)
     return False
 
 class FuncOutputDTypeType(enum.Enum):
