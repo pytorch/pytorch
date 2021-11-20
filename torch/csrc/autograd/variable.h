@@ -8,7 +8,7 @@
 #include <torch/csrc/autograd/cpp_hook.h>
 #include <torch/csrc/autograd/forward_grad.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
 #include <c10/util/Exception.h>
 

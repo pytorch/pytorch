@@ -1,8 +1,11 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/erase_number_types.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+
+#include <ATen/ScalarOps.h>
 
 namespace torch {
 namespace jit {
