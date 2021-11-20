@@ -1,13 +1,11 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include "torch/csrc/autograd/VariableTypeUtils.h"
 
 #include <torch/library.h>
 
-
-#include <ATen/Functions.h>
-#include <ATen/RedispatchFunctions.h>
-
 // ${generated_comment}
 
+$ops_headers
 
 using namespace at;
 using torch::autograd::CreationMeta;
