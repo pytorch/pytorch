@@ -581,7 +581,7 @@ Tensor make_tensor(Args&&... args) {
 } // namespace at
 
 // See Note [Avoiding Include Cycles In Static Dispatch]
-${static_dispatch_extra_headers}
+${static_dispatch_ops_headers}
 namespace at {
 ${tensor_method_definitions}
 } // namespace at
