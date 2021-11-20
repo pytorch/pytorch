@@ -114,7 +114,10 @@ class AllModuleTracer(torch.fx.Tracer):
                 old_target = target
                 # TODO use arg_dequant_infos
                 new_target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
-                    qstate.get_op_convert_info(target, unwrap_scale_zp=True)
+                    qstate.get_op_convert_info(target)
+                for k in ('scale', 'zero_point'):
+                    if k in additional_kwargs:
+                        additional_kwargs[k] = additional_kwargs[k].item()
                 if new_target is not None:
                     target = new_target
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
@@ -166,8 +169,10 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 # TODO use arg_dequant_infos
                 _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs = \
-                    qstate.get_op_convert_info(
-                        module_instance, unwrap_scale_zp=True)
+                    qstate.get_op_convert_info(module_instance)
+                for k in ('scale', 'zero_point'):
+                    if k in additional_kwargs:
+                        additional_kwargs[k] = additional_kwargs[k].item()
 
                 args = self._maybe_update_args_with_quants(args, arg_quant_infos, target)
                 kwargs.update(**additional_kwargs)
