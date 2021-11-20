@@ -406,7 +406,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/comm.cpp",
     "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/exception.cpp",
-    "torch/csrc/distributed/c10d/frontend.cpp",
     "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/quantization/quantization.cpp",
     "torch/csrc/distributed/c10d/reducer.cpp",
