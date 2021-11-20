@@ -33,6 +33,19 @@ from .utils import (
     get_input_args_quant_dequant_info,
 )
 
+OpConvertInfo = Tuple[
+    # quantized equivalent of original op (None means keep original)
+    Optional[Callable],
+    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
+    List[Optional[Tuple[float, int]]],
+    # arg_dequant_infos, each element is True if this arg needs a dequant
+    List[bool],
+    # packed param name, if the op has a packed param
+    Optional[str],
+    # additional kwargs, such as output scale and zero_point
+    Dict[str, Any],
+]
+
 # TODO(future PR): maybe better name
 # TODO(future PR): add serialization support
 class AutoQuantizationState(torch.nn.Module):
@@ -89,6 +102,8 @@ class AutoQuantizationState(torch.nn.Module):
         ]]] = []
         # model name to use in logging results
         self.logging_model_name: Optional[str]
+
+        self.idx_to_op_convert_info: Dict[int, OpConvertInfo] = {}
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
@@ -424,30 +439,20 @@ class AutoQuantizationState(torch.nn.Module):
     def get_op_convert_info(
         self,
         op: Callable,
-    ) -> Tuple[
-        Optional[Callable],
-        List[Optional[Tuple[float, int]]],
-        List[bool],
-        Optional[str],
-        Dict[str, Any]
-    ]:
+    ) -> OpConvertInfo:
         """
         Returns the information needed for convert time modifications to `op`.
-        Has no side effects.  Return types:
-
-        `maybe_new_op`. Returns `None` if the callable does not need quantization,
-        or the corresponding quantized target. Note: returns `None`
-        for modules, because they are quantized with module swaps.
-
-        `arg_quant_infos`. Returns information needed to quantize each arg, if
-        applicable.
-
-        `additional_kwargs`. Returns additional kwargs for scale and zero_point, if
-        applicable.
         """
-        assert self.cur_op_needs_hooks(op)
-        seen_op_info = self._get_cur_seen_op_info()
+        return self.idx_to_op_convert_info[self.idx]
 
+    def calculate_op_convert_info(
+        self,
+        seen_op_info: SeenOpInfo,
+    ) -> OpConvertInfo:
+        """
+        This precalculates the information which will be returned by
+        `get_op_convert_info`.
+        """
         # calculate new op
         maybe_new_op = get_quantized_op(seen_op_info)
 
@@ -465,12 +470,10 @@ class AutoQuantizationState(torch.nn.Module):
         additional_kwargs = {}
         needs_scale_zp = converted_func_needs_scale_zp(seen_op_info)
         if needs_scale_zp:
-            seen_op_info = self._get_cur_seen_op_info()
             output_tensor_infos = seen_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
             scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
             additional_kwargs.update({'scale': scale, 'zero_point': zp})
-
         return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
             packed_param_name, additional_kwargs
 
