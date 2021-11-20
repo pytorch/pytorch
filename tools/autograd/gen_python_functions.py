@@ -93,6 +93,7 @@ _SKIP_PYTHON_BINDINGS = [
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_new_zeros_with_same_feature_meta',  # used for forward AD internals
     '_reshape_alias',
     'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
