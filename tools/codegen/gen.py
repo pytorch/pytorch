@@ -995,18 +995,17 @@ def gen_headers(
 
         del fm
 
-    functions_by_base_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
     for fn in native_functions:
-        functions_by_base_name[fn.func.name.name.base].append(fn)
+        functions_by_root_name[fn.root_name].append(fn)
 
-    grouped_functions_by_base_name: Dict[str, List[Union[NativeFunction, NativeFunctionsGroup]]] = defaultdict(lambda: [])
+    grouped_functions_by_root_name: Dict[str, List[Union[NativeFunction, NativeFunctionsGroup]]] = defaultdict(lambda: [])
     for group in grouped_native_functions:
-        fn = group.functional if isinstance(group, NativeFunctionsGroup) else group
-        name = fn.func.name.name.base
-        grouped_functions_by_base_name[name].append(group)
+        name = group.root_name
+        grouped_functions_by_root_name[name].append(group)
 
     static_dispatch_headers = static_dispatch_extra_headers(static_dispatch_idx)
-    for name, functions in functions_by_base_name.items():
+    for name, functions in functions_by_root_name.items():
         ops_fm.write_with_template(
             f'{name}_ops.h', 'Operator.h', lambda: {
                 'declarations': list(mapMaybe(ComputeOperators(
@@ -1021,7 +1020,7 @@ def gen_headers(
                     static_dispatch_backend_index=static_dispatch_idx), functions)),
             })
 
-        grouped_functions = grouped_functions_by_base_name.get(name, [])
+        grouped_functions = grouped_functions_by_root_name.get(name, [])
         structured_functions = [fn for fn in grouped_functions
                                 if isinstance(fn, NativeFunctionsGroup) and fn.structured]
         is_structured = len(structured_functions) > 0
@@ -1057,14 +1056,14 @@ def gen_headers(
         cpu_fm.write(f'{category}.h', lambda: {
             f'{category}_includes': [
                 f'#include <ATen/ops/{name}{suffix}.h>'
-                for name in sorted(functions_by_base_name.keys())
+                for name in sorted(functions_by_root_name.keys())
             ],
         })
 
     core_fm.write('TensorBody.h', lambda: {
         'operator_includes': [
             f'#include <ATen/ops/{name}_ops.h>'
-            for name, functions in functions_by_base_name.items()
+            for name, functions in functions_by_root_name.items()
             if any(Variant.method in fn.variants for fn in functions)
         ],
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
@@ -1170,22 +1169,15 @@ def gen_source_files(
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    def key_func(fn: NativeFunction) -> str:
-        return fn.func.name.name.base
-
-    def key_func_grouped(g: Union[NativeFunction, NativeFunctionsGroup]) -> str:
-        if isinstance(g, NativeFunction):
-            f = g
-        else:
-            f = g.functional
-        return key_func(f)
+    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
+        return fn.root_name
 
     cpu_fm.write_sharded(
         'Operators.cpp',
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {
-            'operator_headers': [f'#include <ATen/ops/{fn.func.name.name.base}.h>'],
+            'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
             'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
         num_shards=5,
         sharded_keys={'operator_headers', 'definitions'}
@@ -1214,7 +1206,7 @@ def gen_source_files(
     cpu_fm.write_sharded(
         'RegisterFunctionalization.cpp',
         grouped_native_functions,
-        key_fn=key_func_grouped,
+        key_fn=key_func,
         env_callable=lambda g: {
             'func_definitions': list(mapMaybe(lambda f: gen_functionalization_definition(
                 selector, f, to_functional_op[f.func.name]),
