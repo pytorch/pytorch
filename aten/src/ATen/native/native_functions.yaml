@@ -4763,12 +4763,15 @@
     SparseCUDA: _sparse_sum_backward_cuda
 
 - func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  python_module: sparse
   dispatch:
     SparseCPU: softmax_sparse_cpu
     SparseCUDA: softmax_sparse_cuda
@@ -4779,12 +4782,15 @@
     SparseCUDA: softmax_backward_sparse_cuda
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  python_module: sparse
   dispatch:
     SparseCPU: log_softmax_sparse_cpu
     SparseCUDA: log_softmax_sparse_cuda
@@ -4994,6 +5000,7 @@
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  python_module: sparse
   dispatch:
     CompositeExplicitAutograd: _sparse_addmm
 
