@@ -9,16 +9,16 @@ from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
     dispatch_strategy,
 )
-from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
-                                     BaseCType, OptionalCType, longT, boolT, intArrayRefT)
+from tools.codegen.api.types import (Binding, DispatcherSignature, CType, BaseCType,
+                                     OptionalCType, longT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
-    Type, NativeFunction, SelfArgument, TensorOptionsArguments, Variant,
-    SchemaKind, is_foreach_op,
+    Type, NativeFunction, SelfArgument, TensorOptionsArguments, SchemaKind,
+    is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple, Dict
-from tools.codegen.utils import mapMaybe, FileManager
+from tools.codegen.utils import FileManager
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
