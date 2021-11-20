@@ -29,6 +29,7 @@ from .utils import (
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
     get_producer_of_seen_op_info,
+    clone_detach_tensor_without_dispatch,
 )
 
 # TODO(future PR): maybe better name
@@ -68,6 +69,24 @@ class AutoQuantizationState(torch.nn.Module):
         # value: name of packed weight
         # note: this is filled out right before convert
         self.idx_to_packed_weight_name: Dict[str, str] = {}
+
+        # Numeric Suite add_loggers functionality
+        # if this flag is True, op outputs will be saved for debugging
+        self.log_op_outputs = False
+        # data structure to save op outputs for debugging
+        # * outer list represents the different model forward call instances
+        # * inner list represents the different op forward call instances in a
+        #   model forward
+        # TODO(future PR): handle types which are not torch.Tensor
+        # TODO(future PR): use the Logger class and allow user overrides of it
+        self.op_outputs: List[List[Tuple[
+            int,  # global op idx
+            Optional[str],  # fqn
+            Callable,  # fp32 op type (TODO future PR: add quantized op type)
+            torch.Tensor,  # value
+        ]]] = []
+        # model name to use in logging results
+        self.logging_model_name: Optional[str]
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
@@ -125,6 +144,9 @@ class AutoQuantizationState(torch.nn.Module):
         Resets the internal op counter to start a new top level module call
         """
         self.idx = 0
+
+        if self.log_op_outputs:
+            self.op_outputs.append([])
 
     def cur_op_needs_hooks(self, cur_op: Callable) -> bool:
         return op_needs_quantization(cur_op)
@@ -243,6 +265,7 @@ class AutoQuantizationState(torch.nn.Module):
         first_call: bool,
         qtensor_id: List[int],
         root_module: torch.nn.Module,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -270,6 +293,12 @@ class AutoQuantizationState(torch.nn.Module):
                 tensor_id = seen_op_info.output_tensor_infos[0].id
                 obs = self.tensor_id_to_observer[str(tensor_id)]
                 output = obs(output)
+
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
@@ -377,12 +406,19 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         output,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called aftern an op call in a converted model.
 
         TODO: add dequant, if needed
         """
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            seen_op_info = self._get_cur_seen_op_info()
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
