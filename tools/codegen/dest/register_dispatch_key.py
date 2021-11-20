@@ -34,7 +34,7 @@ def gen_registration_headers(backend_index: BackendIndex) -> List[str]:
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 """,
-            "#include <ATen/ops/as_strided_native.h>"
+        "#include <ATen/ops/as_strided_native.h>"
     ]
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
