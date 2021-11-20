@@ -10,11 +10,13 @@ from .quantization_state import (
 from .utils import (
     trace_with_inputs,
     is_leaf,
-    pack_weights_for_functionals,
-    attach_scale_zp_values_to_model,
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
+)
+from .model_utils import (
+    pack_weights_for_functionals,
+    attach_scale_zp_values_to_model,
 )
 from . import auto_trace_rewriter
 
