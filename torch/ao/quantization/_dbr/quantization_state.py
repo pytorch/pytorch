@@ -458,7 +458,7 @@ class AutoQuantizationState(torch.nn.Module):
                 seen_op_info, self.tensor_id_to_scale_zp)
 
         # get packed param name, if applicable
-        packed_param_name = self._get_packed_param_name(op)
+        packed_param_name = self._get_packed_param_name(seen_op_info)
 
         # calculate scale and zp for output
         # TODO: instead of always doing this if there is an observer,
@@ -480,12 +480,12 @@ class AutoQuantizationState(torch.nn.Module):
         return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
             packed_param_name, additional_kwargs
 
-    def _get_packed_param_name(self, cur_op: Callable) -> Optional[str]:
+    def _get_packed_param_name(self, seen_op_info: SeenOpInfo) -> Optional[str]:
         """
-        If the op has a quantized packed param, returns it. Otherwise, returns
-        None.
+        If the op in seen_op_info has a quantized packed param, returns it.
+        Otherwise, returns None.
         """
-        return self.idx_to_packed_weight_name.get(str(self.idx), None)
+        return self.idx_to_packed_weight_name.get(str(seen_op_info.idx), None)
 
     def _first_call_assign_qtensor_infos_to_mod_outputs_tensor(
         self,
