@@ -13140,6 +13140,24 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
     OpInfo(
+        '_masked.log_softmax',
+        method_variant=None,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestMasked', 'test_reference_masked'),
+        ],
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
+    OpInfo(
         "nn.functional.ctc_loss",
         ref=_NOTHING,
         dtypes=floating_types(),
