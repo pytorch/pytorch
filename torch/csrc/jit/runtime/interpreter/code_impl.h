@@ -70,6 +70,9 @@ struct CodeImpl {
 
   std::vector<IValue> constant_table_;
   std::vector<Operation> operator_table_;
+#ifndef NDEBUG
+  std::vector<Operator> full_operator_table_;
+#endif
   // map<(op name, num inputs), index in operator table>, to avoid duplicates,
   // not including vararg operators
   std::unordered_map<
@@ -321,7 +324,8 @@ struct CodeImpl {
     bool is_vararg = op.schema().is_vararg();
 
     int operation_index = add_to_operator_table(
-        op.getOperation(node),
+        op,
+        node,
         c10::toString(op.schema().operator_name()),
         num_inputs,
         is_vararg);
@@ -741,11 +745,14 @@ struct CodeImpl {
    * Add an operation to operator_table_ if not a duplicate and return its index
    */
   int add_to_operator_table(
-      const Operation& oper,
+      const Operator& op,
+      const Node* node,
       const std::string& op_name,
       const int num_inputs,
       const bool is_vararg) {
     int size = operator_table_.size();
+
+    const Operation& oper = op.getOperation(node);
 
     if (!is_vararg) {
       std::pair<std::string, int> key(op_name, num_inputs);
@@ -759,6 +766,9 @@ struct CodeImpl {
     }
 
     operator_table_.emplace_back(oper);
+#ifndef NDEBUG
+    full_operator_table_.emplace_back(op);
+#endif
     return size;
   }
 };
@@ -829,7 +839,8 @@ struct MobileCodeImpl : CodeImpl {
       if (op.hasOperation() && is_vararg) {
         emitLoadInputs(node->inputs());
         int operation_index = add_to_operator_table(
-            op.getOperation(node),
+            op,
+            node,
             unique_op_name,
             num_inputs,
             /* is_vararg */ true);
@@ -852,7 +863,7 @@ struct MobileCodeImpl : CodeImpl {
           emitLoadInputs(node->inputs(), num_include);
         }
         int operation_index = add_to_operator_table(
-            op.getOperation(node), unique_op_name, num_inputs, is_vararg);
+            op, node, unique_op_name, num_inputs, is_vararg);
         insertInstruction(OP, operation_index);
       }
     }

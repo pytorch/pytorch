@@ -258,6 +258,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     };
 #endif
 
+#if !defined(NDEBUG)
+#define CHECK_STACK_SIZE(fn, X, stack)                                                \
+    size_t expected_returns = fn->full_operator_table_[X].schema().returns().size();  \
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(stack.size() == expected_returns,                \
+                          "Expected ",                                                \
+                          expected_returns,                                           \
+                          " outputs from op but found ",                              \
+                          stack.size(),                                               \
+                          " values on the stack");
+#endif
+
     try {
       while (true) {
         Frame& frame = frames.back();
@@ -285,12 +296,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           case INST(OP): {
             INST_GUARD;
             frame.function->operator_table_[inst.X](stack);
+            CHECK_STACK_SIZE(frame.function, inst.X, stack);
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
             frame.function->operator_table_[inst.X](stack);
+            CHECK_STACK_SIZE(frame.function, inst.X, stack);
           }
             INST_NEXT;
           case INST(LOAD): {
