@@ -56,7 +56,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
-    const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
+    const scalar_t* btm_data = bottom_data + static_cast<ptrdiff_t>(n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
@@ -191,7 +191,7 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
             }
           }
         }
-        bottom_diff[(n*channels+c)*height*width+index] = static_cast<scalar_t>(gradient);
+        bottom_diff[static_cast<ptrdiff_t>(n*channels+c)*height*width+index] = static_cast<scalar_t>(gradient);
       }
     }
   }
