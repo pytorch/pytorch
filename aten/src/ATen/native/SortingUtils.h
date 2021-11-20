@@ -4,6 +4,8 @@
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 
+#include <ATen/ops/empty.h>
+
 namespace at {
 namespace native {
 

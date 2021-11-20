@@ -35,6 +35,7 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function)
 import tools.codegen.dest as dest
 from tools.codegen.gen_functionalization_type import (
+    needs_functionalization,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration
@@ -966,47 +967,17 @@ def gen_headers(
         functions_keys: Set[DispatchKey],
         rocm: bool,
 ) -> None:
-    for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-        if dispatch_key in functions_keys:
-            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
-                # See Note [Avoiding Include Cycles In Static Dispatch]
-                inl_headers = ''
-            else:
-                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
-
-            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
-                'dispatch_key': str(dispatch_key),
-                'inline_headers_for_nonstatic_build': inl_headers,
-            })
-            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
-                'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_namespaced_declarations': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
-                        Target.NAMESPACED_DECLARATION,
-                        selector,
-                        rocm=rocm,
-                        cpp_namespace='at::native',
-                        class_method_name=None),
-                    grouped_native_functions
-                )),
-            })
-
-        del fm
-
-    functions_by_base_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
+    functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
     for fn in native_functions:
-        functions_by_base_name[fn.func.name.name.base].append(fn)
+        functions_by_root_name[fn.root_name].append(fn)
 
-    grouped_functions_by_base_name: Dict[str, List[Union[NativeFunction, NativeFunctionsGroup]]] = defaultdict(lambda: [])
+    grouped_functions_by_root_name: Dict[str, List[Union[NativeFunction, NativeFunctionsGroup]]] = defaultdict(lambda: [])
     for group in grouped_native_functions:
-        fn = group.functional if isinstance(group, NativeFunctionsGroup) else group
-        name = fn.func.name.name.base
-        grouped_functions_by_base_name[name].append(group)
+        name = group.root_name
+        grouped_functions_by_root_name[name].append(group)
 
     static_dispatch_headers = static_dispatch_extra_headers(static_dispatch_idx)
-    for name, functions in functions_by_base_name.items():
+    for name, functions in functions_by_root_name.items():
         ops_fm.write_with_template(
             f'{name}_ops.h', 'Operator.h', lambda: {
                 'declarations': list(mapMaybe(ComputeOperators(
@@ -1021,7 +992,7 @@ def gen_headers(
                     static_dispatch_backend_index=static_dispatch_idx), functions)),
             })
 
-        grouped_functions = grouped_functions_by_base_name.get(name, [])
+        grouped_functions = grouped_functions_by_root_name.get(name, [])
         structured_functions = [fn for fn in grouped_functions
                                 if isinstance(fn, NativeFunctionsGroup) and fn.structured]
         is_structured = len(structured_functions) > 0
@@ -1057,14 +1028,64 @@ def gen_headers(
         cpu_fm.write(f'{category}.h', lambda: {
             f'{category}_includes': [
                 f'#include <ATen/ops/{name}{suffix}.h>'
-                for name in sorted(functions_by_base_name.keys())
+                for name in sorted(functions_by_root_name.keys())
             ],
         })
+
+    for dispatch_key in dispatch_keys:
+        if dispatch_key not in functions_keys:
+            continue
+
+        dispatch_namespace = dispatch_key.lower()
+        dispatch_names = []
+
+        for name, functions in functions_by_root_name.items():
+            grouped_functions = grouped_functions_by_root_name.get(name, [])
+            declarations = list(concatMap(
+                dest.RegisterDispatchKey(
+                    backend_indices[dispatch_key],
+                    Target.NAMESPACED_DECLARATION,
+                    selector,
+                    rocm=rocm,
+                    cpp_namespace='at::native',
+                    class_method_name=None),
+                grouped_functions
+            ))
+
+            if len(declarations) == 0:
+                continue
+
+            dispatch_names.append(name)
+            ops_fm.write_with_template(
+                f'{name}_{dispatch_namespace}_dispatch.h',
+                'DispatchKeyFunction.h', lambda: {
+                    'dispatch_namespace': dispatch_namespace,
+                    'dispatch_namespaced_declarations': declarations,
+            })
+
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+            # See Note [Avoiding Include Cycles In Static Dispatch]
+            inl_headers = ''
+        else:
+            inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
+        fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+            'dispatch_key': str(dispatch_key),
+            'inline_headers_for_nonstatic_build': inl_headers,
+        })
+        fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+            f'DispatchKeyFunctions_inl_includes': [
+                f'#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>'
+                for name in sorted(dispatch_names)
+            ],
+        })
+        del fm
 
     core_fm.write('TensorBody.h', lambda: {
         'operator_includes': [
             f'#include <ATen/ops/{name}_ops.h>'
-            for name, functions in functions_by_base_name.items()
+            for name, functions in functions_by_root_name.items()
             if any(Variant.method in fn.variants for fn in functions)
         ],
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
@@ -1116,16 +1137,31 @@ def gen_source_files(
     for dispatch_key in dispatch_keys:
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
+        backend_index = backend_indices[dispatch_key]
+        dispatch_namespace = str(dispatch_key).lower()
         fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
             'extra_cuda_headers': extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else '',
             'external_backend_headers': '',
-            'namespaced_headers': f'#include <ATen/{dispatch_key}Functions.h>' if dispatch_key in functions_keys else '',
+            'dispatch_headers': dest.gen_registration_headers(backend_index),
+            'ops_headers': list(set(
+                (f"""
+#include <ATen/ops/{fn.root_name}_native.h>
+""" if dispatch_key != DispatchKey.CompositeExplicitAutograd else f"""\
+#include <ATen/ops/{fn.root_name}.h>
+#include <ATen/ops/{fn.root_name}_native.h>
+""") + (f"""\
+#include <ATen/ops/{fn.root_name}_{dispatch_namespace}_dispatch.h>
+""" if dispatch_key in functions_keys else "")
+                for fn in native_functions if backend_index.has_kernel(fn) or (
+                        fn.structured and dispatch_key in
+                        (DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd))
+            )),
             'DispatchKey': dispatch_key,
             'dispatch_namespace': dispatch_key.lower(),
-            'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
+            'dispatch_helpers': dest.gen_registration_helpers(backend_index),
             'dispatch_namespaced_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
-                    backend_indices[dispatch_key],
+                    backend_index,
                     Target.NAMESPACED_DEFINITION,
                     selector,
                     rocm=rocm,
@@ -1135,7 +1171,7 @@ def gen_source_files(
             )),
             'dispatch_anonymous_definitions': list(concatMap(
                 dest.RegisterDispatchKey(
-                    backend_indices[dispatch_key],
+                    backend_index,
                     Target.ANONYMOUS_DEFINITION,
                     selector,
                     rocm=rocm,
@@ -1145,7 +1181,7 @@ def gen_source_files(
             )),
             'dispatch_registrations': list(concatMap(
                 dest.RegisterDispatchKey(
-                    backend_indices[dispatch_key],
+                    backend_index,
                     Target.REGISTRATION,
                     selector,
                     rocm=rocm,
@@ -1170,22 +1206,15 @@ def gen_source_files(
         'schema_registrations': list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
     })
 
-    def key_func(fn: NativeFunction) -> str:
-        return fn.func.name.name.base
-
-    def key_func_grouped(g: Union[NativeFunction, NativeFunctionsGroup]) -> str:
-        if isinstance(g, NativeFunction):
-            f = g
-        else:
-            f = g.functional
-        return key_func(f)
+    def key_func(fn: Union[NativeFunction, NativeFunctionsGroup]) -> str:
+        return fn.root_name
 
     cpu_fm.write_sharded(
         'Operators.cpp',
         native_functions,
         key_fn=key_func,
         env_callable=lambda fn: {
-            'operator_headers': [f'#include <ATen/ops/{fn.func.name.name.base}.h>'],
+            'operator_headers': [f'#include <ATen/ops/{fn.root_name}.h>'],
             'definitions': [ComputeOperators(Target.DEFINITION)(fn)]},
         num_shards=5,
         sharded_keys={'operator_headers', 'definitions'}
@@ -1211,20 +1240,35 @@ def gen_source_files(
         for k, v in d.items()
     }
 
+
+    def functionalization_env_callable(
+            g: Union[NativeFunction, NativeFunctionsGroup]
+    ) -> Dict[str, List[str]]:
+        functions = [g] if isinstance(g, NativeFunction) else list(g.functions())
+        functions_needing_functionalization = [
+            fn for fn in functions if needs_functionalization(selector, fn)]
+        return {
+            'ops_headers': [f"""
+#include <ATen/ops/{functions[0].root_name}_native.h>
+#include <ATen/ops/{functions[0].root_name}_ops.h>"""]
+                           if functions_needing_functionalization else [],
+            'func_definitions': list(mapMaybe(
+                lambda f: gen_functionalization_definition(selector, f, to_functional_op[f.func.name]),
+                functions_needing_functionalization)),
+            'func_registrations': list(mapMaybe(
+                lambda f: gen_functionalization_registration(
+                    selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
+                functions_needing_functionalization)),
+        }
+
+
     cpu_fm.write_sharded(
         'RegisterFunctionalization.cpp',
         grouped_native_functions,
-        key_fn=key_func_grouped,
-        env_callable=lambda g: {
-            'func_definitions': list(mapMaybe(lambda f: gen_functionalization_definition(
-                selector, f, to_functional_op[f.func.name]),
-                [g] if isinstance(g, NativeFunction) else g.functions())),
-            'func_registrations': list(mapMaybe(lambda f: gen_functionalization_registration(
-                selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
-                [g] if isinstance(g, NativeFunction) else g.functions()))
-        },
+        key_fn=key_func,
+        env_callable=functionalization_env_callable,
         num_shards=4,
-        sharded_keys={'func_definitions', 'func_registrations'}
+        sharded_keys={'ops_headers', 'func_definitions', 'func_registrations'}
     )
 
 
@@ -1327,6 +1371,7 @@ def main() -> None:
     cpu_fm = make_file_manager(options.install_dir)
     cuda_fm = make_file_manager(options.install_dir)
     ops_fm = make_file_manager(ops_install_dir)
+    ops_cuda_fm = make_file_manager(ops_install_dir)
 
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>

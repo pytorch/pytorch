@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
@@ -14,6 +15,10 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/zeros.h>
+
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAStream.h>

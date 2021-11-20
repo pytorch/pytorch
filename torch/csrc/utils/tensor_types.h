@@ -1,6 +1,7 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/DeprecatedTypeProperties.h>
+#include <c10/core/TensorOptions.h>
 #include <utility>
 #include <vector>
 

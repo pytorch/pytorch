@@ -2,7 +2,7 @@
 
 #include <string>
 #include <unordered_map>
-#include <ATen/ATen.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 
 namespace torch { namespace autograd {

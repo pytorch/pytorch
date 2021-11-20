@@ -9,7 +9,6 @@
 #include <sstream>
 #include <forward_list>
 #include <tuple>
-#include <ATen/ATen.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32

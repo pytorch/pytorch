@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 
 #include <ATen/native/quantized/cpu/packed_params.h>
@@ -8,6 +9,10 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
+
+#include <ATen/ops/quantize_per_tensor.h>
+#include <ATen/ops/zeros.h>
+
 #include <stack>
 
 using ::c10::Dispatcher;

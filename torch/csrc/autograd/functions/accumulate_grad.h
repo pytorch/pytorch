@@ -5,6 +5,9 @@
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <ATen/BatchedTensorImpl.h>
+#include <ATen/TensorOperators.h>
+
+#include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 
 #include <mutex>
 

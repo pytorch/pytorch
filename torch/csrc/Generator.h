@@ -1,7 +1,7 @@
 #pragma once
 
 #include <torch/csrc/python_headers.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Generator.h>
 
 #include <torch/csrc/THP_export.h>
 
