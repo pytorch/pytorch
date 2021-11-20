@@ -548,6 +548,20 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         qconfig = torch.quantization.default_qconfig
         self._test_auto_tracing(model_fp32, qconfig, (torch.randn(1, 1, 2, 2),))
 
+    def test_add_int32(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        model_fp32 = M().eval()
+        qconfig = torch.quantization.default_qconfig
+        self._test_auto_tracing(
+            model_fp32, qconfig, (torch.ones(1, 1, 2, 2, dtype=torch.int32),),
+            # FX graph mode quantization does not automatically detect
+            # tensor inputs in non-float dtypes.
+            do_fx_comparison=False)
+
     def test_module_then_add(self):
         class M(torch.nn.Module):
             def __init__(self):
