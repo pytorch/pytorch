@@ -39,7 +39,7 @@ bool usedOnlyInDtype(Value* v) {
     return false;
   }
   return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-    return u.user->matches("prim::dtype(Tensor a) -> int");
+    return u.user->matches("prim::dtype(Tensor a) -> ScalarType");
   });
 }
 
@@ -77,6 +77,11 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     // int
     val = IValue(
         static_cast<int>(profile_ivalue->i(Symbol::attr("profiled_int"))));
+  } else if (profile_ivalue->hasAttribute(
+                 Symbol::attr("profiled_scalar_type"))) {
+    // ScalarType
+    val = IValue(profile_ivalue->ival(Symbol::attr("profiled_scalar_type"))
+                     .toScalarType());
   } else {
     GRAPH_DEBUG("profile_ivalue: ", *profile_ivalue);
     TORCH_WARN(
@@ -798,14 +803,14 @@ struct CudaGraphFuser {
   bool usedInDtype(Value* v) {
     const auto& uses = v->uses();
     return std::any_of(uses.begin(), uses.end(), [](const Use& u) {
-      return u.user->matches("prim::dtype(Tensor a) -> int");
+      return u.user->matches("prim::dtype(Tensor a) -> ScalarType");
     });
   }
 
   bool usedOnlyInDtypeAndSize(Value* v) {
     const auto& uses = v->uses();
     return std::all_of(uses.begin(), uses.end(), [](const Use& u) {
-      return u.user->matches("prim::dtype(Tensor a) -> int") ||
+      return u.user->matches("prim::dtype(Tensor a) -> ScalarType") ||
           u.user->matches("aten::size(Tensor self) -> int[]");
     });
   }
@@ -1017,7 +1022,7 @@ struct CudaGraphFuser {
           if (u.user->matches("aten::size(Tensor self) -> int[]")) {
             u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
             u.user->destroy();
-          } else if (u.user->matches("prim::dtype(Tensor a) -> int")) {
+          } else if (u.user->matches("prim::dtype(Tensor a) -> ScalarType")) {
             continue;
           } else {
             AT_ASSERT(
@@ -1564,7 +1569,8 @@ void alterBatchNormImplIndex(Node* node) {
     // std::vector<int64_t> sizes; // empty tensor with no size;
     auto const_size_0 = node->owningGraph()->insertConstant(IValue(sizes));
     const_size_0->node()->moveBefore(node);
-    auto const_0 = node->owningGraph()->insertConstant(IValue(0));
+    auto const_0 =
+        node->owningGraph()->insertConstant(IValue(c10::ScalarType::Byte));
     const_0->node()->moveBefore(node);
     auto none_val = node->owningGraph()->insertConstant(IValue());
     none_val->node()->moveBefore(node);
@@ -1622,7 +1628,8 @@ void alterBatchNormImplIndexBackward(Node* node) {
     // std::vector<int64_t> sizes{}; // empty tensor with no size;
     auto const_size_0 = node->owningGraph()->insertConstant(IValue(sizes));
     const_size_0->node()->moveBefore(node);
-    auto const_0 = node->owningGraph()->insertConstant(IValue(6));
+    auto const_0 =
+        node->owningGraph()->insertConstant(IValue(c10::ScalarType::Float));
     const_0->node()->moveBefore(node);
     auto none_val = node->owningGraph()->insertConstant(IValue());
     none_val->node()->moveBefore(node);
@@ -1723,7 +1730,7 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
             "ScalarType should be static for Tensors in fusion for amp optimization");
         auto type_const =
             fusion_block->owningGraph()->insertConstant(IValue(scalar_type));
-        type_const->setType(IntType::get());
+        // type_const->setType(IntType::get());
         type_const->node()->moveBefore(fusion_block->return_node());
         fusion_block->replaceOutput(i, type_const);
 
@@ -1737,7 +1744,7 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
         auto tensor_output = fallback_block->outputs()[i];
         auto dtype_node = fallback_block->owningGraph()->create(
             prim::dtype, tensor_output, 1);
-        dtype_node->output()->setType(IntType::get());
+        dtype_node->output()->setType(ScalarTypeType::get());
         fallback_block->appendNode(dtype_node);
         fallback_block->replaceOutput(i, dtype_node->output());
       }
@@ -1745,11 +1752,11 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
       // we just shot-cut the `dtype` node since we are already outputing dtype
       auto uses = output->uses();
       for (Use u : uses) {
-        AT_ASSERT(u.user->matches("prim::dtype(Tensor a) -> int"));
+        AT_ASSERT(u.user->matches("prim::dtype(Tensor a) -> ScalarType"));
         u.user->output()->replaceAllUsesWith(output);
         u.user->destroy();
       }
-      output->setType(IntType::get());
+      output->setType(ScalarTypeType::get());
     }
   }
 

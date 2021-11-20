@@ -47,6 +47,63 @@ builtin_cast_method_to_scalar_type() {
   return mapping;
 }
 
+static const std::unordered_map<std::string, at::ScalarType>&
+builtin_torch_member_to_scalar_type() {
+  static std::unordered_map<std::string, at::ScalarType> mapping = {
+      {"bfloat16", c10::ScalarType::BFloat16},
+      {"bool", c10::ScalarType::Bool},
+      {"cdouble", c10::ScalarType::ComplexDouble},
+      {"cfloat", c10::ScalarType::ComplexFloat},
+      {"complex128", c10::ScalarType::ComplexDouble},
+      {"complex32", c10::ScalarType::ComplexHalf},
+      {"complex64", c10::ScalarType::ComplexFloat},
+      {"double", c10::ScalarType::Double},
+      {"float", c10::ScalarType::Float},
+      {"float16", c10::ScalarType::Half},
+      {"float32", c10::ScalarType::Float},
+      {"float64", c10::ScalarType::Double},
+      {"half", c10::ScalarType::Half},
+      {"int", c10::ScalarType::Int},
+      {"int16", c10::ScalarType::Short},
+      {"int32", c10::ScalarType::Int},
+      {"int64", c10::ScalarType::Long},
+      {"int8", c10::ScalarType::Char},
+      {"long", c10::ScalarType::Long},
+      {"qint32", c10::ScalarType::QInt32},
+      {"qint8", c10::ScalarType::QInt8},
+      {"quint2x4", c10::ScalarType::QUInt2x4},
+      {"quint4x2", c10::ScalarType::QUInt4x2},
+      {"quint8", c10::ScalarType::QUInt8},
+      {"short", c10::ScalarType::Short},
+      {"uint8", c10::ScalarType::Byte}};
+  return mapping;
+}
+
+std::shared_ptr<SugaredValue> BuiltinModule::attr(
+    const SourceRange& loc,
+    GraphFunction& m,
+    const std::string& field) {
+  if (field == "autograd") {
+    // When refering torch.autograd, it is also considered to be a
+    // BuiltinModule and we will dispatch to the aten operators for the
+    // methods under its module.
+    return std::make_shared<BuiltinModule>("aten", version);
+  }
+  if (builtin_torch_member_to_scalar_type().count(field)) {
+    auto output = m.graph()->insertConstant(
+        IValue(builtin_torch_member_to_scalar_type().at(field)), loc);
+    return std::make_shared<SimpleValue>(output);
+  }
+  auto sym = Symbol::fromQualString(name + "::" + field);
+  if (version.has_value()) {
+    // Possibly replaces symbol with another that implements its
+    // historic behavior.
+    // See note [Versioned Symbols]
+    sym = get_symbol_for_version(sym, *version);
+  }
+  return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
+}
+
 std::shared_ptr<SugaredValue> BuiltinFunction::call(
     const SourceRange& loc,
     GraphFunction& m,

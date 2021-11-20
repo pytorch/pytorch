@@ -191,11 +191,11 @@ struct SchemaParser {
         auto tok = L.next();
         auto text = tok.text();
         if ("float" == text) {
-          return static_cast<int64_t>(at::kFloat);
+          return at::kFloat;
         } else if ("complex" == text) {
-          return static_cast<int64_t>(at::kComplexFloat);
+          return at::kComplexFloat;
         } else if ("long" == text) {
-          return static_cast<int64_t>(at::kLong);
+          return at::kLong;
         } else if ("strided" == text) {
           return static_cast<int64_t>(at::kStrided);
         } else if ("Mean" == text) {

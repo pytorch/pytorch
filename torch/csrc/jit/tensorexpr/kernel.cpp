@@ -344,6 +344,8 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
       return val.toIntVector();
     } else if (val.isDoubleList()) {
       return val.toDoubleVector();
+    } else if (val.isScalarType()) {
+      return val.toScalarType();
     } else {
       throw unsupported_dtype(val.type()->str());
     }

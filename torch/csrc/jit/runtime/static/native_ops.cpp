@@ -368,7 +368,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::to, aten_to, [](Node* n) -> SROperator {
     };
   }
   if (n->matches(torch::schema(
-          "aten::to.prim_dtype(Tensor(a) self, int? dtype, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"))) {
+          "aten::to.prim_dtype(Tensor(a) self, ScalarType? dtype, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"))) {
     return [](ProcessedNode* p_node) {
       const auto& in0_t = p_node->Input(0).toTensor();
       const auto in1_i = p_node->Input(1).toOptional<at::ScalarType>();

@@ -12,7 +12,8 @@ from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
-    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
+    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, \
+    NumberType, ScalarTypeType
 
 
 from textwrap import dedent
@@ -370,7 +371,7 @@ def try_ann_to_type(ann, loc):
     if ann is torch.Stream:
         return StreamObjType.get()
     if ann is torch.dtype:
-        return IntType.get()  # dtype not yet bound in as its own type
+        return ScalarTypeType.get()
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if _get_script_class(ann) is None:
             scripted_class = torch.jit._script._recursive_compile_class(ann, loc)

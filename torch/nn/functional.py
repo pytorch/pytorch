@@ -7,13 +7,7 @@ import torch
 from torch import _VF
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
-# A workaround to support both TorchScript and MyPy:
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from torch.types import _dtype as DType
-else:
-    # The JIT doesn't understand Union, nor torch.dtype here
-    DType = int
+from torch.types import _dtype as DType
 
 from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
 from ..overrides import (

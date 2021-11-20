@@ -153,7 +153,7 @@ class OperandValueSourceType(object):
 # AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS.
 # TODO: Expose these directly to Python to avoid maintaining this list.
 class TorchScalarTypes(enum.Enum):
-    QUINT8 = 13
+    QUINT8 = torch.quint8
 
 
 def approx_equal(lhs, rhs, tolerance=1e-6):
@@ -1175,7 +1175,7 @@ class _NnapiSerializer(object):
                 "Try setting `t.nnapi_nhwc = True` on your tensor inputs.  ")
         _, scale = self.get_constant_value(node.inputsAt(1), "FloatType")
         _, zero_point = self.get_constant_value(node.inputsAt(2), "IntType")
-        _, scalar_type = self.get_constant_value(node.inputsAt(3), "IntType")
+        _, scalar_type = self.get_constant_value(node.inputsAt(3), "ScalarTypeType")
         if scalar_type != TorchScalarTypes.QUINT8.value:
             raise Exception(
                 "PyTorch NNAPI export only supports quantized tensors "

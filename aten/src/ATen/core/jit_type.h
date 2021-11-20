@@ -850,12 +850,13 @@ struct TORCH_API DictType : public Type {
       case TypeKind::StringType:
       case TypeKind::TensorType:
       case TypeKind::DeviceObjType:
+      case TypeKind::ScalarTypeType:
         return DictTypePtr(new DictType(std::move(key), std::move(value)));
       default:
         AT_ERROR(
             "Cannot create dict for key type '",
             key->str(),
-            "', only int, float, complex, Tensor, device and string keys are supported");
+            "', only int, float, complex, Tensor, device, dtype and string keys are supported");
     }
   }
 
@@ -1585,6 +1586,34 @@ private:
   : Type(TypeKind::PyObjectType) {}
 };
 
+template <TypeKind K>
+struct EnumerationType : public Type {
+  static const TypeKind Kind = K;
+
+  bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+
+ protected:
+  EnumerationType() : Type(Kind) {}
+};
+
+struct ScalarTypeType;
+using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
+// This type represents a ScalarType aka torch.dtype object
+struct TORCH_API ScalarTypeType
+    : public EnumerationType<TypeKind::ScalarTypeType> {
+  std::string str() const override {
+    return "ScalarType";
+  }
+  static const TypeKind Kind = TypeKind::ScalarTypeType;
+  // global singleton
+  static const ScalarTypeTypePtr& get();
+
+ private:
+  ScalarTypeType() : EnumerationType() {}
+};
+
 enum class TypeVerbosity {
   None,
   Type,
@@ -1750,15 +1779,15 @@ struct getTypePtr_<int64_t> final {
   }
 };
 template <>
-struct getTypePtr_<c10::ScalarType> final {
-  static decltype(auto) call() {
-    return IntType::get();
-  }
-};
-template <>
 struct getTypePtr_<c10::Device> final {
   static decltype(auto) call() {
     return DeviceObjType::get();
+  }
+};
+template <>
+struct getTypePtr_<c10::ScalarType> final {
+  static decltype(auto) call() {
+    return ScalarTypeType::get();
   }
 };
 template <>
@@ -2434,18 +2463,6 @@ struct TORCH_API InterfaceType : public NamedType {
   bool is_module_;
 };
 
-template <TypeKind K>
-struct EnumerationType : public Type {
-static const TypeKind Kind = K;
-
-bool operator==(const Type& rhs) const override {
-  return rhs.kind() == kind();
-}
-
-protected:
-EnumerationType() : Type(Kind) {}
-};
-
 struct LayoutType;
 using LayoutTypePtr = std::shared_ptr<LayoutType>;
 // This type represents a Generator
@@ -2459,21 +2476,6 @@ static const LayoutTypePtr& get();
 
 private:
 LayoutType() : EnumerationType() {}
-};
-
-struct ScalarTypeType;
-using ScalarTypeTypePtr = std::shared_ptr<ScalarTypeType>;
-// This type represents a Generator
-struct TORCH_API ScalarTypeType : public EnumerationType<TypeKind::ScalarTypeType> {
-std::string str() const override {
-return "ScalarType";
-}
-static const TypeKind Kind = TypeKind::ScalarTypeType;
-// global singleton
-static const ScalarTypeTypePtr& get();
-
-private:
-ScalarTypeType() : EnumerationType() {}
 };
 
 // the common supertype of all lists,

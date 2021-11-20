@@ -18,7 +18,7 @@ bool insertableTensor(const at::Tensor& ten) {
 bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isInt() || ivalue.isNone() || ivalue.isBool() ||
       ivalue.isDouble() || ivalue.isComplexDouble() || ivalue.isString() ||
-      ivalue.isDevice() || ivalue.isEnum()) {
+      ivalue.isDevice() || ivalue.isEnum() || ivalue.isScalarType()) {
     return true;
   }
   if (ivalue.isTensor()) {
@@ -109,6 +109,9 @@ c10::optional<Value*> tryInsertConstant(
     ss << val.toDevice();
     n->s_(attr::value, ss.str());
     n->output()->setType(DeviceObjType::get());
+  } else if (val.isScalarType()) {
+    n->ival_(attr::value, val);
+    n->output()->setType(ScalarTypeType::get());
   } else if (val.isStream()) {
     auto stream = val.toStream();
     n->i_(attr::value, stream.pack());
@@ -192,6 +195,9 @@ c10::optional<IValue> toIValue(const Value* v) {
     return s;
   } else if (type == DeviceObjType::get()) {
     auto d = c10::Device(node->s(attr::value));
+    return d;
+  } else if (type == ScalarTypeType::get()) {
+    auto d = node->ival(attr::value).toScalarType();
     return d;
   } else if (type == StreamObjType::get()) {
     auto s = c10::Stream::unpack(node->i(attr::value));

@@ -1101,7 +1101,7 @@ class TestTEFuser(JitTestCase):
 
         # test not fusing non-const inputs
         @torch.jit.script
-        def foo(x, dtype: int):
+        def foo(x, dtype: torch.dtype):
             return x.to(dtype)
 
         foo(torch.tensor([3.], dtype=torch.float), torch.int)
@@ -1110,7 +1110,7 @@ class TestTEFuser(JitTestCase):
 
         # test not fusing to_pinned inputs
         @torch.jit.script
-        def foo(x, dtype: int):
+        def foo(x, dtype: torch.dtype):
             return x.to(pin_memory=True)
 
         foo(torch.tensor([3.], dtype=torch.float), torch.int)

@@ -53,7 +53,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::ScalarTypeType:
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-        return static_cast<int64_t>(dtype->scalar_type);
+        return dtype->scalar_type;
       }
       if (THPQScheme_Check(obj.ptr())) {
         auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());
@@ -288,6 +288,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::NumberType: {
       if (THPDtype_Check(obj.ptr())) {
         auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
+        throw py::cast_error(c10::str("*****************DTYPEOHOH"));
         return static_cast<int64_t>(dtype->scalar_type);
       }
       if (THPQScheme_Check(obj.ptr())) {

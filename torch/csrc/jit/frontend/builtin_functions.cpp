@@ -72,7 +72,7 @@ def list_with_default(out_size: List[int], defaults: List[int]):
   return out_size
 def _assert(condition : bool, message : str):
   assert condition, message
-def type(self: Tensor, dtype: int, non_blocking: bool=False, copy: bool=False) -> Tensor:
+def type(self: Tensor, dtype: ScalarType, non_blocking: bool=False, copy: bool=False) -> Tensor:
   return self.to(dtype, non_blocking, copy)
 )SCRIPT";
 
@@ -153,7 +153,7 @@ def div__0_3(self: Tensor, other: number) -> Tensor:
 // NOTE: Torchscript does not currently support named tensors, although
 //   torch.full does have a named tensor variant
 auto full = R"SCRIPT(
-def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[int]=None,
+def full_0_4(size:List[int], fill_value:number, *, dtype:Optional[ScalarType]=None,
              layout:Optional[int]=None, device:Optional[Device]=None,
              pin_memory:Optional[bool]=None) -> Tensor:
   if dtype is None:

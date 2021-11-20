@@ -466,7 +466,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         device,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> int"),
+        TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> ScalarType"),
         dtype,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -642,6 +642,24 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::ne.bool(bool a, bool b) -> bool"),
+        [](Stack& stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, a != b);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::eq.ScalarType(ScalarType a, ScalarType b) -> bool"),
+        [](Stack& stack) {
+          auto a = pop(stack);
+          auto b = pop(stack);
+          push(stack, a == b);
+        },
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
+            "aten::ne.ScalarType(ScalarType a, ScalarType b) -> bool"),
         [](Stack& stack) {
           auto a = pop(stack);
           auto b = pop(stack);
@@ -902,6 +920,11 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
+            "aten::__contains__.dtype_list(ScalarType[] l, ScalarType item) -> bool"),
+        listContains<c10::ScalarType>,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA(
             "aten::__contains__.str_list(str[] l, str item) -> bool"),
         listContains<std::string>,
         aliasAnalysisFromSchema()),
@@ -1020,7 +1043,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
     // reference function parse_to_conversion in python_arg_parsing.h
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+            "aten::to.prim_Device(Tensor(a) self, Device? device, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
         [](Stack& stack) {
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool non_blocking;
@@ -1038,7 +1061,7 @@ static const OperatorGeneratorArgs opGenArgs[] = {
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+            "aten::to.prim_dtype(Tensor(a) self, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
         toPrimDType,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -1433,6 +1456,7 @@ void dictConstructFromList(Stack& stack) {
 static const OperatorGeneratorArgs dict_ops[] = {
     CREATE_DICT_OPS("str"),
     CREATE_DICT_OPS("int"),
+    CREATE_DICT_OPS("ScalarType"),
     CREATE_DICT_OPS("bool"),
     CREATE_DICT_OPS("float"),
     CREATE_DICT_OPS("complex"),

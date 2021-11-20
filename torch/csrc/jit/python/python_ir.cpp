@@ -891,6 +891,9 @@ void initPythonIRBindings(PyObject* module_) {
   py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
       m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
+  py::class_<ScalarTypeType, Type, std::shared_ptr<ScalarTypeType>>(
+      m, "ScalarTypeType")
+      .def_static("get", &ScalarTypeType::get);
   py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
       m, "StreamObjType")
       .def_static("get", &StreamObjType::get);

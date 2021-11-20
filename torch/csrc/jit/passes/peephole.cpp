@@ -240,12 +240,12 @@ struct PeepholeOptimizeImpl {
           changed = true;
         }
       } else if (
-          node->matches("prim::dtype(Tensor a) -> int") && shape_peepholes_) {
+          node->matches("prim::dtype(Tensor a) -> ScalarType") &&
+          shape_peepholes_) {
         auto ptt = node->input()->type()->expect<TensorType>();
         if (ptt->scalarType()) {
           WithInsertPoint guard(node);
-          auto output = node->owningGraph()->insertConstant(
-              static_cast<int64_t>(*ptt->scalarType()));
+          auto output = node->owningGraph()->insertConstant(*ptt->scalarType());
           GRAPH_UPDATE(
               "Replacing ",
               getHeader(node),

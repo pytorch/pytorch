@@ -47,7 +47,7 @@ const std::vector<std::string> functions = {
                 result = AD_unsqueeze_multiple(result, dim, n_dims)
             return grad * (self - result).exp()
 
-        def mean_0(self, *, dtype: Optional[int]):
+        def mean_0(self, *, dtype: Optional[ScalarType]):
             self_size = self.size()
             self_numel = self.numel()
             self_scalar_type = self.dtype
@@ -60,7 +60,7 @@ const std::vector<std::string> functions = {
                    dim: List[int],
                    keepdim: bool,
                    *,
-                   dtype: Optional[int]):
+                   dtype: Optional[ScalarType]):
             self_size = self.size()
             self_scalar_type = self.dtype
             def backward(grad_output):
@@ -489,8 +489,8 @@ const std::vector<std::string> functions = {
         def _autocast_to_reduced_precision(self,
                                           cuda_enabled : bool,
                                           cpu_enabled : bool,
-                                          cuda_dtype : int,
-                                          cpu_dtype : int):
+                                          cuda_dtype : ScalarType,
+                                          cpu_dtype : ScalarType):
             self_dtype = self.dtype
             def backward(grad_output):
                 return grad_output.to(self_dtype), None, None, None, None
@@ -752,7 +752,7 @@ const std::vector<std::string> functions = {
 
         def to_0(self,
                  device: Optional[Device],
-                 dtype: Optional[int],
+                 dtype: Optional[ScalarType],
                  non_blocking: bool,
                  copy: bool):
             self_device = self.device
@@ -769,7 +769,7 @@ const std::vector<std::string> functions = {
 
 
         def to_1(self,
-                 dtype: int,
+                 dtype: ScalarType,
                  non_blocking: bool,
                  copy: bool):
             self_dtype = self.dtype
@@ -1199,7 +1199,7 @@ const std::vector<std::string> functions = {
 
             return torch.embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse), backward
 
-        def log_softmax(self, dim: int, dtype: Optional[int]):
+        def log_softmax(self, dim: int, dtype: Optional[ScalarType]):
             result = torch.log_softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._log_softmax_backward_data(grad_output, result, dim, self.dtype)
@@ -1213,7 +1213,7 @@ const std::vector<std::string> functions = {
                 return torch.nll_loss_backward(grad, self, target, weight, reduction, ignore_index, total_weight), None, None, None, None
             return result, backward
 
-        def softmax(self, dim: int, dtype: Optional[int]):
+        def softmax(self, dim: int, dtype: Optional[ScalarType]):
             result = torch.softmax(self, dim, dtype)
             def backward(grad_output):
                 grad_self = torch._softmax_backward_data(grad_output, result, dim, self.dtype)

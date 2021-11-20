@@ -26,6 +26,7 @@ using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
+using c10::ScalarTypeType;
 using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
@@ -42,7 +43,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", GeneratorType::get()},
       {"Dimname", StringType::get()},
-      {"ScalarType", IntType::get()},
+      {"ScalarType", ScalarTypeType::get()},
       {"Layout", IntType::get()},
       {"MemoryFormat", IntType::get()},
       {"Storage", StorageType::get()},

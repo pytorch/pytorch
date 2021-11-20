@@ -132,6 +132,7 @@ struct Capsule {
   _(GenericDict)             \
   _(Future)                  \
   _(Device)                  \
+  _(ScalarType)              \
   _(Stream)                  \
   _(Object)                  \
   _(PyObject)                \
@@ -150,7 +151,7 @@ struct Capsule {
 /// IValue (Interpreter Value) is a tagged union over the types
 /// supported by the TorchScript interpreter. IValues contain their
 /// values as an `IValue::Payload`, which holds primitive types
-/// (`int64_t`, `bool`, `double`, `Device`) and `Tensor` as values,
+/// (`int64_t`, `bool`, `double`, `Device`, `DTxpe`) and `Tensor` as values,
 /// and all other types as a `c10::intrusive_ptr`. In order to
 /// optimize performance of the destructor and related operations by
 /// making the `Tensor` and `c10::intrusive_ptr` paths generate the
@@ -739,10 +740,22 @@ struct TORCH_API IValue final {
   bool isStream() const { return Tag::Stream == tag; }
 
   // ScalarType
-  IValue(ScalarType t)
-      : IValue(static_cast<std::underlying_type<ScalarType>::type>(t)) {}
-  at::ScalarType toScalarType() const {
-    return static_cast<at::ScalarType>(toInt());
+  IValue(c10::ScalarType d) : tag(Tag::ScalarType), is_intrusive_ptr(false) {
+    payload.u.as_dtype = d;
+  }
+  bool isScalarType() const {
+    return Tag::ScalarType == tag;
+  }
+  c10::ScalarType toScalarType() const {
+    AT_ASSERT(isScalarType());
+    return payload.u.as_dtype;
+  }
+  c10::ScalarType toScalarTypeLegacyCompat() const {
+    if (isInt()) {
+      return static_cast<at::ScalarType>(toInt());
+    }
+    AT_ASSERT(isScalarType());
+    return payload.u.as_dtype;
   }
 
   // Layout
@@ -1000,6 +1013,7 @@ struct TORCH_API IValue final {
         DeviceType type;
         DeviceIndex index;
       } as_device;
+      ScalarType as_dtype;
     } u;
     at::Tensor as_tensor;
     Payload() : u() {}

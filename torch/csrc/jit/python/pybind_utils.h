@@ -316,7 +316,7 @@ inline InferredType tryToInferType(py::handle input) {
   } else if (THPStream_Check(input.ptr())) {
     return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
-    return InferredType(IntType::get());
+    return InferredType(ScalarTypeType::get());
   } else if (THPQScheme_Check(input.ptr())) {
     return InferredType(IntType::get());
   } else if (THPLayout_Check(input.ptr())) {
@@ -797,6 +797,8 @@ inline py::object toPyObject(IValue ivalue) {
     return py::cast(c10::Capsule(ivalue.toCapsule()));
   } else if (ivalue.isFuture()) {
     return py::cast(std::make_shared<PythonFutureWrapper>(ivalue.toFuture()));
+  } else if (ivalue.isScalarType()) {
+    return py::cast(ivalue.toScalarType());
   } else if (ivalue.isEnum()) {
     auto enum_holder = ivalue.toEnumHolder();
     auto py_class = getScriptedClassOrError(enum_holder->type());

@@ -8,11 +8,12 @@
 #include <pybind11/stl.h>
 
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
-#include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/python_tuples.h>
-#include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/autograd/python_variable.h>
+#include <torch/csrc/utils/python_numbers.h>
+#include <torch/csrc/utils/python_tuples.h>
 
 #include <stdexcept>
 #include <utility>
@@ -154,6 +155,35 @@ struct type_caster<at::Device> {
   static handle
   cast(const at::Device& src, return_value_policy /* policy */, handle /* parent */) {
     return handle(THPDevice_New(src));
+  }
+};
+
+template <>
+struct type_caster<c10::ScalarType> {
+ public:
+  // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
+  PYBIND11_TYPE_CASTER(c10::ScalarType, _("c10::ScalarType"));
+
+  // PYBIND11_TYPE_CASTER defines a member field called value. Since at::Device
+  // cannot be default-initialized, we provide this constructor to explicitly
+  // initialize that field. The value doesn't matter as it will be overwritten
+  // after a successful call to load.
+  type_caster() : value(c10::ScalarType::Undefined) {}
+
+  bool load(handle src, bool) {
+    PyObject* obj = src.ptr();
+    if (THPDevice_Check(obj)) {
+      value = reinterpret_cast<THPDtype*>(obj)->scalar_type;
+      return true;
+    }
+    return false;
+  }
+
+  static handle cast(
+      const c10::ScalarType& src,
+      return_value_policy /* policy */,
+      handle /* parent */) {
+    return handle(reinterpret_cast<PyObject*>(torch::getTHPDtype(src)));
   }
 };
 

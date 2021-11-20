@@ -52,6 +52,7 @@ const auto& intListAttr = Symbol::attr("profiled_int_list");
 const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
 const auto& boolAttr = Symbol::attr("profiled_bool");
+const auto& scalarTypeAttr = Symbol::attr("profiled_scalar_type");
 
 typedef Val* CgValue;
 typedef Expr* CgOp;
@@ -1641,7 +1642,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::softmax.int(Tensor self, int dim, int? dtype) -> Tensor");
+          "aten::softmax.int(Tensor self, int dim, ScalarType? dtype) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -1712,7 +1713,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> (Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2178,6 +2179,13 @@ class IrParser {
       }
       value_map_.emplace(val->unique(), cg_val);
       return true;
+    } else if (val->type() == ScalarTypeType::get()) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+      CgValue cg_val;
+      auto ival = constant_as<IValue>(val);
+      cg_val = new Int(static_cast<int64_t>(ival.value().toScalarType()));
+      value_map_.emplace(val->unique(), cg_val);
+      return true;
     } else if (val->type()->isSubtypeOf(
                    static_cast<c10::TypePtr>(BoolType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -2453,6 +2461,35 @@ void profileInt(ProfilingRecord* pr, Node* node, size_t offset) {
   pn->setCallback(ivalue_profiler);
 }
 
+void profileScalarType(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+
+    TORCH_INTERNAL_ASSERT(
+        value.isScalarType(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(scalarTypeAttr)) {
+      pn->ival_(scalarTypeAttr, value.toScalarType());
+    } else {
+      auto profiled_val = pn->ival(scalarTypeAttr).toScalarType();
+      TORCH_INTERNAL_ASSERT(
+          value.toScalarType() == profiled_val,
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
+  pn->setCallback(ivalue_profiler);
+}
+
 void profileBoolList(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
@@ -2600,7 +2637,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto reduction_operator_schema =
       getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> (Tensor)")
           ->schema();
   if (node->matches(reduction_operator_schema)) {
     switch (offset) {
@@ -2737,7 +2774,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(to_dtype_schema)) {
     switch (offset) {
       case 1:
-        profileInt(pr, node, offset);
+        profileScalarType(pr, node, offset);
         return true;
       default:
         return false;
@@ -2751,7 +2788,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
   if (node->matches(softmax_backward_data_schema)) {
     switch (offset) {
       case 3:
-        profileInt(pr, node, offset);
+        profileScalarType(pr, node, offset);
         return true;
       default:
         return false;

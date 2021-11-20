@@ -1069,6 +1069,10 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
                     return g.op("Constant", value_t=value)
                 elif n.output().type().kind() == "DeviceObjType":
                     return None
+                elif n.output().type().kind() == "ScalarTypeType":
+                    from torch.onnx.symbolic_helper import scalar_type_to_pytorch_type
+                    value = scalar_type_to_pytorch_type.index(n["value"])
+                    return g.op("Constant", value_i=value)
                 else:
                     raise RuntimeError("Unsupported prim::Constant kind: `{}`. Send a bug report.".format(
                         n.kindOf("value")))

@@ -1085,7 +1085,7 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       return toSimple(g.insertConstant(v, loc));
     } else if (THPDtype_Check(obj.ptr())) {
       auto dtype = reinterpret_cast<THPDtype*>(obj.ptr());
-      const auto v = static_cast<int64_t>(dtype->scalar_type);
+      const auto v = dtype->scalar_type;
       return toSimple(g.insertConstant(v, loc));
     } else if (THPQScheme_Check(obj.ptr())) {
       auto qscheme = reinterpret_cast<THPQScheme*>(obj.ptr());

@@ -374,7 +374,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::expand_dims_copy(Tensor input, int[] dims) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
-      "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
+      "static_runtime::to_copy.prim_dtype(Tensor self, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::to_copy.dtype(Tensor self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor",
@@ -494,7 +494,7 @@ void ReplaceWithCopy(
   // for ops that have overloads, match the schema
   const std::vector<std::pair<c10::FunctionSchema, c10::Symbol>> supported_schema = {
       {torch::schema(
-           "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
+           "aten::to.prim_dtype(Tensor(a) self, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
        fromQualString("static_runtime::to_copy")},
       {torch::schema(
            "aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),

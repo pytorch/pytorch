@@ -310,23 +310,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
       GraphFunction& m,
-      const std::string& field) override {
-    if (field == "autograd") {
-      // When refering torch.autograd, it is also considered to be a
-      // BuiltinModule and we will dispatch to the aten operators for the
-      // methods under its module.
-      return std::make_shared<BuiltinModule>("aten", version);
-    }
-
-    auto sym = Symbol::fromQualString(name + "::" + field);
-    if (version.has_value()) {
-      // Possibly replaces symbol with another that implements its
-      // historic behavior.
-      // See note [Versioned Symbols]
-      sym = get_symbol_for_version(sym, *version);
-    }
-    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
-  }
+      const std::string& field) override;
 
  private:
   std::string name;

@@ -82,6 +82,56 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 } // namespace ivalue
 
+namespace {
+
+std::string toStringTorch(at::ScalarType scalarType) {
+  switch (scalarType) {
+    case at::ScalarType::Byte:
+      return "uint8";
+    case at::ScalarType::Char:
+      return "int8";
+    case at::ScalarType::Double:
+      return "float64";
+    case at::ScalarType::Float:
+      return "float32";
+    case at::ScalarType::Int:
+      return "int32";
+    case at::ScalarType::Long:
+      return "int64";
+    case at::ScalarType::Short:
+      return "int16";
+    case at::ScalarType::Half:
+      return "float16";
+    case at::ScalarType::ComplexHalf:
+      return "complex32";
+    case at::ScalarType::ComplexFloat:
+      return "complex64";
+    case at::ScalarType::ComplexDouble:
+      return "complex128";
+    case at::ScalarType::Bool:
+      return "bool";
+    case at::ScalarType::QInt8:
+      return "qint8";
+    case at::ScalarType::QUInt8:
+      return "quint8";
+    case at::ScalarType::QInt32:
+      return "qint32";
+    case at::ScalarType::BFloat16:
+      return "bfloat16";
+    case at::ScalarType::QUInt4x2:
+      return "quint4x2";
+    case at::ScalarType::QUInt2x4:
+      return "quint2x4";
+    default:
+      std::stringstream dtype_stream;
+      dtype_stream << "dtype(";
+      c10::printQuotedString(dtype_stream, toString(scalarType));
+      dtype_stream << ")";
+      return dtype_stream.str();
+  }
+}
+} // namespace
+
 TypePtr IValue::type() const {
   switch (tag) {
     case Tag::None:
@@ -114,6 +164,8 @@ TypePtr IValue::type() const {
       return RRefType::create(toRRef()->type());
     case Tag::Device:
       return DeviceObjType::get();
+    case Tag::ScalarType:
+      return ScalarTypeType::get();
     case Tag::Stream:
       return StreamObjType::get();
     case Tag::Object:
@@ -236,6 +288,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     }
     case Tag::Future:
     case Tag::Device:
+    case Tag::ScalarType:
     case Tag::Uninitialized:
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
@@ -315,6 +368,8 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isStream() && lhs.toStream() == rhs.toStream();
     case Tag::Device:
       return rhs.isDevice() && lhs.toDevice() == rhs.toDevice();
+    case Tag::ScalarType:
+      return rhs.isScalarType() && lhs.toScalarType() == rhs.toScalarType();
     case Tag::GenericList:
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
@@ -360,6 +415,8 @@ size_t IValue::hash(const IValue& v) {
       return c10::get_hash(*v.toTuple());
     case Tag::Device:
       return c10::get_hash(v.toDevice());
+    case Tag::ScalarType:
+      return c10::get_hash(v.toScalarType());
     case Tag::GenericDict:
     case Tag::GenericList:
     case Tag::Blob:
@@ -559,6 +616,9 @@ std::ostream& IValue::repr(
       c10::printQuotedString(out, device_stream.str());
       return out << ")";
     }
+    case IValue::Tag::ScalarType: {
+      return out << "torch." << toStringTorch(v.toScalarType());
+    }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {
@@ -748,6 +808,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "Uninitialized";
     case IValue::Tag::Device:
       return out << v.toDevice();
+    case IValue::Tag::ScalarType:
+      return out << "torch." << toStringTorch(v.toScalarType());
     case IValue::Tag::Stream:
       return out << v.toStream();
     case IValue::Tag::GenericDict:
@@ -846,6 +908,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Int:
     case IValue::Tag::Bool:
     case IValue::Tag::Device:
+    case IValue::Tag::ScalarType:
     case IValue::Tag::Uninitialized: {
       copy = *this;
     } break;

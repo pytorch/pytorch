@@ -7,12 +7,12 @@ from torch import Tensor
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
+from torch.types import _dtype as DType
+
 if TYPE_CHECKING:
-    from torch.types import _dtype as DType
     DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
 else:
-    # The JIT doesn't understand Union, nor torch.dtype here
-    DType = int
+    # The JIT doesn't understand Union
     DimOrDims = Optional[Tuple[int]]
 
 

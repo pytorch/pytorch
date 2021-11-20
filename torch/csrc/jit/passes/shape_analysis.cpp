@@ -1202,7 +1202,7 @@ class ShapePropagator {
     // Additionally:
     //   - First input should be the only tensor input
     static const register_formula_for reduce_ops_with_opt_dtype{
-        {"aten::mean(Tensor self, *, int? dtype) -> Tensor"},
+        {"aten::mean(Tensor self, *, ScalarType? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
           at::optional<IValue> maybe_dtype_option = node->get(attr::dtype);
           if (auto type = node->input(0)->type()->cast<TensorType>()) {
@@ -1226,8 +1226,8 @@ class ShapePropagator {
     static const register_formula_for
         all_reduce_ops_with_integer_upcast_and_dtype{
             {
-                "aten::sum(Tensor self, *, int? dtype) -> Tensor",
-                "aten::prod(Tensor self, *, int? dtype) -> Tensor",
+                "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor",
+                "aten::prod(Tensor self, *, ScalarType? dtype) -> Tensor",
             },
             [](Node* node) -> type_vec_t {
               if (auto type = node->input(0)->type()->cast<TensorType>()) {
@@ -1353,7 +1353,7 @@ class ShapePropagator {
     //   - has a bool keepdim argument
     static const register_formula_for dim_reduce_ops_with_integer_upcast{
         {
-            "aten::prod(Tensor self, int dim, bool keepdim, *, int? dtype) -> Tensor",
+            "aten::prod(Tensor self, int dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           auto maybe_keepdim = node->get<bool>(attr::keepdim);
@@ -1375,9 +1375,9 @@ class ShapePropagator {
     // Additionally:
     //   - First input should be the only tensor input
     static const register_formula_for dim_reduce_ops_dtype{
-        {"aten::cumprod(Tensor self, int dim, *, int? dtype) -> Tensor",
-         "aten::cumsum(Tensor self, int dim, *, int? dtype) -> Tensor",
-         "aten::log_softmax(Tensor self, int dim, int? dtype) -> Tensor"},
+        {"aten::cumprod(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
+         "aten::cumsum(Tensor self, int dim, *, ScalarType? dtype) -> Tensor",
+         "aten::log_softmax(Tensor self, int dim, ScalarType? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
@@ -1393,7 +1393,7 @@ class ShapePropagator {
     // Additionally:
     //   - has bool keepdim and int[] dim arguments
     static const register_formula_for register_softmax{
-        {"aten::softmax(Tensor self, int dim, int? dtype) -> Tensor"},
+        {"aten::softmax(Tensor self, int dim, ScalarType? dtype) -> Tensor"},
         [](Node* node) -> type_vec_t {
           at::optional<IValue> opt_dtype = node->get(attr::dtype);
           return reduce_op_handler(
@@ -1464,14 +1464,14 @@ class ShapePropagator {
     //   - has ScalarType dtype, Layeout layout and Device device arguments
     static const register_formula_for like_factories_with_options{
         {
-            "aten::empty_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::full_like(Tensor self, Scalar fill_value, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::ones_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::rand_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randint_like(Tensor self, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randint_like(Tensor self, int low, int high, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::randn_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
-            "aten::zeros_like(Tensor self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::empty_like(Tensor self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::full_like(Tensor self, Scalar fill_value, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::ones_like(Tensor self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::rand_like(Tensor self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int high, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randint_like(Tensor self, int low, int high, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::randn_like(Tensor self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
+            "aten::zeros_like(Tensor self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto type =
@@ -1494,14 +1494,14 @@ class ShapePropagator {
     //   arguments
     static const register_formula_for size_factories_with_options{
         {
-            "aten::empty(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
-            "aten::full(int[] size, Scalar fill_value, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::ones(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::rand(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::randn(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::zeros(int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::randint(int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
-            "aten::randint(int low, int high, int[] size, *, int? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::empty(int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory, MemoryFormat? memory_format=contiguous_format) -> Tensor",
+            "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::ones(int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::rand(int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randn(int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::zeros(int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randint(int high, int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
+            "aten::randint(int low, int high, int[] size, *, ScalarType? dtype, int? layout, Device? device, bool? pin_memory) -> Tensor",
         },
         [](Node* node) -> type_vec_t {
           if (auto maybe_size = node->get<c10::List<int64_t>>(attr::size)) {
@@ -1984,12 +1984,12 @@ class ShapePropagator {
           tp->withSizesStrides(sizes, tp->strides().concrete_sizes().value()));
       return true;
     } else if (node->matches(
-                   "aten::sum(Tensor self, *, int? dtype) -> Tensor")) {
+                   "aten::sum(Tensor self, *, ScalarType? dtype) -> Tensor")) {
       node->output()->setType(tensor_types.at(0)->withSizes({}));
       return true;
     } else if (
         node->matches(
-            "aten::sum(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
+            "aten::sum(Tensor self, int[] dim, bool keepdim, *, ScalarType? dtype) -> Tensor",
             /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes().concrete_sizes().value();

@@ -18,6 +18,29 @@ from typing import List, no_type_check, Optional, Union
 # circular dependency
 with torch._jit_internal._disable_emit_hooks():
     @torch.jit.script
+    def ___get_int_to_dtype_dict() -> dict[int, torch.dtype]:
+        return {
+            0: torch.uint8,
+            1: torch.int8,
+            2: torch.int16,
+            3: torch.int32,
+            4: torch.int64,
+            5: torch.float16,
+            6: torch.float32,
+            7: torch.float64,
+            8: torch.complex32,
+            9: torch.complex64,
+            10: torch.complex128,
+            11: torch.bool,
+            12: torch.qint8,
+            13: torch.quint8,
+            14: torch.qint32,
+            15: torch.bfloat16,
+            16: torch.quint4x2,
+            17: torch.quint2x4,
+        }
+
+    @torch.jit.script
     def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
         if (self.is_floating_point() or other.is_floating_point()):
             return self.true_divide(other)
@@ -56,9 +79,13 @@ with torch._jit_internal._disable_emit_hooks():
     def full_names_0_4(size: List[int], fill_value: Union[int, float], *,
                        dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
                        pin_memory: Optional[bool]) -> torch.Tensor:
+
+        proper_dtype: Optional[torch.dtype] = None
         if dtype is None:
             fill_value = float(fill_value)
-        return torch.full(size, fill_value, dtype=dtype, layout=layout,
+        else:
+            proper_dtype = ___get_int_to_dtype_dict()[dtype]
+        return torch.full(size, fill_value, dtype=proper_dtype, layout=layout,
                           device=device, pin_memory=pin_memory)
 
     @torch.jit.script
@@ -85,7 +112,7 @@ def collect_available_upgraders():
     # upgrader entries here and the list of upgraders
     # in the torch/csrc/operator_upgraders/version_map.h
 
-    entries = globals()
+    entries = {k: v for k, v in globals().items() if not k.startswith('___')}
     version_map = torch._C._get_operator_version_map()
 
     # 1. Check if everything in version_map.h is defined here
@@ -101,7 +128,7 @@ def collect_available_upgraders():
     for entry in entries:
         if isinstance(entries[entry], torch.jit.ScriptFunction):
             if entry not in available_upgraders_in_version_map:
-                raise AssertionError("The upgrader {} is not registered in the version_map.h")
+                raise AssertionError("The upgrader {} is not registered in the version_map.h".format(entry))
 
     return available_upgraders_in_version_map
 

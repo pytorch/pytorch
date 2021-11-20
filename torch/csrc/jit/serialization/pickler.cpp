@@ -122,6 +122,9 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
     push<PickleOpCode>(PickleOpCode::BUILD);
   } else if (ivalue.isDevice()) {
     pushDevice(ivalue);
+  } else if (ivalue.isScalarType()) {
+    auto st = ivalue.toScalarType();
+    pushInt(static_cast<int64_t>(st)); // TODO. better plan?
   } else if (ivalue.isCapsule()) {
     std::stringstream err;
     err << "Cannot serialize custom bound C++ class";

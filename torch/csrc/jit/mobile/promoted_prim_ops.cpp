@@ -50,7 +50,7 @@ void device(Stack& stack) {
 void dtype(Stack& stack) {
   at::Tensor a;
   pop(stack, a);
-  push(stack, static_cast<int64_t>(a.scalar_type()));
+  push(stack, a.scalar_type());
 }
 
 void toPrimDType(Stack& stack) {

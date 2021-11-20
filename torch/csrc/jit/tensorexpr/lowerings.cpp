@@ -1219,11 +1219,11 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_to(
-      {"aten::to.dtype(Tensor(a) self, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
-       "aten::to.dtype_layout(Tensor(a) self, *, int? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
-       "aten::to.device(Tensor(a) self, Device device, int dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
-       "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
-       "aten::to.prim_dtype(Tensor(a) self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"},
+      {"aten::to.dtype(Tensor(a) self, ScalarType dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+       "aten::to.dtype_layout(Tensor(a) self, *, ScalarType? dtype=None, int? layout=None, Device? device=None, bool? pin_memory=None, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+       "aten::to.device(Tensor(a) self, Device device, ScalarType dtype, bool non_blocking=False, bool copy=False, int? memory_format=None) -> (Tensor(a))",
+       "aten::to.prim_Device(Tensor(a) self, Device? device, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)",
+       "aten::to.prim_dtype(Tensor(a) self, ScalarType? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -1468,12 +1468,12 @@ int nnc_lowerings_lazy_registration() {
       {"aten::cat(Tensor[] tensors, int dim=0) -> (Tensor)"}, computeCat);
 
   RegisterNNCLoweringsFunction aten_sum(
-      {"aten::sum(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+      {"aten::sum(Tensor self, *, ScalarType? dtype=None) -> (Tensor)",
+       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> (Tensor)"},
       computeSum);
 
   RegisterNNCLoweringsFunction aten_softmax(
-      {"aten::softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
+      {"aten::softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -1482,7 +1482,7 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_log_softmax(
-      {"aten::log_softmax.int(Tensor self, int dim, int? dtype=None) -> (Tensor)"},
+      {"aten::log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -1502,8 +1502,8 @@ int nnc_lowerings_lazy_registration() {
       computeAddMM);
 
   RegisterNNCLoweringsFunction aten_mean(
-      {"aten::mean(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+      {"aten::mean(Tensor self, *, ScalarType? dtype=None) -> (Tensor)",
+       "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> (Tensor)"},
       computeMean);
   RegisterNNCLoweringsFunction aten_max_reduction(
       {"aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"},
@@ -1540,9 +1540,9 @@ int nnc_lowerings_lazy_registration() {
 #define NNC_QUANTIZATION_EXPR_DEQUANT 0
 
   RegisterNNCLoweringsFunction aten_quantize_per_tensor(
-      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, int dtype) -> (Tensor)",
-       "aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, int dtype) -> (Tensor)",
-       "aten::quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, int dtype) -> (Tensor[])"},
+      {"aten::quantize_per_tensor(Tensor self, float scale, int zero_point, ScalarType dtype) -> (Tensor)",
+       "aten::quantize_per_tensor.tensor_qparams(Tensor self, Tensor scale, Tensor zero_point, ScalarType dtype) -> (Tensor)",
+       "aten::quantize_per_tensor.tensors(Tensor[] tensors, Tensor scales, Tensor zero_points, ScalarType dtype) -> (Tensor[])"},
 #if NNC_QUANTIZATION_EXPR_QUANT == 1
       computeQuantizePerTensor
 #else

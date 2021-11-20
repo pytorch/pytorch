@@ -446,7 +446,9 @@ PickleOpCode Unpickler::readInstruction() {
           args.at(0).toStringRef() == "storage",
           "unknown PERSID key ",
           args.at(0).toStringRef());
-      at::ScalarType type = args.at(1).toScalarType();
+      at::ScalarType type =
+          args.at(1)
+              .toScalarTypeLegacyCompat(); // TODO: depend on some version?
       const std::string& key = args.at(2).toStringRef();
 
       at::Device device(args.at(3).toStringRef());

@@ -140,6 +140,9 @@ bool ivaluesEqual(const IValue& a1, const IValue& a2) {
   if (a1.isObject()) {
     return &a1.toObjectRef() == &a2.toObjectRef();
   }
+  if (a1.isScalarType()) {
+    return a1.toScalarType() == a2.toScalarType();
+  }
   TORCH_INTERNAL_ASSERT(false);
 }
 
