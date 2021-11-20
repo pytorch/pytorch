@@ -40,7 +40,7 @@ def _raise_obs_op_mismatch(func, prev_op):
 SeenOpInfo = collections.namedtuple(
     'SeenOpInfo',
     [
-        # string
+        # integer
         'idx',
         # Python type of the seen op. For modules, this is type(mod). For
         # functions, this is the target function.
