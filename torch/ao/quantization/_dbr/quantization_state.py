@@ -325,8 +325,10 @@ class AutoQuantizationState(torch.nn.Module):
         #   to
         # q.conv2d(input, packed_params, scale, zero_point)
         orig_op = op
-        op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
+        maybe_new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
             self.get_op_convert_info(op)
+        if maybe_new_op is not None:
+            op = maybe_new_op
         # print(op, arg_quant_infos, packed_param_name, additional_kwargs)
 
         # potentially quantize args, based on arg_quant_infos
@@ -423,7 +425,7 @@ class AutoQuantizationState(torch.nn.Module):
         op: Callable,
         unwrap_scale_zp: bool = False,
     ) -> Tuple[
-        Callable,
+        Optional[Callable],
         List[Optional[Tuple[float, int]]],
         List[bool],
         Optional[str],
@@ -433,9 +435,9 @@ class AutoQuantizationState(torch.nn.Module):
         Returns the information needed for convert time modifications to `op`.
         Has no side effects.  Return types:
 
-        `new_op`. Returns either the original callable unchanged,
-        or the corresponding quantized target. Note: always returns the original
-        callable for modules, because they are quantized with module swaps.
+        `maybe_new_op`. Returns `None` if the callable does not need quantization,
+        or the corresponding quantized target. Note: returns `None`
+        for modules, because they are quantized with module swaps.
 
         `arg_quant_infos`. Returns information needed to quantize each arg, if
         applicable.
@@ -447,7 +449,7 @@ class AutoQuantizationState(torch.nn.Module):
         seen_op_info = self._get_cur_seen_op_info()
 
         # calculate new op
-        new_op = get_quantized_op(op, seen_op_info)
+        maybe_new_op = get_quantized_op(seen_op_info)
 
         # calculate quant infos
         arg_quant_infos, arg_dequant_infos = \
@@ -473,7 +475,8 @@ class AutoQuantizationState(torch.nn.Module):
                 additional_kwargs.update(
                     {'scale': scale.item(), 'zero_point': zp.item()})  # type: ignore[dict-item]
 
-        return new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs
+        return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
+            packed_param_name, additional_kwargs
 
     def _get_packed_param_name(self, cur_op: Callable) -> Optional[str]:
         """
