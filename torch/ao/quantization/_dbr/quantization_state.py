@@ -69,6 +69,7 @@ class AutoQuantizationState(torch.nn.Module):
         # value: name of packed weight
         # note: this is filled out right before convert
         self.idx_to_packed_weight_name: Dict[str, str] = {}
+        self.tensor_id_to_scale_zp: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
 
         # Numeric Suite add_loggers functionality
         # if this flag is True, op outputs will be saved for debugging
@@ -128,9 +129,14 @@ class AutoQuantizationState(torch.nn.Module):
             s += "(idx_to_packed_weight_name): {\n"
             for k, v in self.idx_to_packed_weight_name.items():  # type: ignore[assignment]
                 s += f"  {k}: {v}\n"
-            s += "}"
+            s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}"
+            s += "(idx_to_packed_weight_name): {}\n"
+        if len(self.tensor_id_to_scale_zp):
+            s += "(tensor_id_to_scale_zp): {\n"
+            for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
+                s += f"  {k}: {v}\n"
+            s += "}"
         return s
 
     def _get_cur_seen_op_info(self):
@@ -464,20 +470,18 @@ class AutoQuantizationState(torch.nn.Module):
         # TODO: instead of always doing this if there is an observer,
         # calculate whether this is needed based on the op and dtypes
         additional_kwargs = {}
-        needs_scale_zp = converted_func_needs_scale_zp(op, seen_op_info)
+        needs_scale_zp = converted_func_needs_scale_zp(seen_op_info)
         if needs_scale_zp:
             seen_op_info = self._get_cur_seen_op_info()
             output_tensor_infos = seen_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
-            observer = self.tensor_id_to_observer[str(tensor_id)]
-
-            scale, zp = observer.calculate_qparams()
+            scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
             # TODO(future PR): remove this boolean flag
             if not unwrap_scale_zp:
                 additional_kwargs.update({'scale': scale, 'zero_point': zp})
             else:
                 additional_kwargs.update(
-                    {'scale': scale.item(), 'zero_point': zp.item()})
+                    {'scale': scale.item(), 'zero_point': zp.item()})  # type: ignore[dict-item]
 
         return new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs
 
@@ -531,11 +535,10 @@ class AutoQuantizationState(torch.nn.Module):
                 tensor_id = input_arg.id
                 if input_arg.inf_dtype != output_dtype:
                     if output_dtype == torch.quint8:
-                        assert str(tensor_id) in self.tensor_id_to_observer
-                        observer = self.tensor_id_to_observer[str(tensor_id)]
+                        assert str(tensor_id) in self.tensor_id_to_scale_zp
+                        scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
                         # TODO: return this to the caller
-                        scale, zp = observer.calculate_qparams()
-                        quant_infos.append((scale, zp,))
+                        quant_infos.append((scale, zp,))  # type: ignore[arg-type]
                         dequant_infos.append(False)
                     else:
                         quant_infos.append(None)
