@@ -549,7 +549,7 @@ class NativeFunctionsGroup:
             yield self.inplace
 
     @property
-    def root_name(self):
+    def root_name(self) -> str:
         return self.functional.root_name
 
     @staticmethod
