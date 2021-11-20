@@ -16,11 +16,10 @@ from quantization.core.test_quantized_op import TestQuantizedOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQNNPackOps  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedLinear  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedConv  # noqa: F401
-from quantization.core.test_quantized_op import TestDynamicQuantizedLinear  # noqa: F401
+from quantization.core.test_quantized_op import TestDynamicQuantizedOps  # noqa: F401
 from quantization.core.test_quantized_op import TestComparatorOps  # noqa: F401
 from quantization.core.test_quantized_op import TestPadding  # noqa: F401
 from quantization.core.test_quantized_op import TestQuantizedEmbeddingOps  # noqa: F401
-from quantization.core.test_quantized_op import TestDynamicQuantizedRNNOp  # noqa: F401
 # 2. Quantized Functional/Workflow Ops
 from quantization.core.test_quantized_functional import TestQuantizedFunctionalOps  # noqa: F401
 from quantization.core.test_workflow_ops import TestFakeQuantizeOps  # noqa: F401
@@ -69,8 +68,6 @@ try:
     from quantization.fx.test_quantize_fx import TestFuseFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFx  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxOps  # noqa: F401
-    from quantization.fx.test_quantize_fx import TestQuantizeFxOpsNew  # noqa: F401
-    from quantization.fx.test_quantize_fx import TestQuantizeFxTRTOps  # noqa: F401
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev
