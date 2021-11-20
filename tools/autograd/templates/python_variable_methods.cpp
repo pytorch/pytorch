@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include <Python.h>
@@ -34,11 +35,13 @@
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include "c10/util/Optional.h"
 #include "c10/core/Stream.h"
 
 #include <stdexcept>
+
+$ops_headers
 
 using at::DeviceGuard;
 using at::device_of;

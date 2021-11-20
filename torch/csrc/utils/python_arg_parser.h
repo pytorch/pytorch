@@ -64,7 +64,7 @@
 #include <torch/csrc/utils/six.h>
 #include <torch/csrc/autograd/variable.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 

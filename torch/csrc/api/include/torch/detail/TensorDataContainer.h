@@ -1,6 +1,11 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
+#include <ATen/ScalarOps.h>
+
+#include <ATen/ops/empty.h>
+#include <ATen/ops/tensor.h>
 
 #include <initializer_list>
 
