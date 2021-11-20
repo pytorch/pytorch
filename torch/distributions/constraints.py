@@ -465,7 +465,7 @@ class _Symmetric(Constraint):
     event_dim = 2
 
     def check(self, value):
-        return (value.transpose(-2, -1) == value).all(dim = -1).all(dim = -1)
+        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
 
 
 class _PositiveDefinite(Constraint):
