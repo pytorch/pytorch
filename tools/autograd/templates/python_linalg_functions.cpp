@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // ${generated_comment}
 
 #include "torch/csrc/Device.h"
@@ -10,6 +11,8 @@
 #include "torch/csrc/utils/pycfunction_helpers.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/structseq.h"
+
+$ops_headers
 
 using at::Tensor;
 using at::Scalar;

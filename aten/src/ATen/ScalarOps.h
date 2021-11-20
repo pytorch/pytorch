@@ -2,7 +2,7 @@
 
 #include <c10/core/Scalar.h>
 #include <ATen/Tensor.h>
-#include <ATen/Functions.h>
+#include <ATen/ops/scalar_tensor.h>
 
 namespace at {
 namespace detail {

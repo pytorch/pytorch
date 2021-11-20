@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
@@ -12,6 +13,10 @@
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
+
+#include <ATen/ops/ones_like.h>
+#include <ATen/ops/zeros_like.h>
+#include <ATen/ops/zeros.h>
 
 namespace torch {
 namespace jit {

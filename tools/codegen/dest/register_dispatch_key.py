@@ -23,6 +23,19 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+def gen_registration_headers(backend_index: BackendIndex) -> List[str]:
+    use_native_empty = backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA)
+
+    return [
+        """
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/empty_strided_native.h>
+""" if use_native_empty else """
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
+""",
+            "#include <ATen/ops/as_strided_native.h>"
+    ]
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:

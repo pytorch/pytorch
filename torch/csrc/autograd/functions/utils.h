@@ -7,7 +7,7 @@
 #include <torch/csrc/autograd/InferenceMode.h>
 #include <torch/csrc/utils/variadic.h>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <functional>
 #include <memory>

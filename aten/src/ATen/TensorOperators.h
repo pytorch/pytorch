@@ -1,7 +1,8 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
-#include <ATen/Tensor.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty_like.h>
 
 #include <string>
 #include <stdexcept>
