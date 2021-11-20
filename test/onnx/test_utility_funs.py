@@ -802,6 +802,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_custom_opsets_gelu(self):
         self.addCleanup(unregister_custom_op_symbolic, "::gelu", 1)
+
         def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
@@ -821,6 +822,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
     def test_register_aten_custom_op_symbolic(self):
         self.addCleanup(unregister_custom_op_symbolic, "aten::gelu", 1)
+
         def gelu(g, self, approximate):
             return g.op("com.microsoft::Gelu", self).setType(self.type())
 
