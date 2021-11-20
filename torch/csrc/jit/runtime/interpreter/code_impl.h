@@ -771,6 +771,20 @@ struct CodeImpl {
 #endif
     return size;
   }
+
+  void assert_stack_size(int32_t instruction_index, size_t actual_size) const {
+#ifndef NDEBUG
+    size_t expected_size = full_operator_table_[instruction_index].schema().returns().size();
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      expected_size == actual_size,
+      "Expected ",
+      expected_size,
+      " return values, but found ",
+      actual_size,
+      " on the stack."
+    );
+#endif
+  }
 };
 
 struct MobileCodeImpl : CodeImpl {
