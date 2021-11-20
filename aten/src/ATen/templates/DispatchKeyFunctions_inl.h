@@ -1,3 +1,4 @@
+#pragma once
 // ${generated_comment}
 
 // NB: The implementing C++ file is RegisterDispatchKey.cpp
@@ -15,10 +16,4 @@
   specific header might achieve the same goal.
 #endif
 
-namespace at {
-namespace ${dispatch_namespace} {
-
-${dispatch_namespaced_declarations}
-
-} // namespace ${dispatch_namespace}
-} // namespace at
+$DispatchKeyFunctions_inl_includes
