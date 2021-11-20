@@ -41,6 +41,16 @@ using at::TensorList;
 
 const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
 
+namespace {
+  static inline at::Tensor apply_loss_reduction(const at::Tensor& unreduced, int64_t reduction) {
+    if (reduction == at::Reduction::Mean) {
+      return unreduced.mean();
+    } else if (reduction == at::Reduction::Sum) {
+      return unreduced.sum();
+    }
+    return unreduced;
+  }
+}
 
 bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
@@ -1341,6 +1351,36 @@ Tensor binary_cross_entropy_with_logits_target_backward(const Tensor& grad_outpu
   }
 
   return grad_target;
+}
+
+Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
+  const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
+
+  Tensor grad_input;
+  Tensor grad_target;
+
+  if (pos_weight.defined()) {
+    // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+    auto t = pos_weight.mul(target_p);
+    grad_input = input_t.mul(t.add(1).sub_(target_p).mul_(input_p.sigmoid()).sub_(t));
+  } else {
+    grad_input = input_t.mul(input_p.sigmoid() - target_p);
+  }
+
+  if (pos_weight.defined()) {
+    grad_target = target_t.mul((1. - input_p.sigmoid()).log_().sub_(pos_weight.mul(input_p.sigmoid().log_())));
+  } else {
+    grad_target = -target_t.mul(input_p);
+  }
+
+  if (weight.defined()) {
+    grad_input.mul_(weight);
+    grad_target.mul_(weight);
+  }
+  return apply_loss_reduction(grad_target + grad_input, reduction);
 }
 
 Tensor log_sigmoid_double_backward(const Tensor & grad, const Tensor & input) {
@@ -4327,6 +4367,27 @@ Tensor cat_jvp(at::TensorList tensors, int64_t dim) {
     out_fw_grad = at::cat(fw_grads, dim);
   }
 
+  return out_fw_grad;
+}
+
+Tensor stack_jvp(at::TensorList tensors, int64_t dim) {
+  // Basically copy of cat_jvp above
+  // TOD0: consolidate with the logic of cat_jvp
+  Tensor out_fw_grad;
+
+  auto any_defined = false;
+  for (const auto& t: tensors) {
+    any_defined |= isFwGradDefined(t);
+  }
+
+  if (any_defined) {
+    std::vector<Tensor> fw_grads;
+
+    for (auto& t: tensors) {
+      fw_grads.push_back(isFwGradDefined(t)? t._fw_grad(/*level*/ 0): at::zeros_like(t));
+    }
+    out_fw_grad = at::stack(fw_grads, dim);
+  }
   return out_fw_grad;
 }
 
