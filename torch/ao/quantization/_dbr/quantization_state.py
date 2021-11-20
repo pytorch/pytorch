@@ -92,15 +92,6 @@ class AutoQuantizationState(torch.nn.Module):
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
-    def validate_is_at_first_idx(self) -> None:
-        is_at_first_idx = (
-            len(self.idx_to_seen_op_infos) == 0 or
-            self.idx == 0
-        )
-        assert is_at_first_idx, \
-            f"Cur idx: {self.idx}, expected idx: 0"
-
-
     def validate_is_at_last_seen_idx(self) -> None:
         is_at_last_seen_idx = (
             len(self.idx_to_seen_op_infos) == 0 or
