@@ -22,6 +22,7 @@ GENERATED_CPP = [
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
+    "autograd/generated/python_sparse_functions.cpp",
     "autograd/generated/python_special_functions.cpp",
     "autograd/generated/python_torch_functions_0.cpp",
     "autograd/generated/python_torch_functions_1.cpp",
@@ -129,6 +130,7 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/monitor/counters.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -863,6 +865,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
+        "autograd/generated/python_sparse_functions.cpp",
         "autograd/generated/python_special_functions.cpp",
         "autograd/generated/python_torch_functions_0.cpp",
         "autograd/generated/python_torch_functions_1.cpp",
