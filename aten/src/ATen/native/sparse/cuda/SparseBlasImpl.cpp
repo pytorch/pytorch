@@ -28,14 +28,6 @@ c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
   }
 }
 
-c10::MaybeOwned<Tensor> inline expect_resolved_conj(const Tensor& tensor) {
-  if (tensor.is_conj()) {
-    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
-  } else {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
-  }
-}
-
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
@@ -44,7 +36,7 @@ c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
 #else
   if (is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
-    return expect_resolved_conj(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     return c10::MaybeOwned<Tensor>::owned(
         tensor.clone(at::MemoryFormat::Contiguous));
