@@ -348,7 +348,7 @@ class AutoQuantizationState(torch.nn.Module):
         new_args = []
         tensor_arg_idx = 0
         # TODO: refactor this to use iterate_and_apply
-        if isinstance(args[0], (tuple, list)):  # torch.cat variants
+        if orig_op is torch.cat:  # torch.cat variants
             # input tensors
             new_first_arg = []
             for arg in args[0]:
@@ -365,9 +365,6 @@ class AutoQuantizationState(torch.nn.Module):
             new_args = [new_first_arg, *args[1:]]
         else:
             for arg in args:
-                if not isinstance(arg, torch.Tensor):
-                    new_args.append(arg)
-                    continue
                 # TODO: handle non-tensor inputs
                 # TODO: this is not handling non-tensor tuple args (for example,
                 # dilation in conv2d) correctly, it just happens to work but
