@@ -129,27 +129,32 @@ known_module_fusion_patterns = [
     (torch.nn.Conv2d, torch.nn.BatchNorm2d),
 ]
 
+binary_related_ops = (
+    (torch.add, torch.Tensor.add),
+    (torch.add, torch.Tensor.add_),
+    (torch.Tensor.add, torch.Tensor.add_),
+    (torch.mul, torch.Tensor.mul),
+    (torch.mul, torch.Tensor.mul_),
+    (torch.Tensor.mul, torch.Tensor.mul_),
+)
+
+# TODO(future PR): reuse global mapping
+a_related_to_b = set()
+for a, b in binary_related_ops:
+    a_related_to_b.add((a, b))
+    a_related_to_b.add((b, a))
+for a, b in q_mod_to_float_mod_mapping.items():  # type: ignore[assignment]
+    a_related_to_b.add((a, b))
+    a_related_to_b.add((b, a))
+for a, b in fp32_to_int8_fun_mapping.items():
+    a_related_to_b.add((a, b))
+    a_related_to_b.add((b, a))
+
 def ops_are_related(cur_op: Callable, expected_op_type: Callable) -> bool:
     if isinstance(cur_op, torch.nn.Module):
-        cur_type = type(cur_op)
-        is_related = (
-            (cur_type == expected_op_type) or
-            (
-                cur_type in q_mod_to_float_mod_mapping and
-                q_mod_to_float_mod_mapping[cur_type] == expected_op_type
-            )
-        )
-    else:
-        is_related = (
-            (cur_op == expected_op_type) or
-            (cur_op is torch.add and expected_op_type is torch.Tensor.add) or
-            (cur_op is torch.Tensor.add and expected_op_type is torch.add) or
-            # TODO: add other flavors of add to complete this
-            (cur_op is torch.add and expected_op_type is torch.Tensor.add_) or
-            (cur_op is torch.mul and expected_op_type is torch.Tensor.mul) or
-            (cur_op is torch.Tensor.mul and expected_op_type is torch.mul)
-        )
-    return is_related
+        cur_op = type(cur_op)
+    return cur_op == expected_op_type or \
+        (cur_op, expected_op_type) in a_related_to_b
 
 # validity checks
 # TODO: move these out
