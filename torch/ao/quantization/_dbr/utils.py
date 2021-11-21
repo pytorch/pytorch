@@ -9,7 +9,6 @@ toq = torch.ops.quantized
 from .mappings import (
     functions_supported_by_quantization,
     module_types_supported_by_quantization,
-    q_mod_to_float_mod_mapping,
     module_types_supported_by_quantization_preserves_dtype,
     functions_supported_by_quantization_preserves_dtype,
     fp32_to_int8_fun_mapping,
@@ -102,11 +101,10 @@ QTensorInfo = collections.namedtuple(
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
         return True
-    if type(op) in module_types_supported_by_quantization:
+    elif type(op) in module_types_supported_by_quantization:
         return True
-    if op in q_mod_to_float_mod_mapping:
-        return True
-    return False
+    else:
+        return False
 
 # TODO: fix lint
 class ObserverWrapper(torch.nn.Identity):
