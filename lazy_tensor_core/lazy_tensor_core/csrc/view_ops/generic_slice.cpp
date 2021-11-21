@@ -1,7 +1,7 @@
-#include "lazy_tensor_core/csrc/ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
@@ -16,8 +16,7 @@ GenericSlice::GenericSlice(const torch::lazy::Value& input,
                           torch::lazy::MHash(base_indices, sizes)),
       base_indices_(base_indices.begin(), base_indices.end()),
       sizes_(sizes.begin(), sizes.end()) {
-  SetShapeDeferred(
-      [&]() { return compiler::InferShape(this); });
+  SetShapeDeferred([&]() { return compiler::InferShape(this); });
 }
 
 std::string GenericSlice::ToString() const {

@@ -24,7 +24,8 @@ class LazyTensor {
         : ir_value(std::move(ir_value)),
           device(device),
           unique_id(GetNextTensorId()) {}
-    Data(std::shared_ptr<LazyView> view, const torch::lazy::BackendDevice& device)
+    Data(std::shared_ptr<LazyView> view,
+         const torch::lazy::BackendDevice& device)
         : view(std::move(view)), device(device), unique_id(GetNextTensorId()) {}
     Data(at::Tensor tensor_data, const torch::lazy::BackendDevice& device)
         : tensor_data(std::move(tensor_data)),
@@ -153,7 +154,7 @@ class LazyTensor {
       const std::shared_ptr<LazyView>& view) const;
 
   std::shared_ptr<LazyView> UpdateView(std::shared_ptr<LazyView> view,
-                                   torch::lazy::Value ir_value) const;
+                                       torch::lazy::Value ir_value) const;
 
   std::shared_ptr<LazyView> CreateView(ViewInfo view_info) const;
 

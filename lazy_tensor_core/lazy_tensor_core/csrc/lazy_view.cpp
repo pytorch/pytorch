@@ -7,48 +7,47 @@
 #include <numeric>
 
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
-#include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/ops/diagonal.h"
-#include "lazy_tensor_core/csrc/ops/diagonal_view_update.h"
-#include "lazy_tensor_core/csrc/ops/generic_slice.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
-#include "lazy_tensor_core/csrc/ops/permute.h"
-#include "lazy_tensor_core/csrc/ops/resize.h"
-#include "lazy_tensor_core/csrc/ops/select.h"
-#include "lazy_tensor_core/csrc/ops/unselect.h"
-#include "lazy_tensor_core/csrc/ops/update_slice.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/permute.h"
+#include "lazy_tensor_core/csrc/view_ops/resize.h"
+#include "lazy_tensor_core/csrc/view_ops/select.h"
+#include "lazy_tensor_core/csrc/view_ops/unselect.h"
+#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch_lazy_tensors {
 namespace {
 
-torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& view_info) {
+torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value,
+                                 const ViewInfo& view_info) {
   switch (view_info.view_type) {
     case ViewInfo::Type::kSelect:
       return torch::lazy::MakeNode<ir::ops::Select>(
           ir_value, view_info.select->dim, view_info.select->start,
           view_info.select->end, view_info.select->stride);
     case ViewInfo::Type::kNarrow:
-      return torch::lazy::MakeNode<ir::ops::GenericSlice>(ir_value, view_info.indices,
-                                                 view_info.shape.sizes());
+      return torch::lazy::MakeNode<ir::ops::GenericSlice>(
+          ir_value, view_info.indices, view_info.shape.sizes());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:
-      return torch::lazy::MakeNode<ir::ops::Permute>(ir_value, view_info.permutation);
+      return torch::lazy::MakeNode<ir::ops::Permute>(ir_value,
+                                                     view_info.permutation);
     case ViewInfo::Type::kReshape:
       return torch::lazy::MakeNode<ir::ops::View>(
-          ir_value,
-          view_info.shape.sizes().vec());
+          ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kResize:
       return torch::lazy::MakeNode<ir::ops::Resize>(
-          ir_value,
-          view_info.shape.sizes().vec());
+          ir_value, view_info.shape.sizes().vec());
     case ViewInfo::Type::kAsStrided:
       return torch::lazy::MakeNode<ir::ops::AsStrided>(
-          ir_value,
-          view_info.shape.sizes().vec(),
-          view_info.as_strided->stride, view_info.as_strided->offset);
+          ir_value, view_info.shape.sizes().vec(), view_info.as_strided->stride,
+          view_info.as_strided->offset);
     case ViewInfo::Type::kDiagonal:
       return torch::lazy::MakeNode<ir::ops::Diagonal>(
           ir_value, view_info.diagonal->offset, view_info.diagonal->dim1,
@@ -60,7 +59,7 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
 }
 
 torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
-                      const Alias::UpdateData& update_data) {
+                               const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<torch::lazy::Value> tmp_values({ir_value});
   for (size_t i = 0; i < update_data.view_infos.size(); ++i) {
@@ -80,8 +79,8 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = torch::lazy::MakeNode<ir::ops::UpdateSlice>(tmp_values[i - 1], result,
-                                                    view_info.indices);
+        result = torch::lazy::MakeNode<ir::ops::UpdateSlice>(
+            tmp_values[i - 1], result, view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;
@@ -99,8 +98,7 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
         break;
       case ViewInfo::Type::kAsStrided:
         result = torch::lazy::MakeNode<ir::ops::AsStridedViewUpdate>(
-            tmp_values[i - 1], result,
-            view_info.source_shape.sizes().vec(),
+            tmp_values[i - 1], result, view_info.source_shape.sizes().vec(),
             view_info.as_strided->stride, view_info.as_strided->offset);
         break;
       case ViewInfo::Type::kDiagonal:
@@ -163,7 +161,8 @@ ViewInfo::ViewInfo(Type view_type, const torch::lazy::Shape& source_shape,
   CHECK(view_type == Type::kDiagonal);
 }
 
-void Alias::Update(torch::lazy::Value ir_value, std::vector<ViewInfo> view_infos) {
+void Alias::Update(torch::lazy::Value ir_value,
+                   std::vector<ViewInfo> view_infos) {
   if (!updates_.empty() && updates_.back().view_infos == view_infos) {
     updates_.back().ir_value = std::move(ir_value);
   } else {
@@ -181,13 +180,13 @@ torch::lazy::Value Alias::SyncUpdateOperations() {
 }
 
 LazyView::LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
-           ViewInfo view_info)
+                   ViewInfo view_info)
     : shape_(std::move(shape)), alias_(std::move(alias)) {
   view_infos_.push_back(std::move(view_info));
 }
 
 LazyView::LazyView(torch::lazy::Shape shape, std::shared_ptr<Alias> alias,
-           std::vector<ViewInfo> view_infos)
+                   std::vector<ViewInfo> view_infos)
     : view_infos_(std::move(view_infos)),
       shape_(std::move(shape)),
       alias_(std::move(alias)) {}
@@ -197,11 +196,11 @@ void LazyView::Update(torch::lazy::Value ir_value) {
 }
 
 std::shared_ptr<LazyView> LazyView::CreateSubView(torch::lazy::Shape shape,
-                                          ViewInfo view_info) {
+                                                  ViewInfo view_info) {
   std::vector<ViewInfo> view_infos(view_infos_);
   view_infos.push_back(std::move(view_info));
   return std::make_shared<LazyView>(std::move(shape), alias_,
-                                std::move(view_infos));
+                                    std::move(view_infos));
 }
 
 std::tuple<torch::lazy::Value, bool> LazyView::GetViewIrNode() {

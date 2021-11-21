@@ -1,8 +1,8 @@
-#include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
 
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

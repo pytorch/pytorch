@@ -1,8 +1,8 @@
-#include "lazy_tensor_core/csrc/ops/unselect.h"
+#include "lazy_tensor_core/csrc/view_ops/unselect.h"
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensor_core/csrc/ops/select.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/view_ops/select.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {

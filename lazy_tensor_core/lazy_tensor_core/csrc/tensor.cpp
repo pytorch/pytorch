@@ -4,14 +4,14 @@
 #include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
@@ -335,8 +335,8 @@ std::shared_ptr<LazyView> LazyTensor::CreateView(ViewInfo view_info) const {
                           torch::lazy::GetShapeFromTsValue(ir_value),
                           torch::lazy::GetShapeFromTsValue(ir_value));
   data()->view =
-      std::make_shared<LazyView>(torch::lazy::GetShapeFromTsValue(ir_value), alias,
-                             std::move(this_view_info));
+      std::make_shared<LazyView>(torch::lazy::GetShapeFromTsValue(ir_value),
+                                 alias, std::move(this_view_info));
   AssignIrValue(torch::lazy::Value());
   return std::make_shared<LazyView>(view_info.shape, alias, view_info);
 }

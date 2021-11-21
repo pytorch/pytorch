@@ -1,7 +1,8 @@
-#include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 
-#include <torch/csrc/lazy/core/shape.h>
 #include <ATen/InferSize.h>
+#include <torch/csrc/lazy/core/shape.h>
+
 #include "lazy_tensor_core/csrc/helpers.h"
 
 namespace torch_lazy_tensors {
@@ -10,13 +11,12 @@ namespace ops {
 namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
-                                    c10::ArrayRef<int64_t> output_sizes) {
+                                   c10::ArrayRef<int64_t> output_sizes) {
   const torch::lazy::Shape& input_shape =
       torch::lazy::GetShapeFromTsValue(input);
   const auto complete_output_sizes =
       at::infer_size(output_sizes, input_shape.numel());
-  return torch::lazy::Shape(input_shape.scalar_type(),
-                                            complete_output_sizes);
+  return torch::lazy::Shape(input_shape.scalar_type(), complete_output_sizes);
 }
 
 }  // namespace
