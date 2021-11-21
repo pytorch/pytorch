@@ -966,35 +966,6 @@ def gen_headers(
         functions_keys: Set[DispatchKey],
         rocm: bool,
 ) -> None:
-    for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-        if dispatch_key in functions_keys:
-            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
-                # See Note [Avoiding Include Cycles In Static Dispatch]
-                inl_headers = ''
-            else:
-                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
-
-            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
-                'dispatch_key': str(dispatch_key),
-                'inline_headers_for_nonstatic_build': inl_headers,
-            })
-            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
-                'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_namespaced_declarations': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
-                        Target.NAMESPACED_DECLARATION,
-                        selector,
-                        rocm=rocm,
-                        cpp_namespace='at::native',
-                        class_method_name=None),
-                    grouped_native_functions
-                )),
-            })
-
-        del fm
-
     functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
@@ -1059,6 +1030,57 @@ def gen_headers(
                 for name in sorted(functions_by_root_name.keys())
             ],
         })
+
+    for dispatch_key in dispatch_keys:
+        if dispatch_key not in functions_keys:
+            continue
+
+        dispatch_namespace = dispatch_key.lower()
+        dispatch_names = []
+
+        for name, functions in functions_by_root_name.items():
+            grouped_functions = grouped_functions_by_root_name.get(name, [])
+            declarations = list(concatMap(
+                dest.RegisterDispatchKey(
+                    backend_indices[dispatch_key],
+                    Target.NAMESPACED_DECLARATION,
+                    selector,
+                    rocm=rocm,
+                    cpp_namespace='at::native',
+                    class_method_name=None),
+                grouped_functions
+            ))
+
+            if len(declarations) == 0:
+                continue
+
+            dispatch_names.append(name)
+            ops_fm.write_with_template(
+                f'{name}_{dispatch_namespace}_dispatch.h',
+                'DispatchKeyFunction.h', lambda: {
+                    'dispatch_namespace': dispatch_namespace,
+                    'dispatch_namespaced_declarations': declarations,
+                })
+
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+            # See Note [Avoiding Include Cycles In Static Dispatch]
+            inl_headers = ''
+        else:
+            inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
+        fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+            'dispatch_key': str(dispatch_key),
+            'inline_headers_for_nonstatic_build': inl_headers,
+        })
+        fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+            'dispatch_namespace': dispatch_namespace,
+            'DispatchKeyFunctions_inl_includes': [
+                f'#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>'
+                for name in sorted(dispatch_names)
+            ],
+        })
+        del fm
 
     core_fm.write('TensorBody.h', lambda: {
         'operator_includes': [
