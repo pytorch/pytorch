@@ -1081,6 +1081,7 @@ def gen_headers(
             'inline_headers_for_nonstatic_build': inl_headers,
         })
         fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+            'dispatch_namespace': dispatch_namespace,
             'DispatchKeyFunctions_inl_includes': [
                 f'#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>'
                 for name in sorted(dispatch_names)
