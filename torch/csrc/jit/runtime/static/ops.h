@@ -11,6 +11,12 @@ at::Tensor& reshape_copy_out(
     const at::Tensor& self,
     const std::vector<int64_t>& proposed_shape,
     bool infer_size = true);
+at::Tensor& to_copy_out(
+    Tensor& out,
+    const Tensor& self,
+    bool non_blocking,
+    bool copy_strides,
+    c10::optional<MemoryFormat> memory_format);
 } // namespace native
 } // namespace at
 
