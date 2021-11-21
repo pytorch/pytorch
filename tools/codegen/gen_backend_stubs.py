@@ -230,7 +230,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
-                'ops_headers': '',
+                'ops_headers': '#include <ATen/Functions.h>',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
                 'dispatch_headers': dest.gen_registration_headers(backend_index),
