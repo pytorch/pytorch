@@ -226,13 +226,15 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         })
 
         for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
+            backend_index = backend_indices[dispatch_key]
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
                 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
                 'ops_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
+                'dispatch_headers': dest.gen_registration_headers(backend_index),
+                'dispatch_helpers': dest.gen_registration_helpers(backend_index),
                 'dispatch_namespaced_definitions': list(concatMap(
                     dest.RegisterDispatchKey(
                         backend_indices[dispatch_key],
@@ -245,7 +247,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 )),
                 'dispatch_anonymous_definitions': list(concatMap(
                     dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
+                        backend_index,
                         Target.ANONYMOUS_DEFINITION,
                         selector,
                         rocm=False,
@@ -255,7 +257,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 )),
                 'dispatch_registrations': list(concatMap(
                     dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
+                        backend_index,
                         Target.REGISTRATION,
                         selector,
                         rocm=False,
