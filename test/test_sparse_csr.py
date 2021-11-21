@@ -599,7 +599,14 @@ class TestSparseCSR(TestCase):
             out = torch.empty_like(c if op_c and a.shape == b.shape else c.mH)
             torch.addmm(c, a, b, alpha=alpha, beta=beta, out=out)
 
-            a_bsr = sp.bsr_matrix((a.values().cpu().numpy(), a.col_indices().cpu().numpy(), a.crow_indices().cpu().numpy()), shape=a.shape)
+            a_bsr = sp.bsr_matrix(
+                (
+                    a.values().cpu().numpy(),
+                    a.col_indices().cpu().numpy(),
+                    a.crow_indices().cpu().numpy(),
+                ),
+                shape=a.shape,
+            )
             expected = alpha * (a_bsr * b.cpu().numpy()) + beta * c.cpu().numpy()
             self.assertEqual(actual, out)
             self.assertEqual(actual, expected)
@@ -609,9 +616,9 @@ class TestSparseCSR(TestCase):
                 nnz = random.randint(0, m * k)
                 a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
-                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m*block_size, k*block_size))
-                b = make_tensor((k*block_size, n*block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
-                c = make_tensor((m*block_size, n*block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
+                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 for op_b, op_c in itertools.product([True, False], repeat=2):
                     run_test(c, a, b, op_b, op_c)
 
