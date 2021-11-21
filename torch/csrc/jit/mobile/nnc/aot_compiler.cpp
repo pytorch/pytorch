@@ -6,10 +6,12 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -40,8 +42,8 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(
   for (const auto& sizes : inputSizes) {
     mobile::nnc::InputSpec spec;
     spec.sizes_ = sizes;
-    // TODO: get and set input dtype
-    spec.dtype_ = c10::ScalarType::Float;
+    // TODO: Use user specified input type. For now using Long for BI model
+    spec.dtype_ = c10::ScalarType::Long;
     specs.emplace_back(std::move(spec));
   }
   return specs;
@@ -55,13 +57,16 @@ std::unique_ptr<Function> compileMethod(
   func->set_name(method_name);
   func->set_input_specs(toInputSpecs(sizes));
 
-  std::vector<at::Tensor> parameters;
   auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
     if (cd.ptr) {
-      at::Tensor const_tensor = at::from_blob(cd.ptr, sizes).clone();
+      // sizes.empty() needs to be handled as sizes can be empty for Scalar
+      // Tensors
+      at::Tensor const_tensor = !sizes.empty()
+          ? at::from_blob(cd.ptr, sizes).clone()
+          : at::native::wrapped_scalar_tensor(*static_cast<double*>(cd.ptr));
       params.push_back(const_tensor);
     } else {
       params.emplace_back(toIValue(cd.node->output()));
@@ -109,24 +114,26 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
   GRAPH_DEBUG("Input sizes ", sizes);
   GRAPH_DEBUG("Method name ", method_name);
 
-  RemoveTensorMutation(g);
-  EliminateDeadCode(g->block());
-  g = tensorexpr::removeUnusedSelfArgument(g);
-  GRAPH_DUMP("graph before shape propagation ", g);
-
+  std::vector<at::IValue> example_values;
   std::vector<c10::optional<at::Tensor>> example_inputs;
   for (const auto& size : sizes) {
-    auto example_input = at::rand(size);
+    // TODO: Use user specified input type. For now using Long for BI model
+    auto example_input = at::rand(size).to(at::dtype(at::kLong));
+    example_values.emplace_back(example_input);
     example_inputs.emplace_back(example_input);
   }
 
+  GRAPH_DUMP("graph before compiler passes ", g);
+  tensorexpr::removeUnusedSelfArgument(g);
+  g = TraceGraph(g, example_values);
+  // TODO: Remove annotateInputShapes pass when TraceGraph can also capture
+  // input shapes
   tensorexpr::annotateInputShapes(g, example_inputs);
-
-  PropagateShapesOnGraph(g);
-  PeepholeOptimize(g, false);
-  ConstantPropagation(g);
-  PropagateShapesOnGraph(g);
-  GRAPH_DUMP("graph after shape propagation ", g);
+  RemoveListMutation(g);
+  RemoveTensorMutation(g);
+  EliminateDeadCode(g);
+  LowerAllTuples(g);
+  GRAPH_DUMP("graph after compiler passes ", g);
 
   std::shared_ptr<tensorexpr::TensorExprKernel> kernel =
       std::make_shared<tensorexpr::TensorExprKernel>(
