@@ -624,11 +624,171 @@ void ValueGroup::init(
   }
 }
 
+namespace {
+
 bool containTensorsOnly(at::ArrayRef<Value*> values) {
   // return true only if all outputs are tensors
   return std::all_of(values.begin(), values.end(), [](const Value* value) {
     return value->type()->castRaw<TensorType>() != nullptr;
   });
+}
+
+bool mayContainAlias(const Value* v1, const Value* v2, const AliasDb& db) {
+  // AliasDb is not const-correct here, so we have to const_cast
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(v1), const_cast<Value*>(v2));
+}
+
+bool isPureFunction(const Node* node) {
+  auto* schema = node->maybeSchema();
+  return schema &&
+      schema->aliasAnalysis() == c10::AliasAnalysisKind::PURE_FUNCTION;
+}
+
+} // namespace
+
+ManagedTensorRanges::ManagedTensorRanges(
+    const std::shared_ptr<Graph>& graph,
+    const FastSet<const Value*>& managed_tensor_values) {
+  AliasDb alias_db(graph);
+  const std::vector<Node*> nodes(graph->nodes().begin(), graph->nodes().end());
+  const FastSet<const Value*> graph_inputs(
+      graph->inputs().begin(), graph->inputs().end());
+
+  auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
+    return !alias_db.isMutableType(value) ||
+        graph_inputs.find(value) != graph_inputs.end();
+  };
+
+  const auto num_nodes = nodes.size();
+  for (const auto i : c10::irange(num_nodes)) {
+    auto* node = nodes[i];
+    for (auto* input : node->inputs()) {
+      auto* lifetime = getLifetime(input);
+      if (!lifetime) {
+        DCHECK(isUntrackedValue(input));
+        continue;
+      }
+      DCHECK(lifetime->end <= i);
+      lifetime->end = i;
+    }
+    for (auto* output : node->outputs()) {
+      if (!alias_db.isMutableType(output)) {
+        continue;
+      }
+      value_lifetimes_.emplace(output, Lifetime(i, i));
+    }
+  }
+  for (auto* graph_output : graph->outputs()) {
+    auto* lifetime = getLifetime(graph_output);
+    if (!lifetime) {
+      DCHECK(isUntrackedValue(graph_output));
+      continue;
+    }
+    lifetime->end = num_nodes;
+  }
+
+  // Handle aliases. Aliases may extend a Value*'s lifetime. If a node
+  // has an input and output that may alias each other, set the input's
+  // lifetime end to max(input.lifetime_end, output.lifetime_end). Iterate
+  // backwards to handle chains of aliases.
+  for (const auto* node : graph->nodes().reverse()) {
+    if (isPureFunction(node)) {
+      // If the node is a pure function, it doesn't create any aliases,
+      // so we can safely skip it.
+      continue;
+    }
+
+    auto inputs = collectValuesWithTrackedLifetimes(node->inputs());
+    auto outputs = collectValuesWithTrackedLifetimes(node->outputs());
+    for (auto* input : inputs) {
+      auto* input_lifetime = getLifetime(input);
+      DCHECK(input_lifetime != nullptr);
+      for (auto* output : outputs) {
+        if (mayContainAlias(input, output, alias_db)) {
+          auto* output_lifetime = getLifetime(output);
+          DCHECK(output_lifetime != nullptr);
+          input_lifetime->end =
+              std::max(output_lifetime->end, input_lifetime->end);
+        }
+      }
+    }
+  }
+  for (auto* managed_tensor : managed_tensor_values) {
+    auto* lifetime = getLifetime(managed_tensor);
+    DCHECK(lifetime && lifetime->end <= num_nodes);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* freeing_node;
+    if (lifetime->end == num_nodes) {
+      freeing_node = graph->return_node();
+    } else {
+      freeing_node = nodes[lifetime->end];
+    }
+    node_to_newly_free_tensors_[freeing_node].emplace_back(managed_tensor);
+  }
+}
+
+bool ManagedTensorRanges::isUnusedValue(const Value* value) const {
+  auto* lifetime = getLifetime(value);
+  return lifetime && lifetime->start == lifetime->end;
+}
+
+bool ManagedTensorRanges::nodeFreesManagedTensors(Node* node) const {
+  auto it = node_to_newly_free_tensors_.find(node);
+  return it != node_to_newly_free_tensors_.end() && !it->second.empty();
+}
+
+const std::vector<const Value*>& ManagedTensorRanges::availableTensorsAfterNode(
+    Node* node) const {
+  return node_to_newly_free_tensors_.at(node);
+}
+
+bool ManagedTensorRanges::lifetimesOverlap(const Value* v1, const Value* v2)
+    const {
+  const auto* v1_lifetime = getLifetime(v1);
+  const auto* v2_lifetime = getLifetime(v2);
+  if (!v1_lifetime || !v2_lifetime) {
+    return false;
+  }
+
+  if (v1_lifetime->start < v2_lifetime->start) {
+    return v1_lifetime->end >= v2_lifetime->start;
+  }
+  return v2_lifetime->end >= v1_lifetime->start;
+}
+
+const ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) const {
+  auto it = value_lifetimes_.find(value);
+  if (it != value_lifetimes_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) {
+  // const_cast is safe here, this is just a way to avoid code duplication
+  // between the const/non-const versions of getLifetime.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const auto* const_this = const_cast<const ManagedTensorRanges*>(this);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return const_cast<ManagedTensorRanges::Lifetime*>(
+      const_this->getLifetime(value));
+}
+
+std::vector<const Value*> ManagedTensorRanges::
+    collectValuesWithTrackedLifetimes(at::ArrayRef<const Value*> values) {
+  std::vector<const Value*> mutable_values;
+  mutable_values.reserve(values.size());
+  std::copy_if(
+      values.begin(),
+      values.end(),
+      std::back_inserter(mutable_values),
+      [this](const Value* value) { return getLifetime(value) != nullptr; });
+  return mutable_values;
 }
 
 StaticModule::StaticModule(
