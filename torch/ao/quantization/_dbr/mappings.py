@@ -165,3 +165,7 @@ for k, v in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
     if k in module_types_supported_by_quantization:
         assert v in module_types_supported_by_quantization, \
             f"{k} is in module_types_supported_by_quantization but {v} is not"
+
+for k, v in q_mod_to_float_mod_mapping.items():
+    assert k in module_types_supported_by_quantization, \
+        f"{k} is in q_mod_to_float_mod_mapping but not in module_types_supported_by_quantization"
