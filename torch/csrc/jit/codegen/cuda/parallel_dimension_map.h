@@ -45,6 +45,10 @@ class TORCH_CUDA_CU_API ParallelDimensionMap {
       ParallelType pt,
       const std::unordered_set<IterDomain*>& dom_set);
 
+  //! TIDx may need to be marked as non-exact as it may be padded to a
+  //! multiple of the warp size.
+  void adjustMappingsForWarpPadding();
+
   static IterDomain* getCAMappedConcreteDomain(IterDomain* id);
 
  private:
