@@ -439,7 +439,7 @@ def iterate_and_apply(
             return args
 
 def get_producer_of_seen_op_info(
-    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    idx_to_seen_op_info: Dict[int, SeenOpInfo],
     cur_seen_op_info: SeenOpInfo,
 ) -> Optional[SeenOpInfo]:
     """
@@ -455,7 +455,7 @@ def get_producer_of_seen_op_info(
     return None
 
 def get_users_of_seen_op_info(
-    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    idx_to_seen_op_info: Dict[int, SeenOpInfo],
     cur_seen_op_info: SeenOpInfo,
 ) -> List[SeenOpInfo]:
     """
@@ -559,7 +559,7 @@ def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
 
 def get_input_args_quant_dequant_info(
     seen_op_info: SeenOpInfo,
-    tensor_id_to_scale_zp: Dict[str, Tuple[torch.Tensor, torch.Tensor]],
+    tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
 ) -> Tuple[List[Optional[Tuple[float, int]]], List[bool]]:
     """
     Returns a list of information about the tensor inputs to the current op.
@@ -597,8 +597,8 @@ def get_input_args_quant_dequant_info(
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
                 if output_dtype == torch.quint8:
-                    assert str(tensor_id) in tensor_id_to_scale_zp
-                    scale, zp = tensor_id_to_scale_zp[str(tensor_id)]
+                    assert tensor_id in tensor_id_to_scale_zp
+                    scale, zp = tensor_id_to_scale_zp[tensor_id]
                     # TODO: return this to the caller
                     quant_infos.append((scale, zp,))  # type: ignore[arg-type]
                     dequant_infos.append(False)
