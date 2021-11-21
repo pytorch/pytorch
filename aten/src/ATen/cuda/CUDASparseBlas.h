@@ -130,6 +130,30 @@ void bsrmm<c10::complex<float>>(CUSPARSE_BSRMM_ARGTYPES(c10::complex<float>));
 template <>
 void bsrmm<c10::complex<double>>(CUSPARSE_BSRMM_ARGTYPES(c10::complex<double>));
 
+#define CUSPARSE_BSRMV_ARGTYPES(scalar_t)                                    \
+  cusparseHandle_t handle, cusparseDirection_t dirA,                         \
+      cusparseOperation_t transA, int mb, int nb, int nnzb,                  \
+      const scalar_t *alpha, const cusparseMatDescr_t descrA,                \
+      const scalar_t *bsrValA, const int *bsrRowPtrA, const int *bsrColIndA, \
+      int blockDim, const scalar_t *x, const scalar_t *beta, scalar_t *y
+
+template <typename scalar_t>
+inline void bsrmv(CUSPARSE_BSRMV_ARGTYPES(scalar_t)) {
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::sparse::bsrmv: not implemented for ",
+      typeid(scalar_t).name());
+}
+
+template <>
+void bsrmv<float>(CUSPARSE_BSRMV_ARGTYPES(float));
+template <>
+void bsrmv<double>(CUSPARSE_BSRMV_ARGTYPES(double));
+template <>
+void bsrmv<c10::complex<float>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<float>));
+template <>
+void bsrmv<c10::complex<double>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<double>));
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
