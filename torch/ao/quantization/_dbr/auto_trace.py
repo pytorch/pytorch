@@ -10,10 +10,14 @@ from .quantization_state import (
 from .utils import (
     trace_with_inputs,
     is_leaf,
-    pack_weights_for_functionals,
     HookType,
     get_torch_function_hook_type,
     get_module_hook_type,
+)
+from .model_utils import (
+    pack_weights_for_functionals,
+    attach_scale_zp_values_to_model,
+    attach_op_convert_info_to_model,
 )
 from . import auto_trace_rewriter
 
@@ -49,6 +53,10 @@ def add_auto_observation(
     # this is a list because it needs to incremented inplace.
     qtensor_id = [0]
     module_id_to_fqn: Dict[int, str] = {}
+
+    # Counter for global quantizeable ops, useful for intermediate activation
+    # logging.
+    global_op_idx = [0]
 
     class QuantizationPrepareTensorProxy(torch.Tensor):
         """
@@ -97,7 +105,8 @@ def add_auto_observation(
                 output = super().__torch_function__(func, types, args, kwargs)
                 # run "after" hook
                 output = qstate.op_prepare_after_hook(
-                    func, output, args, first_call, qtensor_id, parent_module)
+                    func, output, args, first_call, qtensor_id, parent_module,
+                    global_op_idx)
                 qstate.mark_cur_op_complete(func)
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -192,14 +201,14 @@ def add_auto_observation(
                         # TODO is it correct to call_cur_module twice here?
                         output = parent_qstate.op_prepare_after_hook(
                             cur_module, output, args, first_call, qtensor_id,
-                            cur_module)
+                            cur_module, global_op_idx)
                         parent_qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
                         # TODO(future PR): add inputs io hook
 
                         cur_qstate = cur_module._auto_quant_state
-                        cur_qstate.validate_is_at_first_idx()
+                        cur_qstate.reset_to_new_call()
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
@@ -233,22 +242,22 @@ def add_auto_observation(
             torch.nn.Sequential.forward = _nn_sequential_patched_forward  # type: ignore[assignment]
             nonlocal first_call
             try:
-                # Create a list before iterating because we are adding new
-                # named modules inside the loop.
-                named_modules = list(self.named_modules())
-                for k, v in named_modules:
+                if first_call:
+                    # Create a list before iterating because we are adding new
+                    # named modules inside the loop.
+                    named_modules = list(self.named_modules())
+                    for k, v in named_modules:
 
-                    # k is the global FQN, i.e. 'foo.bar.baz'
-                    # v is the module instance
-                    #
-                    # we need to associate the global FQN with SeenOp
-                    # for modules, this is the module FQN
-                    # for functions, this is the parent module FQN
-                    module_id_to_fqn[id(v)] = k
+                        # k is the global FQN, i.e. 'foo.bar.baz'
+                        # v is the module instance
+                        #
+                        # we need to associate the global FQN with SeenOp
+                        # for modules, this is the module FQN
+                        # for functions, this is the parent module FQN
+                        module_id_to_fqn[id(v)] = k
 
-                    has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
-                    if has_qconfig and not is_leaf(v):
-                        if first_call:
+                        has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
+                        if has_qconfig and not is_leaf(v):
                             if v is self:
                                 # for the top level module only, specify input
                                 # and output dtypes
@@ -258,10 +267,8 @@ def add_auto_observation(
                             else:
                                 v._auto_quant_state = AutoQuantizationState(
                                     v.qconfig)
-                        else:
-                            if not isinstance(v, AutoQuantizationState):
-                                assert hasattr(v, '_auto_quant_state')
-                                v._auto_quant_state.reset_to_new_call()
+
+                global_op_idx[0] = 0
 
                 output = super().__call__(*new_args, **new_kwargs)
                 return output
@@ -286,6 +293,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return x
 
     module_id_to_fqn: Dict[int, str] = {}
+    # Counter for global quantizeable ops, useful for intermediate activation
+    # logging.
+    global_op_idx = [0]
 
     class QuantizationConvertTensorProxy(torch.Tensor):
         """
@@ -337,7 +347,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
                 # after hooks
-                output = qstate.op_convert_after_hook(func, output)
+                output = qstate.op_convert_after_hook(
+                    func, output, global_op_idx)
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
@@ -451,7 +462,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
                         output = qstate.op_convert_after_hook(
-                            cur_module, output)
+                            cur_module, output, global_op_idx)
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -459,7 +470,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         if enable_logging:
                             logger.debug(cur_qstate)
 
-                        cur_qstate.validate_is_at_first_idx()
+                        cur_qstate.reset_to_new_call()
 
                         # before hooks (TODO)
                         # forward
@@ -504,10 +515,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             torch.nn.Sequential.forward = _nn_sequential_patched_forward  # type: ignore[assignment]
 
             try:
-                for k, v in self.named_modules():
-                    module_id_to_fqn[id(v)] = k
-                    if hasattr(v, '_auto_quant_state'):
-                        v._auto_quant_state.reset_to_new_call()
+                global_op_idx[0] = 0
 
                 needs_io_hooks = hasattr(self, '_auto_quant_state')
 
@@ -536,6 +544,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             return auto_trace_rewriter.rewrite_for_scripting(self)
 
     pack_weights_for_functionals(module)
+    attach_scale_zp_values_to_model(module)
+    attach_op_convert_info_to_model(module)
     module.__class__ = QuantizationDispatchModule
 
     return module
