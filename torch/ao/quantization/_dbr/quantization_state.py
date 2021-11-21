@@ -184,8 +184,9 @@ class AutoQuantizationState(torch.nn.Module):
         This function is expected to be called after a function or module
         processing is complete.
         """
-        if op_needs_quantization(cur_op):
-            self.idx += 1
+        # torch.nn.Module __setattr__ has overhead,
+        # this code is the explicit fast path for `self.idx += 1`
+        object.__setattr__(self, 'idx', self.idx + 1)
 
     def outputs_prepare_hook(
         self,
