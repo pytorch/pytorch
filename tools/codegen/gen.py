@@ -1364,7 +1364,6 @@ def main() -> None:
     cpu_fm = make_file_manager(options.install_dir)
     cuda_fm = make_file_manager(options.install_dir)
     ops_fm = make_file_manager(ops_install_dir)
-    ops_cuda_fm = make_file_manager(ops_install_dir)
 
     extra_cuda_headers = '''\
 #include <c10/cuda/CUDAGuard.h>
