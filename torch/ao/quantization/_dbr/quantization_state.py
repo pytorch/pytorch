@@ -29,7 +29,22 @@ from .utils import (
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
     get_producer_of_seen_op_info,
+    clone_detach_tensor_without_dispatch,
+    get_input_args_quant_dequant_info,
 )
+
+OpConvertInfo = Tuple[
+    # quantized equivalent of original op (None means keep original)
+    Optional[Callable],
+    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
+    List[Optional[Tuple[float, int]]],
+    # arg_dequant_infos, each element is True if this arg needs a dequant
+    List[bool],
+    # packed param name, if the op has a packed param
+    Optional[str],
+    # additional kwargs, such as output scale and zero_point
+    Dict[str, Any],
+]
 
 # TODO(future PR): maybe better name
 # TODO(future PR): add serialization support
@@ -68,18 +83,30 @@ class AutoQuantizationState(torch.nn.Module):
         # value: name of packed weight
         # note: this is filled out right before convert
         self.idx_to_packed_weight_name: Dict[str, str] = {}
+        self.tensor_id_to_scale_zp: Dict[str, Tuple[torch.Tensor, torch.Tensor]] = {}
+
+        # Numeric Suite add_loggers functionality
+        # if this flag is True, op outputs will be saved for debugging
+        self.log_op_outputs = False
+        # data structure to save op outputs for debugging
+        # * outer list represents the different model forward call instances
+        # * inner list represents the different op forward call instances in a
+        #   model forward
+        # TODO(future PR): handle types which are not torch.Tensor
+        # TODO(future PR): use the Logger class and allow user overrides of it
+        self.op_outputs: List[List[Tuple[
+            int,  # global op idx
+            Optional[str],  # fqn
+            Callable,  # fp32 op type (TODO future PR: add quantized op type)
+            torch.Tensor,  # value
+        ]]] = []
+        # model name to use in logging results
+        self.logging_model_name: Optional[str]
+
+        self.idx_to_op_convert_info: Dict[int, OpConvertInfo] = {}
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
-
-    def validate_is_at_first_idx(self) -> None:
-        is_at_first_idx = (
-            len(self.idx_to_seen_op_infos) == 0 or
-            self.idx == 0
-        )
-        assert is_at_first_idx, \
-            f"Cur idx: {self.idx}, expected idx: 0"
-
 
     def validate_is_at_last_seen_idx(self) -> None:
         is_at_last_seen_idx = (
@@ -109,9 +136,14 @@ class AutoQuantizationState(torch.nn.Module):
             s += "(idx_to_packed_weight_name): {\n"
             for k, v in self.idx_to_packed_weight_name.items():  # type: ignore[assignment]
                 s += f"  {k}: {v}\n"
-            s += "}"
+            s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}"
+            s += "(idx_to_packed_weight_name): {}\n"
+        if len(self.tensor_id_to_scale_zp):
+            s += "(tensor_id_to_scale_zp): {\n"
+            for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
+                s += f"  {k}: {v}\n"
+            s += "}"
         return s
 
     def _get_cur_seen_op_info(self):
@@ -125,6 +157,9 @@ class AutoQuantizationState(torch.nn.Module):
         Resets the internal op counter to start a new top level module call
         """
         self.idx = 0
+
+        if self.log_op_outputs:
+            self.op_outputs.append([])
 
     def cur_op_needs_hooks(self, cur_op: Callable) -> bool:
         return op_needs_quantization(cur_op)
@@ -243,6 +278,7 @@ class AutoQuantizationState(torch.nn.Module):
         first_call: bool,
         qtensor_id: List[int],
         root_module: torch.nn.Module,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -257,8 +293,7 @@ class AutoQuantizationState(torch.nn.Module):
         """
         assert self.cur_op_needs_hooks(op)
         seen_op_info = self._get_cur_seen_op_info()
-        func_output_obs_type = get_func_output_obs_type(
-            op, args, seen_op_info.op_packing_only_uses_module_attributes)
+        func_output_obs_type = get_func_output_obs_type(seen_op_info)
         if first_call:
             self._first_call_op_prepare_after_hook_adjust_subgraphs(
                 op, output, args, first_call, qtensor_id, root_module,
@@ -270,6 +305,12 @@ class AutoQuantizationState(torch.nn.Module):
                 tensor_id = seen_op_info.output_tensor_infos[0].id
                 obs = self.tensor_id_to_observer[str(tensor_id)]
                 output = obs(output)
+
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
@@ -300,8 +341,10 @@ class AutoQuantizationState(torch.nn.Module):
         #   to
         # q.conv2d(input, packed_params, scale, zero_point)
         orig_op = op
-        op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
+        maybe_new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
             self.get_op_convert_info(op)
+        if maybe_new_op is not None:
+            op = maybe_new_op
         # print(op, arg_quant_infos, packed_param_name, additional_kwargs)
 
         # potentially quantize args, based on arg_quant_infos
@@ -377,140 +420,69 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         output,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called aftern an op call in a converted model.
 
         TODO: add dequant, if needed
         """
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            seen_op_info = self._get_cur_seen_op_info()
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
     def get_op_convert_info(
         self,
         op: Callable,
-        unwrap_scale_zp: bool = False,
-    ) -> Tuple[
-        Callable,
-        List[Optional[Tuple[float, int]]],
-        List[bool],
-        Optional[str],
-        Dict[str, Any]
-    ]:
+    ) -> OpConvertInfo:
         """
         Returns the information needed for convert time modifications to `op`.
-        Has no side effects.  Return types:
-
-        `new_op`. Returns either the original callable unchanged,
-        or the corresponding quantized target. Note: always returns the original
-        callable for modules, because they are quantized with module swaps.
-
-        `arg_quant_infos`. Returns information needed to quantize each arg, if
-        applicable.
-
-        `additional_kwargs`. Returns additional kwargs for scale and zero_point, if
-        applicable.
         """
-        assert self.cur_op_needs_hooks(op)
-        seen_op_info = self._get_cur_seen_op_info()
+        return self.idx_to_op_convert_info[self.idx]
 
+    def calculate_op_convert_info(
+        self,
+        seen_op_info: SeenOpInfo,
+    ) -> OpConvertInfo:
+        """
+        This precalculates the information which will be returned by
+        `get_op_convert_info`.
+        """
         # calculate new op
-        new_op = get_quantized_op(op, seen_op_info)
+        maybe_new_op = get_quantized_op(seen_op_info)
 
         # calculate quant infos
         arg_quant_infos, arg_dequant_infos = \
-            self._get_input_args_quant_dequant_info(op)
+            get_input_args_quant_dequant_info(
+                seen_op_info, self.tensor_id_to_scale_zp)
 
         # get packed param name, if applicable
-        packed_param_name = self._get_packed_param_name(op)
+        packed_param_name = self._get_packed_param_name(seen_op_info)
 
         # calculate scale and zp for output
         # TODO: instead of always doing this if there is an observer,
         # calculate whether this is needed based on the op and dtypes
         additional_kwargs = {}
-        needs_scale_zp = converted_func_needs_scale_zp(op, seen_op_info)
+        needs_scale_zp = converted_func_needs_scale_zp(seen_op_info)
         if needs_scale_zp:
-            seen_op_info = self._get_cur_seen_op_info()
             output_tensor_infos = seen_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
-            observer = self.tensor_id_to_observer[str(tensor_id)]
+            scale, zp = self.tensor_id_to_scale_zp[str(tensor_id)]
+            additional_kwargs.update({'scale': scale, 'zero_point': zp})
+        return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
+            packed_param_name, additional_kwargs
 
-            scale, zp = observer.calculate_qparams()
-            # TODO(future PR): remove this boolean flag
-            if not unwrap_scale_zp:
-                additional_kwargs.update({'scale': scale, 'zero_point': zp})
-            else:
-                additional_kwargs.update(
-                    {'scale': scale.item(), 'zero_point': zp.item()})
-
-        return new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs
-
-    def _get_packed_param_name(self, cur_op: Callable) -> Optional[str]:
+    def _get_packed_param_name(self, seen_op_info: SeenOpInfo) -> Optional[str]:
         """
-        If the op has a quantized packed param, returns it. Otherwise, returns
-        None.
+        If the op in seen_op_info has a quantized packed param, returns it.
+        Otherwise, returns None.
         """
-        return self.idx_to_packed_weight_name.get(str(self.idx), None)
-
-    # TODO(next): make this also return information about dequants, not just quants
-    def _get_input_args_quant_dequant_info(
-        self,
-        cur_op: Callable,
-    ) -> Tuple[List[Optional[Tuple[float, int]]], List[bool]]:
-        """
-        Returns a list of information about the tensor inputs to the current op.
-
-        Quant list:
-        For each tensor input:
-        * if the tensor input needs a quant, the list will contain
-          (scale, zero_point)
-        * if the tensor input does not need a quant, the list will contain None
-
-        Dequant list:
-        For each tensor input:
-        * if the tensor input needs a dequant, True, otherwise, False
-
-        For example, if there are two tensor inputs to the current op, and the
-        first input needs a quant, this function will return
-
-          # quants
-          [(scale0, zero_point0), None],
-          # dequants
-          [False, False]
-        """
-        assert self.cur_op_needs_hooks(cur_op)
-        seen_op_info = self._get_cur_seen_op_info()
-        quant_infos: List[Optional[Tuple[float, int]]] = []
-        dequant_infos: List[bool] = []
-
-        # determine the expected output dtype
-        output_dtype = seen_op_info.output_tensor_infos[0].inf_dtype
-        packable_arg_idxs = get_packable_arg_idxs(cur_op)
-
-        for input_arg_idx, input_arg in enumerate(seen_op_info.input_tensor_infos):
-            arg_will_be_packed = packable_arg_idxs is not None and \
-                input_arg_idx in packable_arg_idxs and \
-                seen_op_info.op_packing_only_uses_module_attributes
-            if input_arg is not None and not arg_will_be_packed:
-                tensor_id = input_arg.id
-                if input_arg.inf_dtype != output_dtype:
-                    if output_dtype == torch.quint8:
-                        assert str(tensor_id) in self.tensor_id_to_observer
-                        observer = self.tensor_id_to_observer[str(tensor_id)]
-                        # TODO: return this to the caller
-                        scale, zp = observer.calculate_qparams()
-                        quant_infos.append((scale, zp,))
-                        dequant_infos.append(False)
-                    else:
-                        quant_infos.append(None)
-                        dequant_infos.append(True)
-                else:
-                    quant_infos.append(None)
-                    dequant_infos.append(False)
-            else:
-                quant_infos.append(None)
-                dequant_infos.append(False)
-        return quant_infos, dequant_infos
+        return self.idx_to_packed_weight_name.get(str(seen_op_info.idx), None)
 
     def _first_call_assign_qtensor_infos_to_mod_outputs_tensor(
         self,
