@@ -498,10 +498,13 @@ def get_torch_function_hook_type(
     parent_module: Optional[torch.nn.Module],
     func: Callable,
 ) -> HookType:
-    parent_module_has_qstate = parent_module and \
-        hasattr(parent_module, '_auto_quant_state')
+    # the direct __dict__ accesses are for performance, because
+    # the default `torch.nn.Module.__getattr__` has overhead.
+    parent_module_has_qstate = parent_module is not None and \
+        '_modules' in parent_module.__dict__ and \
+        '_auto_quant_state' in parent_module.__dict__['_modules']
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module._auto_quant_state.cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
@@ -515,15 +518,17 @@ def get_module_hook_type(
     cur_module: torch.nn.Module,
 ) -> HookType:
     parent_module_has_qstate = parent_module is not None and \
-        hasattr(parent_module, '_auto_quant_state')
+        '_modules' in parent_module.__dict__ and \
+        '_auto_quant_state' in parent_module.__dict__['_modules']
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
     # We need IO hooks if
     # * we are calling forward on a module (always True here)
     # * that module has quant state
     # * that module does not need op hooks for the parent
     needs_io_hooks = (
-        hasattr(cur_module, '_auto_quant_state') and
+        '_modules' in cur_module.__dict__ and
+        '_auto_quant_state' in cur_module.__dict__['_modules'] and
         (not needs_op_hooks)
     )
     needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
