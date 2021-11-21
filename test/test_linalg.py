@@ -35,7 +35,7 @@ from torch.distributions.binomial import Binomial
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
 torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
-# import torch.linalg.LinAlgError
+import torch.linalg.LinAlgError
 
 if TEST_SCIPY:
     import scipy

@@ -816,6 +816,16 @@ def configure_extension_build():
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
 
+    lalg = Extension("torch.linalg.LinAlgError",
+                  libraries=main_libraries,
+                  sources=main_sources,
+                  language='c',
+                  extra_compile_args=main_compile_args + extra_compile_args,
+                  include_dirs=[],
+                  library_dirs=library_dirs,
+                  extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
+    extensions.append(lalg)
+
     if not IS_WINDOWS:
         DL = Extension("torch._dl",
                        sources=["torch/csrc/dl.c"],

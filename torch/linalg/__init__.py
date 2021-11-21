@@ -3,9 +3,11 @@ import sys
 
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
+# from torch.linalg import LinAlgError
+# import torch.linalg.LinAlgError
 
-class LinAlgError(RuntimeError):
-    pass
+# class LinAlgError(RuntimeError):
+#     pass
 
 Tensor = torch.Tensor
 
