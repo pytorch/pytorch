@@ -558,7 +558,7 @@ def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
 def get_input_args_quant_dequant_info(
     seen_op_info: SeenOpInfo,
     tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
-) -> Tuple[List[Optional[Tuple[float, int]]], List[bool]]:
+) -> Tuple[List[Optional[Tuple[float, int]]], List[bool], bool]:
     """
     Returns a list of information about the tensor inputs to the current op.
 
@@ -571,6 +571,10 @@ def get_input_args_quant_dequant_info(
     Dequant list:
     For each tensor input:
     * if the tensor input needs a dequant, True, otherwise, False
+
+    any_arg_quant_or_dequant_needed:
+    If True, at least one of quants or dequants is needed. If False,
+    there are no quants or dequants needed.
 
     For example, if there are two tensor inputs to the current op, and the
     first input needs a quant, this function will return
@@ -586,6 +590,7 @@ def get_input_args_quant_dequant_info(
     # determine the expected output dtype
     output_dtype = seen_op_info.output_tensor_infos[0].inf_dtype
     packable_arg_idxs = get_packable_arg_idxs(seen_op_info.type)
+    any_arg_quant_or_dequant_needed = False
 
     for input_arg_idx, input_arg in enumerate(seen_op_info.input_tensor_infos):
         arg_will_be_packed = packable_arg_idxs is not None and \
@@ -594,6 +599,7 @@ def get_input_args_quant_dequant_info(
         if input_arg is not None and not arg_will_be_packed:
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
+                any_arg_quant_or_dequant_needed = True
                 if output_dtype == torch.quint8:
                     assert tensor_id in tensor_id_to_scale_zp
                     scale, zp = tensor_id_to_scale_zp[tensor_id]
@@ -609,4 +615,4 @@ def get_input_args_quant_dequant_info(
         else:
             quant_infos.append(None)
             dequant_infos.append(False)
-    return quant_infos, dequant_infos
+    return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed

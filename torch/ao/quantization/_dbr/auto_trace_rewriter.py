@@ -113,7 +113,7 @@ class AllModuleTracer(torch.fx.Tracer):
 
                 old_target = target
                 # TODO use arg_dequant_infos
-                new_target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
+                new_target, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs, _, _ = \
                     qstate.get_op_convert_info(target)
                 for k in ('scale', 'zero_point'):
                     if k in additional_kwargs:
@@ -168,7 +168,7 @@ class AllModuleTracer(torch.fx.Tracer):
                 qstate.validate_cur_op(module_instance)
 
                 # TODO use arg_dequant_infos
-                _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs = \
+                _, arg_quant_infos, arg_dequant_infos, _packed_param_name, additional_kwargs, _, _ = \
                     qstate.get_op_convert_info(module_instance)
                 for k in ('scale', 'zero_point'):
                     if k in additional_kwargs:
