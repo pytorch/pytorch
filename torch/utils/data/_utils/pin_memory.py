@@ -56,7 +56,7 @@ def pin_memory(data):
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, collections.abc.Sequence):
         try:
-            return type(data)(pin_memory(sample) for sample in data)
+            return type(data)(pin_memory(sample) for sample in data)  # type: ignore
         except BaseException:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [pin_memory(sample) for sample in data]
