@@ -637,7 +637,7 @@ class TensorLikePair(Pair):
             if self.check_layout:
                 raise_mismatch_error("layout", actual.layout, expected.layout)
         elif actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
-                raise_mismatch_error("stride()", actual.stride(), expected.stride())
+            raise_mismatch_error("stride()", actual.stride(), expected.stride())
 
         if self.check_device and actual.device != expected.device:
             raise_mismatch_error("device", actual.device, expected.device)
