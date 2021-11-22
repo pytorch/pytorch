@@ -85,7 +85,7 @@ LazyTensor::Data* LazyTensor::data() const {
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
   int rank = tensor_shape.get().dim();
-  int dim_index = Helpers::GetCanonicalDimensionIndex(dim, rank);
+  int dim_index = GetCanonicalDimensionIndex(dim, rank);
   return tensor_shape.get().size(dim_index);
 }
 
@@ -104,9 +104,8 @@ lazy_tensors::util::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
   }
   CHECK(data()->tensor_data);
   const torch::lazy::BackendDevice& device = GetDevice();
-  return torch::lazy::Shape(
-      data()->tensor_data->type().scalarType(),
-      Helpers::I64List(data()->tensor_data->sizes()));
+  return torch::lazy::Shape(data()->tensor_data->type().scalarType(),
+                            ToI64Vector(data()->tensor_data->sizes()));
 }
 
 const torch::lazy::BackendDevice& LazyTensor::GetDevice() const { return data()->device; }
