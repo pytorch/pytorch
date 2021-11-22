@@ -4,6 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+import functools
 import os
 import pathlib
 import shutil
@@ -460,6 +461,9 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
+
+
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
@@ -609,6 +613,10 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/test_c10d_nccl": lambda test_module, test_directory, options:
+        run_test_with_subprocess(
+            test_module, test_directory, options
+        ),
 }
 
 
