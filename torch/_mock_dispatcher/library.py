@@ -1,14 +1,20 @@
 from typing import Callable, Any, Optional
 from torch._mock_dispatcher.dispatch_key import DispatchKey
 from torch._mock_dispatcher.dispatch_key_set import getRuntimeDispatchKeySet
-from torch._mock_dispatcher.kernel_function import KernelFunction
+from torch._mock_dispatcher.kernel_function import KernelFunction, fallthrough_kernel
 from torch._mock_dispatcher.dispatcher import Dispatcher
 
 class CppFunction:
     func_: KernelFunction
     # Missing:  dispatch_key_, cpp_signature_, schema_, debug_
 
-    def __init__(self, f: Callable[..., Any], *, boxed: bool) -> None:
+    def __init__(self, f: Optional[Callable[..., Any]] = None, *, boxed: bool, fallthrough: bool = False) -> None:
+        if fallthrough:
+            assert f is None
+            self.func_ = fallthrough_kernel
+            return
+
+        assert f is not None
         if boxed:
             self.func_ = KernelFunction.makeFromBoxed(f)
         else:
@@ -25,6 +31,10 @@ class Library:
 
     def impl(self, op: str, f: Callable[..., Any]) -> None:
         func: CppFunction = CppFunction(f, boxed=False)
+        Dispatcher.singleton().registerImpl(op, self.dispatch_key, func.func_)
+
+    def impl_fallthrough(self, op: str) -> None:
+        func: CppFunction = CppFunction(boxed=False, fallthrough=True)
         Dispatcher.singleton().registerImpl(op, self.dispatch_key, func.func_)
 
     def fallback(self, f: Callable[..., Any]) -> None:
