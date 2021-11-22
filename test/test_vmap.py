@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 import types
 
 
-FALLBACK_REGEX = r'falling back to slow \(for loop( and stack)?\) implementation'
+FALLBACK_REGEX = r'There is a performance drop'
 
 class EnableVmapFallbackWarnings:
     def __enter__(self):
@@ -1869,6 +1869,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         B0, B1 = 5, 7
 
         # Single vmap, various in_dims / out_dims
+        test(lambda x: x.sum(()), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0])])
         test(lambda x: x.sum(-1), [torch.randn([B0])])
         test(lambda x: x.sum(0), [torch.randn([B0, 3])])
@@ -1876,6 +1877,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(lambda x: x.sum(2), [torch.randn([2, 5, B0, 3])], in_dims=2, out_dims=2)
 
         # Doubly nested vmap
+        test(vmap(lambda x: x.sum(())), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
