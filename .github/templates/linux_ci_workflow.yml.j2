@@ -56,10 +56,13 @@ jobs:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
+{%- if 'rocm' in test_runner_type %}
+      docker_commit_image: ${{ steps.calculate-tag.outputs.docker_commit_image }}
+{%- endif %}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image(false) }}
+      !{{ common.calculate_docker_image(false, 'rocm' in test_runner_type) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
@@ -92,10 +95,17 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
+{%- if 'rocm' in test_runner_type %}
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          docker copy ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
+{%- else %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+{%- endif %}
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
@@ -110,10 +120,17 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
+{%- if 'rocm' in test_runner_type %}
+      - name: Push Docker image
+        run: |
+          docker commit "${container_name}" {{ steps.calculate-tag.outputs.docker_commit_image }}
+          docker push {{ steps.calculate-tag.outputs.docker_commit_image }}
+{%- else %}
       - name: Chown workspace
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endif %}
       {%- if build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
@@ -184,7 +201,11 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
+{%- if 'rocm' in test_runner_type %}
+      DOCKER_IMAGE: ${{ needs.build.outputs.docker_commit_image }}
+{%- else %}
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
+{%- endif %}
       JOB_BASE_NAME: !{{ build_environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
@@ -205,6 +226,10 @@ jobs:
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - name: ROCm set GPU_FLAG
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
+        run: |
+          echo "GPU_FLAG=--device=/dev/kfd --device=/dev/dri --group-add video" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -226,7 +251,11 @@ jobs:
           unzip -o artifacts.zip
       - name: Output disk space left
         run: |
+{%- if 'rocm' in test_runner_type %}
+          df -H
+{%- else %}
           sudo df -H
+{%- endif %}
       !{{ common.parse_ref() }}
       - name: Test
         env:
@@ -280,16 +309,24 @@ jobs:
             --detach \
             --name="${container_name}" \
             --user jenkins \
+{%- if 'rocm' in test_runner_type %}
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+{%- else %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
+{%- endif %}
           docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+{%- if 'rocm' not in test_runner_type %}
       - name: Chown workspace
         if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- endif %}
       !{{ common.render_test_results() }}
       !{{ common.upload_test_reports(name='linux') }}
       !{{ common.upload_test_statistics(build_environment) }}

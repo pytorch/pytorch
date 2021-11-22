@@ -361,6 +361,10 @@ jobs:
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      - name: ROCm set GPU_FLAG
+        if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
+        run: |
+          echo "GPU_FLAG=--device=/dev/kfd --device=/dev/dri --group-add video" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
