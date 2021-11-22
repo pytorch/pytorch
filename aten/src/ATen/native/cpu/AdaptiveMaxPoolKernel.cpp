@@ -5,6 +5,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -34,16 +35,16 @@ void cpu_adaptive_max_pool(
 
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++) {
+    for (const auto c : c10::irange(begin, end)) {
       scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
-      for (int64_t oh = 0; oh < output_height; oh++) {
+      for (const auto oh : c10::irange(output_height)) {
         int64_t ih0 = start_index(oh, output_height, input_height);
         int64_t ih1 = end_index(oh, output_height, input_height);
 
-        for (int64_t ow = 0; ow < output_width; ow++) {
+        for (const auto ow : c10::irange(output_width)) {
           int64_t iw0 = start_index(ow, output_width, input_width);
           int64_t iw1 = end_index(ow, output_width, input_width);
 
@@ -121,7 +122,7 @@ void cpu_adaptive_max_pool_channels_last(
     // temp buffer holding index with integer_t
     std::unique_ptr<integer_t []> index_buffer(new integer_t[len]);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       int64_t ih0 = start_index(oh, output_height, input_height);
       int64_t ih1 = end_index(oh, output_height, input_height);
 
@@ -216,13 +217,13 @@ void cpu_adaptive_max_pool_backward(
 
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
-    for (int64_t c = begin; c < end; c++) {
+    for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
       scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
       int64_t* indices_ptr = indices_data + c * output_height * output_width;
 
-      for (int64_t oh = 0; oh < output_height; oh++) {
-        for (int64_t ow = 0; ow < output_width; ow++) {
+      for (const auto oh : c10::irange(output_height)) {
+        for (const auto ow : c10::irange(output_width)) {
           // retrieve position of max
           int64_t index = oh * output_width + ow;
           int64_t maxindex = indices_ptr[index];
@@ -264,17 +265,17 @@ void cpu_adaptive_max_pool_backward_channels_last(
 
   // parallel on dim N
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
-    for (int64_t n = begin; n < end; n++) {
+    for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
       scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
       int64_t* indices_ptr = indices_data + n * output_height * output_width * channels;
 
-      for (int64_t oh = 0; oh < output_height; oh++) {
-        for (int64_t ow = 0; ow < output_width; ow++) {
+      for (const auto oh : c10::irange(output_height)) {
+        for (const auto ow : c10::irange(output_width)) {
           scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t* ind = indices_ptr + oh * output_width * channels + ow * channels;
           // TODO: gcc vectorization
-          for (int64_t c = 0; c < channels; c++) {
+          for (const auto c : c10::irange(channels)) {
             int64_t maxindex = ind[c];
             grad_input_ptr[maxindex * channels + c] += gout[c];
           }

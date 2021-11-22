@@ -1,4 +1,5 @@
 #include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -8,12 +9,15 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -95,7 +99,7 @@ struct PythonResolver : public Resolver {
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
@@ -534,7 +538,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
 
 void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = func.function_->graph()->copy();
+  auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
   const auto name = QualifiedName(*module.type()->name(), "forward");
@@ -780,12 +784,6 @@ void initJitScriptBindings(PyObject* module) {
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<c10::Capsule>(m, "Capsule");
-
-  py::class_<MobileCode>(m, "MobileCode")
-      .def(py::init<std::shared_ptr<Graph>, std::string>())
-      .def("bytecode_table", [](MobileCode& self) -> IValue {
-        return self.bytecode_table();
-      });
 
   auto object_class =
       py::class_<Object>(m, "ScriptObject")
@@ -1423,11 +1421,13 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
           "graph",
-          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+          [](const StrongFunctionPtr& self) {
+            return toGraphFunction(*self.function_).graph();
+          })
       .def_property_readonly(
           "inlined_graph",
           [](const StrongFunctionPtr& self) {
-            auto g = self.function_->graph()->copy();
+            auto g = toGraphFunction(*self.function_).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1449,12 +1449,16 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().getDebugState();
+            return toGraphFunction(*self.function_)
+                .get_executor()
+                .getDebugState();
           })
       .def(
           "_debug_flush_compilation_cache",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().debugFlushCompilationCache();
+            toGraphFunction(*self.function_)
+                .get_executor()
+                .debugFlushCompilationCache();
           })
       .def_property_readonly(
           "name",
@@ -1488,7 +1492,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "inlined_graph",
           [](const Method& self) {
-            auto g = self.function().graph()->copy();
+            auto g = toGraphFunction(self.function()).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1596,6 +1600,16 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
 
+  m.def("_compile_graph_to_code_table",
+        [](
+          const std::string& name,
+          const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        auto jitFunc = std::make_unique<GraphFunction>(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc.get(), options);
+        return convertMobileFunctionToCodeTable(mobileFunc.get(), options);
+  });
+
   m.def(
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
@@ -1702,6 +1716,14 @@ void initJitScriptBindings(PyObject* module) {
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
+  });
+
+  m.def("populate_upgraders_map", [](std::unordered_map<std::string, std::string> content) {
+    populate_upgraders_map(content);
+  });
+
+  m.def("get_upgraders_map_size", []() -> int {
+    return get_upgraders_map_size();
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
@@ -1939,6 +1961,10 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
 
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
      return Module(get_python_cu(), type);

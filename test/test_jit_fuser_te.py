@@ -1,3 +1,5 @@
+# Owner(s): ["NNC"]
+
 import operator
 import unittest
 import contextlib
@@ -1962,6 +1964,18 @@ class TestTEFuser(JitTestCase):
             for fn in [bn, bn_no_weight, bn_no_bias, bn_neither]:
                 test(fn, (i, x))
 
+    def test_profiler(self):
+        @torch.jit.script
+        def test(x, y, z):
+            return x * y + z
+
+        args = [torch.randn(4) for _ in range(3)]
+        with torch.autograd.profiler.profile() as prof:
+            for _ in range(3):
+                test(*args)
+        self.assertIn("fused_mul_add", prof.table())
+
+
 works_list = [
     '__radd__',
     '__rdiv__',
@@ -1978,6 +1992,7 @@ works_list = [
     'ceil',
     'clamp',
     'clamp.scalar',
+    'contiguous',
     'cos',
     'cosh',
     'div.no_rounding_mode',
@@ -1996,6 +2011,7 @@ works_list = [
     'fmod.autodiffed',
     'ge',
     'gt',
+    'isnan',
     'le',
     'lerp',
     'lgamma',
@@ -2021,6 +2037,9 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
@@ -2049,6 +2068,24 @@ works_list = [
     'view',
     'view_as',
     'where',
+    'bool',
+    'byte',
+    'char',
+    'double',
+    'float',
+    'half',
+    'int',
+    'long',
+    'short',
+    'bool.channels_last',
+    'byte.channels_last',
+    'char.channels_last',
+    'double.channels_last',
+    'float.channels_last',
+    'half.channels_last',
+    'int.channels_last',
+    'long.channels_last',
+    'short.channels_last',
 ]
 
 known_failures = [

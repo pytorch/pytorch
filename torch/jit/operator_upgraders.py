@@ -8,7 +8,7 @@ Each function definition here needs to following requirements:
 """
 import torch
 import yaml
-from typing import Union, List, Optional
+from typing import Union
 
 @torch.jit.script
 def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
@@ -57,22 +57,43 @@ def div__Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> to
 # def full_out_0_4(size: List[int], fill_value: Union[int, float, complex], *, out: torch.Tensor) -> torch.Tensor:
 #     return torch.full(size, fill_value, out=out)
 
-def format_bytecode(code_table):
-    def listify(t):
-        return list(map(listify, t)) if isinstance(t, (list, tuple)) else t
-    code_table_dict = {}
-    for code in code_table:
-        code_list = list(code)
-        code_table_dict[code_list[0]] = listify(code_list[1:])
-    return code_table_dict
+def format_bytecode(table):
+    # given a nested tuples, convert them to nested list
+    def listify(content):
+        if not isinstance(content, tuple):
+            return content
+        return [listify(i) for i in content]
 
-yaml_content = [
-    {"div_Tensor_0_3": format_bytecode(torch._C.MobileCode(div_Tensor_0_3.graph, "div_Tensor_0_3").bytecode_table())},
-    {"div_Scalar_0_3": format_bytecode(torch._C.MobileCode(div_Scalar_0_3.graph, "div_Scalar_0_3").bytecode_table())},
-    {"div_out_0_3": format_bytecode(torch._C.MobileCode(div_out_0_3.graph, "div_out_0_3").bytecode_table())},
-    {"div__Tensor_0_3": format_bytecode(torch._C.MobileCode(div__Tensor_0_3.graph, "div__Tensor_0_3").bytecode_table())},
-    {"div__Scalar_0_3": format_bytecode(torch._C.MobileCode(div__Scalar_0_3.graph, "div__Scalar_0_3").bytecode_table())},
-]
+    formatted_table = {}
+    for entry in table:
+        identifier = entry[0]
+        content = entry[1]
+        content = listify(content)
+        formatted_table[identifier] = content
+    print(formatted_table)
+    return formatted_table
 
-stream = open('upgraders.yaml', 'w')
-yaml.dump(yaml_content, stream)
+def generate_bytecode(file_name):
+    yaml_content = [
+        {"div_Tensor_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_Tensor_0_3", div_Tensor_0_3.graph))},
+        {"div_Scalar_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_Scalar_0_3", div_Scalar_0_3.graph))},
+        {"div_out_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_out_0_3", div_out_0_3.graph))},
+        {"div__Tensor_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Tensor_0_3", div__Tensor_0_3.graph))},
+        {"div__Scalar_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Scalar_0_3", div__Scalar_0_3.graph))},
+    ]
+
+    stream = open(file_name, 'w')
+    yaml.dump(yaml_content, stream)
+
+def populate_upgraders_map():
+    content = {
+        "div_Tensor_0_3": str(div_Tensor_0_3.graph),
+        "div_Scalar_0_3": str(div_Scalar_0_3.graph),
+        "div_out_0_3": str(div_out_0_3.graph),
+        "div__Tensor_0_3": str(div__Tensor_0_3.graph),
+        "div__Scalar_0_3": str(div__Scalar_0_3.graph)
+    }
+    torch._C.populate_upgraders_map(content)
+
+if __name__ == "__main__":
+    generate_bytecode("stuff.yaml")

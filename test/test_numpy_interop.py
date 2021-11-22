@@ -1,3 +1,5 @@
+# Owner(s): ["module: numpy"]
+
 import torch
 import numpy as np
 

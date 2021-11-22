@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/passes/onnx/constant_fold.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
-#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
@@ -421,11 +420,6 @@ c10::optional<at::Tensor> ComputeConstantFolding(Node* n, int opset_version) {
   if (inputTensorValues.size() < n->inputs().size()) {
     return c10::nullopt;
   }
-  // The _jit_pass_onnx_fold_if pass is processed after onnx pass,
-  // therefore the onnx graph here may contain the if blocks that is never
-  // traced. Constant folding on those if blocks may rely on the input shape
-  // which does not meet the criteria, so it may get errors. A possible solution
-  // is to put _jit_pass_onnx_fold_if pass in an earlier stage.
   try {
     return onnx_constant_fold::runTorchBackendForOnnx(
         n, inputTensorValues, opset_version);
@@ -826,7 +820,8 @@ void ProcessReduceNode(Node* n) {
         axes_vector[idx] += rank_0;
       }
     }
-    int64_t keepdims = 0;
+    // ONNX keepdims defaults to 1 when not set.
+    int64_t keepdims = 1;
     if (n->hasAttributeS("keepdims")) {
       keepdims = n->i(attr::keepdims);
     }
@@ -947,30 +942,30 @@ c10::SymbolicShape ComputeShapeForSlice(
 }
 
 void ProcessSliceNode(Node* n, int opset_version) {
-  if (ConstantValueMap::HasShape(n->input(0)->debugName())) {
+  auto valid = true;
+  // For opset version <= 9, starts, ends, axes, steps are attributes,
+  // so their values are always valid.
+  if (opset_version >= 10) {
+    valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
+        ConstantValueMap::HasValue(n->input(2)->debugName());
+    for (const auto input_idx : c10::irange(3, 5)) {
+      if (n->inputs().size() > input_idx) {
+        valid = valid &&
+            ConstantValueMap::HasValue(n->input(input_idx)->debugName());
+      }
+    }
+  }
+  if (!ConstantValueMap::HasShape(n->input(0)->debugName()) || !valid) {
+    if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
+      auto rank = ConstantValueMap::GetRank(n->input(0)->debugName()).value();
+      UpdateRank(n->output(), rank);
+    }
+    return;
+  } else {
     auto shape_size_0 =
         ConstantValueMap::GetShape(n->input(0)->debugName()).value();
     if (shape_size_0.rank().has_value()) {
       auto input0_shape_value = shape_size_0.sizes().value();
-      auto valid = true;
-      if (opset_version >= 10) {
-        valid = ConstantValueMap::HasValue(n->input(1)->debugName()) &&
-            ConstantValueMap::HasValue(n->input(2)->debugName());
-        for (const auto input_idx : c10::irange(3, 5)) {
-          if (n->inputs().size() > input_idx) {
-            valid = valid &&
-                ConstantValueMap::HasValue(n->input(input_idx)->debugName());
-          }
-        }
-      }
-      if (!valid) {
-        if (ConstantValueMap::HasRank(n->input(0)->debugName())) {
-          auto rank =
-              ConstantValueMap::GetRank(n->input(0)->debugName()).value();
-          UpdateRank(n->output(), rank);
-        }
-        return;
-      }
 
       std::vector<int64_t> start_vector;
       std::vector<int64_t> end_vector;
@@ -2111,6 +2106,7 @@ void ONNXShapeTypeInference(
   ConstantValueMap::ClearMaps();
   SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
+  ConstantValueMap::ClearMaps();
 }
 
 } // namespace jit
