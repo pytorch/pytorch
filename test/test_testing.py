@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import collections
 import doctest
 import functools
@@ -16,8 +18,8 @@ from torch.testing._internal.common_utils import \
      parametrize, subtest, instantiate_parametrized_tests, dtype_name)
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
-     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyOnCPUAndCUDA,
-     deviceCountAtLeast, ops)
+     get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
+     deviceCountAtLeast, ops, expectedFailureMeta)
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -48,7 +50,7 @@ class TestTesting(TestCase):
     # the other is zeroed.
     # TODO: this is legacy behavior and should be updated after test
     # precisions are reviewed to be consistent with torch.isclose.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparetensors_legacy(self, device):
         a = torch.tensor((10000000.,))
         b = torch.tensor((10000002.,))
@@ -81,7 +83,7 @@ class TestTesting(TestCase):
             result, debug_msg = op(x, y, atol=0, rtol=1e-5)
             self.assertFalse(result)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparescalars_debug_msg(self, device):
         # float x float
         result, debug_msg = self._compareScalars(4., 7.)
@@ -113,7 +115,7 @@ class TestTesting(TestCase):
         self.assertEqual(debug_msg, expected_msg)
 
     # Checks that compareTensors provides the correct debug info
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test__comparetensors_debug_msg(self, device):
         # Acquires atol that will be used
         atol = max(1e-05, self.precision)
@@ -265,7 +267,7 @@ class TestTesting(TestCase):
         self._isclose_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
         self._comparetensors_helper(tests, device, dtype, False, atol=1.5, rtol=.5)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(torch.float16, torch.float32, torch.float64)
     def test_isclose_comparetensors_float(self, device, dtype):
         tests = (
@@ -437,6 +439,8 @@ class TestTesting(TestCase):
     @dtypes(torch.bool, torch.long, torch.float, torch.cfloat)
     def test_make_tensor(self, device, dtype):
         def check(size, low, high, requires_grad, noncontiguous):
+            if dtype not in [torch.float, torch.cfloat]:
+                requires_grad = False
             t = make_tensor(size, device, dtype, low=low, high=high,
                             requires_grad=requires_grad, noncontiguous=noncontiguous)
 
@@ -450,10 +454,7 @@ class TestTesting(TestCase):
             if t.numel() > 0 and dtype in [torch.long, torch.float]:
                 self.assertTrue(t.le(high).logical_and(t.ge(low)).all().item())
 
-            if dtype in [torch.float, torch.cfloat]:
-                self.assertEqual(t.requires_grad, requires_grad)
-            else:
-                self.assertFalse(t.requires_grad)
+            self.assertEqual(t.requires_grad, requires_grad)
 
             if t.numel() > 1:
                 self.assertEqual(t.is_contiguous(), not noncontiguous)
@@ -504,7 +505,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -544,7 +545,7 @@ if __name__ == '__main__':
         # should capture CUDA error
         self.assertIn('CUDA error: device-side assert triggered', stderr)
         # should run only 1 test because it throws unrecoverable error.
-        self.assertIn('Ran 1 test', stderr)
+        self.assertIn('errors=1', stderr)
 
 
     @onlyCUDA
@@ -583,9 +584,10 @@ if __name__ == '__main__':
     run_tests()
 """)
         # we are currently disabling CUDA early termination for distributed tests.
-        self.assertIn('Ran 2 test', stderr)
+        self.assertIn('errors=2', stderr)
 
-    @onlyOnCPUAndCUDA
+    @expectedFailureMeta  # This is only supported for CPU and CUDA
+    @onlyNativeDeviceTypes
     def test_get_supported_dtypes(self, device):
         # Test the `get_supported_dtypes` helper function.
         # We acquire the dtypes for few Ops dynamically and verify them against
@@ -726,7 +728,7 @@ class TestAssertClose(TestCase):
         expected = torch.nn.Parameter(actual)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
                 fn(allow_subclasses=False)
 
     def test_mismatching_types(self):
@@ -734,7 +736,7 @@ class TestAssertClose(TestCase):
         expected = actual.numpy()
 
         for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
                 fn(allow_subclasses=allow_subclasses)
 
     def test_unknown_type(self):
@@ -935,6 +937,21 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
+    def test_none(self):
+        actual = expected = None
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_none_mismatch(self):
+        expected = None
+
+        for actual in (False, 0, torch.nan, torch.tensor(torch.nan)):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaises(AssertionError):
+                    fn()
+
+
     def test_docstring_examples(self):
         finder = doctest.DocTestFinder(verbose=False)
         runner = doctest.DocTestRunner(verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE)
@@ -1081,7 +1098,7 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
-    def test_msg_str(self):
+    def test_msg(self):
         msg = "Custom error message!"
 
         actual = torch.tensor(1)
@@ -1090,93 +1107,6 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
-
-    def test_msg_callable(self):
-        msg = "Custom error message!"
-
-        def make_msg(actual, expected, diagnostics):
-            return msg
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, msg):
-                fn(msg=make_msg)
-
-    def test_msg_callable_inputs(self):
-        sentinel = (
-            "This is just a sentinel. If you see this in a traceback, "
-            "you probably need to look at the exception that caused this to see the actual error!"
-        )
-
-        expected_actual = torch.tensor(1)
-        expected_expected = torch.tensor(2)
-
-        def make_msg(actual_actual, actual_expected, diagnostics):
-            torch.testing.assert_close(
-                actual_actual, expected_actual, msg="`actual` is not passed correctly to the `msg` callable!"
-            )
-            torch.testing.assert_close(
-                actual_expected, expected_expected, msg="`expected` is not passed correctly to the `msg` callable!"
-            )
-            return sentinel
-
-        for fn in assert_close_with_inputs(expected_actual, expected_expected):
-            with self.assertRaisesRegex(AssertionError, sentinel):
-                fn(msg=make_msg)
-
-    def test_msg_callable_diagnostics(self):
-        sentinel = (
-            "This is just a sentinel. If you see this in a traceback, "
-            "you probably need to look at the exception that caused this to see the actual error!"
-        )
-
-        expected_attributes = dict(
-            number_of_elements=int,
-            total_mismatches=int,
-            max_abs_diff=(int, float),
-            max_abs_diff_idx=(int, tuple),
-            atol=float,
-            max_rel_diff=(int, float),
-            max_rel_diff_idx=(int, tuple),
-            rtol=float,
-        )
-
-        def check_diagnostics_smoke(diagnostics):
-            actual_attributes = vars(diagnostics)
-
-            extra_attributes = set(actual_attributes.keys()) - set(expected_attributes.keys())
-            if extra_attributes:
-                raise AssertionError(
-                    f"`diagnostics_info` has the following attributes that are not documented:\n\n "
-                    f"'{', '.join(sorted(extra_attributes))}'"
-                )
-
-            missing_attributes = set(expected_attributes.keys()) - set(actual_attributes.keys())
-            if missing_attributes:
-                raise AssertionError(
-                    f"`diagnostics_info` is missing the following attributes:\n\n "
-                    f"'{', '.join(sorted(missing_attributes))}'"
-                )
-
-            for name, expected_type in expected_attributes.items():
-                if not isinstance(actual_attributes[name], expected_type):
-                    raise AssertionError(
-                        f"`diagnostics_info.{name}` should be {expected_type}, "
-                        f"but got {type(actual_attributes[name])} instead."
-                    )
-
-        def make_msg(actual, expected, diagnostics):
-            check_diagnostics_smoke(diagnostics)
-            return sentinel
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, sentinel):
-                fn(msg=make_msg)
 
 
 class TestAssertCloseContainer(TestCase):
@@ -1194,7 +1124,7 @@ class TestAssertCloseContainer(TestCase):
         actual = (t1, t1)
         expected = (t1, t2)
 
-        with self.assertRaisesRegex(AssertionError, r"index\s+1"):
+        with self.assertRaisesRegex(AssertionError, re.escape("item [1]")):
             torch.testing.assert_close(actual, expected)
 
     def test_mapping_mismatching_keys(self):
@@ -1211,7 +1141,7 @@ class TestAssertCloseContainer(TestCase):
         actual = {"a": t1, "b": t1}
         expected = {"a": t1, "b": t2}
 
-        with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
             torch.testing.assert_close(actual, expected)
 
 

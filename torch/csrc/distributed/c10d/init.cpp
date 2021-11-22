@@ -454,6 +454,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("device_ids"),
           py::arg("output_device"),
           py::arg("broadcast_buffers"),
+          py::arg("has_sync_bn"),
           py::call_guard<py::gil_scoped_release>())
       .def(
           "set_runtime_stats_and_log",
@@ -910,7 +911,7 @@ Example::
       )")
       .def(
           py::init([](const std::string& host,
-                      ::c10d::PortType port,
+                      uint16_t port,
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
@@ -1389,7 +1390,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               }),
               py::arg("pg"),
               py::arg("gloo_pg"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+         .def_property_readonly(
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
+         );
 #endif
 
 #ifdef USE_C10D_NCCL
