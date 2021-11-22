@@ -55,7 +55,11 @@ def pin_memory(data):
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, collections.abc.Sequence):
-        return [pin_memory(sample) for sample in data]
+        try:
+            return elem_type(pin_memory(sample) for sample in data)
+        except:
+            # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+            return [pin_memory(sample) for sample in data]
     elif hasattr(data, "pin_memory"):
         return data.pin_memory()
     else:
