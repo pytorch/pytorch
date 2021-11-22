@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -9,6 +10,7 @@ import torch.onnx.utils
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _unimplemented
 import torch.onnx.symbolic_opset9
+from torch.onnx.symbolic_opset9 import linear
 
 from sys import maxsize
 
@@ -318,3 +320,41 @@ def isfinite(g, input):
     inf_node = isinf(g, input)
     nan_node = isnan(g, input)
     return __not_(g, __or_(g, inf_node, nan_node))
+
+
+# https://github.com/pytorch/pytorch/wiki/PyTorch-ONNX-exporter#quantized-model-export
+class Quantized:
+    domain = "quantized"
+
+    # DequantizeLinear was added in opset version 10.
+    @staticmethod
+    def linear(g, input_original, weight, weight_scale, weight_zero_point, bias, op_scale, op_zero_point):
+        input_value, input_scale, input_zero_point = sym_help._unpack_tuple(input_original)
+        # From https://pytorch.org/docs/master/generated/torch.nn.quantized.functional.linear.html
+        # input (Tensor) – Quantized input of type torch.quint8
+        input_type_dq = torch.onnx.TensorProtoDataType.UINT8
+        input_value = g.op("Cast", input_value, to_i=input_type_dq)
+        input_scale = g.op("Cast", input_scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+        input_zero_point = g.op("Cast", input_zero_point, to_i=input_type_dq)
+        input = g.op("DequantizeLinear", input_value, input_scale, input_zero_point)
+        # weight (Tensor) – Quantized weight of type torch.qint8
+        weight_type_dq = torch.onnx.TensorProtoDataType.INT8
+        weight = g.op("Cast", weight, to_i=weight_type_dq)
+        weight_scale = g.op("Cast", weight_scale, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+        weight_zero_point = g.op("Cast", weight_zero_point, to_i=weight_type_dq)
+        weight = g.op("DequantizeLinear", weight, weight_scale, weight_zero_point)
+        # bias (Tensor) – None or fp32 bias of type torch.float
+        bias = g.op("Cast", bias, to_i=torch.onnx.TensorProtoDataType.FLOAT)
+        output = linear(g, input, weight, bias)
+
+        if op_scale is None:
+            op_scale = input_scale
+        elif op_scale.type().scalarType() != "Float":
+            op_scale = g.op("Cast", op_scale, to_i=sym_help.cast_pytorch_to_onnx["Float"])
+
+        if op_zero_point is None:
+            op_zero_point = input_zero_point
+        elif op_zero_point.type().scalarType() != "Byte":
+            op_zero_point = g.op("Cast", op_zero_point, to_i=sym_help.cast_pytorch_to_onnx["Byte"])
+        output = g.op("QuantizeLinear", output, op_scale, op_zero_point)
+        return g.op("prim::TupleConstruct", output, op_scale, op_zero_point)

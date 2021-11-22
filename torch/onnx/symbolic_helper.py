@@ -132,6 +132,10 @@ def _unpack_list(list_value):
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
 
+def _unpack_tuple(tuple_value):
+    tuple_node = tuple_value.node()
+    assert tuple_node.kind() == "prim::TupleConstruct"
+    return list(tuple_node.inputs())
 
 # Check if list_value is output from prim::ListConstruct
 # This is usually called before _unpack_list to ensure the list can be unpacked.
