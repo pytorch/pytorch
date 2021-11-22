@@ -203,7 +203,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker copy ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
+          docker cp ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update

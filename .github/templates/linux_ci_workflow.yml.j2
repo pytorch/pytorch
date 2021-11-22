@@ -99,7 +99,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker copy ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
+          docker cp ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
 {%- else %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
