@@ -78,7 +78,7 @@ class DynamicType : public Type {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
-    for (uint16_t i = 0; i < arguments_.elems.size(); i++) {
+    for (size_t i = 0; i < arguments_.elems.size(); i++) {
       if (!f(arguments_.elems[i], other.arguments_.elems[i])) {
         return false;
       }

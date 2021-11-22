@@ -18,8 +18,8 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
 
 DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
   elems.reserve(args.size());
-  for (size_t i = 0; i < args.size(); i++) {
-    elems.emplace_back(create(*args[i]));
+  for (const auto& arg : args) {
+    elems.emplace_back(create(*arg));
   }
 }
 
