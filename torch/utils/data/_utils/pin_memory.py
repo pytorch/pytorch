@@ -56,8 +56,8 @@ def pin_memory(data):
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, collections.abc.Sequence):
         try:
-            return elem_type(pin_memory(sample) for sample in data)
-        except:
+            return type(data)(pin_memory(sample) for sample in data)
+        except BaseException:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [pin_memory(sample) for sample in data]
     elif hasattr(data, "pin_memory"):
