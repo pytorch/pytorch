@@ -23,14 +23,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
-#include "lazy_tensor_core/csrc/view_ops/permute.h"
-#include "lazy_tensor_core/csrc/view_ops/select.h"
-#include "lazy_tensor_core/csrc/view_ops/unselect.h"
-#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
-#include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -104,18 +96,6 @@ torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
   return torch::lazy::Shape(input_shape.scalar_type(), output_dimensions);
 }
 torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
-  if (node->op() == *ir::ops::ltc_generic_slice) {
-    auto generic_slice = torch::lazy::NodeCast<ir::ops::GenericSlice>(
-        node, *ir::ops::ltc_generic_slice);
-    const torch::lazy::Output& argument = node->operand(0);
-    return torch::lazy::Shape(
-        torch::lazy::GetShapeFromTsOutput(argument).scalar_type(),
-        generic_slice->sizes());
-  }
-  if (node->op() == *ir::ops::ltc_update_slice) {
-    const torch::lazy::Output& argument = node->operand(0);
-    return torch::lazy::GetShapeFromTsOutput(argument);
-  }
   switch (node->op().op) {
     case at::aten::expand: {
       auto expand = torch::lazy::NodeCast<ir::ops::Expand>(
@@ -129,13 +109,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
       return InferConvolutionOverrideable(
           torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(
               node, torch::lazy::OpKind(at::aten::convolution_overrideable)));
-    }
-    case at::aten::permute: {
-      auto permute = torch::lazy::NodeCast<ir::ops::Permute>(
-          node, torch::lazy::OpKind(at::aten::permute));
-      const torch::lazy::Output& argument = node->operand(0);
-      return ir::ops::Permute::MakePermuteShape(
-          torch::lazy::GetShapeFromTsOutput(argument), permute->dims());
     }
     // activation and unary op do not change shape
     case at::aten::pow: {
