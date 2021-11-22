@@ -6,6 +6,7 @@
 
 import argparse
 from typing import Tuple, List
+from collections import defaultdict
 import re
 
 def num_leading_spaces(line: str) -> int:
@@ -102,7 +103,7 @@ def gen_unwraps(arg_types, arg_names):
             unwrapped_arg_list.append(arg)
     return unwraps, unwrapped_arg_list
 
-def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -> str:
+def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, ops) -> str:
     arg_types, arg_names = zip(*args)
     batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
 
@@ -130,6 +131,7 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int) -
         wrapped_returns = f'return std::make_tuple({", ".join(wrapped_returns)});'
 
     result = f"""\
+    // {ops}
     {batch_rule_typedef}
     template <>
     {return_t} lowerToNextLayer<{batch_rule_t},{return_t},{args_t}>(
@@ -187,7 +189,7 @@ def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h', includ
     return tuple(schemas)
 
 def is_schema_outplace(schema):
-    returns, args = schema
+    _, returns, args = schema
     for arg in args:
         typ, _ = arg
         if typ == 'Tensor &' or typ == "TensorList":
@@ -210,6 +212,10 @@ def get_hash(schema):
     args_t, _ = tuple(zip(*args))
     return (ret_t, args_t)
 
+class Container:
+    def __init__(self, schema, ops):
+        self.schema = schema
+        self.ops = ops
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -218,13 +224,19 @@ if __name__ == '__main__':
                         help='link to RegistrationDeclarations.h')
     args = parser.parse_args()
 
-    schemas = get_signatures(args.path)
+    schemas = get_signatures(args.path, include_op=True)
     schemas = [schema for schema in schemas if is_schema_outplace(schema)]
     unique_schemas = {}
     for schema in schemas:
-        unique_schemas[get_hash(schema)] = schema
-    schemas = list(unique_schemas.values())
-    codes = [lower(*schema, i) for i, schema in enumerate(schemas)]
+        op, *schema = schema
+        unique_id = get_hash(schema)
+        if unique_id in unique_schemas:
+            unique_schemas[unique_id].ops.append(op)
+        else:
+            unique_schemas[unique_id] = Container(schema, [op])
+
+    codes = [lower(*container.schema, i, container.ops)
+             for i, container in enumerate(unique_schemas.values())]
     print("#include <functorch/csrc/OutOfPlacePlumbing.h>")
     print("#include <functorch/csrc/PlumbingHelper.h>")
     print("#include <functorch/csrc/Constants.h>")
