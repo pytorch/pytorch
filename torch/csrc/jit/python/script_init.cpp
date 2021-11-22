@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
@@ -1715,6 +1716,14 @@ void initJitScriptBindings(PyObject* module) {
   m.def("parse_type_comment", [](const std::string& comment) {
     Parser p(std::make_shared<Source>(comment));
     return Decl(p.parseTypeComment());
+  });
+
+  m.def("populate_upgraders_map", [](std::unordered_map<std::string, std::string> content) {
+    populate_upgraders_map(content);
+  });
+
+  m.def("get_upgraders_map_size", []() -> int {
+    return get_upgraders_map_size();
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
