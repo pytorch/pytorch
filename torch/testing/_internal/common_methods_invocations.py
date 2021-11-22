@@ -5716,7 +5716,7 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
     return sample_inputs
 
-# Used for both log_softmax and softmax
+# Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -9692,6 +9692,7 @@ op_db: List[OpInfo] = [
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    # https://github.com/pytorch/pytorch/issues/68752
     OpInfo('softmax',
            aliases=('special.softmax', 'nn.functional.softmax',),
            aten_name='softmax',
@@ -9711,6 +9712,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     # `softmin` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
+    # https://github.com/pytorch/pytorch/issues/68752
     OpInfo('nn.functional.softmin',
            aten_name='softmin',
            dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -10254,9 +10256,11 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_nn_functional_prelu,
         decorators=[
             # FIXME: second derivative is implemented but seems to be incorrect
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_fn_gradgrad"),
+            # https://github.com/pytorch/pytorch/issues/68760
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
             # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
             # Consider making it a parameter or input, or detaching the gradient
+            # https://github.com/pytorch/pytorch/issues/68752
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'), ],
     ),
     UnaryUfuncInfo(
