@@ -524,8 +524,8 @@ class OpInfo(object):
                  error_inputs_func=None,  # function to generate inputs that will throw errors
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function works with on the CPU,
-                               # inherited by other device types that don't specify their own dtypes
+                 dtypes, # dtypes this function works with on the CPU,
+                         # inherited by other device types that don't specify their own dtypes
 
                  # the following dtypesIf... options override the dtypes value
                  # on their respective device types
@@ -594,7 +594,6 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
-        assert dtypes is not None, f"`dtypes` argument for OpInfo should not be None, but found None for {name}"
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
