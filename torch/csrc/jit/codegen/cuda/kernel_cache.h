@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/fusion_segmenter.h>
@@ -60,17 +61,25 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Unified interface to run the managed kernels with given input
   std::vector<at::Tensor> runWithInput(
       const at::ArrayRef<IValue>& inputs,
-      size_t input_id) {
-    if (is_segmented_) {
-      return runMultiKernelWithInput(inputs, input_id);
-    } else {
-      return runKernelWithInput(inputs, input_id);
-    }
-  }
+      size_t input_id);
 
   //! Turn On/Off profiling
   void profile(bool to_profile = true) {
     profiling_ = to_profile;
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableLaunchParamCache() {
+    for (auto& executor : executors_) {
+      executor.disableLaunchParamCache();
+    }
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableKernelLaunch() {
+    for (auto& executor : executors_) {
+      executor.setExecuteKernelFlag(false);
+    }
   }
 
   //! Returns if this runtime is segmented
@@ -136,6 +145,8 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Access the list of schedulers maintained in this runtime instance
   const std::vector<SchedulerEntryPtr>& schedulers();
 
+  void prepareRuntimeOrder();
+
  private:
   //! Entries indexed by groupID:
   //! Executors holding compiled kernels
@@ -158,6 +169,25 @@ class TORCH_CUDA_CU_API FusionKernelRuntime {
   //! Graph traversal datacache for the single kernel fusion
   //!  TODO: unify the segmented and un-segmented code-path
   std::unique_ptr<HeuristicSummary> single_kernel_fusion_data_cache_ = nullptr;
+
+  //! Pre-allocated runtime workspace to speed up kernel launch preparation.
+  struct RuntimeWorkSpace {
+    //! Temporary space to save intermediate tensors for segmented fusion
+    std::unordered_map<Val*, IValue> tensor_map;
+
+    //! Pre-determined order to run the segmented groups
+    std::vector<SegmentedGroup*> group_run_order;
+
+    //! Pre-determined order to bind tensor input meta data
+    std::vector<Val*> group_extent_binding_order;
+
+    //! Pre-allocated workspace to hold group inputs and outputs
+    std::vector<IValue> group_runtime_inputs;
+    std::vector<at::Tensor> group_runtime_outputs;
+  } runtime_workspace_;
+
+  //! Utility to speed up integer evaluation at runtime
+  std::unique_ptr<FusionPrecomputedIntegers> precomputed_integers_;
 
   // States for profiling support
   bool profiling_ = false;
@@ -254,9 +284,6 @@ class TORCH_CUDA_CU_API InputsIdLookup : public NonCopyable {
 //!          mostly tensor size & contiguity (see note on unique computational
 //!          graph). The assumption is assured at runtime by
 //!          `prim::CudaFusionGuard`;
-//!        - GraphCache handles permutation for I/O tensors, when they share
-//!          global stride order. This permutation facilitates dimension
-//!          collapsing, which gives simpler indexing.
 //!     b. FusionExecutorCache
 //!        - has a single `Fusion`, FusionExecutorCache handles kernel schedule
 //!          and passed scheduled tensor to `FusionExecutor` to generate code;
@@ -332,6 +359,24 @@ class TORCH_CUDA_CU_API FusionExecutorCache {
     }
   }
 
+  //! Internal knob for profiling shape inference
+  void disableLaunchParamCache() {
+    for (auto& it : kernel_runtimes_) {
+      for (auto& kernel_runtime : it.second) {
+        kernel_runtime->disableLaunchParamCache();
+      }
+    }
+  }
+
+  //! Internal knob for profiling shape inference
+  void disableKernelLaunch() {
+    for (auto& it : kernel_runtimes_) {
+      for (auto& kernel_runtime : it.second) {
+        kernel_runtime->disableKernelLaunch();
+      }
+    }
+  }
+
  private:
   //! evict cached short cut entry in `code_to_fe_lookup_` as well as cached
   //! entry in `FusionExecutor`
@@ -376,34 +421,18 @@ class GraphCache {
   //! Fusion IR.
   explicit GraphCache(const std::shared_ptr<Graph>& graph);
 
-  //! execute graph with given inputs, permutation on I/O tensors are performed.
+  //! execute graph with given inputs
   std::vector<at::Tensor> runGraphWithInputs(
       const at::ArrayRef<IValue>& inputs);
 
  private:
   //! Computation graph;
   std::shared_ptr<Graph> graph_;
-  //! TODO: poor name, we should use `eliminated_axes_` instead;
-  at::DimVector reduction_axes_;
-  bool support_permutation_;
-
-  //! helper function used at run-time to check whether a common permutation is
-  //! present, this is used to take the short-cut to skip permutation logic.
-  bool requiresPermutation();
 
   //! construct FusionExecutorCache
   void createFusion(const std::shared_ptr<Graph>& graph);
 
-  //! extract permutation for I/O tensor from accumulcated tensor type pointer
-  //! on all inputs;
-  void extractPermutation(const TensorTypePtr& acc_type);
-
  private:
-  // common permutation order used to facilitate dimension coalescing;
-  at::DimVector input_permutation_;
-  at::DimVector pw_output_permutation_;
-  at::DimVector reduction_output_permutation_;
-
   //! FusionExecutorCache that performs schedule and kernel execution;
   std::unique_ptr<FusionExecutorCache> fusion_executor_cache_;
 };
