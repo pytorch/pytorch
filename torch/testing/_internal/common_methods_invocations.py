@@ -583,6 +583,8 @@ class OpInfo(object):
                  supports_sparse=False,  # whether the op supports sparse inputs
 
                  supports_scripting=True,  # only run tracing tests
+                 # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
+                 supports_sparse_csr=False,  # whether the op supports sparse csr inputs
                  # the following metadata relates to complex support and is checked in test_ops.py
                  test_conjugated_samples=True,
                  test_neg_view=True,
@@ -718,6 +720,7 @@ class OpInfo(object):
         self.supports_inplace_autograd = supports_inplace_autograd
 
         self.supports_sparse = supports_sparse
+        self.supports_sparse_csr = supports_sparse_csr
 
         self.aliases = ()
         if aliases is not None:
@@ -940,10 +943,10 @@ def sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
-def _generate_masked_reduction_mask(input_shape, device, **kwargs):
+def _generate_masked_op_mask(input_shape, device, **kwargs):
     yield None
     yield make_tensor(input_shape, device, torch.bool, requires_grad=False)
-    if len(input_shape) > 3:
+    if len(input_shape) > 2:
         # broadcast last mask dimension:
         yield make_tensor(input_shape[:-1] + (1,), device, torch.bool, requires_grad=False)
         # broadcast middle mask dimension:
@@ -951,7 +954,7 @@ def _generate_masked_reduction_mask(input_shape, device, **kwargs):
         # broadcast first mask dimension:
         yield make_tensor((1,) + input_shape[1:], device, torch.bool, requires_grad=False)
         # mask.ndim < input.ndim
-        yield make_tensor(input_shape[2:], device, torch.bool, requires_grad=False)
+        yield make_tensor(input_shape[1:], device, torch.bool, requires_grad=False)
         # mask.ndim == 1
         yield make_tensor(input_shape[-1:], device, torch.bool, requires_grad=False)
         # masks that require broadcasting of inputs (mask.ndim >
@@ -970,7 +973,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
     inputs: List[SampleInput] = []
     kwargs['supports_multiple_dims'] = op_info.supports_multiple_dims
     for sample_input in sample_inputs_reduction(op_info, device, dtype, requires_grad, **kwargs):
-        for mask in _generate_masked_reduction_mask(sample_input.input.shape, device, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
             sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
             inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
@@ -1096,12 +1099,18 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
 
-    return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
-                                    low=low, high=high,
-                                    requires_grad=requires_grad)),
-            SampleInput(make_tensor((), device=device, dtype=dtype,
-                                    low=low, high=high,
-                                    requires_grad=requires_grad)))
+    if op_info.supports_sparse_csr:
+        # Tensors with dim=2 for sparse CSR testing
+        return (SampleInput(make_tensor((L, L), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)),)
+    else:
+        return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)),
+                SampleInput(make_tensor((), device=device, dtype=dtype,
+                                        low=low, high=high,
+                                        requires_grad=requires_grad)))
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -1693,7 +1702,7 @@ class BinaryUfuncInfo(OpInfo):
         self.rhs_make_tensor_kwargs = rhs_make_tensor_kwargs
 
 
-def _resolve_binay_pwise_kwargs(
+def _resolve_binary_pwise_kwargs(
         op_info, *, op_kwargs=None, lhs_make_tensor_kwargs=None, rhs_make_tensor_kwargs=None
 ):
     """Resolves default values for :func:`sample_inputs_binary_pwise`.
@@ -1724,7 +1733,7 @@ def sample_inputs_binary_pwise(
     rhs_make_tensor_kwargs=None,
     **kwargs,
 ):
-    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
         op_info,
         op_kwargs=op_kwargs,
         lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
@@ -1786,7 +1795,7 @@ def sample_inputs_add_sub(
     rhs_make_tensor_kwargs=None,
     **kwargs,
 ):
-    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binay_pwise_kwargs(
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
         op_info,
         op_kwargs=op_kwargs,
         lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
@@ -1811,6 +1820,50 @@ def sample_inputs_add_sub(
 
     return sample_inputs
 
+def sample_inputs_isclose(
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    python_scalars=False,
+    op_kwargs=None,
+    lhs_make_tensor_kwargs=None,
+    rhs_make_tensor_kwargs=None,
+    **kwargs,
+):
+    op_kwargs, lhs_make_tensor_kwargs, rhs_make_tensor_kwargs = _resolve_binary_pwise_kwargs(
+        op_info,
+        op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+    )
+
+    sample_inputs = sample_inputs_binary_pwise(
+        op_info,
+        device,
+        dtype,
+        requires_grad,
+        python_scalars=python_scalars,
+        op_kwargs=op_kwargs,
+        lhs_make_tensor_kwargs=lhs_make_tensor_kwargs,
+        rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
+        **kwargs,
+    )
+
+    rtols = [0., 1e-7]
+    atols = [0., 1e-7]
+    equal_nans = [False, True]
+
+    products = product(rtols, atols, equal_nans)
+
+    for rtol, atol, equal_nan in products:
+        lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
+        rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
+
+        sample_inputs.append(SampleInput(lhs, args=(rhs,),
+                             kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan)))
+
+    return sample_inputs
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -5664,6 +5717,23 @@ def sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dt
     ]
 
 
+def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dtype=False, **kwargs):
+    """Sample inputs for masked softmax, log_softmax, and softmin.
+
+    Masked normalization operator is a reduction operator with
+    trailing mask optional argument. A mask is a bool tensor with the
+    same shape as input or a shape that is broadcastable to input
+    shape.
+    """
+    inputs: List[SampleInput] = []
+    for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, with_dtype=with_dtype, **kwargs):
+        for mask in _generate_masked_op_mask(sample_input.input.shape, device, **kwargs):
+            sample_input_args, sample_input_kwargs = sample_input.args, dict(mask=mask, **sample_input.kwargs)
+            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
+
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
 
@@ -9026,11 +9096,10 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_householder_product,
-           decorators=[skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67513
-               DecorateInfo(unittest.skip("67513"), 'TestCommon', 'test_noncontiguous_samples'),
-           )),
+           decorators=[
+               skipCUDAIfNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack,
+               DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)})),
+           ]),
     OpInfo('linalg.lstsq',
            aten_name='linalg_lstsq',
            dtypes=floating_and_complex_types(),
@@ -9550,6 +9619,52 @@ op_db: List[OpInfo] = [
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
                     # FIXME: logical_xor does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
+    BinaryUfuncInfo('bitwise_or',
+                    ref=np.bitwise_or,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('bitwise_xor',
+                    ref=np.bitwise_xor,
+                    dtypes=integral_types_and(torch.bool),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('heaviside',
+                    ref=lambda a, b: (
+                        # necessary because np.heaviside incorrectly returns float64 when passed args of dtype int64
+                        np.int64(np.heaviside(a, b)) if a.dtype == np.int64 and b.dtype == np.int64 else np.heaviside(a, b)
+                    ),
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    # FIXME: heaviside does not accept scalar inputs
+                    skips=(
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
+                    )),
+    BinaryUfuncInfo('lcm',
+                    ref=np.lcm,
+                    dtypes=integral_types_and(),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('gcd',
+                    ref=np.gcd,
+                    dtypes=integral_types_and(),
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_autograd=False,
+                    ),
+    BinaryUfuncInfo('isclose',
+                    ref=np.isclose,
+                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_isclose,
+                    supports_autograd=False,
+                    supports_out=False,
+                    # FIXME: isclose does not accept scalar inputs
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10477,6 +10592,7 @@ op_db: List[OpInfo] = [
                    handles_large_floats=False,
                    handles_complex_extremals=False,
                    safe_casts_outputs=True,
+                   supports_sparse_csr=True,
                    supports_forward_ad=True,
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
@@ -13001,9 +13117,59 @@ op_db: List[OpInfo] = [
             # RuntimeError: undefined value tensor
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
+                         'TestReductions', 'test_reference_masked'),
+        ],
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
+    OpInfo(
+        '_masked.softmax',
+        method_variant=None,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
+    OpInfo(
+        '_masked.log_softmax',
+        method_variant=None,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.bfloat16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestMasked', 'test_reference_masked'),
+        ],
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
+    OpInfo(
+        '_masked.softmin',
+        method_variant=None,
+        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_softmax,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
     OpInfo(
         "nn.functional.ctc_loss",
         ref=_NOTHING,
@@ -13213,7 +13379,8 @@ op_db: List[OpInfo] = [
 unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo)]
 binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
-sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse is True]
+sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
+sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]

@@ -204,6 +204,17 @@
   dispatch:
     CUDA: masked_scale_cuda
 
+- func: native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: native_dropout_cpu
+    CUDA: native_dropout_cuda
+
+- func: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
+  dispatch:
+    CPU: native_dropout_backward_cpu
+    CUDA: native_dropout_backward_cuda
+
 - func: _sobol_engine_draw(Tensor quasi, int n, Tensor sobolstate, int dimension, int num_generated, ScalarType? dtype) -> (Tensor, Tensor)
 
 - func: _sobol_engine_ff_(Tensor(a!) self, int n, Tensor sobolstate, int dimension, int num_generated) -> Tensor(a!)
@@ -3847,11 +3858,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr
 
 - func: sin_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: sin.out
   variants: function, method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_
 
 - func: sin.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3859,6 +3874,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: sin_out
+    SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_out
 
 - func: sinc(Tensor self) -> Tensor
   structured_delegate: sinc.out
@@ -4747,12 +4763,15 @@
     SparseCUDA: _sparse_sum_backward_cuda
 
 - func: _sparse_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  python_module: sparse
   dispatch:
     SparseCPU: softmax_sparse_cpu
     SparseCUDA: softmax_sparse_cuda
@@ -4763,12 +4782,15 @@
     SparseCUDA: softmax_backward_sparse_cuda
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_log_softmax.Dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+  python_module: sparse
   variants: function
 
 - func: _sparse_log_softmax(Tensor self, int dim, bool half_to_float) -> Tensor
+  python_module: sparse
   dispatch:
     SparseCPU: log_softmax_sparse_cpu
     SparseCUDA: log_softmax_sparse_cuda
@@ -4978,6 +5000,7 @@
 # Functionally the same as addmm, but we give it a different derivative formula
 # that doesn't propagate gradients to non-present entries on sparse.
 - func: _sparse_addmm(Tensor self, Tensor sparse, Tensor dense, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  python_module: sparse
   dispatch:
     CompositeExplicitAutograd: _sparse_addmm
 
@@ -6812,6 +6835,7 @@
   structured: True
   dispatch:
     CPU, CUDA: triangular_solve_out
+    SparseCsrCPU: triangular_solve_out_sparse_csr_cpu
     SparseCsrCUDA: triangular_solve_out_sparse_csr_cuda
 
 - func: triangular_solve(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False) -> (Tensor solution, Tensor cloned_coefficient)
