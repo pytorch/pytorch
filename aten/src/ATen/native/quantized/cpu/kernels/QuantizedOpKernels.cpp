@@ -563,33 +563,6 @@ void qrelu_kernel(const Tensor& qx, Tensor& qy) {
   });
 }
 
-void qrelu6_kernel(const Tensor& qx, Tensor& qy) {
-  const auto zero_point = qx.q_zero_point();
-  AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qrelu6", [&]() {
-    qy = at::_empty_affine_quantized(
-        qx.sizes(),
-        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
-        at::device(kCPU).dtype(SCALAR_TYPE).memory_format(qx.suggest_memory_format()),
-        qx.q_scale(),
-        qx.q_zero_point(),
-        c10::nullopt);
-    using Vec = Vectorized<scalar_t>;
-    auto iter = TensorIterator::unary_op(qy, qx);
-    scalar_t six = at::native::quantize_val<scalar_t>(
-        qx.q_scale(), qx.q_zero_point(), 6.0);
-    auto zero_point_vec = Vec(scalar_t(zero_point));
-    auto six_vec = Vec(six);
-    cpu_kernel_vec(
-        iter,
-        [&](scalar_t value) -> scalar_t {
-          underlying_t relu_val =
-              std::max<underlying_t>(value.val_, zero_point);
-          return scalar_t(std::min<underlying_t>(relu_val, six.val_));
-        },
-        [&](Vec val) -> Vec { return val.relu6(zero_point_vec, six_vec); });
-  });
-}
-
 static void leaky_qrelu_out_kernel(Tensor& out, const Tensor& qx,
                                    const Scalar& negval_) {
   int64_t i_zp = qx.q_zero_point();
@@ -1522,7 +1495,7 @@ template <typename T>
 void _qadaptive_avg_pool_kernel(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t sizeC,
     int64_t isizeD,  // Set to 1 for 2d
     int64_t isizeH,
@@ -1536,98 +1509,103 @@ void _qadaptive_avg_pool_kernel(
     int64_t istrideH,
     int64_t istrideW) {
 
-    T* idata = static_cast<T*>(qx.data_ptr());
-    T* odata = static_cast<T*>(qy.data_ptr());
-    auto* i_p =
-        reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
+  T* idata = static_cast<T*>(qx.data_ptr());
+  T* odata = static_cast<T*>(qy.data_ptr());
 
-    float input_scale = qx.q_scale();
-    float output_scale = qy.q_scale();
-    int input_zero_point = qx.q_zero_point();
-    int output_zero_point = qy.q_zero_point();
+  const float input_scale = qx.q_scale();
+  const float output_scale = qy.q_scale();
+  const int input_zero_point = qx.q_zero_point();
+  const int output_zero_point = qy.q_zero_point();
 
-    for (const auto od : c10::irange(osizeD)) {
-      int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
-      int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
-      int kD = iendD - istartD;
-      for (const auto oh : c10::irange(osizeH)) {
-        int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
-        int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
-        int kH = iendH - istartH;
-        for (int64_t ow = 0; ow < osizeW; ow++) {
-          auto* o_p = reinterpret_cast<typename T::underlying*>(
-              odata +
-              b * osizeD * osizeH * osizeW * sizeC +
-              od * osizeH * osizeW * sizeC +
-              oh * osizeW * sizeC +
-              ow * sizeC);
-          int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
-          int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
-          int kW = iendW - istartW;
-          int size = kD * kH * kW;
-          float multiplier = input_scale / output_scale / size;
-          int input_zero_point_m_size = -input_zero_point * size;
-          int64_t c = 0;
-          // For int8 or uint8quantization, we implicitly use int32 as
-          // accumulation Or else, it will go to the slow path
-          // TODO: support 16bit, 32bit, and etc.
-          auto* internal_i_p = i_p +
-                               istartD * istrideD +
-                               istartH * istrideH +
-                               istartW * istrideW;
+  at::parallel_for(0, nBatch, 0, [&](int64_t batch_start, int64_t batch_end) {
+    for (const auto b : c10::irange(batch_start, batch_end)) {
+      auto* i_p = reinterpret_cast<typename T::underlying*>(
+          idata + b * istrideB);
 
-          // Note: If AVX is not available, `do_avg_pool_on_AVX_n is a noop.
-          //       In that case, the following loop takes over
-          // TODO: more vectorization with loop interleaving
-          do_avg_pool_on_AVX_n<T>(
-              internal_i_p,
-              o_p,
-              c,
-              sizeC,
-              1,
-              input_zero_point_m_size,
-              output_zero_point,
-              multiplier,
-              0,
-              kD,
-              0,
-              kH,
-              0,
-              kW,
-              istrideC,
-              istrideD,
-              istrideH,
-              istrideW);
-          // 1) The following loop handles the remaining channels
-          // 2) It also handles the Non-AVX2 path
-          for (; c < sizeC; ++c) {
-            int32_t acc_int32 = input_zero_point_m_size;
-            int64_t tcntr = 0;
-            for (const auto id : c10::irange(kD)) {
-              for (const auto ih : c10::irange(kH)) {
-                for (const auto iw : c10::irange(kW)) {
-                  tcntr = id * istrideD +
-                          ih * istrideH +
-                          iw * istrideW;
-                  auto val = *(internal_i_p + tcntr + c * istrideC);
-                  acc_int32 += val;
+      for (const auto od : c10::irange(osizeD)) {
+        int istartD = (int)std::floor((float)(od * isizeD) / osizeD);
+        int iendD = (int)std::ceil((float)((od + 1) * isizeD) / osizeD);
+        int kD = iendD - istartD;
+        for (const auto oh : c10::irange(osizeH)) {
+          int istartH = (int)std::floor((float)(oh * isizeH) / osizeH);
+          int iendH = (int)std::ceil((float)((oh + 1) * isizeH) / osizeH);
+          int kH = iendH - istartH;
+          for (const auto ow : c10::irange(osizeW)) {
+            auto* o_p = reinterpret_cast<typename T::underlying*>(
+                odata +
+                b * osizeD * osizeH * osizeW * sizeC +
+                od * osizeH * osizeW * sizeC +
+                oh * osizeW * sizeC +
+                ow * sizeC);
+            int istartW = (int)std::floor((float)(ow * isizeW) / osizeW);
+            int iendW = (int)std::ceil((float)((ow + 1) * isizeW) / osizeW);
+            int kW = iendW - istartW;
+            int size = kD * kH * kW;
+            float multiplier = input_scale / output_scale / size;
+            int input_zero_point_m_size = -input_zero_point * size;
+            int64_t c = 0;
+            // For int8 or uint8quantization, we implicitly use int32 as
+            // accumulation Or else, it will go to the slow path
+            // TODO: support 16bit, 32bit, and etc.
+            auto* internal_i_p = i_p +
+                                istartD * istrideD +
+                                istartH * istrideH +
+                                istartW * istrideW;
+
+            // Note: If AVX is not available, `do_avg_pool_on_AVX_n is a noop.
+            //       In that case, the following loop takes over
+            // TODO: more vectorization with loop interleaving
+            do_avg_pool_on_AVX_n<T>(
+                internal_i_p,
+                o_p,
+                c,
+                sizeC,
+                1,
+                input_zero_point_m_size,
+                output_zero_point,
+                multiplier,
+                0,
+                kD,
+                0,
+                kH,
+                0,
+                kW,
+                istrideC,
+                istrideD,
+                istrideH,
+                istrideW);
+            // 1) The following loop handles the remaining channels
+            // 2) It also handles the Non-AVX2 path
+            for (; c < sizeC; ++c) {
+              int32_t acc_int32 = input_zero_point_m_size;
+              int64_t tcntr = 0;
+              for (const auto id : c10::irange(kD)) {
+                for (const auto ih : c10::irange(kH)) {
+                  for (const auto iw : c10::irange(kW)) {
+                    tcntr = id * istrideD +
+                        ih * istrideH +
+                        iw * istrideW;
+                    auto val = *(internal_i_p + tcntr + c * istrideC);
+                    acc_int32 += val;
+                  }
                 }
               }
-            }
-            // clamp
-            o_p[c] = at::native::quantize_val<T>(1.0f / multiplier,
-                                                        output_zero_point,
-                                                        acc_int32).val_;
-          } // c
-        } // oh
-      } // ow
-    } // od
+              // clamp
+              o_p[c] = at::native::quantize_val<T>(1.0f / multiplier,
+                                                          output_zero_point,
+                                                          acc_int32).val_;
+            } // c
+          } // oh
+        } // ow
+      } // od
+    }
+  });
 }
 
 void qadaptive_avg_pool2d_nhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
@@ -1641,7 +1619,7 @@ void qadaptive_avg_pool2d_nhwc_kernel(
         _qadaptive_avg_pool_kernel<scalar_t>(
           qx,
           qy,
-          b,
+          nBatch,
           sizeC,
           /*isizeD=*/1,
           isizeH,
@@ -1661,7 +1639,7 @@ void qadaptive_avg_pool2d_nhwc_kernel(
 void qadaptive_avg_pool3d_ndhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t sizeC,
     int64_t isizeD,
     int64_t isizeH,
@@ -1678,7 +1656,7 @@ void qadaptive_avg_pool3d_ndhwc_kernel(
     _qadaptive_avg_pool_kernel<scalar_t>(
       qx,
       qy,
-      b,
+      nBatch,
       sizeC,
       isizeD,
       isizeH,
@@ -1699,7 +1677,7 @@ template <typename T>
 void _qavg_pool_nhwc_kernel(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -1728,8 +1706,6 @@ void _qavg_pool_nhwc_kernel(
   int ostrideH = strideW * outputWidth;
   int ostrideD = ostrideH * outputHeight;
   int ostrideB = ostrideD * outputDepth;
-  auto* i_p =
-      reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
 
   // lift these operations outside the loop to reduce access overheads
   float input_scale = qx.q_scale();
@@ -1739,81 +1715,87 @@ void _qavg_pool_nhwc_kernel(
   int64_t divisor_override_factor =
       divisor_override.has_value() ? divisor_override.value() : 0;
 
-  for (int od = 0; od < outputDepth; od++) {
-    for (int oh = 0; oh < outputHeight; oh++) {
-      for (int ow = 0; ow < outputWidth; ow++) {
-        auto* o_p = reinterpret_cast<typename T::underlying*>(
-            odata + b * ostrideB + od * ostrideD + oh * ostrideH +
-            ow * strideW);
-        int dstart = od * dD - padD;
-        int hstart = oh * dH - padH;
-        int wstart = ow * dW - padW;
+  at::parallel_for(0, nBatch, 0, [&](int64_t batch_start, int64_t batch_end) {
+    for (int64_t b = batch_start; b < batch_end; ++b) {
+      auto* i_p =
+          reinterpret_cast<typename T::underlying*>(idata + b * istrideB);
+      for (int od = 0; od < outputDepth; od++) {
+        for (int oh = 0; oh < outputHeight; oh++) {
+          for (int ow = 0; ow < outputWidth; ow++) {
+            auto* o_p = reinterpret_cast<typename T::underlying*>(
+                odata + b * ostrideB + od * ostrideD + oh * ostrideH +
+                ow * strideW);
+            int dstart = od * dD - padD;
+            int hstart = oh * dH - padH;
+            int wstart = ow * dW - padW;
 
-        int dend = std::min(dstart + kD, (int)inputDepth + padD);
-        int hend = std::min(hstart + kH, (int)inputHeight + padH);
-        int wend = std::min(wstart + kW, (int)inputWidth + padW);
-        int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+            int dend = std::min(dstart + kD, (int)inputDepth + padD);
+            int hend = std::min(hstart + kH, (int)inputHeight + padH);
+            int wend = std::min(wstart + kW, (int)inputWidth + padW);
+            int pool_size = (dend - dstart) * (hend - hstart) * (wend - wstart);
 
-        dstart = std::max(dstart, 0);
-        hstart = std::max(hstart, 0);
-        wstart = std::max(wstart, 0);
-        dend = std::min(dend, (int)inputDepth);
-        hend = std::min(hend, (int)inputHeight);
-        wend = std::min(wend, (int)inputWidth);
+            dstart = std::max(dstart, 0);
+            hstart = std::max(hstart, 0);
+            wstart = std::max(wstart, 0);
+            dend = std::min(dend, (int)inputDepth);
+            hend = std::min(hend, (int)inputHeight);
+            wend = std::min(wend, (int)inputWidth);
 
-        int size = (dend - dstart) * (hend - hstart) * (wend - wstart);
-        int divide_size = count_include_pad ? pool_size : size;
-        int divide_factor =
-            divisor_override_factor ? divisor_override_factor : divide_size;
-        float multiplier = input_scale / output_scale / divide_factor;
-        int input_zero_point_m_size = -input_zero_point * size;
+            int size = (dend - dstart) * (hend - hstart) * (wend - wstart);
+            int divide_size = count_include_pad ? pool_size : size;
+            int divide_factor =
+                divisor_override_factor ? divisor_override_factor : divide_size;
+            float multiplier = input_scale / output_scale  / divide_factor;
+            int input_zero_point_m_size = -input_zero_point * size;
 
-        int c_start = 0;
+            int c_start = 0;
 
-        // For int8 quantization, we implicitly use int32 as accumulation
-        // Or else, it will go to the slow path
-        // TODO: support 16bit, 32bit, and etc.
-        do_avg_pool_nhwc_on_AVX_n<T>(
-            i_p,
-            o_p,
-            c_start,
-            input_zero_point_m_size,
-            output_zero_point,
-            multiplier,
-            dstart,
-            dend,
-            hstart,
-            hend,
-            wstart,
-            wend,
-            inputDepth,
-            inputHeight,
-            inputWidth,
-            nInputPlane);
+            // For int8 quantization, we implicitly use int32 as accumulation
+            // Or else, it will go to the slow path
+            // TODO: support 16bit, 32bit, and etc.
+            do_avg_pool_nhwc_on_AVX_n<T>(
+                i_p,
+                o_p,
+                c_start,
+                input_zero_point_m_size,
+                output_zero_point,
+                multiplier,
+                dstart,
+                dend,
+                hstart,
+                hend,
+                wstart,
+                wend,
+                inputDepth,
+                inputHeight,
+                inputWidth,
+                nInputPlane);
 
-        // 1) The following loop handles the remaining channels
-        // 2) It also handles the Non-AVX2 path
-        for (int c = c_start; c < nInputPlane; ++c) {
-          int32_t acc_int32 = input_zero_point_m_size;
-          for (int64_t id = dstart; id < dend; id++) {
-            for (int64_t ih = hstart; ih < hend; ih++) {
-              for (int64_t iw = wstart; iw < wend; iw++) {
-                auto val =
-                    *(i_p + id * istrideD + ih * istrideH + iw * strideW +
-                      c * strideC);
-                acc_int32 += val;
+            // 1) The following loop handles the remaining channels
+            // 2) It also handles the Non-AVX2 path
+            for (int c = c_start; c < nInputPlane; ++c) {
+              int32_t acc_int32 = input_zero_point_m_size;
+              for (int64_t id = dstart; id < dend; id++) {
+                for (int64_t ih = hstart; ih < hend; ih++) {
+                  for (int64_t iw = wstart; iw < wend; iw++) {
+                    auto val =
+                        *(i_p + id * istrideD + ih * istrideH + iw * strideW +
+                          c * strideC);
+                    acc_int32 += val;
+                  }
+                }
               }
-            }
-          }
-          double acc_fp = acc_int32 * 1.0;
-          // clamp
-          o_p[c] = at::native::quantize_val<T>(
-                        1.0f / multiplier, output_zero_point, acc_fp)
-                        .val_;
-        } // c
-      } // ow
-    } // oh
-  } // od
+              double acc_fp = acc_int32 * 1.0;
+              // clamp
+              o_p[c] = at::native::quantize_val<T>(
+                            1.0f / multiplier, output_zero_point, acc_fp)
+                            .val_;
+            } // c
+          } // ow
+        } // oh
+      } // od
+    }
+  });
 }
 
 void qavg_pool2d_nhwc_kernel(
@@ -3492,7 +3474,6 @@ REGISTER_NO_AVX512_DISPATCH(qhardswish_stub, qhardswish_fn);
 REGISTER_NO_AVX512_DISPATCH(qmaxpool_2d_nhwc_stub, qmaxpool_2d_fn);
 REGISTER_NO_AVX512_DISPATCH(qmul_relu_stub, qbinary_fn);
 REGISTER_NO_AVX512_DISPATCH(qmul_stub, qbinary_fn);
-REGISTER_NO_AVX512_DISPATCH(qrelu6_stub, qrelu_fn);
 REGISTER_NO_AVX512_DISPATCH(qrelu_leaky_stub, qrelu_leaky_fn);
 REGISTER_NO_AVX512_DISPATCH(qrelu_stub, qrelu_fn);
 REGISTER_NO_AVX512_DISPATCH(qsigmoid_stub, qsigmoid_fn);
@@ -3550,7 +3531,6 @@ REGISTER_DISPATCH(qhardswish_stub, &qhardswish_kernel);
 REGISTER_DISPATCH(qmaxpool_2d_nhwc_stub, &qmaxpool_2d_nhwc_kernel);
 REGISTER_DISPATCH(qmul_relu_stub, &qmul_kernel<true>);
 REGISTER_DISPATCH(qmul_stub, &qmul_kernel<false>);
-REGISTER_DISPATCH(qrelu6_stub, &qrelu6_kernel);
 REGISTER_DISPATCH(qrelu_leaky_stub, &leaky_qrelu_out_kernel);
 REGISTER_DISPATCH(qrelu_stub, &qrelu_kernel);
 REGISTER_DISPATCH(qsigmoid_stub, &qsigmoid_kernel);
