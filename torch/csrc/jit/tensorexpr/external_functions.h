@@ -27,6 +27,7 @@
       void** buf_data,                  \
       int64_t* buf_ranks,               \
       int64_t* buf_dims,                \
+      int64_t* buf_strides,             \
       int8_t* buf_dtypes,               \
       int64_t args_num,                 \
       int64_t* extra_args);
@@ -40,6 +41,7 @@ std::vector<at::Tensor> constructTensors(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes);
 
 #ifdef C10_MOBILE

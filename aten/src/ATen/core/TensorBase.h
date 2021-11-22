@@ -636,6 +636,22 @@ class TORCH_API TensorBase {
     return impl_->requires_grad();
   }
 
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
+  }
+
   /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended
   /// to be used from functions that need to access the `Variable`'s equivalent `Tensor`
   /// (i.e. `Tensor` that shares the same storage and tensor metadata with the `Variable`).
