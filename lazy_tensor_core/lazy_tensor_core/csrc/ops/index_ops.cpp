@@ -17,7 +17,6 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {

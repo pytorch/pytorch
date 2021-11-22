@@ -10,7 +10,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 
