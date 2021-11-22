@@ -594,8 +594,7 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
-        assert dtypes is not None, ("`dtypes` argument for OpInfo should not be None,",
-                                    f"but found None for {name}")
+        assert dtypes is not None, f"`dtypes` argument for OpInfo should not be None, but found None for {name}"
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
