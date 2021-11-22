@@ -524,8 +524,8 @@ class OpInfo(object):
                  error_inputs_func=None,  # function to generate inputs that will throw errors
 
                  # the following metadata relates to dtype support and is tested for correctness in test_ops.py
-                 dtypes=None,  # dtypes this function works with on the CPU,
-                               # inherited by other device types that don't specify their own dtypes
+                 dtypes,  # dtypes this function works with on the CPU,
+                          # inherited by other device types that don't specify their own dtypes
 
                  # the following dtypesIf... options override the dtypes value
                  # on their respective device types
@@ -594,8 +594,6 @@ class OpInfo(object):
                  assert_jit_shape_analysis=False,  # assert that jit shape analysis fully propagates shape
                  ):
 
-        assert dtypes is not None, ("`dtypes` argument for OpInfo should not be None,",
-                                    f"but found None for {name}")
         dtypes_args = (dtypes, dtypesIfCPU, dtypesIfCUDA, dtypesIfROCM)
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -13088,7 +13086,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.softmax',
         method_variant=None,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
@@ -13102,7 +13100,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.log_softmax',
         method_variant=None,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
@@ -13120,7 +13118,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.softmin',
         method_variant=None,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_softmax,
         skips=(
