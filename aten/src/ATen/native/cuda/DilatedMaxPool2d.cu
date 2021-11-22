@@ -35,8 +35,8 @@ static __device__ inline int p_end(int size, int pad, int pooled_size, int strid
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom_data,
-    const int num, const int channels, const int height,
-    const int width, const int pooled_height, const int pooled_width,
+    const int num, const int64_t channels, const int64_t height,
+    const int64_t width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w, scalar_t* top_data,
@@ -56,7 +56,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * width + wstart;
-    const scalar_t* btm_data = bottom_data + static_cast<ptrdiff_t>(n * channels + c) * height * width;
+    const scalar_t* btm_data = bottom_data + (n * channels + c) * height * width;
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
@@ -167,8 +167,8 @@ C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 4)
 C10_LAUNCH_BOUNDS_2(BLOCK_THREADS, 8)
 #endif
 __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_diff,
-    const int64_t* top_mask, const int num, const int channels,
-    const int height, const int width, const int pooled_height,
+    const int64_t* top_mask, const int num, const int64_t channels,
+    const int64_t height, const int64_t width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
     const int dilation_h, const int dilation_w,
@@ -191,7 +191,7 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
             }
           }
         }
-        bottom_diff[static_cast<ptrdiff_t>(n*channels+c)*height*width+index] = static_cast<scalar_t>(gradient);
+        bottom_diff[(n*channels+c)*height*width+index] = static_cast<scalar_t>(gradient);
       }
     }
   }
