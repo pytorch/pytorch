@@ -607,7 +607,9 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            cmd = [sys.executable] + argv + [test_case_full_name]
+            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
+                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
             if exitcode != 0:
@@ -2332,22 +2334,23 @@ CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     """Reruns a test if the test returns a RuntimeError and the exception
-    matches exactly with one of the strings in connect_errors."""
+    contains one of the strings in connect_errors."""
     # This if block is executed when using this function as a decorator with arguments.
     if func is None:
         return partial(retry_on_connect_failures, connect_errors=connect_errors)
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        tries_remaining = 10
+        n_retries = 10
+        tries_remaining = n_retries
         while True:
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) in connect_errors:
+                if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
                     time.sleep(random.random())
                     continue
                 raise
