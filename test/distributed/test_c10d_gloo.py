@@ -2312,6 +2312,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_gloo()
     def test_gloo_barrier_device_ids(self):
+        raise ValueError("foo")
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", rank=self.rank, world_size=self.world_size, store=store
