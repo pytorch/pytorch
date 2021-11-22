@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
+#include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
 #include <ATen/native/TensorIterator.h>
@@ -120,7 +121,7 @@ basic_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_t i, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -178,7 +179,7 @@ multiple_outputs_loop(char* C10_RESTRICT data[], const int64_t* strides_, int64_
   // Copying strides to temporary array helps auto vectorization in older GCC
   // versions.
   int64_t strides[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     strides[arg] = strides_[arg];
   }
 
@@ -204,7 +205,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   constexpr int ntensors = traits::arity + 1;
 
   char* C10_RESTRICT data[ntensors];
-  for (int arg = 0; arg < ntensors; arg++) {
+  for (const auto arg : c10::irange(ntensors)) {
     data[arg] = data_[arg];
   }
 
@@ -220,7 +221,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
   }
   if (i < n) {
     int64_t strides[ntensors];
-    for (int arg = 0; arg < ntensors; arg++) {
+    for (const auto arg : c10::irange(ntensors)) {
       strides[arg] = (S > 0 && arg == S) ? 0 : sizeof(scalar_t);
     }
     basic_loop(data, strides, i, n, std::forward<func_t>(op));

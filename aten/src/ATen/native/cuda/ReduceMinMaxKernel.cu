@@ -4,9 +4,12 @@
 #include <ATen/native/cuda/ReduceOps.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/SharedReduceOps.h>
+#include <ATen/Dispatch.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/ReduceAllOps.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/NumericUtils.h>
 
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
