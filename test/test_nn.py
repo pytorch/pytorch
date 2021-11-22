@@ -13384,28 +13384,29 @@ class TestNNDeviceType(NNTestCase):
         # === mkldnn ===
         subtest(((2, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d'),
-        subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_transposed'),
-        subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch1d'),
-        subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel1d'),
-        subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel1d'),
         subtest(((2, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d'),
-        subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_transposed'),
         subtest(((2, 6, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d'),
+        # Transposed convolution is broken for mkldnn. See https://github.com/pytorch/pytorch/issues/68775.
+        subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn1d_transposed'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn2d_transposed'),
         subtest(((2, 6, 7, 8, 9), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_transposed'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn3d_transposed'),
         subtest(((2, 6, 7), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_cpu_input'),
         subtest(((2, 6, 7, 8), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_cpu_input'),
         subtest(((2, 6, 7, 8, 9), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_cpu_input'),
+        subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch1d'),
+        subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel1d'),
+        subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel1d'),
         subtest(((0, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch2d'),
         subtest(((2, 0, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
@@ -13438,22 +13439,20 @@ class TestNNDeviceType(NNTestCase):
                              device=device, dtype=dtype, requires_grad=True)
         bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True)
 
+        def _make_noncontiguous(inp):
+            old_requires_grad = inp.requires_grad
+            inp = torch.repeat_interleave(inp, 2, dim=-1)
+            inp = inp[..., ::2].detach().requires_grad_(old_requires_grad)
+            return inp
+
         if not contiguous:
-
-            def _make_noncontiguous(inp):
-                old_requires_grad = inp.requires_grad
-                inp = torch.repeat_interleave(inp, 2, dim=-1)
-                inp = inp[..., ::2].detach().requires_grad_(old_requires_grad)
-                return inp
-
             x = _make_noncontiguous(x)
             weight = _make_noncontiguous(weight)
             bias = _make_noncontiguous(bias)
 
         if layout is torch._mkldnn:
             x = x.to_mkldnn()
-            weight = weight.to_mkldnn()
-            bias = bias.to_mkldnn()
+            # Note that weight and bias are not supported as mkldnn tensors during training.
 
         stride = (2,) * dim if strided else (1,) * dim
         padding = (0,) * dim
@@ -13464,16 +13463,6 @@ class TestNNDeviceType(NNTestCase):
         # Ensure correct backend is selected.
         backend_actual = torch._C._select_conv_backend(*inputs)
         self.assertEqual(backend_actual, backend_expected)
-
-        # mkldnn doesn't support gradcheck :(
-        if layout is torch._mkldnn:
-            return
-
-        # Convert to float64 for gradcheck.
-        x = x.to(torch.float64).detach().requires_grad_(True)
-        weight = weight.to(torch.float64).detach().requires_grad_(True)
-        bias = bias.to(torch.float64).detach().requires_grad_(True)
-        inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
 
         # Autograd function to hook up the general convolution function to convolution_backward
         # without a derivatives.yaml entry. TODO: Once general forward + backward are hooked up together,
@@ -13497,7 +13486,26 @@ class TestNNDeviceType(NNTestCase):
 
         convolution = MyConv.apply
 
-        # Set some backend-specfic validation settings.
+        # Ensure backward call succeeds.
+        output = convolution(*inputs)
+        grad_output = torch.randn(output.shape, device=device, dtype=dtype)
+        if not contiguous:
+            grad_output = _make_noncontiguous(grad_output)
+        if layout is torch._mkldnn:
+            grad_output = grad_output.to_mkldnn()
+        output.backward(grad_output)
+
+        # mkldnn doesn't support gradcheck :(
+        if layout is torch._mkldnn:
+            return
+
+        # Convert to float64 for gradcheck.
+        x = x.to(torch.float64).detach().requires_grad_(True)
+        weight = weight.to(torch.float64).detach().requires_grad_(True)
+        bias = bias.to(torch.float64).detach().requires_grad_(True)
+        inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
+
+        # Set some backend-specific validation settings.
         gradcheck_nondet_tol = 0.0
         if torch.backends.cudnn.is_available():
             # cuDNN introduces non-determinism

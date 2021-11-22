@@ -220,6 +220,7 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
 
 // Computes columns used in slow 2D kernel computation.
 // This is computed separately in the forward and backward passes.
+// Note that the input tensor is assumed to be a 4D tensor of shape (N, C, H, W).
 static Tensor compute_columns2d(
     const Tensor& input,
     const ConvParams& params,
@@ -262,6 +263,7 @@ static Tensor compute_columns2d(
 
 // Computes columns used in slow 3D kernel computation.
 // This is computed separately in the forward and backward passes.
+// Note that the input tensor is assumed to be a 5D tensor of shape (N, C, D, H, W).
 static Tensor compute_columns3d(
     const Tensor& input,
     const ConvParams& params,

@@ -561,7 +561,7 @@ static void check_shape_forward(const at::Tensor& input,
   }
 }
 
-static inline void check_input_same_type_as_parameters(
+static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias) {
@@ -1535,6 +1535,24 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _convolution_backward_nogroup_bac
   }
 }
 
+// Backward pass for convolution. Computes gradients for input, weight, and bias depending on the
+// output_mask setting. This function supports 1D, 2D, or 3D spatial convolution and currently requires
+// a single batch dimension to be present.
+//
+// Args:
+//   grad_output_: tensor of shape (N, C_out, L_out), (N, C_out, H_out, W_out), or (N, C_out, D_out, H_out, W_out)
+//   input_: tensor of shape (N, C_in, L_in), (N, C_in, H_in, W_in), or (N, C_in, D_in, H_in, W_in) 
+//   weight_: tensor of shape (C_out, C_in // groups, *kernel_size); dimension of kernel_size must match the number
+//       of input spatial dimensions
+//   bias_opt: if specified, tensor of shape (C_out)
+//   stride: single value or an array with dimension matching the number of input spatial dimensions
+//   padding: single value or an array with dimension matching the number of input spatial dimensions
+//   dilation: single value or an array with dimension matching the number of input spatial dimensions
+//   transposed: boolean indicating whether the convolution is transposed
+//   output_padding: single value or dimension == number of input spatial dimensions; only supported when
+//       transposed is true
+//   groups: number of groups for grouped convolution
+//   output_mask: 3-dim boolean array specifying which gradients to compute in input, weight, bias order
 std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     const Tensor& grad_output_, const Tensor& input_, const Tensor& weight_, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding,
@@ -1563,6 +1581,12 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   params.cudnn_enabled = ctx.userEnabledCuDNN();
   params.allow_tf32 = ctx.allowTF32CuDNN();
 
+  // Validate inputs.
+  check_shape_forward(input, weight.sizes(), bias, params);
+  TORCH_CHECK(input.dim() == grad_output.dim(),
+      "Expected input and grad_output to have the same number of dimensions, but got: ",
+      input.dim(), " and ", grad_output.dim());
+
   // output_padding is only supported for transposed convolutions
   if (!params.transposed) {
     for (auto pad : params.output_padding) {
@@ -1571,11 +1595,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
   }
 
-  if (k == 3) {
+  // Expand 1d -> 2d.
+  // This is only done for backends that don't natively support 1d spatial input.
+  if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input.is_mkldnn()) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     grad_output = view4d(grad_output);
     input = view4d(input);
@@ -1592,14 +1616,14 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   switch(backend) {
     case ConvBackend::CudaDepthwise2d:
       std::tie(backend_grad_input, backend_grad_weight) =
-        at::_conv_depthwise2d_backward(grad_output, input.contiguous(), weight, kernel_size,
+        at::_conv_depthwise2d_backward(grad_output, input, weight, kernel_size,
             params.stride, params.padding, params.dilation, {output_mask[0], output_mask[1]});
       break;
     case ConvBackend::CudaDepthwise3d:
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::conv_depthwise3d_backward(
-          grad_output, input.contiguous(), weight, kernel_size, params.stride, params.padding, params.dilation,
+          grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation,
           output_mask);
       break;
     case ConvBackend::Cudnn:
@@ -1617,7 +1641,6 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
         {output_mask[0], output_mask[1]});
       break;
     case ConvBackend::Empty:
-    case ConvBackend::MkldnnEmpty:
       if (output_mask[0]) {
         backend_grad_input = at::zeros_like(input);
       }
@@ -1627,6 +1650,29 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       if (output_mask[2]) {
         backend_grad_bias = at::zeros_like(bias);
       }
+      break;
+    case ConvBackend::MkldnnEmpty:
+#if AT_MKLDNN_ENABLED()
+      if (output_mask[0]) {
+        if (input.is_mkldnn()) {
+          backend_grad_input = empty_mkldnn(input.sizes(), optTypeMetaToScalarType(input.options().dtype_opt()),
+              input.options().layout_opt(), input.options().device_opt(), input.options().pinned_memory_opt());
+          backend_grad_input.zero_();
+        } else {
+          backend_grad_input = at::zeros_like(input);
+        }
+      }
+      if (output_mask[1]) {
+        // mkldnn weight is not supported during training by the mkldnn backend
+        backend_grad_weight = at::zeros_like(weight);
+      }
+      if (output_mask[2]) {
+        // mkldnn bias is not supported during training by the mkldnn backend
+        backend_grad_bias = at::zeros_like(bias);
+      }
+#else
+      TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
+#endif
       break;
     case ConvBackend::Miopen:
       check_input_same_type_as_parameters(input, weight, bias);
@@ -1649,6 +1695,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
       break;
     case ConvBackend::Mkldnn:
+      TORCH_CHECK(!weight.is_mkldnn(),
+          "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
+      TORCH_CHECK(!bias.is_mkldnn(),
+          "The MKLDNN backend does not support bias as an MKLDNN tensor during training");
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::mkldnn_convolution_backward(input, grad_output, weight, params.padding, params.stride, params.dilation,
             params.groups, output_mask);
@@ -1715,22 +1765,22 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
   }
 
+  // Convert 2D inputs back to 1D for backends that don't natively support 1D
+  // spatial inputs.
   if (output_mask[0]) {
-    if (k == 3) {
+    if (k == 3 && !input.is_mkldnn()) {
       backend_grad_input = view3d(backend_grad_input);
     }
   }
   if (output_mask[1]) {
-    if (k == 3) {
+    if (k == 3 && !input.is_mkldnn()) {
       backend_grad_weight = view3d(backend_grad_weight);
     }
   }
   if (output_mask[2]) {
     if (bias.defined() && !backend_grad_bias.defined()) {
       // Calculate bias gradients outside of the backend for those that don't support it.
-      backend_grad_bias = at::empty_like(bias);
-      auto sum_dims = (dim == 3) ? IntArrayRef{0, 2, 3, 4} : IntArrayRef{0, 2, 3};
-      at::sum_out(const_cast<Tensor&>(backend_grad_bias), grad_output, sum_dims);
+      backend_grad_bias = grad_output.sum((dim == 3) ? IntArrayRef{0, 2, 3, 4} : IntArrayRef{0, 2, 3});
     }
   }
 
