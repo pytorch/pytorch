@@ -75,11 +75,10 @@ void Function::set_register_size(size_t size) {
 }
 
 int64_t Function::get_debug_handle(size_t pc) const {
-  TORCH_CHECK(code_, "Valid code must exist.");
   TORCH_CHECK(
-      pc < code_->debug_handles_.size(),
+      pc < code_.debug_handles_.size(),
       "Module debug info index out of boundary.");
-  return code_->debug_handles_[pc];
+  return code_.debug_handles_[pc];
 }
 
 torch::jit::Function& Function::setSchema(c10::FunctionSchema schema) {
@@ -100,7 +99,7 @@ void Function::run(Stack& stack) {
     getSchema().checkAndNormalizeInputs(
         stack, std::unordered_map<std::string, IValue>{} /*kwargs*/);
   }
-  InterpreterState interp_state(*code_);
+  InterpreterState interp_state(code_);
   interp_state.run(stack);
 }
 
@@ -114,7 +113,7 @@ size_t Function::num_inputs() const {
 }
 
 bool Function::call(Stack&, c10::function_ref<void(const mobile::Code&)> f) {
-  f(*code_);
+  f(code_);
   return true;
 }
 
