@@ -14,6 +14,7 @@
 #include <c10/core/TensorOptions.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/UnaryOps.h>
 
@@ -423,8 +424,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      for(int64_t i = p_begin; i < p_end; i++)
-        result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+      for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
     });
   });
 
@@ -507,10 +507,10 @@ Tensor new_full(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  return at::full(size, fill_value, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(fill_value);
+  return r;
 }
 
 namespace {
@@ -608,11 +608,9 @@ Tensor new_ones(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
-          pin_memory);
-
-  return at::ones(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.fill_(1.);
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ scalar_tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -866,8 +864,9 @@ void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
 
   at::parallel_for(0, n, internal::GRAIN_SIZE,
                   [&r__data, &r__stride_0](int64_t p_begin, int64_t p_end) {
-    for(int64_t i = p_begin; i < p_end; i++)
+    for (const auto i : c10::irange(p_begin, p_end)) {
       r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+    }
   });
 
   for(int64_t i = 0; i < n - 1; i++)
@@ -979,7 +978,7 @@ Tensor tril_indices_cpu(
   //
   // 3. sequential RAM + transpose: create an n X 2 Tensor, fill the Tensor
   //    sequentially, and then transpose it.
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1017,7 +1016,7 @@ Tensor triu_indices_cpu(
   // create an empty Tensor with correct size
   auto result = at::native::empty_cpu({2, triu_size}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 
-  AT_DISPATCH_ALL_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
     scalar_t* result_data = result.data_ptr<scalar_t>();
     int64_t i = 0;
@@ -1078,13 +1077,19 @@ Tensor zeros_like(
   // See [Note: hacky wrapper removal for TensorOptions]
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
 
-  if (options.layout() == kSparse && self.is_sparse()) {
+  if (options.layout() == kSparse) {
     TORCH_CHECK(
         !(optional_memory_format.has_value()),
         "memory format option is only supported by strided tensors");
     auto res = at::empty({0}, options); // to be resized
-    res.sparse_resize_and_clear_(
-        self.sizes(), self.sparse_dim(), self.dense_dim());
+
+    if (self.is_sparse()) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else {
+      res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
+    }
+
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);
@@ -1099,10 +1104,9 @@ Tensor new_zeros(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory
     ) {
-  // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
-
-  return at::zeros(size, self.options().merge_in(options));
+  Tensor r = self.new_empty(size, TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory));
+  r.zero_();
+  return r;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

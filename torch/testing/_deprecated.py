@@ -5,29 +5,33 @@ we don't internalize without warning, but still go through a deprecation cycle.
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
+
+from . import _legacy
 
 
 __all__ = [
     "rand",
     "randn",
     "assert_allclose",
+    "get_all_device_types",
 ]
 
 
-def warn_deprecated(instructions: str) -> Callable:
+def warn_deprecated(instructions: Union[str, Callable[[str, Tuple[Any, ...], Dict[str, Any], Any], str]]) -> Callable:
     def outer_wrapper(fn: Callable) -> Callable:
-        msg = (
-            f"torch.testing.{fn.__name__} is deprecated and will be removed in a future release. "
-            f"{instructions.strip()}"
-        )
+        name = fn.__name__
+        head = f"torch.testing.{name}() is deprecated and will be removed in a future release. "
 
         @functools.wraps(fn)
         def inner_wrapper(*args: Any, **kwargs: Any) -> Any:
+            return_value = fn(*args, **kwargs)
+            tail = instructions(name, args, kwargs, return_value) if callable(instructions) else instructions
+            msg = (head + tail).strip()
             warnings.warn(msg, FutureWarning)
-            return fn(*args, **kwargs)
+            return return_value
 
         return inner_wrapper
 
@@ -84,3 +88,17 @@ def assert_allclose(
         check_is_coalesced=False,
         msg=msg or None,
     )
+
+
+# We iterate over all dtype getters and expose them here with an added deprecation warning
+for name in _legacy.__all_dtype_getters__:
+    fn = getattr(_legacy, name)
+    instructions = (
+        lambda name, args, kwargs, return_value: f"This call to {name}(...) can be replaced with {return_value}."
+    )
+    globals()[name] = warn_deprecated(instructions)(fn)
+    __all__.append(name)
+
+
+instructions = lambda name, args, kwargs, return_value: f"This call can be replaced with {return_value}."  # noqa: E731
+get_all_device_types = warn_deprecated(instructions)(_legacy.get_all_device_types)

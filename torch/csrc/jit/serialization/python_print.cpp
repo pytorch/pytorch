@@ -1,9 +1,12 @@
 #include <torch/csrc/jit/serialization/python_print.h>
 
+#include <algorithm>
+
 #include <ATen/core/qualified_name.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/versioned_symbols.h>
@@ -12,8 +15,6 @@
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
-
-#include <algorithm>
 
 using c10::QualifiedName;
 
@@ -511,13 +512,31 @@ struct PythonPrintImpl {
     }
     indent();
     printValueList(body_, lhs);
+    // We need to preserve Union/Optional type annotations, but only if
+    // we're not assigning values as part of a tuple unpacking statement
+    // (Python doesn't allow type annotations in multiple assignment)
+    if (lhs.size() == 1) {
+      Value* v = lhs.at(0);
+      if (!annotated_unions_.count(v) && !expr_table_.count(v) &&
+          (v->type()->kind() == UnionType::Kind ||
+           v->type()->kind() == OptionalType::Kind)) {
+        body_ << " : " << v->type()->annotation_str();
+        annotated_unions_.insert(v);
+      }
+    }
     body_ << " = ";
+    // or if value is being assigned to something of a union type
     printValueList(body_, rhs);
     body_ << "\n";
   }
 
   bool requiresAnnotation(Value* lhs, Value* rhs) {
-    return *lhs->type() != *rhs->type();
+    if (lhs->type()->kind() == UnionType::Kind ||
+        lhs->type()->kind() == OptionalType::Kind) {
+      return annotated_unions_.insert(lhs).second;
+    } else {
+      return *lhs->type() != *rhs->type();
+    }
   }
 
   void printAnnotatedAssignment(
@@ -1099,7 +1118,7 @@ struct PythonPrintImpl {
         // we cannot recover the type of unwrap_optional(None),
         // using normal schema matching, so we route around this by rewriting
         // the call to unwrap_optional(annotated(Optional[T], None))
-        if (node->input()->type()->isSubtypeOf(NoneType::get()) ||
+        if (node->input()->type()->isSubtypeOf(*NoneType::get()) ||
             node->input()->mustBeNone()) {
           auto input_type = OptionalType::create(node->output()->type());
           stmt << "annotate(" << input_type->annotation_str(type_printer_)
@@ -1283,9 +1302,8 @@ struct PythonPrintImpl {
   void printFunction(
       const Function& func,
       bool print_first_argument_type = true) {
-    TORCH_INTERNAL_ASSERT(func.isGraphFunction());
     const FunctionSchema& schema = func.getSchema();
-    Graph& graph = *func.graph();
+    Graph& graph = *toGraphFunction(func).graph();
     used_names_.clear(); // each graph can reuse local names
 
     WithSourceRange guard(&source_range_stack_, graph.param_node());
@@ -1302,10 +1320,12 @@ struct PythonPrintImpl {
         body_ << arg_name;
         if (print_first_argument_type) {
           body_ << ": " << arg.type()->annotation_str(type_printer_);
+          annotated_unions_.insert(*param_it);
         }
       } else {
         body_ << ",\n    " << arg_name << ": "
               << arg.type()->annotation_str(type_printer_);
+        annotated_unions_.insert(*param_it);
       }
       if (arg.default_value()) {
         printDefaultValue(arg, body_, *arg.default_value());
@@ -1558,6 +1578,12 @@ struct PythonPrintImpl {
   // Any NamedTypes (classes, functions, NamedTuples) used are written to this
   // table.
   PrintDepsTable& deps_table_;
+
+  // We need to preserve Union/Optional type annotations, but we should
+  // only print the annotation on variable declaration (not on any
+  // following uses). This set tracks the Value*s that we've already
+  // printed with annotations
+  std::unordered_set<Value*> annotated_unions_;
 
   // A function that, given a named type, returns us the correct string to print
   // for it.

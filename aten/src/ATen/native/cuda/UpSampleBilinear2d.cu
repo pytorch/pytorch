@@ -1,12 +1,12 @@
 // Adapted from interp.cpp from Caffe util by Pauline Luc
 // Originally developed by George Papandreou
 #include <ATen/ATen.h>
+#include <ATen/ceil_div.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -306,7 +306,7 @@ static void upsample_bilinear2d_out_cuda_template(
           input_width, output_width, align_corners, scales_w);
 
       upsample_bilinear2d_nhwc_out_frame<scalar_t, accscalar_t>
-        <<<cuda::ATenCeilDiv(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+        <<<ceil_div(num_kernels, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
           rheight, rwidth, align_corners,
           batchsize,
           channels,
@@ -335,7 +335,7 @@ static void upsample_bilinear2d_out_cuda_template(
           input_width, output_width, align_corners, scales_w);
 
       upsample_bilinear2d_out_frame<scalar_t, accscalar_t>
-          <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+          <<<ceil_div(num_kernels, num_threads),
              num_threads,
              0,
              stream>>>(
@@ -402,7 +402,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
           input_width, output_width, align_corners, scales_w);
 
       upsample_bilinear2d_backward_nhwc_out_frame<scalar_t, accscalar_t>
-          <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)), num_threads, 0, stream>>>(
+          <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)), num_threads, 0, stream>>>(
               nbatch * channels,
               input_height,
               input_width,
@@ -433,7 +433,7 @@ static void upsample_bilinear2d_backward_out_cuda_template(
           input_width, output_width, align_corners, scales_w);
 
       upsample_bilinear2d_backward_out_frame<scalar_t, accscalar_t>
-          <<<cuda::ATenCeilDiv(num_kernels, static_cast<size_t>(num_threads)),
+          <<<ceil_div(num_kernels, static_cast<size_t>(num_threads)),
              num_threads,
              0,
              stream>>>(

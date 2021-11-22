@@ -144,7 +144,7 @@ CudaIPCSentData::CudaIPCSentData(
       counter_ptr_(counter_ptr),
       original_ptr_(),
       device_(device) {
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   // CUDA have the unofficial limit on the number of recorded blocking interprocess
   // events, to prevent using of all events, we are switching to StreamSync
   // before limit reached.
@@ -186,7 +186,7 @@ CudaIPCSentData::CudaIPCSentData(
 
 CudaIPCSentData::~CudaIPCSentData() {
   ReturnRefCounter(handle_, offset_);
-#ifndef __HIP_PLATFORM_HCC__
+#if !defined(USE_ROCM)
   try {
     if (event_sync_required_) {
       at::cuda::CUDAGuard device_guard(device_.index());

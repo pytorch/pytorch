@@ -3,8 +3,10 @@
 #include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
 
+// TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
+
 // FP32 -> BF16 kernel
-__global__ inline void _float_to_bfloat16_cuda_kernel(
+__global__ void _float_to_bfloat16_cuda_kernel(
     const float* __restrict__ input,
     const int nrows,
     const int ncols,
@@ -26,7 +28,7 @@ __global__ inline void _float_to_bfloat16_cuda_kernel(
 }
 
 // BF16 -> FP32 kernel
-__global__ inline void _bfloat16_to_float_cuda_kernel(
+__global__ void _bfloat16_to_float_cuda_kernel(
     const uint16_t* __restrict__ input,
     const int nrows,
     const int ncols,

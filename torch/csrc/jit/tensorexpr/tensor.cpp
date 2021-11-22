@@ -140,20 +140,6 @@ Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
     const Reducer& reducer,
-    const Placeholder& buffer,
-    const std::vector<DimArg>& reduce_args) {
-  return Reduce(
-      name,
-      dim_args,
-      reducer,
-      [&](ParameterList& p) { return buffer.load(p); },
-      reduce_args);
-}
-
-Tensor Reduce(
-    const std::string& name,
-    const std::vector<DimArg>& dim_args,
-    const Reducer& reducer,
     const BufHandle& buffer,
     const std::vector<DimArg>& reduce_args) {
   return Reduce(

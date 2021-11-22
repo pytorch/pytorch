@@ -54,9 +54,11 @@
 #include <sys/user.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 
 #include <fmt/format.h>
 #include <torch/csrc/deploy/loader.h>
+#include <torch/csrc/deploy/mem_file.h>
 
 namespace torch {
 namespace deploy {
@@ -152,7 +154,7 @@ size_t phdr_table_get_load_size(
   Elf64_Addr max_vaddr = 0;
 
   bool found_pt_load = false;
-  for (size_t i = 0; i < phdr_count; ++i) {
+  for (const auto i : c10::irange(phdr_count)) {
     const Elf64_Phdr* phdr = &phdr_table[i];
 
     if (phdr->p_type != PT_LOAD) {
@@ -214,51 +216,6 @@ struct GnuHash {
 // which appears to include frame information relative to that address.
 extern "C" void __register_frame(void*);
 extern "C" void __deregister_frame(void*);
-
-// Memory maps a file into the address space read-only, and manages the lifetime
-// of the mapping. Used in the loader to read in initial image, and to inspect
-// ELF files for dependencies before callling dlopen.
-struct MemFile {
-  MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
-    fd_ = open(filename_, O_RDONLY);
-    DEPLOY_CHECK(
-        fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
-    struct stat s = {0};
-    if (-1 == fstat(fd_, &s)) {
-      close(fd_); // destructors don't run during exceptions
-      DEPLOY_ERROR("failed to stat {}: {}", filename_, strerror(errno));
-    }
-    n_bytes_ = s.st_size;
-    mem_ = mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0);
-    if (MAP_FAILED == mem_) {
-      close(fd_);
-      DEPLOY_ERROR("failed to mmap {}: {}", filename_, strerror(errno));
-    }
-  }
-  MemFile(const MemFile&) = delete;
-  const char* data() const {
-    return (const char*)mem_;
-  }
-  ~MemFile() {
-    if (mem_) {
-      munmap((void*)mem_, n_bytes_);
-    }
-    if (fd_) {
-      close(fd_);
-    }
-  }
-  size_t size() {
-    return n_bytes_;
-  }
-  int fd() const {
-    return fd_;
-  }
-
- private:
-  int fd_;
-  void* mem_;
-  size_t n_bytes_;
-};
 
 typedef void (*linker_dtor_function_t)();
 typedef void (*linker_ctor_function_t)(int, const char**, char**);
@@ -383,7 +340,7 @@ std::pair<const char*, std::vector<const char*>> load_needed_from_elf_file(
   auto program_headers = (Elf64_Phdr*)(data + header_->e_phoff);
   auto n_program_headers = header_->e_phnum;
   const Elf64_Dyn* dynamic = nullptr;
-  for (size_t i = 0; i < n_program_headers; ++i) {
+  for (const auto i : c10::irange(n_program_headers)) {
     const Elf64_Phdr* phdr = &program_headers[i];
     if (phdr->p_type == PT_DYNAMIC) {
       dynamic = reinterpret_cast<const Elf64_Dyn*>(data + phdr->p_offset);
@@ -405,7 +362,7 @@ std::pair<const char*, std::vector<const char*>> load_needed_from_elf_file(
   const char* segment_string_table =
       data + segment_headers[header_->e_shstrndx].sh_offset;
 
-  for (size_t i = 0; i < n_segments; ++i) {
+  for (const auto i : c10::irange(n_segments)) {
     const Elf64_Shdr* shdr = &segment_headers[i];
     if (shdr->sh_type == SHT_STRTAB &&
         strcmp(".dynstr", segment_string_table + shdr->sh_name) == 0) {
@@ -641,7 +598,7 @@ struct AlreadyLoadedSymTable {
       const Elf64_Phdr* program_headers,
       size_t n_program_headers) {
     Elf64_Dyn* dynamic = nullptr;
-    for (size_t i = 0; i < n_program_headers; ++i) {
+    for (const auto i : c10::irange(n_program_headers)) {
       const Elf64_Phdr* phdr = &program_headers[i];
 
       // Segment addresses in memory.
@@ -871,7 +828,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
 
   void load_segments() {
     // from bionic
-    for (size_t i = 0; i < n_program_headers_; ++i) {
+    for (const auto i : c10::irange(n_program_headers_)) {
       const Elf64_Phdr* phdr = &program_headers_[i];
 
       // Segment addresses in memory.
@@ -1046,7 +1003,6 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   }
 
   at::optional<TLSIndex> tls_lookup_symbol(Elf64_Xword r_info) {
-    const uint32_t r_type = ELF64_R_TYPE(r_info);
     const uint32_t r_sym = ELF64_R_SYM(r_info);
 
     if (r_sym == 0) {
@@ -1142,17 +1098,17 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   }
 
   void relocate() {
-    for (size_t i = 0; i < dyninfo_.n_rela_; ++i) {
+    for (const auto i : c10::irange(dyninfo_.n_rela_)) {
       relocate_one(dyninfo_.rela_[i]);
     }
-    for (size_t i = 0; i < dyninfo_.n_plt_rela_; ++i) {
+    for (const auto i : c10::irange(dyninfo_.n_plt_rela_)) {
       relocate_one(dyninfo_.plt_rela_[i]);
     }
   }
 
   void initialize() {
     call_function(dyninfo_.init_func_);
-    for (size_t i = 0; i < dyninfo_.n_init_array_; ++i) {
+    for (const auto i : c10::irange(dyninfo_.n_init_array_)) {
       call_function(dyninfo_.init_array_[i]);
     }
     initialized_ = true;

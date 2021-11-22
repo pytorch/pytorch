@@ -170,11 +170,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
       counts[j] += __popcll(__ballot(vote));
 #else
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
-#endif  // __HIP_PLATFORM_HCC__
+#endif  // USE_ROCM
     }
   }
 

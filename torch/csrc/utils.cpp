@@ -6,26 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateAllTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateComplexTypes.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateHalfType.h>
-
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateBFloat16Type.h>
-
 #include <torch/csrc/WindowsTorchApiMacro.h>
-// NOLINTNEXTLINE(bugprone-suspicious-include)
-#include <torch/csrc/generic/utils.cpp>
-#include <TH/THGenerateBoolType.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -39,37 +20,6 @@ int THPUtils_getCallable(PyObject *arg, PyObject **result) {
     return 0;
   *result = arg;
   return 1;
-}
-
-THLongStoragePtr THPUtils_unpackSize(PyObject *arg) {
-  THLongStoragePtr result;
-  if (!THPUtils_tryUnpackLongs(arg, result)) {
-    std::string msg = "THPUtils_unpackSize() expects a torch.Size (got '";
-    msg += Py_TYPE(arg)->tp_name;
-    msg += "')";
-    throw std::runtime_error(msg);
-  }
-  return result;
-}
-
-bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
-  bool tuple = PyTuple_Check(arg);
-  bool list = PyList_Check(arg);
-  if (tuple || list) {
-    // NOLINTNEXTLINE(bugprone-branch-clone)
-    const auto nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
-    THLongStoragePtr storage(THLongStorage_newWithSize(nDim));
-    for (int i = 0; i != nDim; ++i) {
-      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
-      if (!THPUtils_checkLong(item)) {
-        return false;
-      }
-      THLongStorage_set(storage, i, THPUtils_unpackLong(item));
-    }
-    result  = std::move(storage);
-    return true;
-  }
-  return false;
 }
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
@@ -91,29 +41,6 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
     return sizes;
   }
   throw std::runtime_error("Expected tuple or list");
-}
-
-bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result) {
-  Py_ssize_t length = PyTuple_Size(args) - ignore_first;
-  if (length < 1) {
-    return false;
-  }
-
-  PyObject *first_arg = PyTuple_GET_ITEM(args, ignore_first);
-  if (length == 1 && THPUtils_tryUnpackLongs(first_arg, result)) {
-    return true;
-  }
-
-  // Try to parse the numbers
-  result = THLongStorage_newWithSize(length);
-  for (Py_ssize_t i = 0; i < length; ++i) {
-    PyObject *arg = PyTuple_GET_ITEM(args, i + ignore_first);
-    if (!THPUtils_checkLong(arg)) {
-      return false;
-    }
-    THLongStorage_set(result, i, THPUtils_unpackLong(arg));
-  }
-  return true;
 }
 
 bool THPUtils_checkIntTuple(PyObject *arg)
@@ -260,6 +187,15 @@ template<>
 void THPPointer<THPStorage>::free() {
   if (ptr)
     Py_DECREF(ptr);
+}
+
+void storage_copy(at::Storage dst, at::Storage src, bool non_blocking) {
+  auto dst_options = c10::TensorOptions().device(dst.device()).dtype(at::kByte);
+  auto dst_t = at::empty({0}, {}, dst_options).set_(dst);
+
+  auto src_options = c10::TensorOptions().device(src.device()).dtype(at::kByte);
+  auto src_t = at::empty({0}, {}, src_options).set_(src);
+  dst_t.copy_(src_t, non_blocking);
 }
 
 template class THPPointer<THPStorage>;

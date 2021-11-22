@@ -285,7 +285,7 @@ In the next section, we give a full example of training a neural network.
 For more information, check out:
 
 * Library of PyTorch-provided modules: `torch.nn <https://pytorch.org/docs/stable/nn.html>`_
-* Defining neural net modules: https://pytorch.org/tutorials/beginner/examples_nn/two_layer_net_module.html
+* Defining neural net modules: https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html
 
 .. _Neural Network Training with Modules:
 

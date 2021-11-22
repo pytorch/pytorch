@@ -436,13 +436,6 @@ class Vectorized<float> {
     return {vec_neg(_vec0), vec_neg(_vec1)};
   }
 
-  void dump() const {
-    std::cout << _vec0[0] << "," << _vec0[1] << "," << _vec0[2] << ","
-              << _vec0[3] << ",";
-    std::cout << _vec1[0] << "," << _vec1[1] << "," << _vec1[2] << ","
-              << _vec1[3] << std::endl;
-  }
-
   Vectorized<float> C10_ALWAYS_INLINE round() const {
     return {vec_round(_vec0), vec_round(_vec1)};
   }

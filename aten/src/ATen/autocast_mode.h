@@ -14,6 +14,8 @@ TORCH_API at::ScalarType get_autocast_gpu_dtype();
 TORCH_API at::ScalarType get_autocast_cpu_dtype();
 TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
 TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
+TORCH_API bool is_autocast_cache_enabled();
+TORCH_API void set_autocast_cache_enabled(bool enabled);
 
 
 namespace {

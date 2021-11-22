@@ -57,83 +57,6 @@ class TORCH_API Tensor {
   StmtPtr stmt_;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class Placeholder {
- public:
-  Placeholder() = default;
-
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Placeholder(const BufHandle& data) : data_(data.node()) {
-    if (data_->base_handle()->dtype() != kHandle) {
-      throw malformed_input("Placeholder dtype must be Handle");
-    }
-
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<ExprHandle> stride_handles(ndim());
-    for (int i = (int)ndim() - 1; i >= 0; i--) {
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (i == ndim() - 1) {
-        stride_handles[i] = 1;
-      } else {
-        stride_handles[i] = stride_handles[i + 1] * ExprHandle(dim(i + 1));
-      }
-    }
-    strides_ = ExprHandleVectorToExprVector(stride_handles);
-  }
-
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Placeholder(
-      const std::string& name,
-      const Dtype& dtype,
-      const std::vector<ExprHandle>& dims)
-      : Placeholder(BufHandle(name, dims, dtype)) {}
-
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  Placeholder(const std::vector<ExprHandle>& dims, const Dtype& dtype)
-      : Placeholder(BufHandle("_", dims, dtype)) {}
-
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-  explicit Placeholder(const std::vector<ExprHandle>& dims)
-      : Placeholder(BufHandle("_", dims, kFloat)) {}
-
-  BufPtr data() const {
-    return data_;
-  }
-  BufHandle handle() const {
-    return BufHandle(data());
-  }
-  Dtype dtype() const {
-    return data_->dtype();
-  }
-  int ndim() const {
-    return data_->ndim();
-  }
-  ExprPtr dim(int index) const {
-    return data_->dim(index);
-  }
-  std::vector<ExprPtr> dims() const {
-    return data_->dims();
-  }
-
-  template <typename... Ts>
-  inline ExprHandle load(const Ts&... ts) const;
-
-  template <typename T>
-  inline ExprHandle load(const std::vector<T>& args) const;
-
-  inline ExprHandle load(const std::vector<ExprHandle>& args) const;
-
-  inline StorePtr store(
-      const std::vector<ExprHandle>& args,
-      const ExprHandle& val) const {
-    return alloc<Store>(data(), ExprHandleVectorToExprVector(args), val.node());
-  }
-
- private:
-  BufPtr data_;
-  std::vector<ExprPtr> strides_;
-};
-
 TORCH_API Tensor Compute(
     const std::string& func_name,
     const std::vector<DimArg>& dim_args,
@@ -258,14 +181,6 @@ Tensor Reduce(
   return Reduce(func_name, dim_args, reducer, body_func, reduce_args);
 }
 
-// Overload for the common case of all dimensions of a Placeholder.
-TORCH_API Tensor Reduce(
-    const std::string& func_name,
-    const std::vector<DimArg>& dim_args,
-    const Reducer& reducer,
-    const Placeholder& buffer,
-    const std::vector<DimArg>& reduce_args);
-
 TORCH_API Tensor Reduce(
     const std::string& name,
     const std::vector<DimArg>& dim_args,
@@ -297,35 +212,21 @@ inline ExprHandle Tensor::load(const std::vector<T>& args) const {
 }
 
 template <typename... Ts>
-inline ExprHandle Placeholder::load(const Ts&... ts) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return ExprHandle(alloc<Load>(data(), ExprHandleVectorToExprVector(params)));
-}
-
-template <typename T>
-inline ExprHandle Placeholder::load(const std::vector<T>& args) const {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<ExprHandle> params(args.begin(), args.end());
-  return ExprHandle(alloc<Load>(data(), ExprHandleVectorToExprVector(params)));
-}
-
-inline ExprHandle Placeholder::load(const std::vector<ExprHandle>& args) const {
-  return this->template load<ExprHandle>(args);
-}
-
-template <typename... Ts>
 inline ExprHandle BufHandle::load(const Ts&... ts) const {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params({ExprHandle(ts)...});
-  return Load::make(*this, params);
+  return ExprHandle(alloc<Load>(node(), ExprHandleVectorToExprVector(params)));
 }
 
 template <typename T>
 inline ExprHandle BufHandle::load(const std::vector<T>& args) const {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<ExprHandle> params(args.begin(), args.end());
-  return Load::make(*this, params);
+  return ExprHandle(alloc<Load>(node(), ExprHandleVectorToExprVector(params)));
+}
+
+inline ExprHandle BufHandle::load(const std::vector<ExprHandle>& args) const {
+  return this->template load<ExprHandle>(args);
 }
 
 } // namespace tensorexpr

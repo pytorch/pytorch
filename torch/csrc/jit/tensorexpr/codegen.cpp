@@ -76,6 +76,10 @@ void* CodeGen::argToPtr(const BufferArg& bufferArg, const CallArg& callArg) {
   return nullptr;
 }
 
+void CodeGen::call_with_numel(void** args, int64_t numel) {
+  TORCH_INTERNAL_ASSERT(
+      false, "This codegen backend does not implement call_with_numel");
+}
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

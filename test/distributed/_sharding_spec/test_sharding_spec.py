@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: distributed"]
+
 import torch
 from torch.testing._internal.common_utils import TestCase
 from torch.distributed._sharding_spec import (
@@ -6,7 +8,11 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
 )
-from torch.distributed._sharding_spec._internals import check_tensor
+from torch.distributed._sharding_spec._internals import (
+    check_tensor,
+    get_split_size,
+    get_chunked_dim_size,
+)
 
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -73,12 +79,12 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:1",
             )
         ])
@@ -88,22 +94,22 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[3, 3],
+                shard_sizes=[3, 3],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[0, 3],
-                shard_lengths=[3, 3],
+                shard_sizes=[3, 3],
                 placement="cuda:1",
             ),
             ShardMetadata(
                 shard_offsets=[3, 0],
-                shard_lengths=[3, 3],
+                shard_sizes=[3, 3],
                 placement="cuda:2",
             ),
             ShardMetadata(
                 shard_offsets=[3, 3],
-                shard_lengths=[3, 3],
+                shard_sizes=[3, 3],
                 placement="cuda:3",
             ),
         ])
@@ -113,22 +119,22 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[2, 4],
+                shard_sizes=[2, 4],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[0, 4],
-                shard_lengths=[4, 2],
+                shard_sizes=[4, 2],
                 placement="cuda:1",
             ),
             ShardMetadata(
                 shard_offsets=[2, 0],
-                shard_lengths=[4, 4],
+                shard_sizes=[4, 4],
                 placement="cuda:2",
             ),
             ShardMetadata(
                 shard_offsets=[4, 4],
-                shard_lengths=[2, 2],
+                shard_sizes=[2, 2],
                 placement="cuda:3",
             ),
         ])
@@ -136,16 +142,16 @@ class TestShardingSpec(TestCase):
 
         # test invalid sharding
         with self.assertRaisesRegex(ValueError, 'Could not parse remote_device'):
-            ShardMetadata(shard_offsets=[0], shard_lengths=[1], placement="cuda:foo")
+            ShardMetadata(shard_offsets=[0], shard_sizes=[1], placement="cuda:foo")
 
         with self.assertRaisesRegex(ValueError, 'same number of elements'):
-            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[1], placement="cuda:0")
+            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, 'shard_offsets should be >=0'):
-            ShardMetadata(shard_offsets=[-1, 0], shard_lengths=[1, 1], placement="cuda:0")
+            ShardMetadata(shard_offsets=[-1, 0], shard_sizes=[1, 1], placement="cuda:0")
 
-        with self.assertRaisesRegex(ValueError, 'shard_lengths should be > 0'):
-            ShardMetadata(shard_offsets=[0, 0], shard_lengths=[0, 1], placement="cuda:0")
+        with self.assertRaisesRegex(ValueError, 'shard_sizes should be >= 0'):
+            ShardMetadata(shard_offsets=[0, 0], shard_sizes=[-1, 1], placement="cuda:0")
 
         with self.assertRaisesRegex(ValueError, 'Empty shard list provided'):
             EnumerableShardingSpec([])
@@ -154,12 +160,12 @@ class TestShardingSpec(TestCase):
             EnumerableShardingSpec([
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[1, 1],
+                    shard_sizes=[1, 1],
                     placement="cpu"
                 ),
                 ShardMetadata(
                     shard_offsets=[0, 0, 0],
-                    shard_lengths=[1, 1, 1],
+                    shard_sizes=[1, 1, 1],
                     placement="cpu"
                 ),
             ])
@@ -168,12 +174,12 @@ class TestShardingSpec(TestCase):
             EnumerableShardingSpec([
                 ShardMetadata(
                     shard_offsets=[0, 0],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cpu"
                 ),
                 ShardMetadata(
                     shard_offsets=[2, 0],
-                    shard_lengths=[3, 3],
+                    shard_sizes=[3, 3],
                     placement="cpu"
                 ),
             ])
@@ -181,12 +187,12 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:1",
             )
         ])
@@ -197,12 +203,12 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:1",
             )
         ])
@@ -213,18 +219,34 @@ class TestShardingSpec(TestCase):
         spec = EnumerableShardingSpec([
             ShardMetadata(
                 shard_offsets=[0, 0],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:0",
             ),
             ShardMetadata(
                 shard_offsets=[5, 5],
-                shard_lengths=[5, 5],
+                shard_sizes=[5, 5],
                 placement="cuda:1",
             )
         ])
 
         with self.assertRaisesRegex(ValueError, 'does not match tensor volume'):
             check_tensor(spec.shards, torch.rand(10, 10).size())
+
+    def test_get_split_size(self):
+        self.assertEqual(3, get_split_size(11, 4))
+        self.assertEqual(3, get_split_size(12, 4))
+        self.assertEqual(4, get_split_size(13, 4))
+        self.assertEqual(2, get_split_size(5, 4))
+
+        self.assertEqual(11, get_split_size(11, 1))
+        self.assertEqual(1, get_split_size(11, 11))
+
+    def test_get_chunked_dim_size(self):
+        self.assertEqual(3, get_chunked_dim_size(11, 3, 0))
+        self.assertEqual(2, get_chunked_dim_size(11, 3, 3))
+        self.assertEqual(4, get_chunked_dim_size(13, 4, 0))
+        self.assertEqual(1, get_chunked_dim_size(13, 4, 3))
+        self.assertEqual(0, get_chunked_dim_size(5, 2, 3))
 
 if __name__ == '__main__':
     run_tests()
