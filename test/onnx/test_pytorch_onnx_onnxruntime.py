@@ -323,8 +323,8 @@ class TestONNXRuntime(unittest.TestCase):
                                   flatten=flatten)
 
         if isinstance(remained_onnx_input_idx, dict):
-            scripting_remained_onnx_input_idx = remained_onnx_input_idx['scripting']
-            tracing_remained_onnx_input_idx = remained_onnx_input_idx['tracing']
+            scripting_remained_onnx_input_idx = remained_onnx_input_idx["scripting"]
+            tracing_remained_onnx_input_idx = remained_onnx_input_idx["tracing"]
         else:
             scripting_remained_onnx_input_idx = remained_onnx_input_idx
             tracing_remained_onnx_input_idx = remained_onnx_input_idx
@@ -523,7 +523,7 @@ class TestONNXRuntime(unittest.TestCase):
         model = Fuse()
         x = torch.randn(2, 5, 9, requires_grad=True)
         self.run_test(torch.jit.script(model), (x,),
-                      input_names=['x'], dynamic_axes={'x': [0, 2]},
+                      input_names=["x"], dynamic_axes={"x": [0, 2]},
                       rtol=1e-3, atol=1e-6)
 
     def test_conv_tbc(self):
@@ -963,7 +963,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(NoOptionalModel(), (y, {}))
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_optional_inputs_with_mixed_optionals(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
@@ -1007,7 +1007,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"y": None, "z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_optional_inputs_with_all_optionals(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
@@ -1040,7 +1040,7 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_input_names_with_optional_args(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1148,7 +1148,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(3, 4)
         self.run_test(Model(), (x, y), input_names=["x", "y"], output_names=["x_out", "y_out"])
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_none_as_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor]):
@@ -1171,7 +1171,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(Model(), (x, None))
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_none_as_tuple_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]]):
@@ -1201,7 +1201,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
-    @skipScriptTest()  # ScriptModule could not be exported without the Input Descriptor for optional inputs
+    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_none_as_named_input(self):
         class Model(torch.nn.Module):
             def forward(self, x, y=None, z=None):
@@ -3920,7 +3920,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModule(), (x,),
                       dynamic_axes={"input": {0: "batch", 2: "height", 3: "width"},
                                     "output": {0: "batch", 1: "class", 2: "height", 3: "width"}},
-                      input_names=['input'], output_names=['output'])
+                      input_names=["input"], output_names=["output"])
 
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -5213,7 +5213,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(4, 384, 2)
         input_names = ["logits"]
         self.run_test(Split(), x, input_names=input_names,
-                      dynamic_axes={input_names[0]: {0: 'batch'}})
+                      dynamic_axes={input_names[0]: {0: "batch"}})
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_chunk(self):
@@ -6280,8 +6280,8 @@ class TestONNXRuntime(unittest.TestCase):
 
         x = torch.randn(2, 3, 4) * 100.0
         y = torch.randn(2, 4, 5) * 100.0
-        self.run_test(Relu6Model(), x, input_names=['x'],
-                      dynamic_axes={'x': [1, 2]},
+        self.run_test(Relu6Model(), x, input_names=["x"],
+                      dynamic_axes={"x": [1, 2]},
                       test_with_inputs=[y])
 
     def test_silu(self):
@@ -7262,7 +7262,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return batch_boxes
 
         dummy_inputs = torch.rand(2, 2, 3)
-        self.run_test(M(), (dummy_inputs, ), input_names=['x'], dynamic_axes={"x": [0]})
+        self.run_test(M(), (dummy_inputs, ), input_names=["x"], dynamic_axes={"x": [0]})
 
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_outer(self):
@@ -7615,11 +7615,11 @@ class TestONNXRuntime(unittest.TestCase):
         def linear_combination(x, y, epsilon):
             return epsilon * x + (1 - epsilon) * y
 
-        def reduce_loss(loss, reduction='mean'):
-            return loss.mean() if reduction == 'mean' else loss.sum() if reduction == 'sum' else loss
+        def reduce_loss(loss, reduction="mean"):
+            return loss.mean() if reduction == "mean" else loss.sum() if reduction == "sum" else loss
 
         class LabelSmoothingCrossEntropy(torch.nn.Module):
-            def __init__(self, epsilon: float = 0.1, reduction='mean'):
+            def __init__(self, epsilon: float = 0.1, reduction="mean"):
                 super().__init__()
                 self.epsilon = epsilon
                 self.reduction = reduction
@@ -9193,8 +9193,8 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(M(), (x, y), remained_onnx_input_idx=[1])
 
         y2 = torch.randn(5, 2)
-        self.run_test(M(), (x, y), remained_onnx_input_idx=[1], input_names=['x', 'y'],
-                      dynamic_axes={'x': [0, 1], 'y': [0, 1]},
+        self.run_test(M(), (x, y), remained_onnx_input_idx=[1], input_names=["x", "y"],
+                      dynamic_axes={"x": [0, 1], "y": [0, 1]},
                       test_with_inputs=[(y, y2)])
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -9965,14 +9965,14 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, start):
                 return torch.arange(start.size(0), 8.5, 1.5, dtype=torch.int64)
         x = torch.randn(2, 3, 4)
-        self.run_test(ArangeModel(), (x,), input_names=['x'], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModel(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(ArangeModel(), (x,), remained_onnx_input_idx=[])
 
         class ArangeModel2(torch.nn.Module):
             def forward(self, start):
                 return torch.arange(start.size(0), 8.5, 1.5, dtype=torch.double)
         x = torch.randn(2, 3, 4)
-        self.run_test(ArangeModel2(), (x,), input_names=['x'], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ArangeModel2(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(ArangeModel2(), (x,), remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -9983,10 +9983,10 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nonzero(ones)
 
         x = torch.randn(2)
-        self.run_test(OneLikeModel(), x, input_names=['x'], dynamic_axes={"x": [0]})
+        self.run_test(OneLikeModel(), x, input_names=["x"], dynamic_axes={"x": [0]})
         self.run_test(OneLikeModel(), x, remained_onnx_input_idx=[])
         x = torch.randn(2, 3, 4)
-        self.run_test(OneLikeModel(), x, input_names=['x'], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(OneLikeModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(OneLikeModel(), x, remained_onnx_input_idx=[])
 
         class ZeroLikeModel(torch.nn.Module):
@@ -9995,10 +9995,10 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.nonzero(zeros)
 
         x = torch.randn(2)
-        self.run_test(ZeroLikeModel(), x, input_names=['x'], dynamic_axes={"x": [0]})
+        self.run_test(ZeroLikeModel(), x, input_names=["x"], dynamic_axes={"x": [0]})
         self.run_test(ZeroLikeModel(), x, remained_onnx_input_idx=[])
         x = torch.randn(2, 3, 4)
-        self.run_test(ZeroLikeModel(), x, input_names=['x'], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(ZeroLikeModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(ZeroLikeModel(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -10313,8 +10313,8 @@ class TestONNXRuntime(unittest.TestCase):
         index = torch.tensor([0, 2, 3, 1])
 
         self.run_test(M(1, index, updates), (x,), test_with_inputs=[y],
-                      input_names=['input_1'],
-                      dynamic_axes={'input_1': [0, 1]})
+                      input_names=["input_1"],
+                      dynamic_axes={"input_1": [0, 1]})
 
     def test_roll(self):
         class M(torch.nn.Module):
@@ -10338,7 +10338,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return torch.sum(x)
 
         x = torch.ones(12, 3)
-        self.run_test(M(), (x,), input_names=['x'], dynamic_axes={'x': [0]})
+        self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0]})
 
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
@@ -10727,11 +10727,11 @@ def setup_rnn_tests():
                     # torch.jit.frontend.UnsupportedNodeError: annotated assignments
                     # without assigned value aren't supported
                     # https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
-                    base == 'elman' or
+                    base == "elman" or
                     # compiling in script mode fails with errors like:
                     # RuntimeError: Arguments for call are not valid.
                     # https://msdata.visualstudio.com/Vienna/_workitems/edit/1160723
-                    base == 'lstm'):
+                    base == "lstm"):
                 script_test_min_opset_version = float("inf")
             make_test(name, base, layer, bidirectional, initial_state,
                       variable_length, dropout, script_test_min_opset_version,
@@ -10825,6 +10825,7 @@ TestONNXRuntime_opset15 = type(str("TestONNXRuntime_opset15"),
                                dict(TestONNXRuntime.__dict__, opset_version=15,
                                     keep_initializers_as_inputs=False,
                                     onnx_shape_inference=True))
+
 
 if __name__ == "__main__":
     unittest.main()
