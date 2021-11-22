@@ -266,17 +266,21 @@ static void UpdateScalarTypeForInputs(
         at::Tensor val = input->node()->t(attr::value);
         at::Tensor new_val = val.to(scalar_type);
         Node* const_node = n->owningGraph()->create(onnx::Constant);
+        const_node->copyMetadata(n);
         const_node->t_(attr::value, new_val);
         const_node->insertBefore(n);
         const_node->output()->setType(TensorType::create(new_val));
+        const_node->copyMetadata(input->node());
         n->replaceInputWith(input, const_node->output());
       } else {
         Node* cast_node = n->owningGraph()->create(onnx::Cast);
         cast_node->addInput(input);
+        cast_node->copyMetadata(n);
         cast_node->i_(attr::to, onnx_type);
         cast_node->insertBefore(n);
         cast_node->output()->setType(CreateProfiledTensorTypeWithScalarType(
             input_tensor_type, scalar_type));
+        cast_node->copyMetadata(n);
         n->replaceInputWith(input, cast_node->output());
       }
     }
@@ -301,6 +305,7 @@ static void RecoverScalarTypeForOutput(
   cast_node->addInput(out);
   cast_node->i_(attr::to, onnx_type);
   cast_node->insertAfter(n);
+  cast_node->copyMetadata(n);
   out->replaceAllUsesAfterNodeWith(cast_node, cast_node->output());
 }
 

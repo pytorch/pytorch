@@ -70,7 +70,6 @@ struct TORCH_API Code {
   const std::vector<Node*>& instructions_source() const;
   void request_bailout(size_t index);
   size_t register_size() const;
-  IValue bytecode_table() const;
 
  private:
   std::shared_ptr<interpreter::CodeImpl> pImpl;

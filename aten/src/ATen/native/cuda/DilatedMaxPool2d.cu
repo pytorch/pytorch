@@ -2,12 +2,13 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
-#include <THC/THCNumerics.cuh>
 #include <c10/macros/Macros.h>
 #include <ATen/native/cuda/LaunchUtils.h>
 
@@ -59,7 +60,7 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = btm_data[h * width + w];
-        if ((static_cast<accscalar_t>(val) > maxval) || THCNumerics<scalar_t>::isnan(val)) {
+        if ((static_cast<accscalar_t>(val) > maxval) || at::_isnan(val)) {
           maxidx = h * width + w;
           maxval = static_cast<accscalar_t>(val);
         }
@@ -133,7 +134,7 @@ __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nba
           const scalar_t *ptr_input = bottom_data + ih * in_stride_h + iw * in_stride_w;
           for(int c = channel_offset; c < channels; c+= blockDim.x*kernel_stride_C) {
             scalar_t val = ptr_input[c*in_stride_c];
-            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || THCNumerics<scalar_t>::isnan(val)) {
+            if ((static_cast<accscalar_t>(val) > out_cached[cached_index]) || at::_isnan(val)) {
               out_cached[cached_index] = static_cast<accscalar_t>(val);
               out_mask_cached[cached_index] = ih * width + iw;
             }

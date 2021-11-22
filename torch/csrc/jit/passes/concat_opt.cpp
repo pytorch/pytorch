@@ -11,6 +11,7 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch {
 namespace jit {
@@ -495,6 +496,203 @@ class ConcatExpander {
 void ExpandConcatAndEliminateRedundancy(const std::shared_ptr<Graph>& graph) {
   ConcatExpander(graph).run();
   GRAPH_DUMP("After expanding Concat and eliminating redundancy", graph);
+}
+
+namespace {
+
+size_t determineUsageIdx(Value* value, Node* user) {
+  const auto idx =
+      std::find(user->inputs().begin(), user->inputs().end(), value) -
+      user->inputs().begin();
+  TORCH_CHECK(idx != user->inputs().size());
+  return idx;
+}
+
+std::vector<Value*> getConcatInputs(Node* concat) {
+  TORCH_CHECK(concat->kind() == aten::cat);
+  auto* list = concat->input(0);
+  auto* list_construct = list->node();
+  TORCH_CHECK(list_construct->kind() == prim::ListConstruct);
+  return list_construct->inputs().vec();
+}
+
+class ConcatCombiner {
+ public:
+  explicit ConcatCombiner(std::shared_ptr<Graph> graph)
+      : graph_(std::move(graph)), aliasDb_(graph_) {}
+
+  bool run() {
+    collectOptimizableConcats();
+    bool changed = combineConcats();
+    if (changed) {
+      EliminateDeadCode(graph_);
+    }
+    return changed;
+  }
+
+ private:
+  // Given a concat node, see if it can be optimized with another.
+  // If so, add a CombinablePair to combinable_concats_.
+  void handleConcat(Node* node) {
+    auto* list = node->input(0);
+    auto* list_node = list->node();
+
+    const auto dim_opt = toIValue(node->input(1));
+    // We need to be able to determine dim statically to match it with another
+    // concat.
+    if (!dim_opt || !dim_opt->isInt()) {
+      return;
+    }
+    const auto dim = dim_opt->toInt();
+
+    // Check that the input of this node is an unmodified list construct
+    if (list_node->kind() != prim::ListConstruct ||
+        !aliasDb_.couldMoveBeforeTopologically(list_node, node)) {
+      return;
+    }
+
+    // Check that the only output of this node is used in an unmodified list
+    // construct.
+    const auto& concat_uses = node->output()->uses();
+    if (concat_uses.size() != 1) {
+      return;
+    }
+
+    auto* next_list = concat_uses[0].user;
+    if (next_list->kind() != prim::ListConstruct) {
+      return;
+    }
+
+    const auto& next_list_uses = next_list->output()->uses();
+    if (next_list_uses.size() != 1) {
+      return;
+    }
+
+    auto* next_concat = next_list_uses[0].user;
+
+    if (next_concat->kind() == aten::cat) {
+      // Dimension must be determined statically and match the one we've already
+      // seen.
+      const auto next_dim_opt = toIValue(next_concat->input(1));
+      if (!next_dim_opt || next_dim_opt->toInt() != dim) {
+        return;
+      }
+      combinable_concats_.emplace_back(
+          node, next_concat, determineUsageIdx(node->output(), next_list));
+    }
+  }
+
+  void collectOptimizableConcats() {
+    DepthFirstGraphNodeIterator graph_it(graph_);
+    for (auto* node = graph_it.next(); node != nullptr;
+         node = graph_it.next()) {
+      if (node->kind() == aten::cat) {
+        handleConcat(node);
+      }
+    }
+  }
+
+  Node* createListConstruct(const std::deque<Value*>& inputs) {
+    auto* output = graph_->create(prim::ListConstruct);
+    for (auto* v : inputs) {
+      output->addInput(v);
+    }
+    return output;
+  }
+
+  using ListConstructInputs = std::shared_ptr<std::deque<Value*>>;
+  // Construct a map (concat node) -> (new list inputs for this node).
+  // std::deque is used so we can do O(1) insertions to the front.
+  std::unordered_map<Node*, ListConstructInputs> getListConstructInputs() {
+    std::unordered_map<Node*, ListConstructInputs> cur_list_construct_inputs;
+    for (const auto& combinable : combinable_concats_) {
+      // Combine the list inputs of first_concat with those of second_concat
+      const auto& inputs_to_add = getConcatInputs(combinable.second_concat);
+
+      auto it = cur_list_construct_inputs.find(combinable.first_concat);
+      std::shared_ptr<std::deque<Value*>> cur_list;
+      if (it != cur_list_construct_inputs.end()) {
+        cur_list = it->second;
+        // We're moving all inputs to second_concat.
+        cur_list_construct_inputs.erase(combinable.first_concat);
+      } else {
+        cur_list = std::make_shared<std::deque<Value*>>();
+      }
+      cur_list_construct_inputs.emplace(combinable.second_concat, cur_list);
+
+      // If cur_list is not empty, it's guaranteed to already contain all of
+      // first_concat's inputs.
+      if (cur_list->empty()) {
+        const auto& starting_values = getConcatInputs(combinable.first_concat);
+        cur_list->insert(
+            cur_list->end(), starting_values.begin(), starting_values.end());
+      }
+
+      cur_list->insert(
+          cur_list->begin(),
+          inputs_to_add.begin(),
+          inputs_to_add.begin() + combinable.idx);
+
+      cur_list->insert(
+          cur_list->end(),
+          inputs_to_add.begin() + combinable.idx + 1,
+          inputs_to_add.end());
+    }
+    return cur_list_construct_inputs;
+  }
+
+  bool combineConcats() {
+    if (combinable_concats_.empty()) {
+      return false;
+    }
+
+    auto list_construct_inputs = getListConstructInputs();
+
+    for (const auto& node_and_new_list : list_construct_inputs) {
+      auto* node = node_and_new_list.first;
+      auto& inputs = node_and_new_list.second;
+
+      auto* new_list_construct = createListConstruct(*inputs);
+      auto* old_list_construct = node->input(0)->node();
+      new_list_construct->output()->setType(
+          old_list_construct->output()->type());
+      new_list_construct->insertBefore(node);
+      old_list_construct->replaceAllUsesWith(new_list_construct);
+    }
+    return true;
+  }
+
+  // Represents an optimizable pair of concat nodes.
+  // - first_concat must appear before second_concat
+  // - idx is the index where first_concat's inputs must be inserted into
+  //   second_concat's new inputs.
+  // Example:
+  //    %inputs.1 = prim::ListConstruct(%0, %0)
+  //    %concat.1 = aten::cat(%inputs.1, %dim)
+  //    %inputs.2 = prim::ListConstruct(%1, %concat.1, %1)
+  //    %concat.2 = aten::cat(%inputs.2, %dim)
+  // -> first_concat = &concat.1, second_concat = &concat.2, idx = 1
+  struct CombinableConcat {
+    CombinableConcat(Node* a, Node* b, size_t i)
+        : first_concat(a), second_concat(b), idx(i) {}
+
+    Node* first_concat;
+    Node* second_concat;
+    size_t idx;
+  };
+
+  std::vector<CombinableConcat> combinable_concats_;
+
+  std::shared_ptr<Graph> graph_;
+  AliasDb aliasDb_;
+};
+
+} // namespace
+
+bool CombineConcats(const std::shared_ptr<Graph>& graph) {
+  bool changed = ConcatCombiner(graph).run();
+  GRAPH_DUMP("After combining concats", graph);
+  return changed;
 }
 
 } // namespace jit
