@@ -329,7 +329,7 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     } else {
       std::cerr
-          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found"
+          << "Warning: UninitializedOutput - Invalid elem Type of ListTensor found."
           << std::endl;
       const_node->output()->setType(other_output->type());
     }
@@ -471,7 +471,6 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
 
   auto mergeTensorType =
       [&findCommonShape](TensorTypePtr a, TensorTypePtr b) -> TensorTypePtr {
-
     if (a && b) {
       const auto& a_shape = a->symbolic_sizes();
       const auto& b_shape = b->symbolic_sizes();

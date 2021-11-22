@@ -344,7 +344,7 @@ Node* CloneNodeToGraph(
 bool HasValidType(TypePtr type, std::string name) {
   if (auto t_type = type->cast<TensorType>()) {
     if (!t_type->scalarType().has_value()) {
-      GRAPH_UPDATE("Input ", name, " misses tensor datatype.");
+      GRAPH_UPDATE("Input ", name, " is missing tensor datatype.");
       return false;
     }
   } else if (auto s_type = type->cast<ListType>()) {
@@ -358,7 +358,7 @@ bool HasValidType(TypePtr type, std::string name) {
 }
 
 bool IsGraphValidForInference(std::shared_ptr<Graph> graph) {
-  // Verify if every input has type(either Tensor or Sequence or Optional) and
+  // Verify if every input has type (either Tensor, Sequence or Optional) and
   // scalar type. This is a requirement for ONNX graph inputs.
   for (auto in : graph->inputs()) {
     return HasValidType(in->type(), in->debugName());

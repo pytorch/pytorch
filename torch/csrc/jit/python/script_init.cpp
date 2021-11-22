@@ -495,8 +495,9 @@ static void setInputTensorTypes(
             AT_ASSERT(s_iter != stack.end());
             s_iter++;
           } else {
-            if (param_count_list[list_idx] > 0)
+            if (param_count_list[list_idx] > 0) {
               AT_ASSERT(s_iter != stack.end());
+            }
             s_iter += param_count_list[list_idx];
           }
           list_idx++;
