@@ -1,0 +1,36 @@
+# Central file where we track which operator has upgraders
+
+- func: div.Tensor
+  version: 4
+  upgrader: div_Tensor_0_3
+  old_schema: aten::div.Tensor(Tensor self, Tensor other) -> Tensor
+
+- func: div.Scalar
+  version: 4
+  upgrader: div_Scalar_0_3
+  old_schema: aten::div.Scalar(Tensor self, Scalar other) -> Tensor
+
+- func: div.out
+  version: 4
+  upgrader: div_out_0_3
+  old_schema: aten::div.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
+
+- func: div_.Tensor
+  version: 4
+  upgrader: div__Tensor_0_3
+  old_schema: aten::div_.Tensor(Tensor(a!), Tensor other) -> Tensor(a!)
+
+- func: div_.Scalar
+  version: 4
+  upgrader: div__Scalar_0_3
+  old_schema: aten::div_.Scalar(Tensor(a!), Tensor other) -> Tensor(a!)
+
+- func: full.names
+  version: 5
+  upgrader: full_names_0_4
+  old_schema: aten::full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+
+- func: full.out
+  version: 5
+  upgrader: full_out_0_4
+  old_schema: aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)
