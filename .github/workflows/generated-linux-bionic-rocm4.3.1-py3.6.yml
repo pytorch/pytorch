@@ -205,8 +205,8 @@ jobs:
           )
           docker cp "${GITHUB_WORKSPACE}" "${container_name}:/var/lib/jenkins/workspace"
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
-          docker commit "${container_name}" ${{ steps.calculate-tag.outputs.docker_commit_image }}
-          docker push ${{ steps.calculate-tag.outputs.docker_commit_image }}
+          docker commit "${container_name}" "${DOCKER_COMMIT_IMAGE}"
+          docker push "${DOCKER_COMMIT_IMAGE}"
           docker cp "${container_name}:/var/lib/jenkins/workspace/.pytorch-test-times.json" .pytorch-test-times.json
           docker cp "${container_name}:/var/lib/jenkins/workspace/dist" dist
           docker cp "${container_name}:/var/lib/jenkins/workspace/build" build
