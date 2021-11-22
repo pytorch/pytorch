@@ -155,7 +155,6 @@ class TestPublicBindings(TestCase):
             "memory_format",
             "merge_type_from_type_comment",
             "MobileOptimizerType",
-            "MobileCode",
             "ModuleDict",
             "Node",
             "NoneType",

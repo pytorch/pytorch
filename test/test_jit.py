@@ -13514,19 +13514,6 @@ dedent """
 
         FileCheck().check("aten::rand").check("aten::add").run(str(foo.graph))
 
-    def test_mobile_code(self):
-        @torch.jit.script
-        def foo():
-            return torch.rand(2, 3)
-
-        mobileCode = torch._C.MobileCode(foo.graph, "foo")
-        keys = set()
-        for x in mobileCode.bytecode_table():
-            keys.add(x[0])
-        # test that only fields that are supposed to show up
-        self.assertTrue(len(keys) == 5)
-        self.assertTrue(keys == {'instructions', 'operators', 'types', 'constants', 'register_size'})
-
     def test_mutable_dce_list(self):
         @torch.jit.script
         def foo(a):
