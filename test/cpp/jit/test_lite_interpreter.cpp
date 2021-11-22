@@ -1507,18 +1507,24 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
-
-  for (auto& mobile_code_data : kUpgraderByteCode) {
-    upgrader_functions.push_back(mobile::Function::registerFunc(
-        mobile_code_data.qualified_name,
-        mobile_code_data.instructions,
-        mobile_code_data.operators,
-        mobile_code_data.constants,
-        mobile_code_data.types,
-        mobile_code_data.register_size));
+  for (auto& byteCodeFunctionWithOperator : kUpgraderByteCode) {
+    ASSERT_EQ(
+        byteCodeFunctionWithOperator.function.get_code()->operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code()->op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
   }
 
   ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+}
 }
 
 } // namespace jit
