@@ -1015,7 +1015,7 @@ class TestFreezing(JitTestCase):
             m_f = torch._C._freeze_module(m_s._c)
 
     def test_freeze_module_inlining(self):
-        @torch.jit.script
+        @torch.jit.script  # noqa: B903
         class Obj(object):  # noqa: B903
             def __init__(self, x: int, y: int):
                 self.x = x
@@ -1566,6 +1566,33 @@ class TestFreezing(JitTestCase):
         FileCheck().check_not("prim::TupleConstruct").run(mf.graph)
         FileCheck().check_not("prim::TupleUnpack").run(mf.graph)
         self.assertEqual(output, expected)
+
+    def test_freeze_module_with_call_method(self):
+        class Mod(nn.Module):
+            def __init__(self, val):
+                super().__init__()
+                self.param = nn.Parameter(val)
+
+            def forward(self, x):
+                # this method will change during freezing
+                return x + self.param
+
+            @torch.jit.export
+            def make_prediction(self, x):
+                y = x + x
+                return self.forward(y)
+
+        param = torch.rand([2, 2])
+        x = torch.rand([2, 2])
+
+        unscripted_mod = Mod(param)
+        mod = torch.jit.script(unscripted_mod)
+        mod.eval()
+        mod = torch.jit.freeze(mod, preserved_attrs=["make_prediction"])
+
+        self.assertEqual(
+            mod.forward(x), unscripted_mod.forward(x), atol=1e-5, rtol=1e-5
+        )
 
 class TestFrozenOptimizations(JitTestCase):
     def setUp(self):
