@@ -86,17 +86,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
 
-  if [[ "$CUDA_VERSION" == 10.2* ]]; then
-    conda_install magma-cuda102 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
-    conda_install magma-cuda110 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
-    conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
-    conda_install magma-cuda113 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.5* ]]; then
-    conda_install magma-cuda115 -c pytorch
-  fi
+  # Magma package names are concatenation of CUDA major and minor
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2
+  conda_install magma-cuda${CUDA_VERSION//./}
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
