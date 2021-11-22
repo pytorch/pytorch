@@ -182,16 +182,23 @@ def _convert_do_not_use(
             if cur_placeholder_node_idx in input_quantized_idxs:
                 # Inputs are assumed to be quantized if the user specifid the
                 # input_quantized_idxs override.
-                # TODO: remove the quantize node for the placeholder
-                raise Exception("input_quantized_idxs is not supported yet")
+                # Note: we don't need to do anything for this, it affects prepare
+                # step in terms of whether to insert observer for input or not
+                continue
         elif node.op == "output":
             cur_output_node_idx = output_node_seen_cnt
             output_node_seen_cnt += 1
             if cur_output_node_idx in output_quantized_idxs:
                 # Result are kept quantized if the user specified the
                 # output_quantized_idxs override.
-                # TODO: remove dequantize node if any
-                raise Exception("output_quantized_idxs is not supported yet")
+                # Remove the dequantize operator in the end
+                maybe_dequantize_node = node.args[0]
+                if isinstance(maybe_dequantize_node, Node) and \
+                   maybe_dequantize_node.op == "call_method" and \
+                   maybe_dequantize_node.target == "dequantize":
+                    quantized_node = maybe_dequantize_node.args[0]
+                    maybe_dequantize_node.replace_all_uses_with(quantized_node)
+                    model.graph.erase_node(maybe_dequantize_node)
         elif node.op == "call_module":
             if is_activation_post_process(modules[node.target]):
                 replace_observer_with_quantize_dequantize_node(model.graph, node, modules)
