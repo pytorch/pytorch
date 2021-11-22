@@ -1517,17 +1517,23 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
   for (auto& byteCodeFunctionWithOperator : kUpgraderByteCode) {
-    for (const auto& op : byteCodeFunctionWithOperator.operators) {
-      byteCodeFunctionWithOperator.function.append_operator(
-          op.name,
-          op.overload_name,
-          op.num_specified_args,
-          caffe2::serialize::kMaxSupportedFileFormatVersion);
+    ASSERT_EQ(
+        byteCodeFunctionWithOperator.function.get_code()->operators_.size(),
+        byteCodeFunctionWithOperator.function.get_code()->op_names_.size());
+    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
     }
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
   }
 
-  // ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+  ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+}
 }
 
 } // namespace jit
