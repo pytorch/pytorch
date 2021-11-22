@@ -291,7 +291,7 @@ class TORCH_API Tensor: public TensorBase {
     if (!index.isIntegral(false)) {
       TORCH_CHECK_INDEX(false, "Can only index tensors with integral scalars");
     }
-    return select(0, index.toLong());
+    return this->operator[](index.toLong());
   }
   Tensor operator[](Tensor index) const {
     // These properties are checked in the Scalar constructor, but we already
