@@ -5,6 +5,7 @@ def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
     NOTE: Current api will change in the future, it's just to unblock experimentation for
     new backends, please don't use it right now.
+    TODO: add a README when it's more stable
     """
     # dtype configs
     weighted_op_qint8_dtype_config = {
@@ -86,6 +87,19 @@ def get_tensorrt_backend_config_dict():
             weighted_op_qint8_dtype_config,
         ]
     }
+    addmm_config = {
+        "pattern": torch.addmm,
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        # a map from input type to input index
+        "input_type_to_index": {
+            "bias": 0,
+            "input": 1,
+            "weight": 2,
+        }
+    }
     cat_config = {
         "pattern": torch.cat,
         "observation_type": ObservationType.OUTPUT_SHARE_OBSERVER_WITH_INPUT,
@@ -112,6 +126,7 @@ def get_tensorrt_backend_config_dict():
             conv_relu_2d_fused_config,
             # conv3d is not supported in fx2trt
             # conv_relu_3d_fused_config,
+            addmm_config,
             cat_config,
             identity_config,
         ]

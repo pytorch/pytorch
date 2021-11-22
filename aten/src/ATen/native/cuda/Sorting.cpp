@@ -84,7 +84,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
   zero_numel_check_dims(self, dim, "median()");
   if (self.dim() > 0) {
     assert(dim >= 0);
-    assert(dim < out_shape.size());
+    assert(dim < static_cast<int64_t>(out_shape.size()));
 
     if (keepdim) {
       out_shape[dim] = 1;
@@ -131,8 +131,8 @@ Tensor median_impl(const Tensor& self, bool ignore_nan) {
     return at::where(sorted[-1].isnan(), sorted[-1], sorted[k]);
   } else {
     // For torch.nanmedian return the middle element among the non-nan values
-    Tensor k = ((size - 1) - sorted.isnan().sum()) / 2;
-    return sorted[k.toType(kLong)];
+    int64_t k = ((size - 1) - sorted.isnan().sum().item<int64_t>()) / 2;
+    return sorted[k].clone();  // Clone so we aren't keeping `sorted` alive
   }
 }
 
