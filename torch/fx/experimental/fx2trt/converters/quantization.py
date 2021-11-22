@@ -2,7 +2,7 @@ import torch
 import tensorrt as trt
 from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
 
-from .helper_functions import get_dyn_range, get_inputs_from_args_and_kwargs
+from .converter_utils import get_dyn_range, get_inputs_from_args_and_kwargs
 
 
 quantize_per_tensor_inputs = ["input", "scale", "zero_point", "dtype"]
