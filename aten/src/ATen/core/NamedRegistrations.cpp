@@ -11,6 +11,7 @@ TORCH_LIBRARY_IMPL(_, Named, m) {
 TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("_cdist_forward", CppFunction::makeFallthrough());
   m.impl("_fused_dropout", CppFunction::makeFallthrough());
+  m.impl("native_dropout", CppFunction::makeFallthrough());
   m.impl("_local_scalar_dense", CppFunction::makeFallthrough());
   m.impl("_sparse_log_softmax.Dimname", CppFunction::makeFallthrough());
   m.impl("_sparse_log_softmax.int", CppFunction::makeFallthrough());
