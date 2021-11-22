@@ -8,14 +8,6 @@
 
 #include <new>
 
-scalar_t* THStorage_(data)(const THStorage *self)
-{
-#if defined(THQUANTIZED)
-  return reinterpret_cast<scalar_t*>(self->data<quantized_t>());
-#else
-  return self->data<scalar_t>();
-#endif
-}
 
 THStorage* THStorage_(new)(void)
 {
@@ -74,7 +66,6 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
   return storage;
 }
 
-
 void THStorage_(retain)(THStorage *storage)
 {
   THStorage_retain(storage);
@@ -110,7 +101,7 @@ void THStorage_(fill)(THStorage *storage, scalar_t value)
   const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   const size_t numel = storage->nbytes() / type_meta.itemsize();
   for (const auto i : c10::irange(numel)) {
-    THStorage_(data)(storage)[i] = value;
+    storage->data<scalar_t>()[i] = value;
   }
 }
 
@@ -119,7 +110,7 @@ void THStorage_(set)(THStorage *self, ptrdiff_t idx, scalar_t value)
   const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
-  THStorage_(data)(self)[idx] = value;
+  self->data<scalar_t>()[idx] = value;
 }
 
 scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
@@ -127,7 +118,7 @@ scalar_t THStorage_(get)(const THStorage *self, ptrdiff_t idx)
   const auto type_meta = caffe2::TypeMeta::Make<scalar_t>();
   const auto numel = static_cast<int64_t>(self->nbytes() / type_meta.itemsize());
   THArgCheck((idx >= 0) && (idx < numel), 2, "out of bounds");
-  return THStorage_(data)(self)[idx];
+  return self->data<scalar_t>()[idx];
 }
 
 void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
