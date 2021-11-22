@@ -1213,10 +1213,10 @@ class CudaMemoryLeakCheck():
 
     def __enter__(self):
         self.befores = self.get_cuda_memory_usage()
-        
+
     def _compare_before_after(self, befores, afters):
         for i, (before, after) in enumerate(zip(befores, afters)):
-            if (after - before) != 0
+            if (after - before) != 0:
                 return self.name, after - before, i
 
         return None
