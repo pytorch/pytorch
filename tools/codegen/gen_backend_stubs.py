@@ -5,7 +5,7 @@ import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
-from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml, _GLOBAL_PARSE_NATIVE_YAML_CACHE
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
@@ -25,6 +25,7 @@ def parse_backend_yaml(
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         backend_indices: Dict[DispatchKey, BackendIndex]
 ) -> ParsedExternalYaml:
+    _GLOBAL_PARSE_NATIVE_YAML_CACHE.clear()
 
     native_functions_map: Dict[OperatorName, NativeFunction] = {
         f.func.name: f
@@ -50,7 +51,7 @@ def parse_backend_yaml(
 
     use_device_guard = yaml_values.pop('device_guard', False)
     assert isinstance(use_device_guard, bool), \
-        f'You must provide either True or False for use_device_guard. Provided: {use_device_guard}'
+        f'You must provide either True or False for device_guard. Provided: {use_device_guard}'
 
     supported = yaml_values.pop('supported', [])
     if supported is None:
