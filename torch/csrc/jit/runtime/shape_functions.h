@@ -475,4 +475,3 @@ def quantized_prepacked_conv2d(input: List[int], conv2dOpContext: Any):
 ####    SHAPE COMPUTE FUNCTIONS END   ###
 ### DO NOT REMOVE THIS STRING!!!
 ")====="
-

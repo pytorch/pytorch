@@ -254,13 +254,13 @@ void loadFunctions() {
   // these should be static casts but not possible until C++17
   // https://stackoverflow.com/a/43335753/9045206
   auto start = _shape_compute_functions.find(
-  "####    SHAPE COMPUTE FUNCTIONS START   ###");
+  	"####    SHAPE COMPUTE FUNCTIONS START   ###");
   auto end = _shape_compute_functions.find(
-  "####    SHAPE COMPUTE FUNCTIONS END   ###");
+  	"####    SHAPE COMPUTE FUNCTIONS END   ###");
   auto start_1 = _shape_compute_functions_1.find(
-  "####    SHAPE COMPUTE FUNCTIONS START   ###");
+  	"####    SHAPE COMPUTE FUNCTIONS START   ###");
   auto end_1 = _shape_compute_functions_1.find(
-  "####    SHAPE COMPUTE FUNCTIONS END   ###");
+  	"####    SHAPE COMPUTE FUNCTIONS END   ###");
   TORCH_INTERNAL_ASSERT(start != std::string::npos && end != std::string::npos);
   TORCH_INTERNAL_ASSERT(
       start_1 != std::string::npos && end_1 != std::string::npos);
