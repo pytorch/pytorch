@@ -52,7 +52,6 @@ class TestFSDPWrap(FSDPTest):
 
     def setUp(self) -> None:
         super().setUp()
-        torch.cuda.set_device(self.rank)
 
     class NestedSequentialModel:
         @staticmethod
@@ -111,15 +110,8 @@ class TestFSDPWrap(FSDPTest):
     # TODO: this generates 8 tests, is it worth testing all these config?
     @skip_if_lt_x_gpu(2)
     @parametrize("nested", [True, False])
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-    )
-    @parametrize(
-        "fsdp_init_mode",
-        [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE]
-    )
-    def test_error_auto_wrap(self, nested, cpu_offload, fsdp_init_mode):
+    @parametrize("fsdp_init_mode", [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE])
+    def test_error_auto_wrap(self, nested, fsdp_init_mode):
         """
         Test that an error is raised if we attempt to wrap when submodules are
         already FSDP.
@@ -129,7 +121,7 @@ class TestFSDPWrap(FSDPTest):
             wrapped_fsdp = wrapped_fsdp.cuda()
 
         with self.assertRaisesRegex(ValueError, "to NOT be FullyShardedDataParallel"):
-            mod = FSDP(wrapped_fsdp, cpu_offload=cpu_offload, fsdp_auto_wrap_policy=default_auto_wrap_policy)
+            mod = FSDP(wrapped_fsdp, fsdp_auto_wrap_policy=default_auto_wrap_policy)
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -360,8 +352,19 @@ class TestAutoWrap(TestCase):
         self.assertTrue(isinstance(model.module[1], nn.ModuleList))
 
     @unittest.skipIf(not torch.cuda.is_available(), "Test Requires CUDA")
-    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR])
-    def test_auto_wrap_smoke_test(self, wrap_method):
+    @parametrize("wrap_method", [WrapMethod.FSDP_CTOR, WrapMethod.WRAP_API])
+    @parametrize("fsdp_init_mode", [FSDPInitMode.CUDA_BEFORE, FSDPInitMode.CUDA_AFTER])
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)]
+    )
+    def test_auto_wrap_smoke_test(self, wrap_method, fsdp_init_mode, cpu_offload):
+        # CPU offload and CUDA after don't work together as expected.
+        if (
+            cpu_offload.offload_params and fsdp_init_mode == FSDPInitMode.CUDA_AFTER
+        ):
+            return
+
         device = torch.device("cuda")
         torch.cuda.set_device(0)
 
@@ -372,18 +375,20 @@ class TestAutoWrap(TestCase):
 
         # NOTE: We move model to CUDA after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.
+        cuda_after_init = fsdp_init_mode == FSDPInitMode.CUDA_AFTER
         try:
-            sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=False)
+            sequential = TestFSDPWrap.NestedSequentialModel.get_model(cuda=(not cuda_after_init))
             my_auto_wrap_policy = functools.partial(
                 default_auto_wrap_policy, min_num_params=40
             )
             if wrap_method == WrapMethod.WRAP_API:
-                with enable_wrap(wrapper_cls=FSDP):
+                with enable_wrap(wrapper_cls=FSDP, cpu_offload=cpu_offload):
                     model = auto_wrap(sequential, auto_wrap_policy=my_auto_wrap_policy)
             else:
-                model = FSDP(sequential, fsdp_auto_wrap_policy=my_auto_wrap_policy)
+                model = FSDP(sequential, cpu_offload=cpu_offload, fsdp_auto_wrap_policy=my_auto_wrap_policy)
             TestFSDPWrap.NestedSequentialModel.verify_model(self, model)
-            model = model.cuda()
+            if cuda_after_init:
+                model = model.cuda()
             input = torch.rand((1, 5), dtype=torch.float).to(device)
             output = model(input)
             loss = F.mse_loss(input, output)

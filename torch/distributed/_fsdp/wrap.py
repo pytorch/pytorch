@@ -233,7 +233,7 @@ class ConfigAutoWrap:
             )
         ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls into ConfigAutoWrap."
+        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
@@ -259,7 +259,7 @@ class ConfigAutoWrap:
         auto_wrap_policy: Optional[Callable],
         only_wrap_children: bool = False,
         **kwargs: Any
-        ) -> Tuple[nn.Module, int]:
+    ) -> Tuple[nn.Module, int]:
         """
         Automatically wrap child modules of *module* that meet the given
         criteria with :func:`auto_wrap`.

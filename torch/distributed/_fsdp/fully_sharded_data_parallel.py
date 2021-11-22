@@ -23,7 +23,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
-from .wrap import ConfigAutoWrap, auto_wrap
+from .wrap import ConfigAutoWrap
 
 from .utils import (
     _apply_to_tensors,
@@ -97,11 +97,11 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
-        auto_wrap_policy: (Optional [callable]):
+        fsdp_auto_wrap_policy: (Optional [callable]):
             A callable specifying a policy to recursively wrap layers with FSDP.
             Note that this policy currently will only apply to child modules of
-            the passed in module. The overall module is always FSDP because we
-            call the constructor.
+            the passed in module. The remainder modules are always wrapped in
+            the returned FSDP root instance.
     """
 
     def __init__(
@@ -117,7 +117,6 @@ class FullyShardedDataParallel(nn.Module):
         # already wrapped, otherwise we'd attempt to double wrap them resulting
         # in errors.
         if fsdp_auto_wrap_policy is not None:
-            num_params = sum([p.numel() for p in module.parameters()])
             self._check_wrapped(
                 module,
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
@@ -445,7 +444,12 @@ class FullyShardedDataParallel(nn.Module):
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), "Expected param to be on CPU when cpu_offloading is enabled."
+            assert p.device == torch.device(
+                "cpu"
+            ), ("Expected param to be on CPU when cpu_offloading is enabled. "
+                "If CPU offloading is enabled correctly, you may be "
+                "accidentally moving the model to CUDA after FSDP initialization."
+                )
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
