@@ -83,6 +83,7 @@ SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 slow_tests_dict: Optional[Dict[str, Any]] = None
 disabled_tests_dict: Optional[Dict[str, Any]] = None
 
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 class _TestParametrizer(object):
     """
@@ -2100,6 +2101,11 @@ class TestCase(expecttest.TestCase):
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
+        # As the non Native devices are not expected to throw the same error message as Native,
+        # we set expected_regex to empty string which matches with any message thrown.
+        if self.device_type not in NATIVE_DEVICES:
+            expected_regex = ''
+
         if self._ignore_not_implemented_error:
             context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
                 expected_exception, self, expected_regex)
