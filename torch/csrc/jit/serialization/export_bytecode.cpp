@@ -307,7 +307,7 @@ mobile::Module jitModuleToMobile(
 
   for (const auto& func :
        inlineFunctions(methods_to_export, options.incl_interface_call)) {
-  auto mobile_code = compileGraphToMobileCode(
+    auto mobile_code = compileGraphToMobileCode(
         func->name(), func->graph(), options, debug_info_recorder);
     const auto& schema = func->getSchema();
     checkSchema(schema);
