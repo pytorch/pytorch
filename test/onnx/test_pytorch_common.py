@@ -75,17 +75,11 @@ def skipForAllOpsetVersions():
         return wrapper
     return skip_dec
 
-# Disable tests for scripting.
-def skipScriptTest(unsupported_opset_versions=None):
+# skips tests for scripting.
+def skipScriptTest(min_opset_version=float("inf")):
     def script_dec(func):
         def wrapper(self):
-            if unsupported_opset_versions is None:
-                self.is_script_test_enabled = False
-            else:
-                if self.opset_version in unsupported_opset_versions:
-                    self.is_script_test_enabled = False
-                else:
-                    self.is_script_test_enabled = True
+            self.is_script_test_enabled = self.opset_version >= min_opset_version
             return func(self)
         return wrapper
     return script_dec

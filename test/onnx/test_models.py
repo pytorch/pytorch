@@ -140,7 +140,7 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])  # None type in outputs
+    @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x))
@@ -224,7 +224,7 @@ class TestModels(TestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])  # None type in outputs
+    @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
