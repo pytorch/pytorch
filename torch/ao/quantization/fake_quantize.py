@@ -6,6 +6,7 @@ during QAT.
 import torch
 from torch.nn import Module
 from torch.ao.quantization.observer import (
+    MinMaxObserver,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
@@ -346,6 +347,12 @@ default_weight_fake_quant = FakeQuantize.with_args(observer=MovingAverageMinMaxO
 Default fake_quant for weights.
 """
 
+default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, quant_min=0, quant_max=255,
+                                                    dtype=torch.quint8, memoryless=True)
+"""
+Default dynamic fake_quant for activations.
+"""
+
 # TODO(future PR): remove these defaults and enforce activation functions
 # to explicitly specify their output range
 default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
@@ -366,11 +373,20 @@ Default fake_quant for per-channel weights.
 
 default_embedding_fake_quant = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
                                                       qscheme=torch.per_channel_affine_float_qparams,
+                                                      dtype=torch.quint8,
+                                                      quant_min=0,
+                                                      quant_max=255,
                                                       ch_axis=0,
                                                       memoryless=True)
 """
 Default fake_quant for embeddings.
 """
+
+default_embedding_fake_quant_4bit = FakeQuantize.with_args(observer=PerChannelMinMaxObserver,
+                                                           qscheme=torch.per_channel_affine_float_qparams,
+                                                           ch_axis=0,
+                                                           dtype=torch.quint4x2,
+                                                           memoryless=True)
 
 default_histogram_fake_quant = FakeQuantize.with_args(observer=HistogramObserver,
                                                       quant_min=0,

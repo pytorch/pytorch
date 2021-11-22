@@ -1,3 +1,5 @@
+# Owner(s): ["module: sparse"]
+
 import torch
 import itertools
 import functools
@@ -1228,7 +1230,7 @@ class TestSparse(TestCase):
         # Create coalesced sparse tensor with non-contiguous indices
         weight = torch.randn(hidden_size, input_size, dtype=dtype, device=device).to_sparse()
         self.assertTrue(weight.is_coalesced())
-        non_contig_indices = weight.indices().transpose(-1, -2).contiguous().transpose(-1, -2)
+        non_contig_indices = weight.indices().mT.contiguous().mT
         weight = torch.sparse_coo_tensor(
             indices=non_contig_indices, values=weight.values(), size=weight.shape)
         weight._coalesced_(True)
@@ -1831,11 +1833,14 @@ class TestSparse(TestCase):
             result = torch.zeros_like(x, layout=torch.strided, memory_format=mem_format)
             self.assertTrue(result.layout == torch.strided)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Could not run 'aten::empty_strided' with arguments from the 'Sparse(CPU|CUDA)' backend"
-        ):
-            dense_tensor = sparse_tensor.to_dense()
-            result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
+        dense_tensor = sparse_tensor.to_dense()
+        result = torch.zeros_like(dense_tensor, layout=torch.sparse_coo)
+        self.assertEqual(dense_tensor.shape, result.shape)
+        self.assertEqual(result.layout, torch.sparse_coo)
+
+        sparse_zeros = torch.zeros(dense_tensor.shape, layout=torch.sparse_coo)
+        self.assertEqual(result._indices().shape, sparse_zeros._indices().shape)
+        self.assertEqual(result._values().shape, sparse_zeros._values().shape)
 
     def _assert_sparse_invars(self, t):
         # SparseTensor has the following invariants:
