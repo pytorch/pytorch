@@ -48,7 +48,7 @@ def build_constraint(constraint_fn, args, is_cuda=False):
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
     return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
 
-@pytest.mark.parametrize('constraint_fn, result, value', [(e[0], e[1], e[2]) for e in EXAMPLES])
+@pytest.mark.parametrize('constraint_fn, result, value', EXAMPLES)
 @pytest.mark.parametrize('is_cuda', [False,
                                      pytest.param(True, marks=pytest.mark.skipif(not TEST_CUDA,
                                                                                  reason='CUDA not found.'))])
