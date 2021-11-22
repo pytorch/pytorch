@@ -464,6 +464,10 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
 run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
 
 
+def get_run_test_with_subprocess_fn():
+    return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
+
+
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
@@ -613,10 +617,8 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
-    "distributed/test_c10d_nccl": lambda test_module, test_directory, options:
-        run_test_with_subprocess(
-            test_module, test_directory, options
-        ),
+    "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
 }
 
 
