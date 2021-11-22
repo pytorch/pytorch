@@ -85,7 +85,6 @@ def assert_allclose(
         check_device=True,
         check_dtype=False,
         check_stride=False,
-        check_is_coalesced=False,
         msg=msg or None,
     )
 
