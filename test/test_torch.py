@@ -8202,7 +8202,7 @@ else:
 
     def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
         # Verify that self.assertRaisesRegex only checks the Error and ignores
-        # message for non naitve devices.
+        # message for non-native devices.
         x = torch.randn((10, 3), device=device)
         t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
         invalid_weight = torch.randn(4, device=device)
