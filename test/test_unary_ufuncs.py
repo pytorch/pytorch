@@ -80,6 +80,10 @@ def replace_values_in_tensor(tensor, condition, safe_value):
 # Returns generator of tensors of different sizes filled with values in domain
 # and with intested region filled with `vals`. This will help test different code
 # paths for the given vals
+# `filter_` can be either None or a tuple of (condition, safe_value). When not None
+# values satisfying `condition`` will be replaced with `safe_value` in the generated
+# tensor. This is useful to avoid singularities when generating inputs for tests, such
+# as tan(pi/2)
 def generate_tensors_from_vals(vals, device, dtype, domain, filter_):
     offset = 63
 
