@@ -253,7 +253,7 @@ def _convert_do_not_use(
                 # TODO: may need to change the mapping when we support dynamic quantization
                 ref_qmodule_cls = quantized_reference_module_mapping.get(type(float_module), None)
                 assert ref_qmodule_cls is not None, f"No reference quantized module class configured for {type(float_module)}"
-                ref_qmodule = ref_qmodule_cls.from_float(float_module, weight_qparams)
+                ref_qmodule = ref_qmodule_cls.from_float(float_module, weight_qparams)  # type: ignore[attr-defined]
                 if fused_module is not None:
                     fused_module[0] = ref_qmodule
                 else:
