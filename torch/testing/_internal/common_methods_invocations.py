@@ -1002,6 +1002,33 @@ def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
     return inputs
 
 
+def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked var.
+    """
+    inputs: List[SampleInput] = []
+    for unbiased in [False, True]:
+        for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+            if sample_input.args:
+                dim = sample_input.args[0]
+                sample_input_args = sample_input.args[:1] + (unbiased,) + sample_input.args[1:]
+                sample_input_kwargs = sample_input.kwargs.copy()
+            else:
+                dim = sample_input.kwargs.get('dim')
+                sample_input_args = sample_input.args
+                sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
+            if requires_grad:
+                inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
+                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
+                if orig_count.min() <= int(unbiased):
+                    # Skipping samples that lead to singularities in
+                    # var computation resulting nan values both in var
+                    # and autograd output.
+                    continue
+            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
+
+
 # NOTE [Reductions]:
 #
 # For testing purposes, we relax the definition of a reduction operator
@@ -7693,6 +7720,11 @@ def reference_reduction_numpy(f, supports_keepdims=True):
                     identity = identity.cpu()
                 kwargs['initial'] = identity.numpy()
 
+        if 'unbiased' in keys:
+            unbiased = kwargs.pop('unbiased')
+            if unbiased is not None:
+                kwargs['ddof'] = int(unbiased)
+
         result = f(x, *args, **kwargs)
 
         # Unsqueeze reduced dimensions if NumPy does not support keepdims
@@ -13166,6 +13198,32 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
         ),
         sample_inputs_func=sample_inputs_masked_norm,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.var',
+        ref=reference_reduction_numpy(np.var) if np.lib.NumpyVersion(np.__version__) >= '1.20.2' else None,
+        method_variant=None,
+        nan_policy='propagate',
+        supports_out=False,
+        promotes_int_to_float=True,
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # RuntimeError: undefined value tensor
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        decorators=[
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestReductions', 'test_reference_masked'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestReductions', 'test_ref_small_input'),
+            DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
+                         'TestMasked', 'test_reference_masked'),
+        ],
+        sample_inputs_func=sample_inputs_masked_var,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(

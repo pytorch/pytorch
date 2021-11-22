@@ -141,6 +141,7 @@ Example::
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -159,6 +160,9 @@ ord (int, float, optional): the order of vector norm. Default: 2.
         ord__required='''\
 ord (int, float): the order of vector norm. Default: 2.
   See :func:`torch.linalg.vector_norm` for a list of supported norms.''',
+        unbiased='''\
+unbiased (bool): when True, use Bessel’s correction, otherwise, compute
+  the uncorrected sample variance.''',
         eps='''\
 eps (float, optional): small value to avoid division by zero. Default: {default}.''',
         keepdim='''\
@@ -199,7 +203,8 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         amax='maximum',
         amin='minimum',
         mean='mean',
-        norm='norm')
+        norm='norm',
+        var='variance')
 
     normalization_names = dict(
         softmax='softmax',
@@ -219,6 +224,8 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
     if func.__name__ in {'norm', 'normalize'}:
         example_args = (2.0, example_dim)
         example_input = example_input.to(dtype=torch.float32)
+    elif func.__name__ in {'var'}:
+        example_args = (example_dim, False)
     else:
         example_args = (example_dim,)
 
@@ -340,6 +347,8 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             assert torch.is_floating_point(input), input.dtype
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
+    elif op_name == 'var':
+        return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
 
 
@@ -383,7 +392,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm', 'var'}
         is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
@@ -573,6 +582,53 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
         return torch.linalg.vector_norm(mask_input, ord, dim_, bool(keepdim), dtype=dtype)
     else:
         raise ValueError(f'masked norm expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def var(input: Tensor,
+        dim: DimOrDims = None,
+        unbiased: Optional[bool] = False,
+        *,
+        keepdim: Optional[bool] = False,
+        dtype: Optional[DType] = None,
+        mask: Optional[Tensor] = None) -> Tensor:
+    """\
+{reduction_signature}
+
+{reduction_descr}
+
+The identity value of sample variance operation is undefined.  The
+elements of output tensor with strided layout, that correspond to
+fully masked-out elements, have ``nan`` values.
+
+{reduction_args}
+
+{reduction_example}"""
+    if dtype is None:
+        dtype = input.dtype
+        if not (dtype.is_floating_point or dtype.is_complex):
+            dtype = torch.float32
+    compute_dtype = dtype
+    if not (compute_dtype.is_floating_point or compute_dtype.is_complex):
+        compute_dtype = torch.float32
+    if input.layout == torch.strided:
+        inmask = _input_mask(input, mask=mask)
+        count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
+        sample_total = sum(input, dim, keepdim=True, dtype=dtype, mask=inmask)
+        # TODO: replace torch.subtract/divide/square/maximum with
+        # masked subtract/divide/square/maximum when these will be
+        # available.
+        sample_mean = torch.divide(sample_total, count)
+        x = torch.subtract(input, sample_mean)
+        total = sum(x * x.conj(), dim, keepdim=keepdim, dtype=compute_dtype, mask=inmask)
+        if not keepdim:
+            count = count.reshape(total.shape)
+        if unbiased:
+            count = torch.subtract(count, 1)
+            count = torch.maximum(count, count.new_zeros([]))
+        return torch.divide(total, count).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked var expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
