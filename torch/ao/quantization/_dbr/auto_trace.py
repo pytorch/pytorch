@@ -93,8 +93,7 @@ def add_auto_observation(
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if hook_type is HookType.OP_HOOKS:
-                assert parent_module is not None
-                qstate = parent_module._auto_quant_state
+                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
                 if not first_call:
                     qstate.validate_cur_op(func)
@@ -184,9 +183,8 @@ def add_auto_observation(
                     hook_type = get_module_hook_type(parent_module, cur_module)
 
                     if hook_type is HookType.OP_HOOKS:
-                        assert parent_module is not None
-                        parent_qstate = parent_module._auto_quant_state
-                        assert isinstance(parent_qstate, AutoQuantizationState)
+                        parent_qstate: AutoQuantizationState = \
+                            parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
                         # before hooks
                         if not first_call:
                             parent_qstate.validate_cur_op(cur_module)
@@ -214,7 +212,6 @@ def add_auto_observation(
                         output = orig_module_call(self, *args, **kwargs)
 
                         # after hooks
-                        assert isinstance(cur_qstate, AutoQuantizationState)
                         output = cur_qstate.outputs_prepare_hook(
                             output, first_call, qtensor_id)
                         cur_qstate.validate_is_at_last_seen_idx()
@@ -337,12 +334,11 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]}")
 
             if hook_type is HookType.OP_HOOKS:
-                assert parent_module is not None
-                qstate = parent_module._auto_quant_state
+                qstate: AutoQuantizationState = parent_module._auto_quant_state  # type: ignore[union-attr]
                 # before hooks
                 qstate.validate_cur_op(func)
                 func, args, kwargs = qstate.op_convert_before_hook(
-                    func, args, kwargs, parent_module)
+                    func, args, kwargs, parent_module)  # type: ignore[arg-type]
 
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
@@ -450,9 +446,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     if hook_type is HookType.OP_HOOKS:
                         # before hooks
-                        assert parent_module is not None
-                        assert isinstance(parent_module._auto_quant_state, AutoQuantizationState)
-                        qstate = parent_module._auto_quant_state
+                        qstate: AutoQuantizationState = \
+                            parent_module._auto_quant_state  # type: ignore[union-attr, assignment]
                         if enable_logging:
                             logger.debug(qstate)
                         qstate.validate_cur_op(cur_module)
@@ -466,7 +461,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
-                        cur_qstate = cur_module._auto_quant_state
+                        cur_qstate: AutoQuantizationState = cur_module._auto_quant_state
                         if enable_logging:
                             logger.debug(cur_qstate)
 
@@ -476,7 +471,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
-                        assert isinstance(cur_qstate, AutoQuantizationState)
                         output = cur_qstate.outputs_convert_hook(output)
                         cur_qstate.validate_is_at_last_seen_idx()
 
