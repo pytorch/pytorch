@@ -105,7 +105,7 @@ jobs:
       - name: Ensure all test files have header containing ownership information
         if: always()
         run: |
-          python3 -m pip install boto3==1.16.34
+          python3 -m pip install boto3==1.19.12
           .github/scripts/lint_test_ownership.py
 
   clang-format:

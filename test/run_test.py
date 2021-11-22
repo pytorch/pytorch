@@ -103,6 +103,7 @@ TESTS = discover_tests(
         'test_metal',
         'test_nnapi',
         'test_python_dispatch',
+        'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
         'test_throughput_benchmark',
@@ -307,7 +308,6 @@ DISTRIBUTED_TESTS = [
     "distributed/test_c10d_common",
     "distributed/test_c10d_gloo",
     "distributed/test_c10d_nccl",
-    "distributed/test_jit_c10d",
     "distributed/test_c10d_spawn_gloo",
     "distributed/test_c10d_spawn_nccl",
     "distributed/test_store",
@@ -596,7 +596,7 @@ def test_distributed(test_module, test_directory, options):
                         test_module, test_directory, options, launcher_cmd=mpiexec
                     )
                 else:
-                    return_code = run_test(test_module, test_directory, options)
+                    return_code = run_test(test_module, test_directory, options, extra_unittest_args=["--subprocess"])
                 if return_code != 0:
                     return return_code
             finally:

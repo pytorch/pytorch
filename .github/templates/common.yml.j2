@@ -48,16 +48,16 @@ concurrency:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.16.34
+          python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
@@ -119,7 +119,7 @@ concurrency:
 {%- endmacro -%}
 
 
-{%- macro upload_test_reports(name) -%}
+{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
@@ -139,10 +139,18 @@ concurrency:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 {%- endif %}
+{%- if use_s3 %}
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
+{%- else %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on Github
+{%- endif %}
         if: always()
         with:
+{%- if artifact_name != "" %}
+          name: !{{ artifact_name }}
+{%- endif %}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -231,4 +239,20 @@ concurrency:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           ./build_docker.sh
+{%- endmacro -%}
+
+{%- macro setup_miniconda(python_version) -%}
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: !{{ python_version }}
+          activate-environment: build
+{%- endmacro -%}
+
+{%- macro set_xcode_version(xcode_version) -%}
+{%- if xcode_version != '' %}
+  # Set xcode xcode version to !{{ xcode_version }}
+  DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
+{%- endif %}
 {%- endmacro -%}
