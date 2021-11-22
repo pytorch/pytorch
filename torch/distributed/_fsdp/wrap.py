@@ -195,7 +195,11 @@ def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool
 
 
 def recursive_wrap(
-    module: nn.Module, auto_wrap_policy: Callable, wrapper_cls: Callable, only_wrap_children: bool = False, **kwargs: Any
+    module: nn.Module,
+    auto_wrap_policy: Callable,
+    wrapper_cls: Callable,
+    only_wrap_children: bool = False,
+    **kwargs: Any
 ) -> Tuple[nn.Module, int]:
     """
     Automatically wrap child modules of *module* that meet the given
@@ -326,7 +330,6 @@ class ConfigAutoWrap:
     def recursive_wrap(
         module: nn.Module,
         auto_wrap_policy: Optional[Callable],
-        only_wrap_children: bool = False,
         **kwargs: Any
     ) -> Tuple[nn.Module, int]:
         """
@@ -338,11 +341,6 @@ class ConfigAutoWrap:
                 module to recursively wrap
             auto_wrap_policy (Callable, Optional):
                 optionally, override the :func:`auto_wrap_policy` from the context.
-            only_wrap_children (bool, Optional):
-                If ``True``, will not wrap the passed in (i.e. outer-most)
-                module passed into ``recursive_wrap``. This is useful if the
-                function is being called from FSDP constructor which takes care
-                of wrapping the outer-most user module.
 
         Returns:
             (nn.Module, int):
@@ -355,6 +353,5 @@ class ConfigAutoWrap:
             module=module,
             auto_wrap_policy=auto_wrap_policy,
             wrapper_cls=ConfigAutoWrap.wrapper_cls,
-            only_wrap_children=only_wrap_children,
             **{**ConfigAutoWrap.kwargs, **kwargs}
         )
