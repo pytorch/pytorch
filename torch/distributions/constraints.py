@@ -463,7 +463,7 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        return (torch.linalg.eig(value)[0].float() > 0).all()
+        return (torch.linalg.eig(value)[0].real > 0).all(dim=-1)
 
 
 class _Cat(Constraint):
