@@ -6,9 +6,9 @@
 #include <cmath>
 #include <sstream>
 
+#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensors/computation_client/util.h"
 #include "lazy_tensors/core/platform/macros.h"
-#include "lazy_tensors/str_split.h"
 
 namespace lazy_tensors {
 namespace metrics {
@@ -18,7 +18,7 @@ const std::vector<double>* ReadEnvPercentiles() {
   std::string percentiles = sys_util::GetEnvString(
       "LTC_METRICS_PERCENTILES", "0.01:0.05:0.1:0.2:0.5:0.8:0.9:0.95:0.99");
   std::vector<std::string> percentiles_list =
-      lazy_tensors::StrSplit(percentiles, ':');
+      torch_lazy_tensors::StrSplit(percentiles, ':');
   std::unique_ptr<std::vector<double>> metrics_percentiles =
       std::make_unique<std::vector<double>>();
   for (auto& pct_str : percentiles_list) {

@@ -30,8 +30,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
                  c10::optional<int64_t> dim) {
   int64_t canonical_dim;
   if (dim) {
-    canonical_dim =
-        Helpers::GetCanonicalDimensionIndex(*dim, input.shape().get().dim());
+    canonical_dim = GetCanonicalDimensionIndex(*dim, input.shape().get().dim());
   } else {
     auto input_shape_ref = input.shape();
     auto dim_3_it = std::find((*input_shape_ref).sizes().begin(),
@@ -70,9 +69,9 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
 
 LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
-  dim = Helpers::GetCanonicalDimensionIndex(dim, shape.get().dim());
+  dim = GetCanonicalDimensionIndex(dim, shape.get().dim());
   LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
-  auto new_dims = Helpers::DropDimensions(shape.get().sizes(), {dim});
+  auto new_dims = DropDimensions(shape.get().sizes(), {dim});
   return lazy_tensor_aten_ops::view(result, new_dims);
 }
 

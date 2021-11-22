@@ -124,7 +124,7 @@ CanonicalIndexInfo TransposeToFront(at::Tensor base, at::TensorList indices) {
             adjacency_info.start_dim};
   }
   return {base.permute(dims), std::move(transposed_indices),
-          torch::lazy::InversePermutation(Helpers::I64List(dims)), 0};
+          torch::lazy::InversePermutation(ToI64Vector(dims)), 0};
 }
 
 torch::lazy::NodePtr IndexFillOp(const torch::lazy::Value& buffer, int64_t dim,

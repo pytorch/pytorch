@@ -10,8 +10,8 @@
 
 namespace torch_lazy_tensors {
 
-std::vector<int64_t> Helpers::DropDimensions(c10::ArrayRef<int64_t> sizes,
-                                             c10::ArrayRef<int64_t> drop_dims) {
+std::vector<int64_t> DropDimensions(c10::ArrayRef<int64_t> sizes,
+                                    c10::ArrayRef<int64_t> drop_dims) {
   std::vector<int64_t> new_dims;
   size_t drop_index = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {
@@ -25,7 +25,7 @@ std::vector<int64_t> Helpers::DropDimensions(c10::ArrayRef<int64_t> sizes,
   return new_dims;
 }
 
-int64_t Helpers::GetCanonicalDimensionIndex(int64_t dim, int64_t rank) {
+int64_t GetCanonicalDimensionIndex(int64_t dim, int64_t rank) {
   int64_t min_shape_dim = -rank;
   int64_t max_shape_dim = rank - 1;
   CHECK(min_shape_dim <= dim && dim <= max_shape_dim)
@@ -37,7 +37,7 @@ int64_t Helpers::GetCanonicalDimensionIndex(int64_t dim, int64_t rank) {
   return dim_index;
 }
 
-std::vector<int64_t> Helpers::GetCanonicalDimensionIndices(
+std::vector<int64_t> GetCanonicalDimensionIndices(
     c10::ArrayRef<int64_t> dimensions, int64_t rank) {
   std::vector<int64_t> canonical_dim_indices;
   for (int64_t dim : dimensions) {
@@ -46,8 +46,8 @@ std::vector<int64_t> Helpers::GetCanonicalDimensionIndices(
   return canonical_dim_indices;
 }
 
-int64_t Helpers::GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
-                                      int64_t dim, int64_t pos) {
+int64_t GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions, int64_t dim,
+                             int64_t pos) {
   dim = GetCanonicalDimensionIndex(dim, dimensions.size());
   if (pos < 0) {
     pos = GetCanonicalDimensionIndex(pos, dimensions[dim]);
@@ -57,9 +57,8 @@ int64_t Helpers::GetCanonicalPosition(c10::ArrayRef<int64_t> dimensions,
   return pos;
 }
 
-std::vector<int64_t> Helpers::MakeTransposePermutation(int64_t dim0,
-                                                       int64_t dim1,
-                                                       int64_t rank) {
+std::vector<int64_t> MakeTransposePermutation(int64_t dim0, int64_t dim1,
+                                              int64_t rank) {
   int64_t canonical_dim0 = GetCanonicalDimensionIndex(dim0, rank);
   int64_t canonical_dim1 = GetCanonicalDimensionIndex(dim1, rank);
   auto permute_dims = lazy_tensors::util::Iota<int64_t>(rank);
@@ -67,8 +66,8 @@ std::vector<int64_t> Helpers::MakeTransposePermutation(int64_t dim0,
   return permute_dims;
 }
 
-std::vector<int64_t> Helpers::GetPromotedShape(
-    c10::ArrayRef<int64_t> shape1_dims, c10::ArrayRef<int64_t> shape2_dims) {
+std::vector<int64_t> GetPromotedShape(c10::ArrayRef<int64_t> shape1_dims,
+                                      c10::ArrayRef<int64_t> shape2_dims) {
   std::vector<int64_t> dimensions;
   // If the rank of a shape is bigger than then other, fill up the first
   // dimensions with the ones of the bigger.
@@ -102,11 +101,24 @@ std::vector<int64_t> Helpers::GetPromotedShape(
   return dimensions;
 }
 
-torch::lazy::Shape Helpers::GetPromotedBinaryOpShape(
-    const torch::lazy::Shape& shape1, const torch::lazy::Shape& shape2) {
+torch::lazy::Shape GetPromotedBinaryOpShape(const torch::lazy::Shape& shape1,
+                                            const torch::lazy::Shape& shape2) {
   return torch::lazy::Shape(
       promoteTypes(shape1.scalar_type(), shape2.scalar_type()),
       GetPromotedShape(shape1.sizes(), shape2.sizes()));
+}
+
+std::vector<std::string> StrSplit(c10::string_view text, char delim) {
+  size_t start;
+  size_t end = 0;
+
+  std::vector<std::string> tokens;
+  while ((start = text.find_first_not_of(delim, end)) != std::string::npos) {
+    end = text.find(delim, start);
+    auto token = text.substr(start, end - start);
+    tokens.emplace_back(token.begin(), token.end());
+  }
+  return tokens;
 }
 
 }  // namespace torch_lazy_tensors

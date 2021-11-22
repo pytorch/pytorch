@@ -9,11 +9,11 @@
 #include <sstream>
 #include <unordered_set>
 
+#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/unique.h"
-#include "lazy_tensors/str_split.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -37,7 +37,7 @@ std::unordered_set<std::string>* LoadExperiments() {
   std::string experiments =
       lazy_tensors::sys_util::GetEnvString("LTC_EXPERIMENTAL", "");
   std::vector<std::string> experiment_list =
-      lazy_tensors::StrSplit(experiments, ':');
+      StrSplit(experiments, ':');
   for (auto& name : experiment_list) {
     xset->insert(name);
   }
