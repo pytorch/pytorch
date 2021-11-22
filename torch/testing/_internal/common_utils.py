@@ -1213,6 +1213,13 @@ class CudaMemoryLeakCheck():
 
     def __enter__(self):
         self.befores = self.get_cuda_memory_usage()
+        
+    def _compare_before_after(self, befores, afters):
+        for i, (before, after) in enumerate(zip(befores, afters)):
+            if (after - before) != 0
+                return self.name, after - before, i
+
+        return None
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
@@ -1220,18 +1227,23 @@ class CudaMemoryLeakCheck():
             return
 
         afters = self.get_cuda_memory_usage()
+        result = self._compare_before_after(self.before, afters)
 
-        for i, (before, after) in enumerate(zip(self.befores, afters)):
-            if not TEST_WITH_ROCM:
-                self.testcase.assertEqual(
-                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                        self.name, after - before, i))
-            else:
-                # See #62533
-                # ROCM: Sometimes the transient memory is reported as leaked memory
-                if before != after:
-                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
-                        self.name, after - before, i), RuntimeWarning)
+        # Implements retry logic
+        if result is not None:
+            name, diff, i = result
+
+            warnings.warn('{} leaked {} bytes CUDA memory before retry on device {}'.format(
+                          name, diff, i), RuntimeWarning)
+
+            torch.cuda.synchronize()
+            afters = self.get_cuda_memory_usage()
+            result = self._compare_before_after(self.before, afters)
+            if result is not None:
+                name, diff, i = result
+                self.fail('{} leaked {} bytes CUDA memory after retry on device {}'.format(
+                          name, diff, i))
+
 
 @contextmanager
 def skip_exception_type(exc_type):
