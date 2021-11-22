@@ -22,6 +22,7 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include "caffe2/serialize/versions.h"
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
@@ -207,7 +208,7 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
-  void init_upgrader(mobile::Function* function) ;
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -305,14 +306,22 @@ void BytecodeDeserializer::parseFunctionSchema(
 }
 
 void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
-  for (auto& mobile_code_data : kUpgraderByteCode) {
-    function->append_function(mobile::Function::registerFunc(
-        mobile_code_data.qualified_name,
-        mobile_code_data.instructions,
-        mobile_code_data.operators,
-        mobile_code_data.constants,
-        mobile_code_data.types,
-        mobile_code_data.register_size));
+  for (auto& byteCodeFunctionWithOperator : kUpgraderByteCode) {
+    // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
+    // function is initialized with everything (instruction, constants, types,
+    // registerer size and etc), except operator. The operator function is also
+    // static initialized and is available later. The oprator for the upgrader
+    // function will be initialized when the first module is loaded.
+    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    function->append_function(byteCodeFunctionWithOperator.function);
   }
 }
 
