@@ -1,4 +1,4 @@
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 
 #include <algorithm>
 

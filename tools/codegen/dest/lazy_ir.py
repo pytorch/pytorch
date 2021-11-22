@@ -159,7 +159,8 @@ class GenLazyNativeFuncDefinition:
         scalar_types = schema.filtered_types(values=False, scalars=True)
         returns_length = len(schema.returns)
 
-        get_device_str = f"""auto device = bridge::GetSameBackendDeviceOrUseDefault({", ".join([f"{t.name}" for t in value_types])});"""
+        get_device_str = f"""auto device = bridge::GetSameBackendDeviceOrUseDefault(
+            {", ".join([f"{t.name}" for t in value_types])});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
@@ -244,8 +245,8 @@ class GenLazyShapeInferenceDefinition:
     tensor_class: str
 
     @method_with_native_function
-    def __call__(self, f: NativeFunction) -> List[str]:
     # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
+    def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
 
         # Lazy IR stuff

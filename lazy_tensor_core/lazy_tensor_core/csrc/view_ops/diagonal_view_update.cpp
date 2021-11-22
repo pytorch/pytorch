@@ -1,7 +1,6 @@
-#include "lazy_tensor_core/csrc/ops/diagonal_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal_view_update.h"
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

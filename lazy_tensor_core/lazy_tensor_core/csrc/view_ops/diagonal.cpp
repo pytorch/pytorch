@@ -1,8 +1,7 @@
-#include "lazy_tensor_core/csrc/ops/diagonal.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal.h"
 
 #include <cmath>
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -28,9 +27,9 @@ std::string Diagonal::ToString() const {
   return ss.str();
 }
 
-torch::lazy::Shape Diagonal::MakeDiagonalShape(
-    const torch::lazy::Shape& shape, int64_t offset, int64_t dim1,
-    int64_t dim2) {
+torch::lazy::Shape Diagonal::MakeDiagonalShape(const torch::lazy::Shape& shape,
+                                               int64_t offset, int64_t dim1,
+                                               int64_t dim2) {
   std::vector<int64_t> dimensions;
   for (int64_t dim = 0; dim < shape.dim(); ++dim) {
     if (dim != dim1 && dim != dim2) {

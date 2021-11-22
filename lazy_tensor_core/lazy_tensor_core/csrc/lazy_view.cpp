@@ -7,18 +7,18 @@
 #include <numeric>
 
 #include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ops/as_strided.h"
-#include "lazy_tensor_core/csrc/ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/ops/diagonal.h"
-#include "lazy_tensor_core/csrc/ops/diagonal_view_update.h"
-#include "lazy_tensor_core/csrc/ops/generic_slice.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
-#include "lazy_tensor_core/csrc/ops/permute.h"
-#include "lazy_tensor_core/csrc/ops/resize.h"
-#include "lazy_tensor_core/csrc/ops/select.h"
-#include "lazy_tensor_core/csrc/ops/unselect.h"
-#include "lazy_tensor_core/csrc/ops/update_slice.h"
-#include "lazy_tensor_core/csrc/ops/view.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
+#include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal.h"
+#include "lazy_tensor_core/csrc/view_ops/diagonal_view_update.h"
+#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/permute.h"
+#include "lazy_tensor_core/csrc/view_ops/resize.h"
+#include "lazy_tensor_core/csrc/view_ops/select.h"
+#include "lazy_tensor_core/csrc/view_ops/unselect.h"
+#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch_lazy_tensors {
 namespace {

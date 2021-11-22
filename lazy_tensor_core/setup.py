@@ -215,6 +215,7 @@ client_files = [
 # Fetch the sources to be built.
 torch_ltc_sources = (
     glob.glob('lazy_tensor_core/csrc/*.cpp') + glob.glob('lazy_tensor_core/csrc/ops/*.cpp') +
+    glob.glob('lazy_tensor_core/csrc/view_ops/*.cpp') +
     glob.glob('lazy_tensor_core/csrc/compiler/*.cpp') + glob.glob('lazy_tensor_core/csrc/ts_backend/*.cpp') +
     glob.glob('lazy_tensors/client/*.cc') + glob.glob('lazy_tensors/*.cc') +
     glob.glob('lazy_tensors/client/lib/*.cc') + glob.glob('lazy_tensors/core/platform/*.cc') +
