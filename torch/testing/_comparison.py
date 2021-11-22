@@ -596,13 +596,12 @@ class TensorLikePair(Pair):
 
         - the :attr:`~torch.Tensor.shape`,
         - whether both inputs are quantized or not,
-         - and if they are the quantization scheme.
+        - and if they use the same quantization scheme.
 
         Checks for
 
         - :attr:`~torch.Tensor.layout`,
         - :meth:`~torch.Tensor.stride`,
-        - :meth:`~torch.Tensor.is_coalesced`,
         - :attr:`~torch.Tensor.device`, and
         - :attr:`~torch.Tensor.dtype`
 
@@ -626,15 +625,8 @@ class TensorLikePair(Pair):
         if actual.layout != expected.layout:
             if self.check_layout:
                 raise_mismatch_error("layout", actual.layout, expected.layout)
-        else:
-            if actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
+        elif actual.layout == torch.strided and self.check_stride and actual.stride() != expected.stride():
                 raise_mismatch_error("stride()", actual.stride(), expected.stride())
-            elif (
-                actual.layout == torch.sparse_coo
-                and self.check_is_coalesced
-                and actual.is_coalesced() != expected.is_coalesced()
-            ):
-                raise_mismatch_error("is_coalesced()", actual.is_coalesced(), expected.is_coalesced())
 
         if self.check_device and actual.device != expected.device:
             raise_mismatch_error("device", actual.device, expected.device)
@@ -651,7 +643,6 @@ class TensorLikePair(Pair):
         - ... not of the same ``dtype``, they are promoted  to a common ``dtype`` (according to
             :func:`torch.promote_types`).
         - ... not of the same ``layout``, they are converted to strided tensors.
-        - ... both sparse COO tensors but only one is coalesced, the other one is coalesced.
 
         Args:
             actual (Tensor): Actual tensor.
@@ -673,9 +664,6 @@ class TensorLikePair(Pair):
             # These checks are needed, since Tensor.to_dense() fails on tensors that are already strided
             actual = actual.to_dense() if actual.layout != torch.strided else actual
             expected = expected.to_dense() if expected.layout != torch.strided else expected
-        elif actual.is_sparse and actual.is_coalesced() != expected.is_coalesced():
-            actual = actual.coalesce()
-            expected = expected.coalesce()
 
         return actual, expected
 
@@ -709,10 +697,20 @@ class TensorLikePair(Pair):
     ) -> None:
         """Compares sparse COO tensors by comparing
 
+        - the number of sparse dimensions,
         - the number of non-zero elements (nnz) for equality,
         - the indices for equality, and
         - the values for closeness.
         """
+        if actual.sparse_dim() != expected.sparse_dim():
+            raise self._make_error_meta(
+                AssertionError,
+                (
+                    f"The number of sparse dimensions in sparse COO tensors does not match: "
+                    f"{actual.sparse_dim()} != {expected.sparse_dim()}"
+                ),
+            )
+
         if actual._nnz() != expected._nnz():
             raise self._make_error_meta(
                 AssertionError,
@@ -996,7 +994,6 @@ def assert_close(
     check_dtype: bool = True,
     check_layout: bool = True,
     check_stride: bool = False,
-    check_is_coalesced: bool = True,
     msg: Optional[str] = None,
 ):
     r"""Asserts that ``actual`` and ``expected`` are close.
@@ -1015,8 +1012,6 @@ def assert_close(
     If ``actual`` and ``expected`` are sparse (either having COO or CSR layout), their strided members are
     checked individually. Indices, namely ``indices`` for COO or ``crow_indices``  and ``col_indices`` for CSR layout,
     are always checked for equality whereas the values are checked for closeness according to the definition above.
-    Sparse COO tensors are only considered close if both are either coalesced or uncoalesced (if
-    ``check_is_coalesced`` is ``True``).
 
     If ``actual`` and ``expected`` are quantized, they are considered close if they have the same
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
@@ -1054,9 +1049,6 @@ def assert_close(
             check is disabled, tensors with different ``layout``'s are converted to strided tensors before being
             compared.
         check_stride (bool): If ``True`` and corresponding tensors are strided, asserts that they have the same stride.
-        check_is_coalesced (bool): If ``True`` (default) and corresponding tensors are sparse COO, checks that both
-            ``actual`` and ``expected`` are either coalesced or uncoalesced. If this check is disabled, tensors are
-            :meth:`~torch.Tensor.coalesce`'ed before being compared.
         msg (Optional[str]): Optional error message to use in case a failure occurs during the comparison.
 
     Raises:
@@ -1075,8 +1067,6 @@ def assert_close(
             :attr:`~torch.Tensor.device`.
         AssertionError: If ``check_dtype`` is ``True``, but corresponding tensors do not have the same ``dtype``.
         AssertionError: If ``check_stride`` is ``True``, but corresponding strided tensors do not have the same stride.
-        AssertionError: If ``check_is_coalesced``  is ``True``, but corresponding sparse COO tensors are not both
-            either coalesced or uncoalesced.
         AssertionError: If the values of corresponding tensors are not close according to the definition above.
 
     The following table displays the default ``rtol`` and ``atol`` for different ``dtype``'s. In case of mismatching
@@ -1218,6 +1208,5 @@ def assert_close(
         check_dtype=check_dtype,
         check_layout=check_layout,
         check_stride=check_stride,
-        check_is_coalesced=check_is_coalesced,
         msg=msg,
     )
