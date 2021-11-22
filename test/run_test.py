@@ -308,7 +308,6 @@ DISTRIBUTED_TESTS = [
     "distributed/test_c10d_common",
     "distributed/test_c10d_gloo",
     "distributed/test_c10d_nccl",
-    "distributed/test_jit_c10d",
     "distributed/test_c10d_spawn_gloo",
     "distributed/test_c10d_spawn_nccl",
     "distributed/test_store",
