@@ -50,7 +50,7 @@ class Fuser:
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            root_node, obj = fusion_pairs.get(node.name, (None, None))
+            root_node, pattern, obj = fusion_pairs.get(node.name, (None, None, None))
             if root_node is node:
                 assert obj is not None
                 env[node.name] = obj.fuse(self, load_arg, fuse_custom_config_dict)
@@ -84,6 +84,6 @@ class Fuser:
             if node.name not in match_map:
                 for pattern, value in patterns.items():
                     if is_match(modules, node, pattern):
-                        apply_match(pattern, node, (node, value(self, node)))
+                        apply_match(pattern, node, (node, pattern, value(self, node)))
 
         return match_map

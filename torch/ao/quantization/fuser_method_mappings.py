@@ -2,8 +2,10 @@ import torch.nn as nn
 import torch.nn.intrinsic as nni
 
 from typing import Union, Callable, Tuple, Dict, Optional, Type
+from torch.ao.quantization.utils import Pattern
 
 from torch.ao.quantization.utils import get_combined_dict
+
 
 def fuse_conv_bn(conv, bn):
     r"""Given the conv and bn modules, fuses them and returns the fused module
@@ -104,7 +106,7 @@ def fuse_linear_bn(linear, bn):
     else:
         return nn.utils.fusion.fuse_linear_bn_eval(linear, bn)
 
-DEFAULT_OP_LIST_TO_FUSER_METHOD : Dict[Tuple, Union[nn.Sequential, Callable]] = {
+DEFAULT_OP_LIST_TO_FUSER_METHOD: Dict[Tuple, Union[nn.Sequential, Callable]] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -130,4 +132,31 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
                                      additional_fuser_method_mapping)
     fuser_method = all_mappings.get(op_list, None)
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
+    return fuser_method
+
+DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] = {
+    (nn.BatchNorm1d, nn.Conv1d): fuse_conv_bn,
+    (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): fuse_conv_bn_relu,
+    (nn.BatchNorm2d, nn.Conv2d): fuse_conv_bn,
+    (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): fuse_conv_bn_relu,
+    (nn.BatchNorm3d, nn.Conv2d): fuse_conv_bn,
+    (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): fuse_conv_bn_relu,
+    (nn.ReLU, nn.Conv1d): nni.ConvReLU1d,
+    (nn.ReLU, nn.Conv2d): nni.ConvReLU2d,
+    (nn.ReLU, nn.Conv3d): nni.ConvReLU3d,
+    (nn.BatchNorm1d, nn.Linear): fuse_linear_bn,
+    (nn.ReLU, nn.Linear): nni.LinearReLU,
+    (nn.ReLU, nn.BatchNorm2d): nni.BNReLU2d,
+    (nn.ReLU, nn.BatchNorm3d): nni.BNReLU3d,
+}
+
+def get_fuser_method_new(op_pattern, fuser_method_mapping=None):
+    """ This will be made defult after we deparate the get_fuser_method
+    Would like to implement this first and have a separate PR for deprecation
+    """
+    if fuser_method_mapping is None:
+        fuser_method_mapping = DEFAULT_PATTERN_TO_FUSER_METHOD
+
+    fuser_method = fuser_method_mapping.get(op_list, None)
+    assert fuser_method is not None, "did not find fuser method for: {} ".format(op_pattern)
     return fuser_method
