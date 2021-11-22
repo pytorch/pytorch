@@ -915,6 +915,8 @@ def originate_pairs(
                 return [pair_type(actual, expected, id=id, **options)]
             except UnsupportedInputs:
                 continue
+            except ErrorMeta:
+                raise
             except Exception as error:
                 raise RuntimeError(
                     f"Originating a {pair_type.__name__}() with\n\n"
