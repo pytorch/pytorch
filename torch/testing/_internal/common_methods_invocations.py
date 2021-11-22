@@ -1018,11 +1018,13 @@ def sample_inputs_masked_var(op_info, device, dtype, requires_grad, **kwargs):
                 sample_input_kwargs = dict(sample_input.kwargs, unbiased=unbiased)
             if requires_grad:
                 inmask = torch._masked._input_mask(sample_input.input, *sample_input_args, **sample_input_kwargs)
-                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64), dim, keepdim=True, mask=inmask)
+                orig_count = torch._masked.sum(inmask.new_ones(sample_input.input.shape, dtype=torch.int64),
+                                               dim, keepdim=True, mask=inmask)
                 if orig_count.min() <= int(unbiased):
-                    # Skipping samples that lead to singularities in
-                    # var computation resulting nan values both in var
-                    # and autograd output.
+                    # Skip samples that lead to singularities in var
+                    # computation resulting nan values both in var and
+                    # autograd output that test_grad_fn cannot handle
+                    # correctly.
                     continue
             inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
                                       args=sample_input_args, kwargs=sample_input_kwargs))
