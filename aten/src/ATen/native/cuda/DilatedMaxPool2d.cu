@@ -74,8 +74,8 @@ __global__ void max_pool_forward_nchw(const int nthreads, const scalar_t* bottom
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_forward_nhwc(const scalar_t* bottom_data, const int nbatch,
-                                   const int channels, const int height,
-                                   const int width, const int pooled_height, const int pooled_width,
+                                   const int64_t channels, const int64_t height,
+                                   const int64_t width, const int pooled_height, const int pooled_width,
                                    const int kernel_h, const int kernel_w, const int stride_h,
                                    const int stride_w, const int pad_h, const int pad_w,
                                    const int dilation_h, const int dilation_w,
@@ -200,8 +200,8 @@ __global__ void max_pool_backward_nchw(const int nthreads, const scalar_t* top_d
 template <typename scalar_t, typename accscalar_t>
 C10_LAUNCH_BOUNDS_1(CUDA_MAX_THREADS)
 __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_diff,
-                                    const int64_t* top_mask, const int nbatch, const int channels,
-                                    const int height, const int width, const int pooled_height,
+                                    const int64_t* top_mask, const int nbatch, const int64_t channels,
+                                    const int64_t height, const int64_t width, const int pooled_height,
                                     const int pooled_width, const int kernel_h, const int kernel_w,
                                     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
                                     const int dilation_h, const int dilation_w,
@@ -235,9 +235,9 @@ __global__ void max_pool_backward_nhwc(const int nthreads, const scalar_t* top_d
   int iH = (height + gridDim.z-1) / gridDim.z;
   int iW = (width + gridDim.y-1) / gridDim.y;
   int istartH = threadIdx.z + blockIdx.z*iH;
-  int iendH = ::min(istartH+iH, height);
+  int iendH = ::min(static_cast<int64_t>(istartH)+iH, height);
   int istartW = threadIdx.y + blockIdx.y*iW;
-  int iendW = ::min(istartW+iW, width);
+  int iendW = ::min(static_cast<int64_t>(istartW)+iW, width);
 
   for (int ih = istartH; ih < iendH; ih+=blockDim.z) {
     int phstart = p_start(ih, pad_h, kernel_h, dilation_h, stride_h);
