@@ -1142,6 +1142,7 @@ bool Node::isNondeterministic() const {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
       "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
