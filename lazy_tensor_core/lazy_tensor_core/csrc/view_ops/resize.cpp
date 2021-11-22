@@ -1,6 +1,5 @@
-#include "lazy_tensor_core/csrc/ops/resize.h"
+#include "lazy_tensor_core/csrc/view_ops/resize.h"
 
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -8,8 +7,9 @@ namespace ops {
 namespace {
 
 torch::lazy::Shape NodeOutputShape(const torch::lazy::Value& input,
-                                    c10::ArrayRef<int64_t> size) {
-  return torch::lazy::Shape(torch::lazy::GetShapeFromTsValue(input).scalar_type(), size);
+                                   c10::ArrayRef<int64_t> size) {
+  return torch::lazy::Shape(
+      torch::lazy::GetShapeFromTsValue(input).scalar_type(), size);
 }
 
 }  // namespace

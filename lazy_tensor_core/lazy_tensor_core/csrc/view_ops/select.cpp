@@ -1,4 +1,4 @@
-#include "lazy_tensor_core/csrc/ops/select.h"
+#include "lazy_tensor_core/csrc/view_ops/select.h"
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 
@@ -28,8 +28,8 @@ std::string Select::ToString() const {
 }
 
 torch::lazy::Shape Select::MakeSelectShape(const torch::lazy::Shape& shape,
-                                            int64_t dim, int64_t start,
-                                            int64_t end, int64_t stride) {
+                                           int64_t dim, int64_t start,
+                                           int64_t end, int64_t stride) {
   int64_t effective_stride = GetStride(start, end, stride);
   torch::lazy::Shape select_shape(shape);
   select_shape.set_size(
