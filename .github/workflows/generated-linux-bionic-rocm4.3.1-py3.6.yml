@@ -203,8 +203,13 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker cp ${GITHUB_WORKSPACE} "${container_name}:/var/lib/jenkins/workspace"
+          docker cp "${GITHUB_WORKSPACE}" "${container_name}:/var/lib/jenkins/workspace"
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && .jenkins/pytorch/build.sh'
+          docker commit "${container_name}" ${{ steps.calculate-tag.outputs.docker_commit_image }}
+          docker push ${{ steps.calculate-tag.outputs.docker_commit_image }}
+          docker cp "${container_name}:/var/lib/jenkins/workspace/.pytorch-test-times.json" .pytorch-test-times.json
+          docker cp "${container_name}:/var/lib/jenkins/workspace/dist" dist
+          docker cp "${container_name}:/var/lib/jenkins/workspace/build" build
       - name: Display and upload binary build size statistics (Click Me)
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
@@ -218,10 +223,6 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26 boto3==1.16.34
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-      - name: Push Docker image
-        run: |
-          docker commit "${container_name}" {{ steps.calculate-tag.outputs.docker_commit_image }}
-          docker push {{ steps.calculate-tag.outputs.docker_commit_image }}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
