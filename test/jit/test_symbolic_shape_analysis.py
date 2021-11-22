@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
 import operator
+import unittest
 from textwrap import dedent
 
 import torch
@@ -442,6 +443,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
 
         self.checkSymShapeCompute(shape_compute_graph, nodes, output_shapes, inps)
 
+    @unittest.skipIf(not hasattr(torch.jit, "_shapes"), "shape functions not loaded in python")
     def test_shape_function_includes(self):
         inp_shape = [1, 16, 5, 10]
         weight_shape = [33, 16, 3, 3]

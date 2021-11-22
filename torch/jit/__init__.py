@@ -55,11 +55,13 @@ import warnings
 from importlib.machinery import SourceFileLoader
 
 import os
-shape_function_fp = f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
 try:
+    shape_function_fp = (
+        f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
+    )
     _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
-except FileNotFoundError:
-    warnings.warn(f"Couldn't load shape functions from {shape_function_fp}")
+except Exception as e:
+    warnings.warn(f"Couldn't load shape functions: {e}")
 
 
 # For backwards compatibility
