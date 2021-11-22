@@ -13,6 +13,17 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+//! Buffer allocation information to store in GPU lower to avoid
+//!  logic duplication
+struct LocalAllocationInfo {
+  kir::Allocate* alloc_expr = nullptr;
+  std::vector<kir::IterDomain*> alloc_domains;
+  bool has_halo = false;
+};
+
+using LocalAllocationInfoMap =
+    std::unordered_map<kir::Allocate*, std::unique_ptr<LocalAllocationInfo>>;
+
 //! Insert buffer allocations
 std::vector<kir::Expr*> insertAllocations(const std::vector<kir::Expr*>& exprs);
 
