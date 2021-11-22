@@ -1227,7 +1227,7 @@ class CudaMemoryLeakCheck():
             return
 
         afters = self.get_cuda_memory_usage()
-        result = self._compare_before_after(self.before, afters)
+        result = self._compare_before_after(self.befores, afters)
 
         # Implements retry logic
         if result is not None:
@@ -1238,11 +1238,11 @@ class CudaMemoryLeakCheck():
 
             torch.cuda.synchronize()
             afters = self.get_cuda_memory_usage()
-            result = self._compare_before_after(self.before, afters)
+            result = self._compare_before_after(self.befores, afters)
             if result is not None:
                 name, diff, i = result
-                self.fail('{} leaked {} bytes CUDA memory after retry on device {}'.format(
-                          name, diff, i))
+                self.testcase.fail('{} leaked {} bytes CUDA memory after retry on device {}'.format(
+                                   name, diff, i))
 
 
 @contextmanager
