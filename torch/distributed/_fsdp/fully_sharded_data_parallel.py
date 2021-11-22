@@ -129,13 +129,16 @@ class FullyShardedDataParallel(nn.Module):
                 assert ConfigAutoWrap.in_autowrap_context
                 assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
                 assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
-                wrapped_module, total_wrapped_params = ConfigAutoWrap.recursive_wrap(
+                # This will only wrap the children, and then constructor will
+                # run for root module.
+                ConfigAutoWrap.recursive_wrap(
                     module,
                     auto_wrap_policy=fsdp_auto_wrap_policy,
                     # Note that we have the recursive_wrap skip wrapping for
                     # the outermost (this) module otherwise it will result in a
                     # double-wrap causing issues.
                     only_wrap_children=True,
+                    # FSDP arguments follow.
                     process_group=process_group,
                     cpu_offload=cpu_offload,
                     # Note that recursive_wap should not call FSDP with wrapping
