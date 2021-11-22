@@ -34,6 +34,10 @@ C10_DEFINE_string(
     "",
     "Name of the output llvm assembly to be saved.");
 C10_DEFINE_string(output_model, "", "Name of the output model to be saved.");
+C10_DEFINE_string(
+    methods_to_clone,
+    "",
+    "Methods to clone from the original model");
 
 namespace {
 
@@ -79,12 +83,13 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   return compile_spec;
 }
 
-std::vector<std::vector<int64_t>> getInputSizes (
+std::vector<std::vector<int64_t>> getInputSizes(
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec) {
-  auto input_shapes = compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
+  auto input_shapes =
+      compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
   std::vector<std::vector<int64_t>> inputSizes;
   for (const auto& input_shape : input_shapes) {
-    auto sizes = ((c10::IValue) input_shape).toIntVector();
+    auto sizes = ((c10::IValue)input_shape).toIntVector();
     inputSizes.emplace_back(sizes);
   }
   return inputSizes;
@@ -93,12 +98,13 @@ std::vector<std::vector<int64_t>> getInputSizes (
 std::string getNncKernelId() {
   // TODO: calculate the version_token.
   const std::string version_token = "VERTOKEN";
-  return FLAGS_model_name + ":" + FLAGS_model_version + ":" + FLAGS_method_name +
-      ":" + version_token;
+  return FLAGS_model_name + ":" + FLAGS_model_version + ":" +
+      FLAGS_method_name + ":" + version_token;
 }
 
 std::string getNncKernelFuncName(const std::string& method_name) {
-  return "nnc_" + FLAGS_model_name + "_" + FLAGS_model_version + "_" + method_name;
+  return "nnc_" + FLAGS_model_name + "_" + FLAGS_model_version + "_" +
+      method_name;
 }
 
 void writeOutputLlvmAssembly(const std::string& asm_code) {
@@ -110,15 +116,14 @@ void writeOutputLlvmAssembly(const std::string& asm_code) {
 
   std::ofstream output(output_llvm_file_name);
   output << asm_code;
-  std::cout << "The compiled llvm assembly code was saved to " << output_llvm_file_name
-            << std::endl;
+  std::cout << "The compiled llvm assembly code was saved to "
+            << output_llvm_file_name << std::endl;
 }
 
 c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
-
   auto method = mod.get_method(FLAGS_method_name);
   auto graph = toGraphFunction(method.function()).graph()->copy();
   auto sizes = getInputSizes(compile_spec);
@@ -150,7 +155,8 @@ int main(int argc, char** argv) {
       " --input_dims=<input dimensions like '1,3,224,224;2,2'>"
       " [--method_name=<method name>]"
       " [--output_llvm=<llvm assembly output file path>]"
-      " [--output_model=<output model file path>]");
+      " [--output_model=<output model file path>]"
+      " [--methods_to_clone=<comma separated list of methods to clone from original model like 'get_metadata,is_detect_and_track'>]");
 
   if (!c10::ParseCommandLineFlags(&argc, &argv)) {
     std::cerr << "Failed to parse command line flags!" << std::endl;
@@ -198,6 +204,10 @@ int main(int argc, char** argv) {
       c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
   auto compiled_module = torch::jit::detail::codegen_backend_module(
       "nnc", frozen_m, compile_spec, any_dict_ty);
+  auto methods_to_clone = split(',', FLAGS_methods_to_clone);
+  for (const auto& method : methods_to_clone) {
+    compiled_module.clone_method(m, method);
+  }
   compiled_module._save_for_mobile(output_model_name);
   std::cout << "The compiled model was saved to " << output_model_name
             << std::endl;
