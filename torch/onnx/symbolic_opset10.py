@@ -166,7 +166,7 @@ upsample_linear1d = _interpolate("upsample_linear1d", 3, "linear")
 upsample_bilinear2d = _interpolate("upsample_bilinear2d", 4, "linear")
 upsample_trilinear3d = _interpolate("upsample_trilinear3d", 5, "linear")
 
-def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor):
+def __interpolate(g, input, size, scale_factor, mode , align_corners, recompute_scale_factor, antialias):
     scales, mode = sym_help._interpolate_get_scales_and_mode(g, input, size, scale_factor,
                                                              mode , align_corners)
     return g.op("Resize", input, scales, mode_s=mode)
@@ -205,23 +205,23 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == 'NoneType'
-    is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == 'NoneType'
-    is_start_onnx_const = start.node().kind() == 'onnx::Constant'
-    is_end_onnx_const = end.node().kind() == 'onnx::Constant'
-    step = sym_help._parse_arg(step, 'i')
+    is_start_none = start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_start_onnx_const = start.node().kind() == "onnx::Constant"
+    is_end_onnx_const = end.node().kind() == "onnx::Constant"
+    step = sym_help._parse_arg(step, "i")
     if (not is_start_none and not is_start_onnx_const) or \
        (not isinstance(end, int) and not is_end_none and not is_end_onnx_const) or \
-       (not isinstance(dim, int) and dim.node().kind() != 'onnx::Constant'):
+       (not isinstance(dim, int) and dim.node().kind() != "onnx::Constant"):
         dynamic_slice = True
         if is_start_none:
             start = g.op("Constant", value_t=torch.tensor(0))
         if is_end_none:
             end = g.op("Constant", value_t=torch.tensor(9223372036854775807))
     else:
-        start = [0 if is_start_none else sym_help._parse_arg(start, 'i')]
-        end = [9223372036854775807 if is_end_none else sym_help._parse_arg(end, 'i')]
-        dim = [sym_help._parse_arg(dim, 'i')]
+        start = [0 if is_start_none else sym_help._parse_arg(start, "i")]
+        end = [9223372036854775807 if is_end_none else sym_help._parse_arg(end, "i")]
+        dim = [sym_help._parse_arg(dim, "i")]
         dynamic_slice = False
     return sym_help._slice_helper(g, self, axes=dim, starts=start, ends=end, steps=[step], dynamic_slice=dynamic_slice)
 
@@ -307,6 +307,14 @@ def fake_quantize_per_tensor_affine(g, inputs, scale, zero_point, quant_min=-128
     zero_point = torch.tensor(zero_point, dtype=zero_point_dtype)  # ONNX requires zero_point to be tensor
     return g.op("DequantizeLinear", g.op("QuantizeLinear", inputs, scale, zero_point), scale, zero_point)
 
+
 def isinf(g, input):
     from torch.onnx.symbolic_opset9 import _cast_Double  # type: ignore[attr-defined]
     return g.op("IsInf", _cast_Double(g, input, False))
+
+
+def isfinite(g, input):
+    from torch.onnx.symbolic_opset9 import isnan, __not_, __or_
+    inf_node = isinf(g, input)
+    nan_node = isnan(g, input)
+    return __not_(g, __or_(g, inf_node, nan_node))

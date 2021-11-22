@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <test/cpp/tensorexpr/test_base.h>
 
+#include <c10/util/irange.h>
 #include <test/cpp/tensorexpr/test_utils.h>
 #include <torch/csrc/jit/tensorexpr/hash_provider.h>
 #include <torch/csrc/jit/tensorexpr/ir_simplifier.h>
@@ -1109,9 +1110,30 @@ TEST(Simplify, SimplifyDiv) {
   }
 }
 
+TEST(Simplify, SimplifyDivWithLoopContext0) {
+  // Stmt to simplify:
+  // for (int i = 0; i < 100; i++) {
+  //  A[i] = i / 100;
+  //}
+  VarHandle i("i", kInt);
+  BufHandle a_buf("A", {100}, kInt);
+  auto for_stmt = For::make(i, 0, 100, Store::make(a_buf, {i}, (i / 100)));
+
+  const StmtPtr simplified = IRSimplifier::simplify(for_stmt);
+
+  std::ostringstream oss;
+  oss << *(simplified);
+  const std::string& verification_pattern =
+      R"IR(
+# CHECK: for (int i
+# CHECK-NEXT:   A[i] = 0;
+      )IR";
+  torch::jit::testing::FileCheck().run(verification_pattern, oss.str());
+}
+
 TEST(Simplify, SimplifyDivWithLoopContext1) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  A[i] = (i + 24) / 6;
   //}
   VarHandle i("i", kInt);
@@ -1132,7 +1154,7 @@ TEST(Simplify, SimplifyDivWithLoopContext1) {
 
 TEST(Simplify, SimplifyDivWithLoopContext2) {
   // Stmt to simplify:
-  // for (int i = 0; i < 5; i++) {
+  // for (const auto i : c10::irange(5)) {
   //  A[i] = (i + 25) / 6;
   //}
   VarHandle i("i", kInt);
@@ -1153,7 +1175,7 @@ TEST(Simplify, SimplifyDivWithLoopContext2) {
 
 TEST(Simplify, SimplifyDivWithLoopContext3) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  A[i] = (i + 24) / (-6);
   //}
   VarHandle i("i", kInt);
@@ -1174,7 +1196,7 @@ TEST(Simplify, SimplifyDivWithLoopContext3) {
 
 TEST(Simplify, SimplifyDivWithLoopContext4) {
   // Stmt to simplify:
-  // for (int i = 0; i < 5; i++) {
+  // for (const auto i : c10::irange(5)) {
   //  A[i] = (i - 5) / 6;
   //}
   VarHandle i("i", kInt);
@@ -1195,8 +1217,8 @@ TEST(Simplify, SimplifyDivWithLoopContext4) {
 
 TEST(Simplify, SimplifyDivWithLoopContext5) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
-  //  for (int j = 0; j < 10; j++) {
+  // for (const auto i : c10::irange(6)) {
+  //  for (const auto j : c10::irange(10)) {
   //    A[i, j] = (i + 6*j) / 6;
   //  }
   //}
@@ -1221,7 +1243,7 @@ TEST(Simplify, SimplifyDivWithLoopContext5) {
 
 TEST(Simplify, SimplifyDivWithLoopContext6) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  for (int j = -1; j < 9; j++) {
   //    A[i, j+1] = (i + 6*j) / 6;
   //  }
@@ -1248,8 +1270,8 @@ TEST(Simplify, SimplifyDivWithLoopContext6) {
 
 TEST(Simplify, SimplifyDivWithLoopContext7) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
-  //  for (int j = 0; j < 10; j++) {
+  // for (const auto i : c10::irange(6)) {
+  //  for (const auto j : c10::irange(10)) {
   //    A[i, j] = (i + 6*j) / (-6);
   //  }
   //}
@@ -1275,7 +1297,7 @@ TEST(Simplify, SimplifyDivWithLoopContext7) {
 
 TEST(Simplify, SimplifyModWithLoopContext0) {
   // Stmt to simplify:
-  // for (int i = 0; i < 100; i++) {
+  // for (const auto i : c10::irange(100)) {
   //  A[i] = i % 100;
   //}
   VarHandle i("i", kInt);
@@ -1296,7 +1318,7 @@ TEST(Simplify, SimplifyModWithLoopContext0) {
 
 TEST(Simplify, SimplifyModWithLoopContext1) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  A[i] = (i + 24) % 6;
   //}
   VarHandle i("i", kInt);
@@ -1317,7 +1339,7 @@ TEST(Simplify, SimplifyModWithLoopContext1) {
 
 TEST(Simplify, SimplifyModWithLoopContext2) {
   // Stmt to simplify:
-  // for (int i = 0; i < 5; i++) {
+  // for (const auto i : c10::irange(5)) {
   //  A[i] = (i + 25) % 6;
   //}
   VarHandle i("i", kInt);
@@ -1338,7 +1360,7 @@ TEST(Simplify, SimplifyModWithLoopContext2) {
 
 TEST(Simplify, SimplifyModWithLoopContext3) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  A[i] = (i + 24) % (-6);
   //}
   VarHandle i("i", kInt);
@@ -1359,7 +1381,7 @@ TEST(Simplify, SimplifyModWithLoopContext3) {
 
 TEST(Simplify, SimplifyModWithLoopContext4) {
   // Stmt to simplify:
-  // for (int i = 0; i < 5; i++) {
+  // for (const auto i : c10::irange(5)) {
   //  A[i] = (i - 5) % 6;
   //}
   VarHandle i("i", kInt);
@@ -1380,8 +1402,8 @@ TEST(Simplify, SimplifyModWithLoopContext4) {
 
 TEST(Simplify, SimplifyModWithLoopContext5) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
-  //  for (int j = 0; j < 10; j++) {
+  // for (const auto i : c10::irange(6)) {
+  //  for (const auto j : c10::irange(10)) {
   //    A[i, j] = (i + 6*j) % 6;
   //  }
   //}
@@ -1406,7 +1428,7 @@ TEST(Simplify, SimplifyModWithLoopContext5) {
 
 TEST(Simplify, SimplifyModWithLoopContext6) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
+  // for (const auto i : c10::irange(6)) {
   //  for (int j = -1; j < 9; j++) {
   //    A[i, j+1] = (i + 6*j) % 6;
   //  }
@@ -1433,8 +1455,8 @@ TEST(Simplify, SimplifyModWithLoopContext6) {
 
 TEST(Simplify, SimplifyModWithLoopContext7) {
   // Stmt to simplify:
-  // for (int i = 0; i < 6; i++) {
-  //  for (int j = 0; j < 10; j++) {
+  // for (const auto i : c10::irange(6)) {
+  //  for (const auto j : c10::irange(10)) {
   //    A[i, j] = (i + 6*j) % (-6);
   //  }
   //}
@@ -3833,7 +3855,7 @@ TEST(Simplify, SimplifyMultilevelFor) {
 
 TEST(Simplify, SimplifyForCleansUp) {
   {
-    Placeholder a("a", kFloat, {1, 12, 1});
+    BufHandle a("a", {1, 12, 1}, kFloat);
     VarHandle x("x", kInt);
     Tensor b = Compute(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -3863,7 +3885,8 @@ TEST(Simplify, SimplifyEliminateEmptyFor) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (int i = 0; i < 11; ++i) {
+    for (const auto i : c10::irange(11)) {
+      (void)i; // Suppress unused variable warning
       VarHandle loopVar("loopVar", kInt);
       last = For::make(loopVar, 0, 10, last);
     }
@@ -3947,7 +3970,8 @@ TEST(Simplify, SimplifyFlattenBlock) {
   {
     // Flatten many layers around an empty block to an empty block.
     StmtPtr last = alloc<Block>(std::vector<StmtPtr>({}));
-    for (int i = 0; i < 11; ++i) {
+    for (const auto i : c10::irange(11)) {
+      (void)i; // Suppress unused variable warning
       last = alloc<Block>(std::vector<StmtPtr>({last}));
     }
 
@@ -4796,22 +4820,22 @@ TEST(Simplify, SimplifyBroadcastTermExpander) {
   SimpleIREvaluator eval(store, {buf});
   std::vector<int> output(num_lanes);
   eval(output);
-  for (int i = 0; i < num_lanes; ++i) {
+  for (const auto i : c10::irange(num_lanes)) {
     ASSERT_EQ(output[i], 2);
   }
 }
 
 TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
   // Before:
-  //   for (int n = 1; n < N; n++) {
+  //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = n < 1 ? 0.f : 1.f;
   //   }
   // After:
-  //   for (int n = 1; n < N; n++) {
+  //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = 1.f;
   //   }
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N});
+  BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
   StmtPtr s = For::make(
       n, 1, N, b.store({n}, CompareSelect::make(n, 1, 0.f, 1.0f, kLT)));
@@ -4827,15 +4851,15 @@ TEST(Simplify, DISABLED_CompareSelectCondAlwaysInLoopBounds) {
 
 TEST(Simplify, DISABLED_IfThenCondAlwaysInLoopBounds) {
   // Before:
-  //   for (int n = 1; n < N; n++) {
+  //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = IfThenElse(n < 1 ? 1 : 0, 0.f, 1.f);
   //   }
   // After:
-  //   for (int n = 1; n < N; n++) {
+  //   for (const auto n : c10::irange(1, N)) {
   //     b[n] = 1.f;
   //   }
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N});
+  BufHandle b("b", {N}, kFloat);
   VarHandle n("n", kInt);
   StmtPtr s =
       For::make(n, 1, N, b.store({n}, IfThenElse::make(n < 1, 0.f, 1.0f)));
@@ -4854,16 +4878,16 @@ TEST(Simplify, DISABLED_MultiClauseCondAlwaysInLoopBounds) {
   // conditional that is provably satisfied (or unsatisfied) by the entire loop
   // range.
   // Before:
-  //   for (int i = 1; i < 7; i++) {
-  //     for (int j = 1; j < 7; j++) {
+  //   for (const auto i : c10::irange(1, 7)) {
+  //     for (const auto j : c10::irange(1, 7)) {
   //       b[i, j] = IfThenElse(
   //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, 1.f);
   // After:
-  //   for (int i = 1; i < 7; i++) {
-  //     for (int j = 1; j < 7; j++) {
+  //   for (const auto i : c10::irange(1, 7)) {
+  //     for (const auto j : c10::irange(1, 7)) {
   //       b[i, j] = 1.f;
   constexpr int N = 8;
-  Placeholder b("b", kFloat, {N, N});
+  BufHandle b("b", {N, N}, kFloat);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto csel = CompareSelect::make(i, 1, kLT);
@@ -4889,18 +4913,18 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   // could be solved by peeling, and applying the range-based conditional
   // simplification in the previous tests.
   // Before:
-  //   for (int i = 0; i < 3; i++) {
-  //     for (int j = 0; j < 3; j++) {
+  //   for (const auto i : c10::irange(3)) {
+  //     for (const auto j : c10::irange(3)) {
   //       b[i, j] = (b[i, j]) + (IfThenElse(
   //         j>=7 ? 1 : (i>=7 ? 1 : (j<1 ? 1 : (i<1 ? 1 : 0))), 0.f, a[i, j]));
   // After:
-  //   for (int i = 1; i < 3; i++) {
-  //     for (int j = 1; j < 3; j++) {
+  //   for (const auto i : c10::irange(1, 3)) {
+  //     for (const auto j : c10::irange(1, 3)) {
   //       b[i, j] = (b[i, j]) + 1.f;
   constexpr int N = 8;
   constexpr int K = 3;
-  Placeholder a("a", kFloat, {N, N});
-  Placeholder b("b", kFloat, {N, N});
+  BufHandle a("a", {N, N}, kFloat);
+  BufHandle b("b", {N, N}, kFloat);
   VarHandle i("i", kInt);
   VarHandle j("j", kInt);
   auto csel = CompareSelect::make(i, 1, kLT);
@@ -4916,8 +4940,8 @@ TEST(Simplify, DISABLED_SimplifyLoopBounds) {
   oss << *s;
   torch::jit::testing::FileCheck().run(
       R"IR(
-# CHECK: for (int i = 1; i < 3; i++) {
-# CHECK: for (int j = 1; j < 3; j++) {
+# CHECK: for (const auto i : c10::irange(1, 3)) {
+# CHECK: for (const auto j : c10::irange(1, 3)) {
 # CHECK-NOT: IfThenElse
 )IR",
       oss.str());

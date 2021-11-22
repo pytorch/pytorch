@@ -9,6 +9,7 @@
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/GridSamplerKernel.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -51,12 +52,12 @@ namespace {
     scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-      for (int64_t n = start; n < end; ++n) {
+      for (const auto n : c10::irange(start, end)) {
         scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
         scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-        for (int64_t d = 0; d < out_D; ++d) {
-          for (int64_t h = 0; h < out_H; ++h) {
-            for (int64_t w = 0; w < out_W; ++w) {
+        for (const auto d : c10::irange(out_D)) {
+          for (const auto h : c10::irange(out_H)) {
+            for (const auto w : c10::irange(out_W)) {
               // get the corresponding input x, y, z co-ordinates from grid
               scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
               scalar_t ix = *grid_ptr_NDHW;
@@ -222,12 +223,12 @@ namespace {
     scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-      for (int64_t n = start; n < end; ++n) {
+      for (const auto n : c10::irange(start, end)) {
         scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
         scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
         scalar_t *gGrid_ptr_NDHW = gGrid_ptr + n * gGrid_sN;
-        for (int64_t d = 0; d < out_D; ++d) {
-          for (int64_t h = 0; h < out_H; ++h) {
+        for (const auto d : c10::irange(out_D)) {
+          for (const auto h : c10::irange(out_H)) {
             for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NDHW += gGrid_sW /* grad_grid is contiguous */ ) {
               // get the corresponding input x, y, z co-ordinates from grid
               scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
@@ -384,6 +385,112 @@ namespace {
 
 }  // namespace
 
+Tensor _grid_sampler_2d_cpu_quantized(
+    const Tensor& input,
+    const Tensor& grid,
+    int64_t interpolation_mode_,
+    int64_t padding_mode_,
+    bool align_corners) {
+  auto interpolation_mode =
+      static_cast<GridSamplerInterpolation>(interpolation_mode_);
+  /* Bilinear interpolation is supported using the fact that we can perform
+   * linear interpolations on quantized values without rescaling. */
+  TORCH_CHECK(
+      interpolation_mode == GridSamplerInterpolation::Bilinear,
+      "_grid_sampler_2d_cpu_quantized(): only bilinear interpolation supported")
+  auto padding_mode = static_cast<GridSamplerPadding>(padding_mode_);
+
+  int64_t N = input.size(0);
+  int64_t C = input.size(1);
+  int64_t inp_H = input.size(2);
+  int64_t inp_W = input.size(3);
+  int64_t out_H = grid.size(1);
+  int64_t out_W = grid.size(2);
+  uint8_t zero_point = input.q_zero_point();
+  auto output = at::_empty_affine_quantized(
+      {N, C, out_H, out_W},
+      at::device(c10::kCPU).dtype(c10::kQUInt8),
+      input.q_scale(),
+      zero_point);
+  int64_t inp_sN = input.stride(0);
+  int64_t inp_sC = input.stride(1);
+  int64_t inp_sH = input.stride(2);
+  int64_t inp_sW = input.stride(3);
+  int64_t grid_sN = grid.stride(0);
+  int64_t grid_sH = grid.stride(1);
+  int64_t grid_sW = grid.stride(2);
+  int64_t grid_sCoor = grid.stride(3);
+  int64_t out_sN = output.stride(0);
+  int64_t out_sC = output.stride(1);
+  int64_t out_sH = output.stride(2);
+  int64_t out_sW = output.stride(3);
+  uint8_t* inp_ptr = (uint8_t*)input.data_ptr<quint8>();
+  uint8_t* out_ptr = (uint8_t*)output.data_ptr<quint8>();
+  float* grid_ptr = grid.data_ptr<float>();
+  at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
+    for (int64_t n = start; n < end; ++n) {
+      float* grid_ptr_N = grid_ptr + n * grid_sN;
+      uint8_t* inp_ptr_N = inp_ptr + n * inp_sN;
+      for (int64_t h = 0; h < out_H; ++h) {
+        for (int64_t w = 0; w < out_W; ++w) {
+          // get the corresponding input x, y, z co-ordinates from grid
+          float* grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
+          float x = *grid_ptr_NHW;
+          float y = grid_ptr_NHW[grid_sCoor];
+
+          float ix = grid_sampler_compute_source_index(
+              x, inp_W, padding_mode, align_corners);
+          float iy = grid_sampler_compute_source_index(
+              y, inp_H, padding_mode, align_corners);
+
+          // get corner pixel values from (x, y)
+          // for 4d, we use north-east-south-west
+          int64_t ix_nw = static_cast<int64_t>(std::floor(ix));
+          int64_t iy_nw = static_cast<int64_t>(std::floor(iy));
+
+          int64_t ix_ne = ix_nw + 1;
+          int64_t iy_ne = iy_nw;
+
+          int64_t ix_sw = ix_nw;
+          int64_t iy_sw = iy_nw + 1;
+
+          int64_t ix_se = ix_nw + 1;
+          int64_t iy_se = iy_nw + 1;
+
+          // get surfaces to each neighbor:
+          float nw = (ix_se - ix) * (iy_se - iy);
+          float ne = (ix - ix_sw) * (iy_sw - iy);
+          float sw = (ix_ne - ix) * (iy - iy_ne);
+          float se = (ix - ix_nw) * (iy - iy_nw);
+
+          // calculate bilinear weighted pixel value and set output pixel
+          uint8_t* inp_ptr_NC = inp_ptr_N;
+          uint8_t* out_ptr_NCHW =
+              out_ptr + n * out_sN + h * out_sH + w * out_sW;
+          for (int64_t c = 0; c < C;
+               ++c, out_ptr_NCHW += out_sC, inp_ptr_NC += inp_sC) {
+            float res = 0;
+            res += within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)
+                ? inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW] * nw
+                : zero_point * nw;
+            res += within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)
+                ? inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW] * ne
+                : zero_point * ne;
+            res += within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)
+                ? inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW] * sw
+                : zero_point * sw;
+            res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
+                ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
+                : zero_point * se;
+            *out_ptr_NCHW = std::round(res);
+          }
+        }
+      }
+    }
+  });
+  return output;
+}
+
 Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
                                      int64_t interpolation_mode_,
                                      int64_t padding_mode_,
@@ -416,11 +523,11 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
   scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (int64_t n = start; n < end; ++n) {
+    for (const auto n : c10::irange(start, end)) {
       scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
       scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
-      for (int64_t h = 0; h < out_H; ++h) {
-        for (int64_t w = 0; w < out_W; ++w) {
+      for (const auto h : c10::irange(out_H)) {
+        for (const auto w : c10::irange(out_W)) {
           // get the corresponding input x, y, z co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           scalar_t x = *grid_ptr_NHW;
@@ -505,7 +612,7 @@ Tensor _grid_sampler_2d_cpu_fallback(const Tensor& input, const Tensor& grid,
               scalar_t coefficients[4];
 
               // Interpolate 4 values in the x directon
-              for (int64_t i = 0; i < 4; ++i) {
+              for (const auto i : c10::irange(4)) {
                 coefficients[i] = cubic_interp1d<scalar_t>(
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw - 1, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
                   get_value_bounded<scalar_t>(inp_ptr_NC, ix_nw + 0, iy_nw - 1 + i, inp_W, inp_H, inp_sW, inp_sH, padding_mode, align_corners),
@@ -578,11 +685,11 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
-    for (int64_t n = start; n < end; ++n) {
+    for (const auto n : c10::irange(start, end)) {
       scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
       scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
       scalar_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
-      for (int64_t h = 0; h < out_H; ++h) {
+      for (const auto h : c10::irange(out_H)) {
         for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
           // get the corresponding input x, y co-ordinates from grid
           scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
@@ -703,8 +810,8 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
               scalar_t gOut = *gOut_ptr_NCHW;
 
-              for (int64_t i = 0; i < 4; ++i) {
-                for (int64_t j = 0; j < 4; ++j) {
+              for (const auto i : c10::irange(4)) {
+                for (const auto j : c10::irange(4)) {
 
                   // set input gradient
                   add_value_bounded<scalar_t>(gInp_ptr_NC, ix_nw - 1 + i, iy_nw - 1 + j,
@@ -733,7 +840,10 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
 Tensor grid_sampler_2d_cpu(const Tensor& input, const Tensor& grid,
                            int64_t interpolation_mode, int64_t padding_mode,
                            bool align_corners) {
-
+  if (input.scalar_type() == kQUInt8) {
+    return native::_grid_sampler_2d_cpu_quantized(
+        input, grid, interpolation_mode, padding_mode, align_corners);
+  }
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
   if (input.scalar_type() != kDouble) {
@@ -775,7 +885,8 @@ Tensor grid_sampler_3d_cpu(const Tensor& input, const Tensor& grid,
 // No shape checking needed here. See # NOTE [ grid_sampler Native Functions ].
 std::tuple<Tensor, Tensor>
 grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, const Tensor& grid,
-                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners) {
+                             int64_t interpolation_mode, int64_t padding_mode, bool align_corners,
+                             std::array<bool,2> output_mask) {
 
   // AVX gather instructions use signed 32-bit offsets to gather float values.
   // Check for possible overflow and fallback to scalar implementation
@@ -801,7 +912,7 @@ grid_sampler_2d_backward_cpu(const Tensor& grad_output, const Tensor& input, con
   }
 
   return grid_sampler_2d_backward_cpu_kernel(
-    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners);
+    kCPU, grad_output, input, grid, interpolation_mode, padding_mode, align_corners, output_mask);
 }
 
 DEFINE_DISPATCH(grid_sampler_2d_backward_cpu_kernel);
@@ -832,10 +943,6 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
     "grid_sampler(): expected input and grid to be on same device, but input "
     "is on ", input_opt.device(), " and grid is on ", grid_opt.device());
   TORCH_CHECK(
-    input_opt.dtype() == grid_opt.dtype(),
-    "grid_sampler(): expected input and grid to have same dtype, but input "
-    "has ", input_opt.dtype(), " and grid has ", grid_opt.dtype());
-  TORCH_CHECK(
     input_opt.layout() == kStrided && grid_opt.layout() == kStrided,
     "grid_sampler(): expected input and grid to have torch.strided layout, but "
     "input has ", input_opt.layout(), " and grid has ", grid_opt.layout());
@@ -856,7 +963,7 @@ Tensor grid_sampler(const Tensor& input, const Tensor& grid,
     !(input.dim() == 5 && static_cast<GridSamplerInterpolation>(interpolation_mode) == GridSamplerInterpolation::Bicubic),
     "grid_sampler(): bicubic interpolation only supports 4D input"
   );
-  for (int64_t i = 2; i < input.dim(); i++) {
+  for (const auto i : c10::irange(2, input.dim())) {
     TORCH_CHECK(input.size(i) > 0,
       "grid_sampler(): expected input to have non-empty spatial dimensions, "
       "but input has sizes ", input.sizes(), " with dimension ", i, " being "

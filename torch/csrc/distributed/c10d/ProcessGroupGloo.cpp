@@ -190,6 +190,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -255,6 +259,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -2733,7 +2741,7 @@ void ProcessGroupGloo::monitoredBarrier(
           "Rank ",
           rank,
           " successfully reached monitoredBarrier, but received errors while waiting",
-          " to be unblocked by rank 0. Please check rank 0 logs for faulty rank.");
+          " for send/recv from rank 0. Please check rank 0 logs for faulty rank.");
       logAndThrow(
           error, c10::str(error, "\n Original exception: \n", e.what()));
     }
@@ -2772,7 +2780,7 @@ void ProcessGroupGloo::monitoredBarrier(
             rankResponded = true;
           } catch (const std::exception& e) {
             const std::string error = c10::str(
-                "Rank ",
+                "[Rank 0]: Rank ",
                 work.first,
                 " failed to pass monitoredBarrier in ",
                 monitoredBarrierTimeout.count(),

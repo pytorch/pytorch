@@ -214,7 +214,7 @@ class RNNBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer_method = default_dynamic_qconfig.weight
 
         dtype = weight_observer_method().dtype
@@ -525,7 +525,7 @@ class GRU(RNNBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
-    .. include:: cudnn_persistent_rnn.rst
+    .. include:: ../cudnn_persistent_rnn.rst
 
     Examples::
 
@@ -731,7 +731,7 @@ class RNNCellBase(torch.nn.Module):
             # We have the circular import issues if we import the qconfig in the beginning of this file:
             # https://github.com/pytorch/pytorch/pull/24231. The current workaround is to postpone the
             # import until we need it.
-            from torch.quantization.qconfig import default_dynamic_qconfig
+            from torch.ao.quantization.qconfig import default_dynamic_qconfig
             weight_observer_method = default_dynamic_qconfig.weight
 
         dtype = weight_observer_method().dtype

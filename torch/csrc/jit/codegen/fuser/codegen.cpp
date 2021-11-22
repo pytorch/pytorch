@@ -661,7 +661,7 @@ std::string generateKernel(
 
   // HIP headers must be included until precompiled header feature is available
   // clang-format off
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #if ROCM_VERSION < 40200
   if (use_cuda && has_half_tensor) {
     env.s("RuntimeHeader", R"(

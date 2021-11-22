@@ -31,7 +31,7 @@ class Gemm : public benchmark::Fixture {
   at::Tensor B;
   at::Tensor C;
 };
-}
+} // namespace
 
 BENCHMARK_DEFINE_F(Gemm, Torch)(benchmark::State& state) {
   for (auto _ : state) {
@@ -40,9 +40,8 @@ BENCHMARK_DEFINE_F(Gemm, Torch)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
-
-  te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
-  te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
+  te::BufHandle AP("A", {M, K}, te::kFloat);
+  te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -63,9 +62,8 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprNoopt)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
-
-  te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
-  te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
+  te::BufHandle AP("A", {M, K}, te::kFloat);
+  te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -122,9 +120,8 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile32x32)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
-
-  te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
-  te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
+  te::BufHandle AP("A", {M, K}, te::kFloat);
+  te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -181,9 +178,8 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
-
-  te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
-  te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
+  te::BufHandle AP("A", {M, K}, te::kFloat);
+  te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -248,9 +244,8 @@ BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16VecUnroll)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(Gemm, TensorExprTile4x16Cache)(benchmark::State& state) {
-
-  te::Placeholder AP(te::BufHandle("A", {M, K}, te::kFloat));
-  te::Placeholder BP(te::BufHandle("B", {K, N}, te::kFloat));
+  te::BufHandle AP("A", {M, K}, te::kFloat);
+  te::BufHandle BP("B", {K, N}, te::kFloat);
   te::Tensor CT = te::Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},

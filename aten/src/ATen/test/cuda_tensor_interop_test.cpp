@@ -84,6 +84,8 @@ TEST(CUDAPytorchToCaffe2, Op) {
 
   auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  (void)c2_tensor_a;
+  (void)c2_tensor_b;
 
   // Test Alias
   {

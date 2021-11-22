@@ -45,6 +45,7 @@ class IOSNightlyJob:
             props_dict["ios_platform"] = ios_definitions.get_platform(self.variant)
             props_dict["name"] = self.gen_job_name()
             props_dict["use_metal"] = miniutils.quote(str(int(True)))
+            props_dict["use_coreml"] = miniutils.quote(str(int(True)))
 
         template_name = "_".join([
             "binary",

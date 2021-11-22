@@ -2693,8 +2693,8 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
    */
 
   // Can determine if 2 loops created by Compute are dependent.
-  Placeholder a_buf("a", kFloat, {4, 5});
-  Placeholder b_buf("b", kFloat, {5, 6});
+  BufHandle a_buf("a", {4, 5}, kFloat);
+  BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{4, "m"}, {5, "n"}, {6, "k"}},
@@ -2710,13 +2710,13 @@ TEST(MemDependency, MemDependencyCheckerComputeAPI) {
 
   LoopNest l({d}, {c, d});
 
-  MemDependencyChecker analyzer({a_buf.data(), b_buf.data()}, {d.buf()});
+  MemDependencyChecker analyzer({a_buf.node(), b_buf.node()}, {d.buf()});
 
   l.root_stmt()->accept(&analyzer);
 
   // Sanity test: Output depends on input.
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a_buf.data()));
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b_buf.data()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a_buf.node()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b_buf.node()));
 
   // Second loop depends on first loop.
   auto c_loop = l.getLoopStmtsFor(c)[0];
@@ -2738,8 +2738,8 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
 
   // Check inlining affects the number of accesses returned.
 
-  Placeholder a_buf("a", kFloat, {4, 5});
-  Placeholder b_buf("b", kFloat, {5, 6});
+  BufHandle a_buf("a", {4, 5}, kFloat);
+  BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{4, "m"}, {5, "n"}, {6, "k"}},
@@ -2756,12 +2756,12 @@ TEST(MemDependency, MemDependencyCheckerComputeInline) {
   LoopNest l({d}, {c, d});
   l.computeInline(c.buf());
 
-  MemDependencyChecker analyzer({a_buf.data(), b_buf.data()}, {d.buf()});
+  MemDependencyChecker analyzer({a_buf.node(), b_buf.node()}, {d.buf()});
   l.root_stmt()->accept(&analyzer);
 
   // Sanity test: Output depends on input.
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a_buf.data()));
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b_buf.data()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a_buf.node()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b_buf.node()));
 
   // broadcast_add tensor should not appear in trace at all.
   for (auto& wi : analyzer.getHistory()) {
@@ -2773,8 +2773,8 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
   using namespace analysis;
   // Split an axis, so the number of loops != the number of dimensions.
 
-  Placeholder a_buf("a", kFloat, {4, 5});
-  Placeholder b_buf("b", kFloat, {5, 6});
+  BufHandle a_buf("a", {4, 5}, kFloat);
+  BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{4, "m"}, {5, "n"}, {6, "k"}},
@@ -2784,12 +2784,12 @@ TEST(MemDependency, MemDependencyCheckerComputeSplit) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.node(), b_buf.node()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   l.splitWithTail(l.getLoopStmtsFor(c)[0], 2);
 
-  MemDependencyChecker analyzer_after({a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_after({a_buf.node(), b_buf.node()}, {c.buf()});
   StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   stmt->accept(&analyzer_after);
 
@@ -2819,8 +2819,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
   using namespace analysis;
   // Reorder an axis, so the loop order doesn't match the indexing order.
 
-  Placeholder a_buf("a", kFloat, {4, 5});
-  Placeholder b_buf("b", kFloat, {5, 6});
+  BufHandle a_buf("a", {4, 5}, kFloat);
+  BufHandle b_buf("b", {5, 6}, kFloat);
   Tensor c = Compute(
       "broadcast_add",
       {{4, "m"}, {5, "n"}, {6, "k"}},
@@ -2830,13 +2830,13 @@ TEST(MemDependency, MemDependencyCheckerComputeReorder) {
 
   LoopNest l({c});
 
-  MemDependencyChecker analyzer_before({a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_before({a_buf.node(), b_buf.node()}, {c.buf()});
   l.root_stmt()->accept(&analyzer_before);
 
   auto loops = l.getLoopStmtsFor(c);
   l.reorderAxis(loops[0], loops[1]);
 
-  MemDependencyChecker analyzer_after({a_buf.data(), b_buf.data()}, {c.buf()});
+  MemDependencyChecker analyzer_after({a_buf.node(), b_buf.node()}, {c.buf()});
   StmtPtr stmt = IRSimplifier::simplify(l.root_stmt());
   stmt->accept(&analyzer_after);
 
@@ -2884,8 +2884,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 
   // Can determine dependencies of a Reduction.
 
-  Placeholder a(BufHandle("a", {2, 3, 6}, kFloat));
-  Placeholder b(BufHandle("b", {2, 3, 6}, kFloat));
+  BufHandle a("a", {2, 3, 6}, kFloat);
+  BufHandle b("b", {2, 3, 6}, kFloat);
 
   Tensor c = Compute(
       "scale",
@@ -2896,13 +2896,13 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
   Tensor d = Reduce("sum", {{2, "l1"}}, Sum(), c, {{3, "n1"}, {6, "m1"}});
   LoopNest l({d}, {c, d});
 
-  MemDependencyChecker analyzer({a.data(), b.data()}, {d.buf()});
+  MemDependencyChecker analyzer({a.node(), b.node()}, {d.buf()});
 
   l.root_stmt()->accept(&analyzer);
 
   // Sanity test: Output depends on input.
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a.data()));
-  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b.data()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), a.node()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(d.buf(), b.node()));
 
   // Second loop depends on first loop.
   auto c_loop = l.getLoopStmtsFor(c)[0];
@@ -2911,8 +2911,8 @@ TEST(MemDependency, MemDependencyCheckerComputeReduce) {
 
   // Reduction depends on both inputs.
   auto reduces = NodeFinder<ReduceOp>::find(l.root_stmt());
-  ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], a.data()));
-  ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], b.data()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], a.node()));
+  ASSERT_TRUE(analyzer.dependsIndirectly(reduces[0], b.node()));
 }
 
 TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
@@ -2921,8 +2921,8 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
   int K = 2048;
   using namespace analysis;
 
-  Placeholder AP(BufHandle("A", {M, K}, kFloat));
-  Placeholder BP(BufHandle("B", {K, N}, kFloat));
+  BufHandle AP("A", {M, K}, kFloat);
+  BufHandle BP("B", {K, N}, kFloat);
   Tensor CT = Reduce(
       "gemm",
       {{M, "M"}, {N, "N"}},
@@ -2984,8 +2984,8 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
     stmt->accept(&analyzer_unlowered);
 
     // Outputs depend on inputs.
-    ASSERT_TRUE(analyzer_unlowered.dependsIndirectly(CT.buf(), AP.data()));
-    ASSERT_TRUE(analyzer_unlowered.dependsIndirectly(CT.buf(), BP.data()));
+    ASSERT_TRUE(analyzer_unlowered.dependsIndirectly(CT.buf(), AP.node()));
+    ASSERT_TRUE(analyzer_unlowered.dependsIndirectly(CT.buf(), BP.node()));
 
     // The last write to gemm should cover the total bound of the output.
     std::shared_ptr<AccessInfo> outputAccess =
@@ -3003,8 +3003,8 @@ TEST(MemDependency, MemDependencyCheckerComputeGEMM) {
 
     // Likewise the first read from each input cover the entire range of the
     // input.
-    auto aInput = analyzer_unlowered.input(AP.data());
-    auto bInput = analyzer_unlowered.input(BP.data());
+    auto aInput = analyzer_unlowered.input(AP.node());
+    auto bInput = analyzer_unlowered.input(BP.node());
 
     // A single dependent each.
     ASSERT_EQ(aInput->dependents().size(), 1);

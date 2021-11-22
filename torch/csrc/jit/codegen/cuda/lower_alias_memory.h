@@ -28,9 +28,8 @@ namespace cuda {
 //!          is not used after this op:
 //! then alias output Allocate to input Allocate.
 //!
-std::vector<Expr*> reuseMemoryAllocations(
-    Fusion* fusion,
-    const std::vector<Expr*>& exprs);
+std::vector<kir::Expr*> reuseMemoryAllocations(
+    const std::vector<kir::Expr*>& exprs);
 
 } // namespace cuda
 } // namespace fuser

@@ -101,7 +101,10 @@ if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
       sccache --show-stats
       sccache --stop-server || true
     }
-    trap_add sccache_epilogue EXIT
+
+    if [[ "${JOB_BASE_NAME}" == *-build ]]; then
+      trap_add sccache_epilogue EXIT
+    fi
   fi
 
   if which ccache > /dev/null; then
@@ -139,7 +142,6 @@ fi
 # Alternatively we could point cmake to the right place
 # export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 if [[ "$BUILD_ENVIRONMENT" == *xla-linux-bionic* ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda9-cudnn7-py2* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *centos* ]] || \
    [[ "$BUILD_ENVIRONMENT" == *linux-bionic* ]]; then
   if ! which conda; then

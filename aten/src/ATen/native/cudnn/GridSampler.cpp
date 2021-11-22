@@ -30,6 +30,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
+#include <c10/util/irange.h>
 
 // TODO: descriptor checking
 
@@ -41,7 +42,7 @@ namespace {
 void setSamplerDescriptor(SpatialTransformerDescriptor& desc, cudnnDataType_t dataType, const at::Tensor& tensor)
 {
   int inputSize[4] = {0};
-  for (int i = 0; i < tensor.dim(); ++i) {
+  for (const auto i : c10::irange(tensor.dim())) {
     inputSize[i] = (int) tensor.size(i);
   }
   desc.set(dataType, 4, inputSize);

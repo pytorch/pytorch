@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["module: unknown"]
+
 from torch.testing._internal.common_utils import run_tests
 
 import copy
@@ -8,7 +10,7 @@ import logging
 from itertools import product
 
 import torch
-import torch.quantization as tq
+import torch.ao.quantization as tq
 
 from torch import nn
 from torch.ao.nn.sparse import quantized as ao_nn_sq

@@ -21,7 +21,9 @@ namespace tensorexpr {
 
 Tensor computeSum(
     const std::vector<ArgValue>& inputs,
-    const c10::optional<ScalarType>& outputType) {
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   std::vector<size_t> axes;
   bool keepdim = false;
   // aten::sum takes the input tensor named self.
@@ -103,7 +105,8 @@ Tensor computeSum(
 Tensor computeMean(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);
@@ -126,10 +129,34 @@ Tensor computeMean(
           ResultBuf, "nnc_aten_mean", {InputBuf}, mean_dims_expr));
 }
 
+Tensor computeMax(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+  BufHandle ResultBuf("max", outputShape, dtype);
+  BufHandle InputBuf = c10::get<BufHandle>(inputs[0]);
+  std::vector<ExprHandle> max_dims_expr;
+  auto max_dim = c10::get<int64_t>(inputs[1]);
+  auto keep_dim = c10::get<bool>(inputs[2]);
+  return Tensor(
+      ResultBuf.node(),
+      ExternalCall::make(
+          ResultBuf,
+          "nnc_aten_max_red",
+          {InputBuf},
+          {max_dim, (int64_t)keep_dim}));
+}
+
 Tensor computeAdaptiveAvgPool2d(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
-    const c10::optional<ScalarType>& outputType) {
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
   Dtype dtype = kFloat;
   if (outputType) {
     dtype = Dtype(*outputType);

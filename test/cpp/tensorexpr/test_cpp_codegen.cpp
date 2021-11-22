@@ -2,6 +2,7 @@
 
 #include "test/cpp/tensorexpr/test_base.h"
 
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/cpp_codegen.h>
 #include <torch/csrc/jit/tensorexpr/fwd_decls.h>
 #include <torch/csrc/jit/tensorexpr/stmt.h>
@@ -145,8 +146,8 @@ TEST(CppPrinter, AllocateFree) {
 }
 
 TEST(CppPrinter, LoadStore) {
-  Placeholder a(BufHandle("A", {2, 3}, kInt));
-  Placeholder b(BufHandle("B", {3, 4}, kInt));
+  BufHandle a("A", {2, 3}, kInt);
+  BufHandle b("B", {3, 4}, kInt);
   auto store = b.store({2, 2}, a.load(1, 1));
   STR_CHECK(
       store, "B[(0 + 2 * (1 * 4)) + 2 * 1] = A[(0 + 1 * (1 * 3)) + 1 * 1];\n");
@@ -176,9 +177,9 @@ TEST(CppPrinter, Let) {
 
 TEST(CppPrinter, For) {
   constexpr int N = 1024;
-  Placeholder a(BufHandle("A", {N}, kInt));
-  Placeholder b(BufHandle("B", {N}, kInt));
-  Placeholder c(BufHandle("C", {N}, kInt));
+  BufHandle a("A", {N}, kInt);
+  BufHandle b("B", {N}, kInt);
+  BufHandle c("C", {N}, kInt);
   VarHandle i("i", kInt);
   auto f = For::make(i, 0, N, c.store({i}, Add::make(a.load(i), b.load(i))));
   const std::string pattern = R"(
@@ -190,7 +191,7 @@ TEST(CppPrinter, For) {
 }
 
 TEST(CppPrinter, Cond) {
-  Placeholder x(BufHandle("X", {1}, kInt));
+  BufHandle x("X", {1}, kInt);
   auto cmp = CompareSelect::make(x.load(0), 10, CompareSelectOperation::kLT);
   auto cond =
       Cond::make(cmp, x.store({0}, x.load(0) + 1), x.store({0}, x.load(0) - 1));
@@ -207,7 +208,7 @@ TEST(CppPrinter, Cond) {
 TEST(CppPrinter, Intrinsics) {
   const std::unordered_set<IntrinsicsOp, std::hash<int>> unsupported_ops{
       kRand, kSigmoid};
-  for (int i = 0; i < kMaxIntrinsicsOp; i++) {
+  for (const auto i : c10::irange(static_cast<uint32_t>(kMaxIntrinsicsOp))) {
     IntrinsicsOp op = static_cast<IntrinsicsOp>(i);
     if (unsupported_ops.count(op)) {
       continue;

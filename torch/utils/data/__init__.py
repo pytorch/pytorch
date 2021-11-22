@@ -14,6 +14,7 @@ from torch.utils.data.dataset import (
     DataChunk,
     Dataset,
     Dataset as MapDataPipe,
+    DFIterDataPipe,
     IterableDataset,
     IterableDataset as IterDataPipe,
     Subset,
