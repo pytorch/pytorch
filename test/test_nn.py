@@ -14707,6 +14707,22 @@ class TestNNDeviceType(NNTestCase):
         helper(1, 100000, 32, 32, ks=4)
         helper(1, 100000, 1, 4, ks=(1, 4))  # test for max_pool1d
 
+    @onlyCUDA
+    @largeTensorTest('6GB')
+    def test_pooling_large(self, device):
+
+        def helper(pool):
+            inp = torch.randn(2**7+10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda")
+            self.assertTrue(inp.numel() > 2**31-1)
+            out = pool(inp)
+            torch.cuda.synchronize()    # asserts test finishes normally without raising errors
+
+        helper(nn.MaxPool2d(4, 4))
+        helper(nn.AvgPool2d(4, 4))
+        helper(nn.FractionalMaxPool2d(4, 4))
+        helper(nn.AdaptiveMaxPool2d((2**6, 2**6)))
+        helper(nn.AdaptiveAvgPool2d((2**6, 2**6)))
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
