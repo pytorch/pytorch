@@ -1906,6 +1906,8 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* buf_dims = irb_.CreateAlloca(
       LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
+  llvm::Value* buf_strides = irb_.CreateAlloca(
+      LongTy_, llvm::ConstantInt::getSigned(IntTy_, dims_num));
   llvm::Value* buf_dtypes = irb_.CreateAlloca(
       ByteTy_, llvm::ConstantInt::getSigned(IntTy_, bufs_num));
   llvm::Value* extra_args = irb_.CreateAlloca(
@@ -1913,6 +1915,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
 
   int i = 0;
   int dim_idx = 0;
+  int stride_idx = 0;
   for (BufPtr b : bufs) {
     // Store value for buf pointer
     auto gep = irb_.CreateInBoundsGEP(
@@ -1945,6 +1948,16 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
       dim_idx++;
     }
 
+    // Store strides of the buf
+    for (const auto dim : c10::irange(b->dims().size())) {
+      gep = irb_.CreateInBoundsGEP(
+          buf_strides, {llvm::ConstantInt::getSigned(IntTy_, stride_idx)});
+      b->strides()[dim]->accept(this);
+      auto stride_val = this->value_;
+      irb_.CreateStore(irb_.CreateZExt(stride_val, LongTy_), gep);
+      stride_idx++;
+    }
+
     i++;
   }
 
@@ -1967,6 +1980,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
            Int8PtrTy_->getPointerTo(), // void** buf_data
            LongTy_->getPointerTo(), // int64_t* buf_ranks
            LongTy_->getPointerTo(), // int64_t* buf_dims
+           LongTy_->getPointerTo(), // int64_t* buf_strides
            ByteTy_->getPointerTo(), // int64_t* buf_dtypes
            LongTy_, // int64_t args_num
            LongTy_->getPointerTo()}, // int64_t* extra_args
@@ -1983,6 +1997,7 @@ void LLVMCodeGenImpl::visit(ExternalCallPtr v) {
        buf_ptrs,
        buf_ranks,
        buf_dims,
+       buf_strides,
        buf_dtypes,
        llvm::ConstantInt::getSigned(LongTy_, args_num),
        extra_args});

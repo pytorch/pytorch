@@ -53,7 +53,7 @@ except ImportError:
 #
 # This framework was built to make it easier to write tests that run on
 #   multiple device types, multiple datatypes (dtypes), and for multiple
-#   operators. It's also useful for controlling which tests are fun. For example,
+#   operators. It's also useful for controlling which tests are run. For example,
 #   only tests that use a CUDA device can be run on platforms with CUDA.
 #   Let's dive in with an example to get an idea for how it works:
 #
@@ -326,7 +326,12 @@ class DeviceTypeTestBase(TestCase):
     def _get_dtypes(cls, test):
         if not hasattr(test, 'dtypes'):
             return None
-        return test.dtypes.get(cls.device_type, test.dtypes.get('all', None))
+
+        default_dtypes = test.dtypes.get('all')
+        msg = f"@dtypes is mandatory when using @dtypesIf however '{test.__name__}' didn't specify it"
+        assert default_dtypes is not None, msg
+
+        return test.dtypes.get(cls.device_type, default_dtypes)
 
     def _get_precision_override(self, test, dtype):
         if not hasattr(test, 'precision_overrides'):
