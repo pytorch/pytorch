@@ -115,6 +115,11 @@ class ShardedTensor(object):
             Default: ``False``.
     """
 
+    def __new__(cls, *args, **kwargs):
+        # Use __new__ for logging purposes.
+        torch._C._log_api_usage_once("torch.distributed.sharded_tensor")
+        return super(ShardedTensor, cls).__new__(cls)
+
     def __init__(
         self,
         sharding_spec: ShardingSpec,
