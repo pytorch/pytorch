@@ -7,7 +7,7 @@ import itertools
 import math
 import os
 import re
-import unittest
+import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
@@ -970,6 +970,27 @@ class TestAssertClose(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             fn(check_dtype=False)
+
+    class UnexpectedException(Exception):
+        pass
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
+    def test_unexpected_error_originate(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.compare", side_effect=UnexpectedException)
+    def test_unexpected_error_compare(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+
 
 
 class TestAssertCloseMultiDevice(TestCase):
