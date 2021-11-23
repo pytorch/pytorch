@@ -143,7 +143,6 @@ class ModuleReLUFusion(FuseHandler):
                 return relu
             return MatchAllNode
 
-        print("matched node pattern", matched_node_pattern)
         matched_modules = tuple(map(get_module, matched_node_pattern))
         # since relu can be used multiple times, we'll need to create a relu module for each match
 
@@ -152,13 +151,9 @@ class ModuleReLUFusion(FuseHandler):
 
         matched_module_types = tuple(map(get_type, matched_modules))
         module_parent_name, module_name = _parent_name(self.module_node.target)
-        print("module parent name, module name", module_parent_name, module_name)
-        print("matched module types:", matched_module_types)
         fuser_method = get_fuser_method_new(matched_module_types)
-        print("fuser method:", fuser_method)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
         fused_module = fuser_method(*matched_modules)
-        print(fused_module)
         setattr(quantizer.modules[module_parent_name], module_name, fused_module)
         return quantizer.fused_graph.node_copy(self.module_node, load_arg)

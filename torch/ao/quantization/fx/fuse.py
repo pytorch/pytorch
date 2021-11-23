@@ -48,18 +48,14 @@ class Fuser:
         for node in input_graph.nodes:
             root_node, pattern, matched_node_pattern, obj = \
                 fusion_pairs.get(node.name, (None, None, None, None))
-            print("root node and node:", root_node, node)
             if root_node is node:
                 assert obj is not None
-                print("obj.fuse")
                 env[node.name] = obj.fuse(self, load_arg, root_node, matched_node_pattern, fuse_custom_config_dict)
             elif root_node is None:
-                print("copy node")
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
         preserved_attributes = set(fuse_custom_config_dict.get("preserved_attributes", []))
-        print("fused graph:", self.fused_graph)
         model = FusedGraphModule(input_root, self.fused_graph, preserved_attributes)
         return model
 
@@ -76,12 +72,9 @@ class Fuser:
                 current_node_pattern = []
                 apply_match(s, node, match, current_node_pattern)
                 for subpattern, arg in zip(args, node.args):
-                    print("applying ", subpattern, arg)
                     apply_match(subpattern, arg, match, current_node_pattern)
                 matched_node_pattern.append(tuple(current_node_pattern))
             else:
-                print("node name:", node.name)
-                print("match map:", match_map)
                 # the first pattern matches will take precedence
                 if node.name not in match_map:
                     matched_node_pattern.append(node)
@@ -94,7 +87,5 @@ class Fuser:
                     matched_node_pattern = []
                     if is_match(modules, node, pattern):
                         apply_match(pattern, node, (node, pattern, value(self, node)), matched_node_pattern)
-
-        print("match map:", match_map)
 
         return match_map
