@@ -31,11 +31,15 @@ std::unique_ptr<mobile::Code> compileGraphToMobileCode(
     const std::string& name,
     const std::shared_ptr<Graph>& graph,
     const CompilationOptions& compilation_options,
-    BackendDebugInfoRecorder* debug_info_recorder = nullptr);
+    BackendDebugInfoRecorder& debug_info_recorder);
 
-TORCH_API std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(const GraphFunction *function, const CompilationOptions& options);
+TORCH_API std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(
+    const GraphFunction& function,
+    const CompilationOptions& options);
 
-TORCH_API IValue convertMobileFunctionToCodeTable(const mobile::Function *func, const CompilationOptions& compilation_options);
+TORCH_API IValue convertMobileFunctionToCodeTable(
+    const mobile::Function* func,
+    const CompilationOptions& compilation_options);
 
 } // namespace jit
 } // namespace torch
