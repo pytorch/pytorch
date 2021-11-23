@@ -284,13 +284,17 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
           }
           case INST(OP): {
             INST_GUARD;
+            size_t init_size = stack.size();
             frame.function->operator_table_[inst.X](stack);
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
           }
             INST_NEXT;
           case INST(OPN): {
             INST_GUARD;
             stack.push_back(inst.N);
+            size_t init_size = stack.size();
             frame.function->operator_table_[inst.X](stack);
+            frame.function->assert_stack_size(inst.X, init_size, stack.size());
           }
             INST_NEXT;
           case INST(LOAD): {
