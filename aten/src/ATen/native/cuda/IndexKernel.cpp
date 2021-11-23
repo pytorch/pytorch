@@ -28,7 +28,9 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   // owning and expand_outplace returns a borrow, the returned borrow
   // would dangle.
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
-  at::native::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
+  at::native::index_out(
+      result, *std::get<1>(mask_self_expanded),
+      c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
 
   return result;
 }
