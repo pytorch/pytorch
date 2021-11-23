@@ -365,11 +365,11 @@ Tensor _s_where(const Tensor& condition, const Tensor& self, const Tensor& other
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(ret)
-    .add_input(condition)
+    .add_input(condition.scalar_type() == ScalarType::Bool ? condition : condition.to(ScalarType::Bool))
     .add_input(self)
     .add_input(other)
     .build();
-  where_kernel(iter.device_type(), iter, condition.scalar_type());
+  where_kernel(iter.device_type(), iter);
   return ret;
 }
 
@@ -490,10 +490,8 @@ TORCH_IMPL_FUNC(clamp_out)
     clamp_scalar_stub(device_type(), *this, min.get(), max.get(), ClampLimits::MinMax);
   } else if (max) {
     clamp_scalar_stub(device_type(), *this, max.get(), max.get(), ClampLimits::Max);
-//    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
   } else if (min) {
     clamp_scalar_stub(device_type(), *this, min.get(), min.get(), ClampLimits::Min);
-//    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
   }
 }
 

@@ -195,22 +195,14 @@ static void aminmax_kernel(
   });
 }
 
-static void where_kernel_impl(TensorIterator &iter, ScalarType condition_type) {
+static void where_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
     iter.dtype(), "where_cpu", [&] {
-    if (condition_type == at::ScalarType::Byte) {
-      cpu_kernel(
-        iter,
-        [=](uint8_t cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
-          return cond_val ? self_val : other_val;
-        });
-    } else {
       cpu_kernel(
         iter,
         [=](bool cond_val, scalar_t self_val, scalar_t other_val) -> scalar_t {
           return cond_val ? self_val : other_val;
         });
-    }
   });
 }
 

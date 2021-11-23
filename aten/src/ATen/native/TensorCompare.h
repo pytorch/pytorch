@@ -22,7 +22,7 @@ using structured_reduce_minmax_fn =
 DECLARE_DISPATCH(structured_reduce_minmax_fn, max_stub);
 DECLARE_DISPATCH(structured_reduce_minmax_fn, min_stub);
 
-using where_fn = void (*)(TensorIterator &, c10::ScalarType);
+using where_fn = void (*)(TensorIterator &);
 DECLARE_DISPATCH(where_fn, where_kernel);
 
 using is_infinity_op_fn = void (*)(TensorIteratorBase &);
