@@ -424,6 +424,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
