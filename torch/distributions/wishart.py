@@ -155,7 +155,7 @@ class Wishart(Distribution):
 
         # Implemented Bartlett decomposition
         if self.bartlett_decomposition:
-            noise = self.dist_gamma.sample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
+            noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
             noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
         else:
             noise = _standard_normal(
