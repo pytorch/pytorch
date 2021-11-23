@@ -27,7 +27,7 @@ void mode_kernel_impl(
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as
   // the input Tensor, except at dim=dimension, the size is 1)
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(0 <= dim && dim < self_sizes.size());
+  assert(0 <= dim && static_cast<size_t>(dim) < self_sizes.size());
   self_sizes[dim] = 1;
 
   if (!keepdim) {
