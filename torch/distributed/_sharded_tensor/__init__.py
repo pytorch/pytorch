@@ -360,26 +360,18 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
     _recurse_update_module(module, state_dict, prefix)
 
 def _recurse_update_module(module, state_dict, prefix):
-    for attr_name, attr in module.__dict__.items():
-        key = prefix + attr_name
-        if key in state_dict:
-            if isinstance(state_dict[key], ShardedTensor):
-                setattr(module, attr_name, state_dict[key])
-
     for submodule_name, submodule in module.named_modules():
-        key = prefix + submodule_name
-        if submodule_name:
-            _recurse_update_module(submodule, state_dict, key + '.')
-
+        for attr_name, attr in module.__dict__.items():
+            key = prefix + submodule_name + '.' + attr_name
+            if key in state_dict:
+                if isinstance(state_dict[key], ShardedTensor):
+                    setattr(module, attr_name, state_dict[key])
 
 def _recurse_update_dict(module, destination, prefix):
-    for attr_name, attr in module.__dict__.items():
-        if isinstance(attr, ShardedTensor):
-            destination[prefix + attr_name] = attr
-
     for submodule_name, submodule in module.named_modules():
-        if submodule_name != '':
-            _recurse_update_dict(submodule, destination, prefix + submodule_name + '.')
+        for attr_name, attr in module.__dict__.items():
+            if isinstance(attr, ShardedTensor):
+                destination[prefix + submodule_name + '.' + attr_name] = attr
 
 def shard_parameter(
         module: torch.nn.Module,
