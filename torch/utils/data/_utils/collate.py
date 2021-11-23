@@ -28,7 +28,7 @@ def default_convert(data):
     elif isinstance(data, collections.abc.Mapping):
         try:
             return elem_type({key: default_convert(data[key]) for key in data})
-        except BaseException:
+        except TypeError:
             # The mapping type may not support `__init__(iterable)`.
             return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
@@ -36,7 +36,7 @@ def default_convert(data):
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
         try:
             return elem_type([default_convert(d) for d in data])
-        except BaseException:
+        except TypeError:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [default_convert(d) for d in data]
     else:
@@ -81,7 +81,7 @@ def default_collate(batch):
     elif isinstance(elem, collections.abc.Mapping):
         try:
             return elem_type({key: default_collate([d[key] for d in batch]) for key in elem})
-        except BaseException:
+        except TypeError:
             # The mapping type may not support `__init__(iterable)`.
             return {key: default_collate([d[key] for d in batch]) for key in elem}
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
@@ -95,7 +95,7 @@ def default_collate(batch):
         transposed = zip(*batch)
         try:
             return elem_type([default_collate(samples) for samples in transposed])
-        except BaseException:
+        except TypeError:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [default_collate(samples) for samples in transposed]
 
