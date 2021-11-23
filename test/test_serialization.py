@@ -14,6 +14,7 @@ import pickle
 import shutil
 import pathlib
 from copy import deepcopy
+from itertools import product
 
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
@@ -22,6 +23,7 @@ from torch.serialization import check_module_version_greater_or_equal
 from torch.testing._internal.common_utils import TestCase, IS_WINDOWS, \
     TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_dtype import get_all_dtypes
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -573,22 +575,25 @@ class SerializationMixin(object):
         if torch.cuda.is_available():
             devices.append('cuda')
 
-        for device in devices:
-            a = torch.tensor([], dtype=torch.complex128, device=device)
-            f = io.BytesIO()
+        def save_load_check(a, b):
+            with io.BytesIO() as f:
+                torch.save([a, b], f)
+                f.seek(0)
+                a_loaded, b_loaded = torch.load(f)
+            self.assertEqual(a, a_loaded)
+            self.assertEqual(b, b_loaded)
 
-            torch.save([a, a.imag], f)
-            torch.save([a.storage(), a.imag], f)
-            torch.save([a, a.imag.storage()], f)
-            torch.save([a.storage(), a.imag.storage()], f)
+        for device, dtype in product(devices, get_all_dtypes()):
+            a = torch.tensor([], dtype=dtype, device=device)
 
-            a = torch.tensor([], dtype=torch.float64, device=device)
-            s_bytes = torch.TypedStorage(
-                wrap_storage=a.storage()._untyped(),
-                dtype=torch.uint8)
-
-            torch.save([a, s_bytes], f)
-            torch.save([a.storage(), s_bytes], f)
+            for other_dtype in get_all_dtypes():
+                s = torch.TypedStorage(
+                    wrap_storage=a.storage()._untyped(),
+                    dtype=other_dtype)
+                save_load_check(a, s)
+                save_load_check(a.storage(), s)
+                b = torch.tensor([], dtype=other_dtype, device=device)
+                save_load_check(a, b)
 
     def test_save_different_dtype_error(self):
         error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"

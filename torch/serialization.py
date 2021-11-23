@@ -431,6 +431,9 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 dtype = torch.uint8
                 storage_numel = cast(Storage, storage).nbytes()
 
+            # If storage is allocated, ensure that any other saved storages
+            # pointing to the same data all have the same dtype. If storage is
+            # not allocated, don't perform this check
             if storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:
@@ -555,6 +558,9 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
             storage = cast(Storage, storage)
 
+            # If storage is allocated, ensure that any other saved storages
+            # pointing to the same data all have the same dtype. If storage is
+            # not allocated, don't perform this check
             if storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:
