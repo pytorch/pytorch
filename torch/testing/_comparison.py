@@ -581,6 +581,10 @@ class TensorLikePair(Pair):
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
+        # TODO: See https://github.com/pytorch/pytorch/issues/68592
+        if tensor.device.type == "meta":
+            raise ErrorMeta(ValueError, "Comparing meta tensors is currently not supported", id=id)
+
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
