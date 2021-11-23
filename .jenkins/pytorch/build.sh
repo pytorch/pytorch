@@ -148,23 +148,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
       export PYTORCH_ROCM_ARCH="gfx900;gfx906"
   fi
 
+  # hipify sources
   python tools/amd_build/build_amd.py
-  python setup.py install
-
-  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-  sudo rm -f /opt/cache/bin/cc
-  sudo rm -f /opt/cache/bin/c++
-  sudo rm -f /opt/cache/bin/gcc
-  sudo rm -f /opt/cache/bin/g++
-  pushd /opt/rocm/llvm/bin
-  if [[ -d original ]]; then
-    sudo mv original/clang .
-    sudo mv original/clang++ .
-  fi
-  sudo rm -rf original
-  popd
-
-  exit 0
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
@@ -320,4 +305,21 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+  sudo rm -f /opt/cache/bin/cc
+  sudo rm -f /opt/cache/bin/c++
+  sudo rm -f /opt/cache/bin/gcc
+  sudo rm -f /opt/cache/bin/g++
+  pushd /opt/rocm/llvm/bin
+  if [[ -d original ]]; then
+    sudo mv original/clang .
+    sudo mv original/clang++ .
+  fi
+  sudo rm -rf original
+  popd
+
+  exit 0
 fi
