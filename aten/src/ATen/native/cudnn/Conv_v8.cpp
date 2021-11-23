@@ -295,7 +295,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   const float alpha2 = alpha;
   auto conv_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR)
                    .setxDesc(getTensorDescriptor(x, 'x', key.x_alignment))
-		   // virtual output of conv
+                   // virtual output of conv
                    .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'C', key.y_alignment, precision, true))
                    .setwDesc(getTensorDescriptor(w, 'w', key.w_alignment))
                    .setAlpha(alpha1)
@@ -304,7 +304,7 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   auto add_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(conv_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(z, 'z', key.z_alignment))
-			   // another virtual output (of add)
+                           // another virtual output (of add)
                            .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'A', key.y_alignment, precision, true))
                            .setpwDesc(addDesc)
                            .setAlpha(alpha1)
@@ -314,13 +314,13 @@ auto build_opgraph_fused(const cudnnHandle_t handle, const Tensor & x, const Ten
   auto add_bias_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                            .setxDesc(add_op.getOutputTensor())
                            .setbDesc(getTensorDescriptor(b, 'b', key.b_alignment))
-			   // another virtual output (of add bias)
+                           // another virtual output (of add bias)
                            .setyDesc(getTensorDescriptorWithTypeVirtual(y, 'B', key.y_alignment, precision, true))
                            .setpwDesc(addBiasDesc)
                            .build();
   auto act_op = cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)
                           .setxDesc(add_bias_op.getOutputTensor())
-			  // final output is in original datatype
+                          // final output is in original datatype
                           .setyDesc(getTensorDescriptor(y, 'y', key.y_alignment))
                           .setpwDesc(actDesc)
                           .build();
