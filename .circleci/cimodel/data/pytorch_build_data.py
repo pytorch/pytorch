@@ -1,4 +1,4 @@
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode, X
 
 
 CONFIG_TREE_DATA = [
