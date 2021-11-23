@@ -52,7 +52,7 @@ def pin_memory(data):
         return data
     elif isinstance(data, collections.abc.Mapping):
         try:
-            return type(data)((k, pin_memory(sample)) for k, sample in data.items())  # type: ignore[call-arg]
+            return type(data)({k: pin_memory(sample) for k, sample in data.items()})  # type: ignore[call-arg]
         except BaseException:
             # The mapping type may not support `__init__(iterable)`.
             return {k: pin_memory(sample) for k, sample in data.items()}

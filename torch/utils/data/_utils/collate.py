@@ -27,7 +27,7 @@ def default_convert(data):
         return torch.as_tensor(data)
     elif isinstance(data, collections.abc.Mapping):
         try:
-            return elem_type((key, default_convert(data[key])) for key in data)
+            return elem_type({key: default_convert(data[key]) for key in data})
         except BaseException:
             # The mapping type may not support `__init__(iterable)`.
             return {key: default_convert(data[key]) for key in data}
@@ -80,7 +80,7 @@ def default_collate(batch):
         return batch
     elif isinstance(elem, collections.abc.Mapping):
         try:
-            return elem_type((key, default_collate([d[key] for d in batch])) for key in elem)
+            return elem_type({key: default_collate([d[key] for d in batch]) for key in elem})
         except BaseException:
             # The mapping type may not support `__init__(iterable)`.
             return {key: default_collate([d[key] for d in batch]) for key in elem}
