@@ -88,7 +88,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
 
   # Magma package names are concatenation of CUDA major and minor
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2
-  conda_install magma-cuda${CUDA_VERSION//./} -c pytorch
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda${CUDA_VERSION//./} -c pytorch
+  fi
 
   # TODO: This isn't working atm
   conda_install nnpack -c killeent
