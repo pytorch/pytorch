@@ -1,12 +1,14 @@
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
 from torch.fx.node import Node
+from torch.fx.node import map_arg
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx._compatibility import compatibility
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
+from functools import partial
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -43,6 +45,15 @@ class _SubgraphMatcher:
 
     # Compare the pattern node `pn` against the graph node `gn`
     def _match_nodes(self, pn: Node, gn: Node) -> bool:
+
+        if isinstance(pn, (tuple, list)):
+            if not isinstance(gn, type(pn)):
+                return False
+            return all(self._match_nodes(a1, a2) for a1, a2 in zip(pn, gn))
+        elif isinstance(pn, dict):
+            if not isinstance(gn, dict):
+                return False
+            return pn.keys() == gn.keys() and all(self._match_nodes(v1, v2) for v1, v2 in zip(pn.values(), gn.values()))
 
         # Check if we've already matched these nodes in the current
         # traversal
