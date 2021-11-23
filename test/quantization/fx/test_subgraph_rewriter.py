@@ -1,4 +1,4 @@
-# Copied from
+# Copied from pytorch/test/fx/test_subgraph_rewriter.py
 
 import os
 import sys
