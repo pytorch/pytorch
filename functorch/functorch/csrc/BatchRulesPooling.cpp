@@ -26,38 +26,6 @@ static Tensor reshape_bdim_into_front(
   return reshape_dim_into(*bdim, 0, value_);
 }
 
-// We can't use ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED because the CUDA
-// kernel rightfully assumes that indices is contiguous.
-std::tuple<Tensor,optional<int64_t>> max_pool2d_with_indices_backward_batch_rule(
-    const Tensor& gradOutput, optional<int64_t> gradOutput_bdim,
-    const Tensor& input, optional<int64_t> input_bdim,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef dilation,
-    bool ceil_mode,
-    const Tensor& indices, optional<int64_t> indices_bdim) {
-  TORCH_INTERNAL_ASSERT(input_bdim.has_value() ^ !indices_bdim.has_value());
-  const auto bdim_size = get_bdim_size2(gradOutput, gradOutput_bdim, input, input_bdim);
-  const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
-  bool chw_case = input_logical_rank == 3;
-
-  const auto gradOutput_ = reshape_bdim_into_front(gradOutput, gradOutput_bdim, bdim_size, chw_case);
-  const auto input_ = reshape_bdim_into_front(input, input_bdim, bdim_size, chw_case);
-  const auto indices_ = reshape_bdim_into_front(indices, indices_bdim, bdim_size, chw_case);
-
-  const auto result = at::max_pool2d_with_indices_backward(
-      gradOutput_, input_, kernel_size, stride, padding, dilation, ceil_mode,
-      // max_pool2d_with_indices rightfully assumes that indices is contiguous
-      indices_.contiguous());
-
-  if (chw_case) {
-    return std::make_tuple(std::move(result), 0);
-  } else {
-    return std::make_tuple(reshape_dim_outof(0, bdim_size, result), 0);
-  }
-}
-
 std::tuple<Tensor,optional<int64_t>,Tensor,optional<int64_t>>
 max_pool2d_with_indices_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
@@ -91,8 +59,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(avg_pool3d);
   EXISTING_BDIM_ALL_BOXED(avg_pool2d_backward);
   EXISTING_BDIM_ALL_BOXED(avg_pool3d_backward);
+  EXISTING_BDIM_ALL_BOXED(adaptive_max_pool2d);
+  EXISTING_BDIM_ALL_BOXED(adaptive_max_pool3d);
+  ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, adaptive_max_pool2d_backward, 2);
+  ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(4, adaptive_max_pool3d_backward, 2);
+
   VMAP_SUPPORT("max_pool2d_with_indices", max_pool2d_with_indices_batch_rule);
-  VMAP_SUPPORT("max_pool2d_with_indices_backward", max_pool2d_with_indices_backward_batch_rule);
+  ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(3, max_pool2d_with_indices_backward, 2);
 }
 
 }}

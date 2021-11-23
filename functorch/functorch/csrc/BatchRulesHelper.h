@@ -265,7 +265,7 @@ inline void boxed_existing_bdim_all_batch_rule(
 #define EXISTING_BDIM_ALL_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_existing_bdim_all_batch_rule>());
 
-template <int64_t feature_rank>
+template <int64_t feature_rank, int64_t contig_tensor_index=-1>
 inline void boxed_all_tensors_have_optional_bdim(
     const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   const auto& schema = op.schema();
@@ -302,11 +302,19 @@ inline void boxed_all_tensors_have_optional_bdim(
     }
     if (*is_no_batch_dim_case) {
       TORCH_INTERNAL_ASSERT(logical_rank == feature_rank);
-      (*stack)[args_begin + tensor_pos[tensor_idx]] = moveBatchDimToFront(value_, bdim);
+      value_ = moveBatchDimToFront(value_, bdim);
+      if (tensor_idx == contig_tensor_index) {
+        value_ = value_.contiguous();
+      }
+      (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
       continue;
     }
     TORCH_INTERNAL_ASSERT(logical_rank == feature_rank + 1);
-    (*stack)[args_begin + tensor_pos[tensor_idx]] = reshape_dim_into(*bdim, 0, value_);
+    value_ = reshape_dim_into(*bdim, 0, value_);
+    if (tensor_idx == contig_tensor_index) {
+      value_ = value_.contiguous();
+    }
+    (*stack)[args_begin + tensor_pos[tensor_idx]] = value_;
   }
 
   op.callBoxed(stack);
@@ -329,6 +337,14 @@ inline void boxed_all_tensors_have_optional_bdim(
 // - All arguments must be the same rank
 #define ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED(feature_rank, op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_all_tensors_have_optional_bdim<feature_rank>>());
+
+#define ALL_TENSORS_HAVE_OPTIONAL_BDIM_BOXED_CONTIG1(feature_rank, op, contig_tensor_index) \
+  m.impl(#op, \
+         torch::CppFunction::makeFromBoxedFunction<\
+             boxed_all_tensors_have_optional_bdim<\
+                 feature_rank, \
+                 contig_tensor_index>\
+             >());
 
 template <typename A, A a, typename C>
 struct ExistingBdimBatchRuleHelper;
