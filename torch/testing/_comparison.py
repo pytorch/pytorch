@@ -30,10 +30,14 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
+    @staticmethod
+    def id_to_itemstr(id: Tuple[Any, ...]) -> str:
+        return "".join(str([item]) for item in id)
+
     def to_error(self) -> Exception:
         msg = self.msg
         if self.id:
-            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
+            msg += f"\n\nThe failure occurred for item {self.id_to_itemstr(self.id)}"
         return self.type(msg)
 
 
@@ -588,6 +592,10 @@ class TensorLikePair(Pair):
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
+        # TODO: See https://github.com/pytorch/pytorch/issues/68592
+        if tensor.device.type == "meta":
+            raise ErrorMeta(ValueError, "Comparing meta tensors is currently not supported", id=id)
+
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
@@ -804,7 +812,9 @@ class TensorLikePair(Pair):
     ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
         actual, expected = self._promote_for_comparison(actual, expected)
-        mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        # torch.isclose is currently not supported on the XLA backend
+        comparison_fn = self._isclose_xla if actual.device.type == "xla" else torch.isclose
+        mismatches = ~comparison_fn(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
         if not torch.any(mismatches):
             return
 
@@ -831,6 +841,24 @@ class TensorLikePair(Pair):
         else:
             dtype = torch.int64
         return actual.to(dtype), expected.to(dtype)
+
+    # TODO: remove this as soon as torch.isclose is supported on the XLA backend
+    def _isclose_xla(
+            self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
+    ) -> torch.Tensor:
+        matches = actual == expected
+        if equal_nan:
+            matches[actual.isnan() & expected.isnan()] = True
+
+        if rtol == 0 and atol == 0:
+            return matches
+
+        abs_diff = torch.abs(actual - expected)
+        tolerance = atol + rtol * torch.abs(expected)
+
+        matches[torch.isfinite(abs_diff) & (abs_diff <= tolerance)] = True
+
+        return matches
 
     def extra_repr(self) -> Sequence[str]:
         return (
@@ -951,13 +979,19 @@ def originate_pairs(
         for pair_type in pair_types:
             try:
                 return [pair_type(actual, expected, id=id, **options)]
+            # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
+            # inputs. Thus, we try the next pair type.
             except UnsupportedInputs:
                 continue
+            # Raising an `ErrorMeta` during origination is the orderly way to abort and so we simply re-raise it. This
+            # is only in a separate branch, because the one below would also except it.
             except ErrorMeta:
                 raise
+            # Raising any other exception during origination is unexpected and will give some extra information about
+            # what happened. If applicable, the exception should be expected in the future.
             except Exception as error:
                 raise RuntimeError(
-                    f"Originating a {pair_type.__name__}() with\n\n"
+                    f"Originating a {pair_type.__name__}() at item {ErrorMeta.id_to_itemstr(id)} with\n\n"
                     f"{type(actual).__name__}(): {actual}\n\n"
                     f"and\n\n"
                     f"{type(expected).__name__}(): {expected}\n\n"
@@ -1019,6 +1053,8 @@ def assert_equal(
             pair.compare()
         except ErrorMeta as error_meta:
             error_metas.append(error_meta)
+        # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
+        # about what happened. If applicable, the exception should be expected in the future.
         except Exception as error:
             raise RuntimeError(
                 f"Comparing\n\n"
