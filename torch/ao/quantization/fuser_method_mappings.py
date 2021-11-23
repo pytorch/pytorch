@@ -134,20 +134,29 @@ def get_fuser_method(op_list, additional_fuser_method_mapping=None):
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_list)
     return fuser_method
 
+def reverse2(f):
+    return lambda x, y: f(y, x)
+
+def reverse3(f):
+    def reversed(x, w):
+        y, z = w
+        return f(z, y, x)
+    return reversed
+
 DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] = {
-    (nn.BatchNorm1d, nn.Conv1d): fuse_conv_bn,
-    (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): fuse_conv_bn_relu,
-    (nn.BatchNorm2d, nn.Conv2d): fuse_conv_bn,
-    (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): fuse_conv_bn_relu,
-    (nn.BatchNorm3d, nn.Conv2d): fuse_conv_bn,
-    (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): fuse_conv_bn_relu,
-    (nn.ReLU, nn.Conv1d): nni.ConvReLU1d,
-    (nn.ReLU, nn.Conv2d): nni.ConvReLU2d,
-    (nn.ReLU, nn.Conv3d): nni.ConvReLU3d,
-    (nn.BatchNorm1d, nn.Linear): fuse_linear_bn,
-    (nn.ReLU, nn.Linear): nni.LinearReLU,
-    (nn.ReLU, nn.BatchNorm2d): nni.BNReLU2d,
-    (nn.ReLU, nn.BatchNorm3d): nni.BNReLU3d,
+    (nn.BatchNorm1d, nn.Conv1d): reverse2(fuse_conv_bn),
+    (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): reverse3(fuse_conv_bn_relu),
+    (nn.BatchNorm2d, nn.Conv2d): reverse2(fuse_conv_bn),
+    (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): reverse3(fuse_conv_bn_relu),
+    (nn.BatchNorm3d, nn.Conv2d): reverse2(fuse_conv_bn),
+    (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): reverse3(fuse_conv_bn_relu),
+    (nn.ReLU, nn.Conv1d): reverse2(nni.ConvReLU1d),
+    (nn.ReLU, nn.Conv2d): reverse2(nni.ConvReLU2d),
+    (nn.ReLU, nn.Conv3d): reverse2(nni.ConvReLU3d),
+    (nn.BatchNorm1d, nn.Linear): reverse2(fuse_linear_bn),
+    (nn.ReLU, nn.Linear): reverse2(nni.LinearReLU),
+    (nn.ReLU, nn.BatchNorm2d): reverse2(nni.BNReLU2d),
+    (nn.ReLU, nn.BatchNorm3d): reverse2(nni.BNReLU3d),
 }
 
 def get_fuser_method_new(op_pattern, fuser_method_mapping=None):
@@ -157,6 +166,6 @@ def get_fuser_method_new(op_pattern, fuser_method_mapping=None):
     if fuser_method_mapping is None:
         fuser_method_mapping = DEFAULT_PATTERN_TO_FUSER_METHOD
 
-    fuser_method = fuser_method_mapping.get(op_list, None)
+    fuser_method = fuser_method_mapping.get(op_pattern, None)
     assert fuser_method is not None, "did not find fuser method for: {} ".format(op_pattern)
     return fuser_method

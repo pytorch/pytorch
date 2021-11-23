@@ -4,10 +4,12 @@ from .pattern_utils import (
     register_fusion_pattern,
 )
 from .utils import _parent_name
-from .quantization_types import QuantizerCls
+from .quantization_types import QuantizerCls, NodePattern
 from ..fuser_method_mappings import get_fuser_method
+from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict
+from .match_utils import MatchAllNode
 
 # ---------------------
 # Fusion Pattern Registrations
@@ -21,7 +23,11 @@ class FuseHandler(ABC):
         pass
 
     @abstractmethod
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
+    def fuse(self,
+             quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any]) -> Node:
         pass
 
@@ -61,7 +67,11 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
         self.conv_or_linear_node = node
         self.conv_or_linear = quantizer.modules[self.conv_or_linear_node.target]
 
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
+    def fuse(self,
+             quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
@@ -116,23 +126,39 @@ class ModuleReLUFusion(FuseHandler):
         self.module_node = node
         self.module = quantizer.modules[self.module_node.target]
 
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
+    def fuse(self, quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
-        op_list = []
-        # since relu can be used multiple times, we'll need to create a relu module for each match
-        if self.relu_node.op == 'call_module':
-            relu = torch.nn.ReLU(quantizer.modules[self.relu_node.target].inplace)
-        else:
-            # TODO: get inplace argument from functional
-            relu = torch.nn.ReLU()
-        relu.training = self.module.training
-        op_list.append(relu)
-        op_list.append(self.module)
+        assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
+        "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
+        def get_module(n):
+            if n.op == "call_module":
+                return quantizer.modules[n.target]
+            elif n.op == "call_function" and n.target == torch.nn.functional.relu:
+                relu = torch.nn.ReLU()
+                relu.training = self.module.training
+                return relu
+            return MatchAllNode
 
-        op_list.reverse()
-        op_type_list = tuple(type(m) for m in op_list)
+        print("matched node pattern", matched_node_pattern)
+        matched_modules = tuple(map(get_module, matched_node_pattern))
+        # since relu can be used multiple times, we'll need to create a relu module for each match
+
+        def get_type(m):
+            return type(m)
+
+        matched_module_types = tuple(map(get_type, matched_modules))
         module_parent_name, module_name = _parent_name(self.module_node.target)
-        fuser_method = get_fuser_method(op_type_list, additional_fuser_method_mapping)
-        setattr(quantizer.modules[module_parent_name], module_name, fuser_method(*op_list))
+        print("module parent name, module name", module_parent_name, module_name)
+        print("matched module types:", matched_module_types)
+        fuser_method = get_fuser_method_new(matched_module_types)
+        print("fuser method:", fuser_method)
+        # TODO: change the signature for fuser_method to take matched module patterns
+        # as input
+        fused_module = fuser_method(*matched_modules)
+        print(fused_module)
+        setattr(quantizer.modules[module_parent_name], module_name, fused_module)
         return quantizer.fused_graph.node_copy(self.module_node, load_arg)

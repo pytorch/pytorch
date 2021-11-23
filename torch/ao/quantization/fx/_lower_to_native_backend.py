@@ -75,7 +75,7 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         while True:
             # replace the pattern until there is no more matches
-            matches = subgraph_rewriter.replace_pattern(model, pattern, replacement)
+            matches = subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
             if not matches:
                 break
     model.graph.lint()

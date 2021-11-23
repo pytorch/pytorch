@@ -199,6 +199,7 @@ def generate_qconfig_map(
         input_graph: Graph,
         qconfig_dict: Any,
         node_name_to_scope: Dict[str, Tuple[str, type]]) -> Dict[str, QConfigAny]:
+    print("ndoe name to scope:", node_name_to_scope)
     global_qconfig = qconfig_dict.get("", None)
     qconfig_map = dict()
 
@@ -210,6 +211,7 @@ def generate_qconfig_map(
     # 1 F.conv2d invocations so far.
     submodule_to_object_type_to_cur_idx: Dict[str, Dict[Callable, int]] = \
         defaultdict(lambda: defaultdict(int))
+    print("input graph:", input_graph)
     for node in input_graph.nodes:
         qconfig = None
         if node.op == "get_attr":
@@ -251,6 +253,7 @@ def generate_qconfig_map(
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
                 qconfig_dict, type(modules[node.target]), node.target, global_qconfig)
 
+            print("node name to scope:", node_name_to_scope)
             module_path, module_type = node_name_to_scope[node.name]
             # Note: for call_module, the module_path is the current module's name.
             # to meaningfully count invocations, we need to count them in the parent
