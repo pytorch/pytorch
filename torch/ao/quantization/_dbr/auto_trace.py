@@ -583,6 +583,12 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     attach_scale_zp_values_to_model(module)
     attach_op_convert_info_to_model(module)
     attach_output_convert_info_to_model(module)
+
+    # Since eager mode convert could have changed the IDs of some modules,
+    # populate the FQN map again
+    for k, v in module.named_modules():
+        module_id_to_fqn[id(v)] = k
+
     module.__class__ = QuantizationDispatchModule
 
     return module
