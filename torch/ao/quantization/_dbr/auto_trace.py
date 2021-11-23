@@ -552,24 +552,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
             try:
                 global_op_idx[0] = 0
-
-                needs_io_hooks = hasattr(self, '_auto_quant_state')
-
-                # handle module input dtype conversions
-                # TODO(implement)
-
                 output = super().__call__(*new_args, **new_kwargs)
-
-                # handle module output dtype conversions
-                if needs_io_hooks:
-                    qstate = self._auto_quant_state
-                    assert isinstance(qstate, AutoQuantizationState)
-                    output = qstate.outputs_convert_hook(output)
 
                 def unwrap_proxy(a):
                     if isinstance(a, QuantizationConvertTensorProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
+
                 output = map_aggregate(output, unwrap_proxy)
                 return output
             finally:
