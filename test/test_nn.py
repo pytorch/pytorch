@@ -10643,24 +10643,27 @@ class TestNN(NNTestCase):
         torch.set_printoptions(precision=5)
         self.assertEqual(out_t, expected_out_t, atol=1e-5, rtol=0)
 
-
         device_list = ['cpu']
         if TEST_CUDA:
             device_list.append('cuda')
 
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
-            # test float scale factor up & downsampling
-            for device in device_list:
-                for scale_factor in [0.5, 1, 1.5, 2]:
-                    in_t = torch.ones(2, 2, 2, 2).to(device)
-                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    self.assertEqual(torch.ones(2, 2, out_size, out_size), out_t.data,
-                                     atol=1e-5, rtol=0)
+        for antialias in [True, False]:
+            for align_corners in [True, False]:
+                kwargs = dict(mode='bicubic', align_corners=align_corners, antialias=antialias)
+                # test float scale factor up & downsampling
+                for device in device_list:
+                    # temporarily disabled on CUDA:
+                    if antialias and torch.device(device).type == 'cuda':
+                        continue
+                    for scale_factor in [0.5, 1, 1.5, 2]:
+                        in_t = torch.ones(2, 3, 8, 8).to(device)
+                        out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                        out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                        self.assertEqual(torch.ones(2, 3, out_size, out_size), out_t.data,
+                                         atol=1e-5, rtol=0)
 
-                    input = torch.randn(2, 2, 2, 2, requires_grad=True)
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                        input = torch.randn(2, 3, 8, 8, requires_grad=True)
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     def test_upsampling_not_recompute_scale_factor(self):
         # test output against known input: result must match opencv
@@ -15153,6 +15156,21 @@ class TestNNDeviceType(NNTestCase):
             device=device, dtype=torch.float
         ).reshape(1, 1, 1, 8)
         t_out = F.interpolate(t_in, size=(1, 8), mode="bilinear", align_corners=False, antialias=True)
+        self.assertEqual(expected_out, t_out)
+
+    @onlyCPU  # temporarily disabled on CUDA
+    def test_upsamplingBicubic2d_aa_correctness(self, device):
+        t_in = torch.arange(30, dtype=torch.float, device=device).reshape(1, 1, 1, -1)
+        # This expected result is obtain using PIL.Image.resize
+        # a_in = t_in.numpy()[0, 0, ...]
+        # pil_in = Image.fromarray(a_in)
+        # pil_out = pil_in.resize((8, 1), resample=Image.BICUBIC)
+        expected_out = torch.tensor(
+            [1.4579126, 5.0461774, 8.876762, 12.627864,
+             16.372137, 20.123238, 23.953823, 27.542088],
+            device=device, dtype=torch.float
+        ).reshape(1, 1, 1, 8)
+        t_out = F.interpolate(t_in, size=(1, 8), mode="bicubic", align_corners=False, antialias=True)
         self.assertEqual(expected_out, t_out)
 
     @dtypes(torch.float, torch.double)

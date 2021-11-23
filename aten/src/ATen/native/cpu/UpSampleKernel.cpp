@@ -1021,6 +1021,61 @@ struct HelperInterpCubic : public HelperInterpBase {
     );
     return output;
   }
+
+  // taken from
+  // https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+  // src/libImaging/Resample.c#L46-L62
+  template<typename scalar_t>
+  static inline scalar_t aa_filter(scalar_t x) {
+    // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+#define a -0.5
+    if (x < 0.0) {
+      x = -x;
+    }
+    if (x < 1.0) {
+      return ((a + 2.0) * x - (a + 3.0)) * x * x + 1;
+    }
+    if (x < 2.0) {
+      return (((x - 5) * x + 8) * x - 4) * a;
+    }
+    return 0.0;
+#undef a
+  }
+
+  static inline std::vector<Tensor> compute_indices_weights_aa(
+    at::ScalarType scalar_type,
+    int64_t input_size,
+    int64_t output_size,
+    int64_t stride,
+    int64_t ndims,
+    int64_t reshape_dim,
+    bool align_corners,
+    const c10::optional<double> opt_scale
+  ) {
+
+    std::vector<Tensor> indices_weights;
+    AT_DISPATCH_FLOATING_TYPES(
+      scalar_type, "compute_indices_weights_aa", [&] {
+
+        scalar_t scale = area_pixel_compute_scale<scalar_t>(
+            input_size, output_size, align_corners, opt_scale);
+
+        auto interp_size = HelperInterpCubic::interp_size;
+
+        indices_weights = HelperInterpCubic::_compute_indices_weights_aa<scalar_t>(
+            input_size,
+            output_size,
+            stride,
+            ndims,
+            reshape_dim,
+            align_corners,
+            scale,
+            interp_size,
+            &HelperInterpCubic::aa_filter<scalar_t>);
+      }
+    );
+    return indices_weights;
+  }
 };
 
 // Generic upsampling interpolation kernel for N-d case.
@@ -1124,7 +1179,7 @@ void cpu_upsample_generic_aa(at::TensorIterator& iter) {
   iter.for_each(loop);
 }
 
-// Generic separable upsampling interpolation kernels for N-d case.
+// Generic separable upsampling interpolation kernels for N-d case with anti-aliasing
 template <int out_ndims, typename scale_type, class F>
 void _separable_upsample_generic_Nd_kernel_impl_single_dim(
     const Tensor& output,
@@ -1359,6 +1414,17 @@ void upsample_bicubic2d_kernel_impl(
     c10::optional<double> scales_w) {
   upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
     output, input, align_corners, {scales_h, scales_w});
+}
+
+void upsample_bicubic2d_aa_kernel_impl(
+    const Tensor& output,
+    const Tensor& input,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+
+  separable_upsample_generic_Nd_kernel_impl<2, scale_t, HelperInterpCubic>(
+      output, input, align_corners, {scales_h, scales_w});
 }
 
 template <typename scalar_t, typename scale_type, nearest_idx_fn_t nearest_idx_fn>
@@ -1633,8 +1699,21 @@ void upsample_bilinear2d_aa_backward_kernel_impl(
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES(
-      grad_output.scalar_type(), "upsample_bilinear2d_backward_cpu", [&] {
+      grad_output.scalar_type(), "upsample_bilinear2d_aa_backward_cpu", [&] {
         cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpLinear>(
+            grad_input, grad_output, align_corners, {scales_h, scales_w});
+      });
+}
+
+void upsample_bicubic2d_aa_backward_kernel_impl(
+    const Tensor& grad_input,
+    const Tensor& grad_output,
+    bool align_corners,
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w) {
+  AT_DISPATCH_FLOATING_TYPES(
+      grad_output.scalar_type(), "upsample_bicubic2d_aa_backward_cpu", [&] {
+        cpu_upsample_genNd_backward_aa<scalar_t, scale_t, HelperInterpCubic>(
             grad_input, grad_output, align_corners, {scales_h, scales_w});
       });
 }
@@ -1661,5 +1740,7 @@ REGISTER_DISPATCH(_upsample_bilinear2d_aa_backward_kernel, &upsample_bilinear2d_
 REGISTER_DISPATCH(upsample_trilinear3d_kernel, &upsample_trilinear3d_kernel_impl);
 
 REGISTER_DISPATCH(upsample_bicubic2d_kernel, &upsample_bicubic2d_kernel_impl);
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_kernel, &upsample_bicubic2d_aa_kernel_impl);
+REGISTER_DISPATCH(_upsample_bicubic2d_aa_backward_kernel, &upsample_bicubic2d_aa_backward_kernel_impl);
 } // namespace native
 } // namespace at
