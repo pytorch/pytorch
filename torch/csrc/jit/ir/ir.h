@@ -1655,6 +1655,10 @@ struct OperatorMap {
     return false;
   }
 
+  bool contains(const Node* n) const {
+    return contains(n->getOperator());
+  }
+
   c10::optional<T> find(const Operator& op) {
     const auto it = map.find(Symbol::fromQualString(op.schema().name()));
     if (it == map.end()) {
