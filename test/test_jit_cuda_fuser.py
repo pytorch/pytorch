@@ -1031,6 +1031,7 @@ class TestCudaFuser(JitTestCase):
         o = t(x, y)
         self.assertEqual(o.dtype, jit_o.dtype)
         self.assertEqual(o, jit_o)
+        self.assertEqual(o.stride(), jit_o.stride())
         self.assertGraphContains(t_jit.graph_for(x, y), FUSION_GUARD)
 
     # end-2-end test of permutation & contiguity handling in integration.
@@ -1292,7 +1293,7 @@ class TestCudaFuser(JitTestCase):
                 norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
                 self._native_layer_norm_helper(input_shape, norm_shape, torch.bfloat16, "cuda", 1e-1)
 
-    def _norm_helper(self, shape, dtype, device, error, is_batch_norm_else_instance_norm):
+    def _norm_helper(self, shape, dtype, device, error, is_batch_norm_else_instance_norm, memory_format=torch.contiguous_format):
         class MyBatchNorm(torch.nn.Module):
             def __init__(self):
                 super(MyBatchNorm, self).__init__()
@@ -1313,7 +1314,7 @@ class TestCudaFuser(JitTestCase):
 
         t = MyBatchNorm() if is_batch_norm_else_instance_norm else MyInstanceNorm()
 
-        x = torch.randn(shape, dtype=dtype, device=device)
+        x = torch.randn(shape, dtype=dtype, device=device).to(memory_format=memory_format)
         running_mean = torch.zeros(shape[1], dtype=torch.float32, device=device)
         running_var = torch.ones(shape[1], dtype=torch.float32, device=device)
         t_jit = torch.jit.script(t)
@@ -1331,12 +1332,25 @@ class TestCudaFuser(JitTestCase):
         jit_o = t_jit(x, jit_running_mean, jit_running_var)
         o = t(x, eager_running_mean, eager_running_var)
         self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertEqual(o.stride(), jit_o.stride())
         # numerical issues here due to our scheduling.
         # can't use `self.assertEqual(o, jit_o)`
         self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
         self.assertTrue(self._compare("comparing running_mean failed", eager_running_mean, jit_running_mean, error))
         self.assertTrue(self._compare("comparing running_var failed", eager_running_var, jit_running_var, error))
         self.assertGraphContains(t_jit.graph_for(x, running_mean, running_var), FUSION_GUARD)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_norm_channels_last(self):
+        size = [3, 4, 5, 6]
+
+        with torch.backends.cudnn.flags(enabled=False):
+            for is_batch_norm_else_instance_norm in [False, True]:
+                for mf in [torch.channels_last, torch.contiguous_format]:
+                    self._norm_helper(size, torch.float32, "cuda", 1e-4, is_batch_norm_else_instance_norm, memory_format=mf)
 
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
@@ -1751,7 +1765,7 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
     def test_normalization_partition(self):
-        sizes = [8, 8, 8]
+        sizes = [3, 8, 5]
         dtype = torch.float
         device = "cuda"
         x = torch.randn(sizes, dtype=dtype, device=device)

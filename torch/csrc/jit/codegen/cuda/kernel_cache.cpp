@@ -15,28 +15,6 @@ namespace cuda {
 
 namespace {
 
-// permutes tensor from [N, S0, S1, ..., C] to [N, C, S0, S1, ...]
-at::Tensor revert_channels_last(at::Tensor& v) {
-  auto n_dim = v.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), -1); // -1, 0, 1, ..., n-2
-  permutation[0] = 0; // 0, 0, 1, ..., n-2
-  permutation[1] = n_dim - 1; // 0, n-1, 1, ..., n-2
-  return v.permute(permutation);
-}
-
-// permutes tensor from [N, C, S0, S1, ...] to [N, S0, S1, ..., C]
-at::Tensor convert_channels_last(IValue& v) {
-  TORCH_CHECK(v.isTensor(), "permutation can only be applied at tensor");
-  auto tensor = v.toTensor();
-  auto n_dim = tensor.dim();
-  std::vector<int64_t> permutation(n_dim);
-  std::iota(permutation.begin(), permutation.end(), 1); // 1, 2, 3, ..., n
-  permutation[0] = 0; // 0, 2, 3, ..., n
-  permutation[n_dim - 1] = 1; // 0, 2, 3, ..., 1
-  return tensor.permute(permutation);
-}
-
 // Check device of TensorType in all inputs ensure all tensors are on cuda
 // devices.
 // return common device index (or -1 if device differs).
@@ -137,34 +115,33 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
     : fusion_(std::move(fusion)) {}
 
-// Note [ Channels Last support in nvfuser ]
+// Note [ Permutation support in nvfuser ]
 //
 // Background:
-// To support channels last in nvfuser with optimal performance, we would want
-// to allow dimension collapsing in generated code on channels-last tensors,
-// which greatly simplifies indexing. Current API in codegen only allows
-// dimensional collapsing on neighboring axes. The unfortunate thing is that
-// memory format design in PyTorch is implicitly marked by strides, while the
-// semantics meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C,
-// H, W] would have the same shape in both format, while contiguous tensor
-// carries strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C,
-// C].
+// To support permutation in nvfuser with optimal performance, we would want to
+// allow dimension collapsing in generated code on channels-last tensors, which
+// greatly simplifies indexing. Current API in codegen only allows dimensional
+// collapsing on neighboring axes. The unfortunate thing is that memory format
+// design in PyTorch is implicitly marked by strides, while the semantics
+// meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C, H, W]
+// would have the same shape in both format, while contiguous tensor carries
+// strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C, C]
 //
 // Approach:
-// Part_1. To allow axes collapsing for channels-last format in codegen, we can
+// Part_1. To allow axes collapsing for permuted tensor in codegen, we can
 // permute input tensor to have axes in decending order by their strides, so
 // they would be viewed as `contiguous` in codegen, hence collapsed to simple
 // indexing. Part_2. To ensure correct result, we need to ensure computation in
 // nvfuser carries same semantics as with TorchScript graph. We need to
 //   Part_2_1. Maintain a bookkeeping where each codegen tensor is tagged with
-//   either `contiguous` format or `channels_last` format. Part_2_2. Parsing
-//   rule should handle and propagate the tag properly, i.e. having special
-//   rules for `channels_last` input tensor and mark output in its right format.
-// Part_3. Codegen output tensor in `channels_last` format should be permuted
-// back to `contiguous` format before returning to TorchScript
+//   either their permutation. Part_2_2. Parsing rule should handle and
+//   propagate the tag properly, e.g. batch normalization has special rules for
+//   `channels_last` input tensor and mark output in its right permutation.
+// Part_3. Codegen output tensor that has been permuted should be restored to
+// original layout before returning to TorchScript
 //
-// For details  on Part_2, refer to implementation Note [ Format Bookkeeping and
-// Propagation in Parser ]
+// For details  on Part_2, refer to implementation Note [ Permutation
+// Bookkeeping and Propagation in Parser ]
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
@@ -172,12 +149,16 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   // permute input tensor for kernel execution. See Part_1 in Note [ Channels
   // Last support in nvfuser ]
   at::ArrayRef<IValue> perm_inputs = inputs;
-  const auto& c_last_inputs = fusion_->getChannelsLastInputIndices();
+  const auto& to_be_permuted_inputs = fusion_->getPermutationInputMap();
   std::vector<IValue> inputs_vec;
-  if (!c_last_inputs.empty()) {
+  if (!to_be_permuted_inputs.empty()) {
     inputs_vec = inputs.vec();
-    for (const auto i : c_last_inputs) {
-      inputs_vec[i] = convert_channels_last(inputs_vec[i]);
+    for (const auto& pair : to_be_permuted_inputs) {
+      auto v = inputs_vec[pair.first];
+      TORCH_CHECK(
+          v.isTensor(), "input permutation can only be applied at tensor");
+      auto tensor = v.toTensor();
+      inputs_vec[pair.first] = tensor.permute(pair.second);
     }
     perm_inputs = inputs_vec;
   }
@@ -196,9 +177,9 @@ std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
   auto outputs = kernel_runtime->runWithInput(perm_inputs, unique_id);
 
   // permute output tensor returned by kernel execution. See Part_3 in Note [
-  // Channels Last support in nvfuser ]
-  for (const auto i : fusion_->getChannelsLastOutputIndices()) {
-    outputs[i] = revert_channels_last(outputs[i]);
+  // Permutation support in nvfuser ]
+  for (const auto& pair : fusion_->getPermutationOutputMap()) {
+    outputs[pair.first] = outputs[pair.first].permute(pair.second);
   }
 
   return outputs;
