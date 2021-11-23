@@ -568,6 +568,28 @@ class SerializationMixin(object):
         with self.assertRaisesRegex(AttributeError, expected_err_msg):
             torch.load(resource)
 
+    def test_save_different_dtype_unallocated(self):
+        devices = ['cpu']
+        if torch.cuda.is_available():
+            devices.append('cuda')
+
+        for device in devices:
+            a = torch.tensor([], dtype=torch.complex128, device=device)
+            f = io.BytesIO()
+
+            torch.save([a, a.imag], f)
+            torch.save([a.storage(), a.imag], f)
+            torch.save([a, a.imag.storage()], f)
+            torch.save([a.storage(), a.imag.storage()], f)
+
+            a = torch.tensor([], dtype=torch.float64, device=device)
+            s_bytes = torch.TypedStorage(
+                wrap_storage=a.storage()._untyped(),
+                dtype=torch.uint8)
+
+            torch.save([a, s_bytes], f)
+            torch.save([a.storage(), s_bytes], f)
+
     def test_save_different_dtype_error(self):
         error_msg = r"Cannot save multiple tensors or storages that view the same data as different types"
 
