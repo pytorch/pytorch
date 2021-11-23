@@ -17,6 +17,7 @@
   _(nnc_aten_quantized_conv2d)        \
   _(nnc_aten_quantized_conv2d_relu)   \
   _(nnc_aten_quantized_add)           \
+  _(nnc_aten_quantized_sigmoid)       \
   _(nnc_aten_quantize_per_tensor)     \
   _(nnc_aten_dequantize)              \
   _(nnc_aten_upsample_nearest2d)

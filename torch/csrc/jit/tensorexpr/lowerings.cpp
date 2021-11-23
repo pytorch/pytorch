@@ -406,6 +406,12 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
+        // check if the activation is quantized
+        const BufHandle& x = c10::get<BufHandle>(inputs[0]);
+        if (x.node()->qscale()) {
+          return computeQuantizedSigmoidExternalCall(
+              inputs, outputShape, outputType, device);
+        }
         return computeOneOperand(
             "aten_sigmoid",
             inputs,

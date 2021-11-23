@@ -440,6 +440,36 @@ Tensor computeUpsampleNearest2d(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeQuantizedSigmoidExternalCall(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    at::Device) {
+  const BufHandle& qx = c10::get<BufHandle>(inputs[0]);
+
+  const auto out_qdtype = immQDType(qx);
+  const double out_qscale = 1.0f / 256.0f;
+  const int64_t out_qzero = (out_qdtype == ScalarType::QInt8) ? -128 : 0;
+
+  auto ResultBuf = makeQBufHandleNHWC(
+      "quantized_sigmoid",
+      outputShape,
+      Dtype(out_qdtype),
+      out_qscale,
+      out_qzero);
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_sigmoid",
+      {qx},
+      {immQScale(qx),
+       immQZero(qx),
+       (int64_t)immQDType(qx),
+       out_qscale,
+       out_qzero});
+  return Tensor(ResultBuf.node(), s);
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

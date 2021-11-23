@@ -673,6 +673,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor", "adaptive_avg_pool2d"},
       {"aten::gelu(Tensor self) -> Tensor", "unary"},
       {"aten::tanh(Tensor self) -> Tensor", "unary"},
+      {"aten::sigmoid(Tensor self) -> Tensor", "unary"},
       {"aten::erf(Tensor self) -> (Tensor)", "unary"},
       {"prim::NumToTensor.Scalar(Scalar a) -> Tensor", "zero_dim_tensor"},
       {"prim::NumToTensor.bool(bool a) -> Tensor", "zero_dim_tensor"},
