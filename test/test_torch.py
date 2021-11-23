@@ -5681,7 +5681,7 @@ else:
     # This test calls torch.pad and numpy.pad many different ways to ensure
     # that they give the same results
     # NOTE: bfloat16 is skipped because numpy.pad does not support it
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bfloat16=False))
     def test_pad(self, device, dtype):
         test_cases = [
@@ -5751,7 +5751,7 @@ else:
             self.assertEqual(result.size(), result_np.size(), msg=msg)
             self.assertEqual(result, result_np, msg=msg)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_pad_neg_pad_width(self, device, dtype):
         input = make_tensor((8, 4, 10), device, dtype, low=-9, high=9)
@@ -5763,7 +5763,7 @@ else:
         self.assertEqual(result.size(), result_expected.size())
         self.assertEqual(result, result_expected)
 
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_pad_errors(self, device, dtype):
         input = make_tensor((3, 3, 3), device, dtype, low=-9, high=9)
@@ -5821,7 +5821,7 @@ else:
                 torch.pad(input, 1, constant_values=constant_values)
 
     # Ensure proper device checking for tensor inputs to torch.pad
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_pad_errors_devices(self, device, dtype):
         modes = ['constant']
@@ -5836,7 +5836,7 @@ else:
                     torch.pad(input, pad_width, mode=mode)
 
     # Check that torch.pad throws an error for incorrect pad_width argument sizes
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes())
     def test_pad_errors_pad_width_size(self, device, dtype):
         S = 3
