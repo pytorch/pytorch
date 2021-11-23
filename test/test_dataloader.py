@@ -1929,7 +1929,7 @@ except RuntimeError as e:
         data = range(2)
         converted = _utils.collate.default_convert(data)
 
-        self.assertEqual(converted, [0, 1, 2])
+        self.assertEqual(converted, [0, 1])
 
     def test_default_collate_dtype(self):
         arr = [1, 2, -1]
