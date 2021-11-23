@@ -848,11 +848,9 @@ class TensorLikePair(Pair):
     ) -> torch.Tensor:
         matches = actual == expected
         if equal_nan:
-            a = actual.isnan()
             # FIXME: debug
-            print("a", a.dtype)
+            a = actual.isnan()
             b = expected.isnan()
-            print("b", b.dtype)
             mask = a.to(torch.bool) & b.to(torch.bool)
             matches[mask] = True
 
@@ -864,9 +862,7 @@ class TensorLikePair(Pair):
 
         # FIXME: debug
         c = abs_diff.isfinite()
-        print("c", c.dtype)
         d = abs_diff <= tolerance
-        print("d", d.dtype)
         mask = c.to(torch.bool) & d.to(torch.bool)
         matches[mask] = True
 
