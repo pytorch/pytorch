@@ -463,7 +463,8 @@ class _PositiveDefinite(Constraint):
     event_dim = 2
 
     def check(self, value):
-        return (torch.linalg.eig(value)[0].real > 0).all(dim=-1)
+        # info == 0 means no error, that is, it's SPD
+        return (value.eq(value.mT).all(-2).all(-1) and torch.linalg.cholesky_ex(value).info.eq(0)).unsqueeze(0)
 
 
 class _Cat(Constraint):
