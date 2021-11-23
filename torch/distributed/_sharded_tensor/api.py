@@ -290,7 +290,7 @@ class ShardedTensor(object):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
                             metadata.shard_offsets[dim],
-                            metadata.shard_lengths[dim],
+                            metadata.shard_sizes[dim],
                         )
 
                     out_narrow_view.copy_(tensor)
@@ -427,7 +427,7 @@ class ShardedTensor(object):
             if current_rank == rank:
                 # Initialize the local shard.
                 local_shard = _create_tensor_from_params(
-                    *shard_metadata.shard_lengths, local_device=local_device,
+                    *shard_metadata.shard_sizes, local_device=local_device,
                     tensor_init_params=tensor_init_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 

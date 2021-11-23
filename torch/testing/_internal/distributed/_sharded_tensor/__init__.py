@@ -9,11 +9,12 @@ from torch.testing._internal.common_distributed import (
     TEST_SKIPS,
 )
 
+TEST_GPU_NUM = 4
 
 class ShardedTensorTestBase(MultiProcessTestCase):
     @property
     def world_size(self):
-        return 4
+        return TEST_GPU_NUM
 
     def init_pg(self, backend="nccl"):
         if backend not in ["nccl", "gloo", "mpi"]:
