@@ -848,7 +848,13 @@ class TensorLikePair(Pair):
     ) -> torch.Tensor:
         matches = actual == expected
         if equal_nan:
-            matches[actual.isnan() & expected.isnan()] = True
+            a = actual.isnan()
+            # FIXME: debug
+            print("a", a.dtype)
+            b = expected.isnan()
+            print("b", b.dtype)
+            mask = a.to(torch.bool) & b.to(torch.bool)
+            matches[mask] = True
 
         if rtol == 0 and atol == 0:
             return matches
@@ -856,7 +862,13 @@ class TensorLikePair(Pair):
         abs_diff = torch.abs(actual - expected)
         tolerance = atol + rtol * torch.abs(expected)
 
-        matches[torch.isfinite(abs_diff) & (abs_diff <= tolerance)] = True
+        # FIXME: debug
+        c = abs_diff.isfinite()
+        print("c", c.dtype)
+        d = abs_diff <= tolerance
+        print("d", d.dtype)
+        mask = c.to(torch.bool) & d.to(torch.bool)
+        matches[mask] = True
 
         return matches
 
@@ -1045,7 +1057,8 @@ def assert_equal(
             **options,
         )
     except ErrorMeta as error_meta:
-        raise error_meta.to_error() from error_meta
+        # Explicitly raising from None to hide the internal traceback
+        raise error_meta.to_error() from None
 
     error_metas: List[ErrorMeta] = []
     for pair in pairs:
