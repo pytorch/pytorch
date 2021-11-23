@@ -1,4 +1,6 @@
-from typing import cast
+# coding=utf-8
+
+from typing import List, cast
 
 import torch
 import torch.distributed as dist
@@ -10,6 +12,7 @@ from torch.distributed._sharded_tensor.ops._common import (
     _communicate_size_to_each_rank,
     _handle_col_wise_sharding_base,
     _handle_row_wise_lookup_distribute,
+    _handle_max_norm_col_wise,
 )
 from torch.distributed._sharding_spec import ChunkShardingSpec
 
@@ -22,8 +25,7 @@ def sharded_embedding_bag(types, args, kwargs, pg):
     1. Supports only sharding of ``weight``.
     2. Supports only ``ChunkShardingSpec``.
     3. Supports only a single local shard per rank.
-    4. Supports only limited specs like offsets, per_sample_weights, and excluding specs
-       like padding_idx, max_norm, etc.
+    4. Supports all specs except for scale_grad_by_freq, sparse, etc.
 
     Based on the dimension that the weight is sharded on, there are two
     algorithms:
@@ -99,22 +101,32 @@ def sharded_embedding_bag(types, args, kwargs, pg):
        size of the result we need.
     5. If placements are not in order any appropriate rearrangement of columns
        are done for the (17 x 4) matrix and finally we transpose the output again.
+    6. If max_norm is specified, we manually sum up the norm and renorm. Because
+       the renorm must be in place, we need to override the local_shard to mimic
+       this behavior.
     """
     # Validate input params
     _validate_embedding_bag_param(args, kwargs)
 
     input = args[0]
     weight = args[1]
-    offsets = kwargs["offsets"]
-    per_sample_weights = kwargs["per_sample_weights"]
-    mode = kwargs["mode"]
+    offsets = kwargs.get("offsets")
+    per_sample_weights = kwargs.get("per_sample_weights")
+    mode = kwargs.get("mode")
+    max_norm = kwargs.get("max_norm")
+    norm_type = kwargs.get("norm_type")
+    include_last_offset = kwargs.get("include_last_offset")
+    padding_idx = kwargs.get("padding_idx")
 
     local_shard = weight.local_shards()[0].tensor.contiguous()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
+    rank = dist.get_rank(pg)
+    if include_last_offset:
+        offsets = offsets[:-1]
 
     if sharding_dim == 1:
-        return _handle_col_wise_sharding(
+        output, local_shard = _handle_col_wise_sharding(
             input,
             world_size,
             weight,
@@ -122,8 +134,13 @@ def sharded_embedding_bag(types, args, kwargs, pg):
             offsets,
             per_sample_weights,
             mode,
+            max_norm,
+            norm_type,
+            padding_idx,
             pg,
         )
+        weight.local_shards()[0].tensor = local_shard
+        return output
     elif sharding_dim == 0:
         return _handle_row_wise_sharding(
             input,
@@ -133,6 +150,10 @@ def sharded_embedding_bag(types, args, kwargs, pg):
             offsets,
             per_sample_weights,
             mode,
+            max_norm,
+            norm_type,
+            padding_idx,
+            rank,
             pg,
         )
     else:
@@ -156,9 +177,15 @@ def _validate_embedding_bag_param(args, kwargs):
 
     input = args[0]
     weight = args[1]
-    offsets = kwargs["offsets"]
-    per_sample_weights = kwargs["per_sample_weights"]
-    mode = kwargs["mode"]
+    offsets = kwargs.get("offsets")
+    per_sample_weights = kwargs.get("per_sample_weights")
+    mode = kwargs.get("mode")
+    max_norm = kwargs.get("max_norm")
+    norm_type = kwargs.get("norm_type")
+    scale_grad_by_freq = kwargs.get("scale_grad_by_freq")
+    sparse = kwargs.get("sparse")
+    include_last_offset = kwargs.get("include_last_offset")
+    padding_idx = kwargs.get("padding_idx")
 
     # Validate types
     if not isinstance(input, torch.Tensor):
@@ -200,6 +227,23 @@ def _validate_embedding_bag_param(args, kwargs):
         mode = "mean"
     if mode not in ["sum", "mean", "max"]:
         raise ValueError(f"mode '{mode}' is not supported")
+    if scale_grad_by_freq:
+        raise RuntimeError(
+            'nn.Embedding weight sharded with flag on "scale_grad_by_freq" not supported!'
+        )
+    if sparse:
+        raise RuntimeError(
+            'nn.Embedding weight sharded with flag on "sparse" not supported!'
+        )
+    if include_last_offset and offsets is None:
+        raise ValueError('offsets is required for flag "include_last_offset"!')
+    if include_last_offset and cast(List[int], offsets)[-1] != input.size(0):
+        raise ValueError(
+            'offsets need to have the input size in the end when the flag "include_last_offset" is on!'
+        )
+
+    if max_norm and max_norm <= 0.0:
+        raise ValueError('"max_norm" must be larger than zero!')
 
     if not isinstance(weight._sharding_spec, ChunkShardingSpec):
         raise ValueError("Only ChunkShardingSpec supported for ShardedTensor ops!")
@@ -208,7 +252,17 @@ def _validate_embedding_bag_param(args, kwargs):
 
 
 def _handle_col_wise_sharding(
-    input, world_size, weight, local_shard, offsets, per_sample_weights, mode, pg
+    input,
+    world_size,
+    weight,
+    local_shard,
+    offsets,
+    per_sample_weights,
+    mode,
+    max_norm,
+    norm_type,
+    padding_idx,
+    pg,
 ):
     """
     Entry-point function to handle the logic of col-wise sharding of weight
@@ -223,9 +277,22 @@ def _handle_col_wise_sharding(
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
         mode: aggregation method of each bag.
+        max_norm: If given, each embedding vector with norm larger
+            than max_norm is renormalized to have norm max_norm.
+            Note: this will modify weight in-place.
+        norm_type: The p in the p-norm to compute for the max_norm option.
+        padding_idx: If specified, the entries at padding_idx do
+            not contribute to the gradient; therefore, the embedding
+            vector at padding_idx is not updated during training,
+            i.e. it remains as a fixed “pad”.
+            Note that the embedding vector at padding_idx is
+            excluded from the reduction.
         pg: process group.
 
-    Return: final result of lookup and aggregation.
+    Return:
+        output: final result of lookup and aggregation.
+        local_shard: col-wise shared local weight used for lookup.
+            If max_norm, this will be the renormed weight.
     """
     # allgather the special input of embedding bag first.
     gathered_per_sample_weights = None
@@ -239,7 +306,14 @@ def _handle_col_wise_sharding(
         gathered_offsets = [torch.zeros_like(offsets) for _ in range(world_size)]
         dist.all_gather(gathered_offsets, offsets, group=pg)
 
-    return _handle_col_wise_sharding_base(
+    gathered_inputs = None
+    if max_norm is not None:
+        # max_norm changes the weight in-place
+        local_shard, gathered_inputs = _handle_max_norm_col_wise(
+            max_norm, norm_type, local_shard, input, world_size, pg
+        )
+
+    output = _handle_col_wise_sharding_base(
         torch.nn.functional.embedding_bag,
         weight.size(1),
         1,
@@ -251,11 +325,25 @@ def _handle_col_wise_sharding(
         mode=mode,
         gathered_per_sample_weights=gathered_per_sample_weights,
         gathered_offsets=gathered_offsets,
+        padding_idx=padding_idx,
+        gathered_inputs=gathered_inputs,
     )
+    return (output, local_shard)
 
 
 def _handle_row_wise_sharding(
-    input, world_size, weight, local_shard, offsets, per_sample_weights, mode, pg
+    input,
+    world_size,
+    weight,
+    local_shard,
+    offsets,
+    per_sample_weights,
+    mode,
+    max_norm,
+    norm_type,
+    padding_idx,
+    rank,
+    pg,
 ):
     """
     Entry-point function to handle the logic of row-wise sharding of weight
@@ -270,6 +358,17 @@ def _handle_row_wise_sharding(
         offsets: list of start positions of each bag for 1D input.
         per_sample_weights: weights for weighted sum mode.
         mode: aggregation method of each bag.
+        max_norm: If given, each embedding vector with norm larger
+            than max_norm is renormalized to have norm max_norm.
+            Note: this will modify weight in-place.
+        norm_type: The p in the p-norm to compute for the max_norm option.
+        padding_idx: If specified, the entries at padding_idx do
+            not contribute to the gradient; therefore, the embedding
+            vector at padding_idx is not updated during training,
+            i.e. it remains as a fixed “pad”.
+            Note that the embedding vector at padding_idx is
+            excluded from the reduction.
+        rank: # of cuda process.
         pg: process group.
 
     Returns:
@@ -281,7 +380,8 @@ def _handle_row_wise_sharding(
         input_split_sorted_list,
         input_split_sorted_indices,
         split_sizes_1d,
-    ) = _input_split_sort(input, offsets)
+        split_sizes_1d_with_padding,
+    ) = _input_split_sort(input, offsets, padding_idx)
 
     # Within each interval of the sorted list, we first need to distribute
     # each ID to different bucket(rank) and also ensure the rearrangement
@@ -296,6 +396,7 @@ def _handle_row_wise_sharding(
         offsets_rearrange_sizes,
         per_sample_weights,
         sharded_dim_size_max,
+        padding_idx,
     ) = _sorted_input_distribute_prepare(
         input_split_sorted_list,
         input_split_sorted_indices,
@@ -303,6 +404,8 @@ def _handle_row_wise_sharding(
         input,
         weight,
         per_sample_weights,
+        rank,
+        padding_idx,
     )
 
     # Send ID/offsets/per_sample_weights to different bucket(rank).
@@ -331,12 +434,21 @@ def _handle_row_wise_sharding(
             if gathered_per_sample_weights is not None
             else None
         )
+        # If input is None, passing in max_norm causes
+        # errors in CUDA.
+        if max_norm is not None and inp.size(0) == 0:
+            max_norm = None
+
+        # Perform local embedding look up and aggregation.
         result = torch.nn.functional.embedding_bag(
             inp,
             local_shard,
             offsets=output_offsets_tensor_list[i],
             mode=mode if mode != "mean" else "sum",
             per_sample_weights=per_sample_weights,
+            max_norm=max_norm,
+            norm_type=norm_type,
+            padding_idx=padding_idx,
         )
         if mode != "max":
             results.append(result)
@@ -354,7 +466,15 @@ def _handle_row_wise_sharding(
                     next_offset = output_split_sizes[i]
                 else:
                     next_offset = output_offsets_tensor_list[i][idx + 1]
-                if current_offset == next_offset:
+                # When there is no interval in the current rank or all IDs
+                # are equal to padding_idx, we then need to ensure they
+                # don't contribute to the final result.
+                if (current_offset == next_offset) or (
+                    padding_idx is not None
+                    and not torch.any(
+                        torch.ne(inp[current_offset:next_offset], padding_idx)
+                    )
+                ):
                     result[idx] = -float("Inf")
             results.append(result)
 
@@ -367,27 +487,22 @@ def _handle_row_wise_sharding(
     # For Mean, we cannot do the division until very end because the sum of means
     # not equal to the mean of sum. (Divisor is different)
     if mode == "mean":
-        # For a 2D tensor, we just average by col number
-        if len(input_size) > 1:
-            return torch.div(gathered_output, float(input.size(1)))
-        # For a 1D tensor, we need to average by each offset
-        else:
-            split_sizes_1d_tensor = torch.tensor(
-                split_sizes_1d, dtype=torch.float, device=input.device
-            )
-            # Make sure divisor is not zero.
-            split_sizes_1d_tensor[split_sizes_1d_tensor == 0.0] = 1.0
-            return (
-                torch.div(gathered_output.t().contiguous(), split_sizes_1d_tensor)
-                .t()
-                .contiguous()
-            )
+        split_sizes_1d_tensor = torch.tensor(
+            split_sizes_1d_with_padding, dtype=torch.float, device=input.device
+        )
+        # Make sure divisor is not zero.
+        split_sizes_1d_tensor[split_sizes_1d_tensor == 0.0] = 1.0
+        return (
+            torch.div(gathered_output.t().contiguous(), split_sizes_1d_tensor)
+            .t()
+            .contiguous()
+        )
 
     # Return the appropriate local result.
     return gathered_output
 
 
-def _input_split_sort(input, offsets):
+def _input_split_sort(input, offsets, padding_idx):
     """
     In the circumstance of row-wise sharding of weight, we need to distribute
     the sorted lookup IDs of embeddingBag to each rank by range. The constraint
@@ -397,9 +512,14 @@ def _input_split_sort(input, offsets):
     If the index in the placement is not equal to the rank number, we need to
     do the rearrangement based on the order given by the Sharding Spec (placement).
 
+    We also calculate the split_size with padding_idx excluded per interval
+    so that we can use it as the divisor to calculate the mean correctly.
+
     Args:
         input: tensor to be applied op on.
         offsets: start index of each interval in the 1D case.
+        padding_idx: the embedding vector at padding_idx is
+            excluded from the reduction.
 
     Return:
         input_split_sorted_list: list of ID positions sorted per interval.
@@ -407,10 +527,14 @@ def _input_split_sort(input, offsets):
             rearrangments.
         split_sizes_1d: size of each split for 1D input because it can be
             different in such scenario.
+        split_sizes_1d_with_padding: size of each split for 1D input with
+            padding_idx excluded. This is for the divisor of `mean` mode.
     """
     input_size = input.size()
     input_split_sorted_list = []
     split_sizes_1d = []
+    split_sizes_1d_with_padding = []
+    padding_idx = padding_idx if padding_idx is not None else -1
 
     # For 2D tensor, we just first sort and then append row by row into a list.
     if len(input_size) > 1:
@@ -420,6 +544,9 @@ def _input_split_sort(input, offsets):
             input_split_sorted_list.append(sorted_input[i])
             input_split_sorted_indices[i] += indice_offset
             indice_offset += input.size(1)
+            split_sizes_1d_with_padding.append(
+                torch.sum(torch.ne(sorted_input[i], padding_idx)).item()
+            )
         input_split_sorted_indices = torch.reshape(input_split_sorted_indices, (-1,))
     # Split 1D input tensor based on the given offsets.
     else:
@@ -433,11 +560,19 @@ def _input_split_sort(input, offsets):
         for idx, split_result in enumerate(torch.split(input, split_sizes_1d)):
             split_result_sorted, indices = torch.sort(split_result)
             input_split_sorted_list.append(split_result_sorted)
+            split_sizes_1d_with_padding.append(
+                torch.sum(torch.ne(split_result_sorted, padding_idx)).item()
+            )
             input_split_sorted_indices_list.append(indices + indice_offset)
             indice_offset += split_sizes_1d[idx]
         input_split_sorted_indices = torch.cat(input_split_sorted_indices_list)
 
-    return input_split_sorted_list, input_split_sorted_indices, split_sizes_1d
+    return (
+        input_split_sorted_list,
+        input_split_sorted_indices,
+        split_sizes_1d,
+        split_sizes_1d_with_padding,
+    )
 
 
 def _sorted_input_distribute_prepare(
@@ -447,6 +582,8 @@ def _sorted_input_distribute_prepare(
     input,
     weight,
     per_sample_weights,
+    rank,
+    padding_idx,
 ):
     """
     In the circumstance of row-wise sharding of weight, we need to distribute
@@ -456,6 +593,11 @@ def _sorted_input_distribute_prepare(
     Also, we perform rearrangements, if the order in Sharding Spec is not
     same as the rank sequence.
 
+    In addition, in the row-wise sharding, we need to do two things for
+    padding_idx. The first thing is only to set it if it's within the range
+    of the current rank and the other thing is to do the modularization of
+    it by sharded_dim_size_max.
+
     Args:
         input_split_sorted_list: list of ID positions sorted per interval.
         input_split_sorted_indices: sorted indices for per_sample_weights
@@ -464,6 +606,9 @@ def _sorted_input_distribute_prepare(
         world_size: number of ranks.
         weight: shareded weight tensor.
         per_sample_weights: weights for weighted sum mode.
+        rank: # of cuda process.
+        padding_idx: If specified, the entries at padding_idx do
+            not contribute to the gradient and reduction.
 
     Returns:
         input_combined: list of ID to be sent to each rank.
@@ -472,6 +617,8 @@ def _sorted_input_distribute_prepare(
         offsets_rearrange_sizes: # of bag offsets sent to each rank.
         per_sample_weights: weights for weighted sum mode.
         sharded_dim_size_max: the max size of the row each rank gets.
+        padding_idx: Modularized padding_idx if it is within the range,
+            otherwise, None is returned.
     """
     input_sorted_list = []
     input_split_sizes_list = []
@@ -487,8 +634,9 @@ def _sorted_input_distribute_prepare(
             sharded_dim_size_max,
             input_split_rearrange_indices,
             _,
+            padding_idx_modular,
         ) = _handle_row_wise_lookup_distribute(
-            split_result_sorted, input, world_size, weight
+            split_result_sorted, input, world_size, weight, rank, padding_idx
         )
         rearrange_indices_list.append(
             input_split_rearrange_indices + split_sizes_rolling_sum
@@ -500,6 +648,9 @@ def _sorted_input_distribute_prepare(
         input_split_sizes_rolling_sum.append(split_sizes_rolling_sum)
         split_sizes_rolling_sum += sum(input_split_sizes)
 
+    # padding_idx cannot be directly overridden in the for loop because the
+    # later iteration will wipe out the modularized padding_idx.
+    padding_idx = padding_idx_modular
     if not (any(x is None for x in rearrange_indices_list)):
         input_split_rearrange_indices_combined = torch.cat(rearrange_indices_list)
 
@@ -562,6 +713,7 @@ def _sorted_input_distribute_prepare(
         offsets_rearrange_sizes,
         per_sample_weights,
         sharded_dim_size_max,
+        padding_idx,
     )
 
 
