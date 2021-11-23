@@ -71,12 +71,14 @@ def to_numpy(elem):
     elif isinstance(elem, float):
         return np.array(elem, dtype=float)
     elif isinstance(elem, dict):
-        dict_ = []
+        flattened = []
         for k in elem:
-            dict_ += [to_numpy(k)] + [to_numpy(elem[k])]
-        return dict_
+            flattened += [to_numpy(k)] + [to_numpy(elem[k])]
+        return flattened
+    elif elem is None:
+        return elem
     else:
-        return RuntimeError("Input has unknown type.")
+        raise ValueError(f"Don't know how to convert {type(elem).__name__} {elem} to numpy.")
 
 
 def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True,
@@ -872,7 +874,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
-            def forward(self, x_in):
+            def forward(self, x_in: Dict[str, Tensor]) -> Dict[str, Tensor]:
                 x_out = {}
                 x_out["test_key_out"] = torch.add(x_in["test_key_in"], 2.)
                 return x_out
@@ -949,8 +951,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
         self.run_test(NestedTupleModel(), input=(x, y))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_optional_inputs_with_no_optionals(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -985,8 +986,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, {"z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_optional_inputs_with_mixed_optionals_script(self):
         class MixedModel(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -1003,6 +1003,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MixedModel(), (x, y, None))
         self.run_test(MixedModel(), (x, None, z))
         # With optional arguments dictionary
+        # TODO: This fails. The input flattening doesn't work.
         self.run_test(MixedModel(), (x, {"y": y, "z": None}))
         self.run_test(MixedModel(), (x, {"y": None, "z": z}))
         self.run_test(MixedModel(), (x, {"y": y}))
@@ -1022,8 +1023,7 @@ class TestONNXRuntime(unittest.TestCase):
         # With optional arguments dictionary
         self.run_test(AllOptionalModel(), {"y": y, "z": None})
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_optional_inputs_with_all_optionals_script(self):
         class AllOptionalModel(torch.nn.Module):
             def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -1088,8 +1088,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(AllOptionalModel(), {"y": y, "z": None}, input_names=["input_y"])
         self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_input_names_with_optional_args_script(self):
         class NoOptionalModel(torch.nn.Module):
             def forward(self, input):
@@ -1159,8 +1158,7 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         self.run_test(Model(), (x, None))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_none_as_input_script(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3)):
@@ -1185,8 +1183,7 @@ class TestONNXRuntime(unittest.TestCase):
         y = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y)))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)  # pending ORT implementation
     def test_none_as_tuple_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
@@ -1215,8 +1212,7 @@ class TestONNXRuntime(unittest.TestCase):
         z = torch.randn(2, 3)
         self.run_test(Model(), (x, None, z))
 
-    @skipScriptTest([7, 8, 9, 10, 11, 12, 13, 14])
-    @skipIfUnsupportedMinOpsetVersion(16)  # pending ORT implementation
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_none_as_named_input_scripting(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
@@ -3871,7 +3867,6 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(GatherModel(), input=(input, indices))
 
     @skipScriptTest()  # Scripting error: Cannot instantiate nn module
-    @skipIfUnsupportedMinOpsetVersion(11)
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
             def __init__(self):
