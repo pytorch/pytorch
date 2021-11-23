@@ -40,6 +40,8 @@ class CuSparseDescriptor {
 #if defined(USE_ROCM)
 // hipSPARSE doesn't define this
 using cusparseMatDescr = std::remove_pointer<cusparseMatDescr_t>::type;
+using bsrsv2Info = std::remove_pointer<bsrsv2Info_t>::type;
+using bsrsm2Info = std::remove_pointer<bsrsm2Info_t>::type;
 #endif
 
 class TORCH_CUDA_CPP_API CuSparseMatDescriptor
