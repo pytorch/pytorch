@@ -29,10 +29,14 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
+    @staticmethod
+    def id_to_itemstr(id: Tuple[Any, ...]) -> str:
+        return "".join(str([item]) for item in id)
+
     def to_error(self) -> Exception:
         msg = self.msg
         if self.id:
-            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
+            msg += f"\n\nThe failure occurred for item {self.id_to_itemstr(self.id)}"
         return self.type(msg)
 
 
@@ -913,13 +917,19 @@ def originate_pairs(
         for pair_type in pair_types:
             try:
                 return [pair_type(actual, expected, id=id, **options)]
+            # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
+            # inputs. Thus, we try the next pair type.
             except UnsupportedInputs:
                 continue
+            # Raising an `ErrorMeta` during origination is the orderly way to abort and so we simply re-raise it. This
+            # is only in a separate branch, because the one below would also except it.
             except ErrorMeta:
                 raise
+            # Raising any other exception during origination is unexpected and will give some extra information about
+            # what happened. If applicable, the exception should be expected in the future.
             except Exception as error:
                 raise RuntimeError(
-                    f"Originating a {pair_type.__name__}() with\n\n"
+                    f"Originating a {pair_type.__name__}() at item {ErrorMeta.id_to_itemstr(id)} with\n\n"
                     f"{type(actual).__name__}(): {actual}\n\n"
                     f"and\n\n"
                     f"{type(expected).__name__}(): {expected}\n\n"
@@ -966,6 +976,8 @@ def assert_equal(
             pair.compare()
         except ErrorMeta as error_meta:
             error_metas.append(error_meta)
+        # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
+        # about what happened. If applicable, the exception should be expected in the future.
         except Exception as error:
             raise RuntimeError(
                 f"Comparing\n\n"
