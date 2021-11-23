@@ -972,7 +972,8 @@ def assert_equal(
     try:
         pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
     except ErrorMeta as error_meta:
-        raise error_meta.to_error() from error_meta
+        # Explicitly raising from None to hide the internal traceback
+        raise error_meta.to_error() from None
 
     error_metas: List[ErrorMeta] = []
     for pair in pairs:
