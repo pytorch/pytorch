@@ -425,9 +425,10 @@ build_xla() {
   # shellcheck disable=SC1091
   source "xla/.circleci/common.sh"
   apply_patches
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
   install_deps_pytorch_xla $XLA_DIR
-  build_torch_xla $XLA_DIR
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch;${CMAKE_PREFIX_PATH}" build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }
 
@@ -435,7 +436,8 @@ test_xla() {
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
-  run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch;${CMAKE_PREFIX_PATH}" run_torch_xla_tests "$(pwd)" "$(pwd)/xla"
   assert_git_not_dirty
 }
 
