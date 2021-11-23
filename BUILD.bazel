@@ -515,6 +515,7 @@ header_template_rule(
         "@CAFFE2_STATIC_LINK_CUDA_INT@": "0",
         "@AT_BUILD_WITH_BLAS@": "1",
         "@AT_BUILD_WITH_LAPACK@": "1",
+        "@AT_BUILD_WITH_OPENBLAS@": "0",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
         "@AT_PARALLEL_NATIVE_TBB@": "0",

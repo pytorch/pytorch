@@ -2997,6 +2997,18 @@ static void apply_svd(Tensor& self, Tensor& U, Tensor& S, Tensor& VT,
     // Compute S, U (optionally) and VT (optionally)
     lapackSvd<scalar_t, value_t>(jobz, m, n, self_working_ptr, lda,
                         S_working_ptr, U_working_ptr, lda, VT_working_ptr, ldvt, work_data, lwork, rwork_data, iwork_data, &info);
+
+// Reference LAPACK changed `info` behavior for inputs with non-finite values
+// Previously, it would return `info` > 0, but now it returns `info` = -4
+// Making the behaviour different from MKL
+// Here we check for the case where `info` is -4 and set it to a positive number
+// This will give the same error message as with MKL
+#if AT_BUILD_WITH_OPENBLAS()
+    if (info == -4) {
+      info = 1;
+    }
+#endif
+
     infos[i] = info;
     if (info != 0) {
       return;
