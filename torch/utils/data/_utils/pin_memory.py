@@ -51,7 +51,11 @@ def pin_memory(data):
     elif isinstance(data, string_classes):
         return data
     elif isinstance(data, collections.abc.Mapping):
-        return {k: pin_memory(sample) for k, sample in data.items()}
+        try:
+            return type(data)((k, pin_memory(sample)) for k, sample in data.items())
+        except BaseException:
+            # The mapping type may not support `__init__(iterable)`.
+            return {k: pin_memory(sample) for k, sample in data.items()}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return type(data)(*(pin_memory(sample) for sample in data))
     elif isinstance(data, collections.abc.Sequence):
