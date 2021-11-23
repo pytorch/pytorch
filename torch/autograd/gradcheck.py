@@ -819,8 +819,8 @@ def _test_batched_grad(input, output, output_idx) -> bool:
     # Squash warnings since these are expected to happen in most cases
     # NB: this doesn't work for CUDA tests: https://github.com/pytorch/pytorch/issues/50209
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", message="Batching rule not implemented")
-        warnings.filterwarnings("ignore", message="torch.vmap is an experimental prototype")
+        warnings.filterwarnings("ignore", message="There is a performance drop")
+        warnings.filterwarnings("ignore", message="Please use functorch.vmap")
         try:
             result = vmap(vjp)(torch.stack(grad_outputs))
         except RuntimeError as ex:
@@ -1320,9 +1320,10 @@ def gradcheck(
         "Expected at least one of check_forward_ad or check_backward_ad to be True"
     assert not (check_undefined_grad and not check_backward_ad), \
         "Setting check_undefined_grad=True requires check_backward_ad to be True"
-    assert not (check_batched_forward_grad and not (check_forward_ad and check_batched_grad)), (
-        "Setting check_batched_forward_grad=True requires check_forward_ad and check_batched_grad "
-        "to both be True")
+    assert not (check_batched_grad and not check_backward_ad), (
+        "Setting check_batched_grad=True requires check_backward_ad to be True")
+    assert not (check_batched_forward_grad and not check_forward_ad), (
+        "Setting check_batched_forward_grad=True requires check_forward_ad to be True")
     args = locals().copy()
     args.pop("raise_exception")
     if not raise_exception:
