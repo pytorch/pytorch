@@ -295,7 +295,8 @@ jobs:
             "${DOCKER_IMAGE}"
           )
 {%- if 'rocm' in test_runner_type %}
-          docker exec -t "${container_name}" sh -c "pip install dist/*.whl && ${TEST_COMMAND}"
+          # jenkins user does not have write permission to mounted workspace; work-around by copying to jenkins home
+          docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
 {%- else %}
           docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
 {%- endif %}
