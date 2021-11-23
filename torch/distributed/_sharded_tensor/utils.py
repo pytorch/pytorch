@@ -158,7 +158,7 @@ def build_metadata_from_local_shards(
                 f"local shard metadata placement device: {local_device}"
             )
 
-        _raise_if_mismatch(local_shard_meta.shard_lengths, list(local_shard_tensor.size()), "size", current_rank)
+        _raise_if_mismatch(local_shard_meta.shard_sizes, list(local_shard_tensor.size()), "size", current_rank)
         _raise_if_mismatch(local_shard_tensor.is_pinned(), first_shard_is_pinned, "pin_memory", current_rank)
         _raise_if_mismatch(local_shard_tensor.dtype, first_shard_dtype, "dtype", current_rank)
         _raise_if_mismatch(local_shard_tensor.requires_grad, first_shard_requires_grad, "requires_grad", current_rank)
