@@ -14712,8 +14712,8 @@ class TestNNDeviceType(NNTestCase):
     def test_pooling_large(self, device):
 
         def helper(pool):
-            inp = torch.randn(2**7+10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda")
-            self.assertTrue(inp.numel() > 2**31-1)
+            inp = torch.randn(2**7 + 10, 2**8, 2**8, 2**8, dtype=torch.half, device="cuda")
+            self.assertTrue(inp.numel() > 2**31 - 1)
             out = pool(inp)
             torch.cuda.synchronize()    # asserts test finishes normally without raising errors
 
