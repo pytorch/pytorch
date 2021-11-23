@@ -35,7 +35,7 @@ def default_convert(data):
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
         try:
-            return elem_type(default_convert(d) for d in data)
+            return elem_type([default_convert(d) for d in data])
         except BaseException:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [default_convert(d) for d in data]
@@ -94,7 +94,7 @@ def default_collate(batch):
             raise RuntimeError('each element in list of batch should be of equal size')
         transposed = zip(*batch)
         try:
-            return elem_type(default_collate(samples) for samples in transposed)
+            return elem_type([default_collate(samples) for samples in transposed])
         except BaseException:
             # The sequence type may not support `__init__(iterable)` (e.g., `range`).
             return [default_collate(samples) for samples in transposed]
