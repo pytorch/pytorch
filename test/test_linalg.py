@@ -1029,77 +1029,7 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.eigvalsh(t, out=out)
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    def test_eigvalsh_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        def run_test(matrix, uplo):
-            self.assertFalse(matrix.is_contiguous())
-            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy(), UPLO=uplo)
-            actual_w = torch.linalg.eigvalsh(matrix, UPLO=uplo)
-            self.assertEqual(actual_w, expected_w)
-
-        def run_test_permuted(shape, batch, uplo):
-            # check for permuted / transposed inputs
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.mT
-            run_test(matrix, uplo)
-
-        def run_test_skipped_elements(shape, batch, uplo):
-            # check for inputs with skipped elements
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix[::2]
-            run_test(matrix, uplo)
-
-        shapes = (3, 5)
-        batches = ((4, ), (4, 2))
-        uplos = ["U", "L"]
-        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
-            run_test_permuted(shape, batch, uplo)
-            run_test_skipped_elements(shape, batch, uplo)
-
-    @dtypes(*floating_and_complex_types())
-||||||| constructed merge base
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    def test_eigvalsh_non_contiguous(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_matrix
-
-        def run_test(matrix, uplo):
-            self.assertFalse(matrix.is_contiguous())
-            expected_w = np.linalg.eigvalsh(matrix.cpu().numpy(), UPLO=uplo)
-            actual_w = torch.linalg.eigvalsh(matrix, UPLO=uplo)
-            self.assertEqual(actual_w, expected_w)
-
-        def run_test_permuted(shape, batch, uplo):
-            # check for permuted / transposed inputs
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix.mT
-            run_test(matrix, uplo)
-
-        def run_test_skipped_elements(shape, batch, uplo):
-            # check for inputs with skipped elements
-            matrix = random_hermitian_matrix(shape, *batch, dtype=dtype, device=device)
-            matrix = matrix[::2]
-            run_test(matrix, uplo)
-
-        shapes = (3, 5)
-        batches = ((4, ), (4, 2))
-        uplos = ["U", "L"]
-        for shape, batch, uplo in itertools.product(shapes, batches, uplos):
-            run_test_permuted(shape, batch, uplo)
-            run_test_skipped_elements(shape, batch, uplo)
-
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-=======
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     def test_kron(self, device, dtype):
 
         def run_test_case(a_shape, b_shape):
@@ -1120,125 +1050,7 @@ class TestLinalg(TestCase):
         for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
             run_test_case(a_shape, b_shape)
 
-<<<<<<< HEAD
     @dtypes(*floating_and_complex_types())
-    def test_kron_non_contiguous(self, device, dtype):
-
-        def run_test_transposed(a_shape, b_shape):
-            # check for transposed case
-            a = torch.rand(a_shape, dtype=dtype, device=device).mT
-            b = torch.rand(b_shape, dtype=dtype, device=device).mT
-            self.assertFalse(a.is_contiguous())
-            self.assertFalse(b.is_contiguous())
-
-            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-            result = torch.kron(a, b)
-            self.assertEqual(result, expected)
-
-            # check the out= variant
-            out = torch.empty(result.mT.shape, dtype=dtype, device=device).mT
-            self.assertFalse(out.is_contiguous())
-            ans = torch.kron(a, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        def run_test_skipped_elements(a_shape, b_shape):
-            # check for transposed case
-            a = torch.rand(2 * a_shape[0], *a_shape[1:], dtype=dtype, device=device)[::2]
-            b = torch.rand(2 * b_shape[0], *b_shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(a.is_contiguous())
-            self.assertFalse(b.is_contiguous())
-
-            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-            result = torch.kron(a, b)
-            self.assertEqual(result, expected)
-
-            # check the out= variant
-            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(out.is_contiguous())
-            ans = torch.kron(a, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        shapes = [(2, 2), (2, 2, 3), (2, 2, 3, 3)]
-        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
-            # run_test_transposed(a_shape, b_shape)
-            run_test_skipped_elements(a_shape, b_shape)
-
-        # Test that kron perserve memory format
-        a = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
-        b = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
-        c = torch.kron(a, b)
-        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
-        torch.kron(a, b, out=c)
-        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
-        c = c.contiguous(memory_format=torch.contiguous_format)
-        torch.kron(a, b, out=c)
-        self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
-
-
-    @dtypes(*floating_and_complex_types())
-||||||| constructed merge base
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_kron_non_contiguous(self, device, dtype):
-
-        def run_test_transposed(a_shape, b_shape):
-            # check for transposed case
-            a = torch.rand(a_shape, dtype=dtype, device=device).mT
-            b = torch.rand(b_shape, dtype=dtype, device=device).mT
-            self.assertFalse(a.is_contiguous())
-            self.assertFalse(b.is_contiguous())
-
-            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-            result = torch.kron(a, b)
-            self.assertEqual(result, expected)
-
-            # check the out= variant
-            out = torch.empty(result.mT.shape, dtype=dtype, device=device).mT
-            self.assertFalse(out.is_contiguous())
-            ans = torch.kron(a, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        def run_test_skipped_elements(a_shape, b_shape):
-            # check for transposed case
-            a = torch.rand(2 * a_shape[0], *a_shape[1:], dtype=dtype, device=device)[::2]
-            b = torch.rand(2 * b_shape[0], *b_shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(a.is_contiguous())
-            self.assertFalse(b.is_contiguous())
-
-            expected = np.kron(a.cpu().numpy(), b.cpu().numpy())
-            result = torch.kron(a, b)
-            self.assertEqual(result, expected)
-
-            # check the out= variant
-            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(out.is_contiguous())
-            ans = torch.kron(a, b, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        shapes = [(2, 2), (2, 2, 3), (2, 2, 3, 3)]
-        for a_shape, b_shape in itertools.product(shapes, reversed(shapes)):
-            # run_test_transposed(a_shape, b_shape)
-            run_test_skipped_elements(a_shape, b_shape)
-
-        # Test that kron perserve memory format
-        a = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
-        b = torch.randn(1, 2, 3, 4, dtype=dtype, device=device).contiguous(memory_format=torch.channels_last)
-        c = torch.kron(a, b)
-        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
-        torch.kron(a, b, out=c)
-        self.assertTrue(c.is_contiguous(memory_format=torch.channels_last))
-        c = c.contiguous(memory_format=torch.contiguous_format)
-        torch.kron(a, b, out=c)
-        self.assertTrue(c.is_contiguous(memory_format=torch.contiguous_format))
-
-
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-=======
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     def test_kron_empty(self, device, dtype):
 
         def run_test_case(empty_shape):
@@ -3068,46 +2880,6 @@ class TestLinalg(TestCase):
         for upper, batchsize in itertools.product([True, False], [1, 3, 4]):
             cholesky_solve_batch_helper((5, batchsize), (batchsize, 5, 10), upper)
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_cholesky_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        for upper in [True, False]:
-            A = random_hermitian_pd_matrix(2, 2, dtype=dtype, device='cpu')
-            b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
-            x_exp = solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())
-            A = A.to(device).permute(0, 2, 1)
-            b = b.to(device).permute(2, 1, 0)
-            assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-            L = torch.cholesky(A, upper)
-            x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(x, x_exp)
-
-||||||| constructed merge base
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_cholesky_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        for upper in [True, False]:
-            A = random_hermitian_pd_matrix(2, 2, dtype=dtype, device='cpu')
-            b = torch.randn(2, 2, 2, dtype=dtype, device='cpu')
-            x_exp = solve(A.permute(0, 2, 1).numpy(), b.permute(2, 1, 0).numpy())
-            A = A.to(device).permute(0, 2, 1)
-            b = b.to(device).permute(2, 1, 0)
-            assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-            L = torch.cholesky(A, upper)
-            x = torch.cholesky_solve(b, L, upper=upper)
-            self.assertEqual(x, x_exp)
-
-=======
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3572,45 +3344,7 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-<<<<<<< HEAD
     @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
-    def test_solve_batched_non_contiguous(self, device, dtype):
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2).permute(1, 0, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-        self.assertFalse(A.is_contiguous())
-        self.assertFalse(b.is_contiguous())
-        actual = torch.linalg.solve(A, b)
-        expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-||||||| constructed merge base
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3})
-    def test_solve_batched_non_contiguous(self, device, dtype):
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2).permute(1, 0, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-        self.assertFalse(A.is_contiguous())
-        self.assertFalse(b.is_contiguous())
-        actual = torch.linalg.solve(A, b)
-        expected = np.linalg.solve(A.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(actual, expected)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-=======
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     def test_solve_errors_and_warnings(self, device, dtype):
         # solve expects batches of square matrices as input
         with self.assertRaisesRegex(RuntimeError, "must be batches of square matrices"):
@@ -3701,40 +3435,6 @@ class TestLinalg(TestCase):
         for batchsize in [1, 3, 4]:
             solve_batch_helper((batchsize, 5, 5), (batchsize, 5, 10))
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_old_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
-
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2).permute(1, 0, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-        x, _ = torch.solve(b, A)
-        x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(x, x_exp)
-
-||||||| constructed merge base
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_old_solve_batched_non_contiguous(self, device, dtype):
-        from numpy.linalg import solve
-
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2).permute(1, 0, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device).permute(2, 1, 0)
-        x, _ = torch.solve(b, A)
-        x_exp = solve(A.cpu().numpy(), b.cpu().numpy())
-        self.assertEqual(x, x_exp)
-
-=======
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     @slowTest
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -3891,104 +3591,6 @@ class TestLinalg(TestCase):
         run_test((1, 2, 3, 2, 3), ind=3)
         run_test((3, 2, 1, 2, 12), ind=4)
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
-    def test_tensorinv_non_contiguous(self, device, dtype):
-
-        def run_test(a_shape, ind):
-            # check for permuted (transposed) case
-            a = torch.randn(a_shape, dtype=dtype, device=device)
-            permutation = list(range(0, a.ndim))
-            a = a.permute(permutation[ind:] + permutation[:ind])
-            self.assertFalse(a.is_contiguous())
-            a_numpy = a.cpu().numpy()
-            result = torch.linalg.tensorinv(a, ind=a.ndim - ind)
-            expected = np.linalg.tensorinv(a_numpy, ind=a.ndim - ind)
-            self.assertEqual(result, expected)
-
-        def run_test_skipped_elements(a_shape, ind):
-            # check for input with skipped elements
-            a = torch.randn(a_shape, dtype=dtype, device=device)
-            a = a[::2]
-            self.assertFalse(a.is_contiguous())
-            a_numpy = a.cpu().numpy()
-            result = torch.linalg.tensorinv(a, ind=ind)
-            expected = np.linalg.tensorinv(a_numpy, ind=ind)
-            self.assertEqual(result, expected)
-
-            # check non-contiguous out
-            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(out.is_contiguous())
-            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        run_test((12, 3, 4), ind=1)
-        run_test((3, 8, 24), ind=2)
-        run_test((18, 3, 3, 2), ind=1)
-        run_test((1, 4, 2, 2), ind=2)
-        run_test((2, 3, 5, 30), ind=3)
-        run_test((24, 2, 2, 3, 2), ind=1)
-        run_test((3, 4, 2, 3, 2), ind=2)
-        run_test((1, 2, 3, 2, 3), ind=3)
-        run_test((3, 2, 1, 2, 12), ind=4)
-
-        run_test_skipped_elements((12, 3, 2), ind=1)
-        run_test_skipped_elements((18, 3, 3, 1), ind=1)
-
-||||||| constructed merge base
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @precisionOverride({torch.float: 1e-3, torch.cfloat: 1e-3})
-    def test_tensorinv_non_contiguous(self, device, dtype):
-
-        def run_test(a_shape, ind):
-            # check for permuted (transposed) case
-            a = torch.randn(a_shape, dtype=dtype, device=device)
-            permutation = list(range(0, a.ndim))
-            a = a.permute(permutation[ind:] + permutation[:ind])
-            self.assertFalse(a.is_contiguous())
-            a_numpy = a.cpu().numpy()
-            result = torch.linalg.tensorinv(a, ind=a.ndim - ind)
-            expected = np.linalg.tensorinv(a_numpy, ind=a.ndim - ind)
-            self.assertEqual(result, expected)
-
-        def run_test_skipped_elements(a_shape, ind):
-            # check for input with skipped elements
-            a = torch.randn(a_shape, dtype=dtype, device=device)
-            a = a[::2]
-            self.assertFalse(a.is_contiguous())
-            a_numpy = a.cpu().numpy()
-            result = torch.linalg.tensorinv(a, ind=ind)
-            expected = np.linalg.tensorinv(a_numpy, ind=ind)
-            self.assertEqual(result, expected)
-
-            # check non-contiguous out
-            out = torch.empty(2 * result.shape[0], *result.shape[1:], dtype=dtype, device=device)[::2]
-            self.assertFalse(out.is_contiguous())
-            ans = torch.linalg.tensorinv(a, ind=ind, out=out)
-            self.assertEqual(ans, out)
-            self.assertEqual(ans, result)
-
-        run_test((12, 3, 4), ind=1)
-        run_test((3, 8, 24), ind=2)
-        run_test((18, 3, 3, 2), ind=1)
-        run_test((1, 4, 2, 2), ind=2)
-        run_test((2, 3, 5, 30), ind=3)
-        run_test((24, 2, 2, 3, 2), ind=1)
-        run_test((3, 4, 2, 3, 2), ind=2)
-        run_test((1, 2, 3, 2, 3), ind=3)
-        run_test((3, 2, 1, 2, 12), ind=4)
-
-        run_test_skipped_elements((12, 3, 2), ind=1)
-        run_test_skipped_elements((18, 3, 3, 1), ind=1)
-
-=======
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     @skipMeta  # See https://github.com/pytorch/pytorch/issues/53739
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -7771,44 +7373,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         for indices in itertools.product((True, False), repeat=2):
             verify_batched_matmul(*indices)
 
-<<<<<<< HEAD
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_lu_solve_batched_non_contiguous(self, device, dtype):
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device)
-        x_exp = np.linalg.solve(A.cpu().permute(0, 2, 1).numpy(), b.cpu().permute(2, 1, 0).numpy())
-        A = A.permute(0, 2, 1)
-        b = b.permute(2, 1, 0)
-        assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-        LU_data, LU_pivots = torch.lu(A)
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertEqual(x, x_exp)
-
-||||||| constructed merge base
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    def test_lu_solve_batched_non_contiguous(self, device, dtype):
-        make_fullrank = make_fullrank_matrices_with_distinct_singular_values
-        make_A = partial(make_fullrank, device=device, dtype=dtype)
-
-        A = make_A(2, 2, 2)
-        b = torch.randn(2, 2, 2, dtype=dtype, device=device)
-        x_exp = np.linalg.solve(A.cpu().permute(0, 2, 1).numpy(), b.cpu().permute(2, 1, 0).numpy())
-        A = A.permute(0, 2, 1)
-        b = b.permute(2, 1, 0)
-        assert not A.is_contiguous() and not b.is_contiguous(), "contiguous inputs"
-        LU_data, LU_pivots = torch.lu(A)
-        x = torch.lu_solve(b, LU_data, LU_pivots)
-        self.assertEqual(x, x_exp)
-
-=======
->>>>>>> Remove unnecessary non_contiguous tests from test_linalg
     def lu_solve_test_helper(self, A_dims, b_dims, pivot, device, dtype):
         make_fullrank = make_fullrank_matrices_with_distinct_singular_values
         make_A = partial(make_fullrank, device=device, dtype=dtype)
