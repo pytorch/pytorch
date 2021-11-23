@@ -485,12 +485,15 @@ TORCH_IMPL_FUNC(clamp_out)
  const OptionalScalarRef min,
  const OptionalScalarRef max,
  const Tensor& result) {
+  using at::native::detail::ClampLimits;
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    clamp_scalar_stub(device_type(), *this, min.get(), max.get(), ClampLimits::MinMax);
   } else if (max) {
-    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
+    clamp_scalar_stub(device_type(), *this, max.get(), max.get(), ClampLimits::Max);
+//    at::clamp_max_outf(self, max.get(), const_cast<Tensor&>(result));
   } else if (min) {
-    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
+    clamp_scalar_stub(device_type(), *this, min.get(), min.get(), ClampLimits::Min);
+//    at::clamp_min_outf(self, min.get(), const_cast<Tensor&>(result));
   }
 }
 
