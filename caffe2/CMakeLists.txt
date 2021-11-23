@@ -202,7 +202,6 @@ if(BUILD_SPLIT_CUDA)
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/THC/THCStorage.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCStorageCopy.cpp"
       "${PROJECT_SOURCE_DIR}/aten/src/THC/THCTensor.cpp"
 
       "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterCUDA.cpp"
