@@ -89,7 +89,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Magma package names are concatenation of CUDA major and minor ignoring revision
   # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
   if [ -n "$CUDA_VERSION" ]; then
-    conda_install magma-cuda${${CUDA_VERSION/./}/.*[0-9]/} -c pytorch
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
   # TODO: This isn't working atm
