@@ -77,11 +77,48 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
+// Logic copied from ATen/cudnn/Descriptors.h
+// The stride for a size-1 dimensions is not uniquely determined; in
+// fact, it can be anything you want, because the fact that the
+// tensor is size 1 at this dimension means that you will never actually
+// try advancing your pointer by this stride.
+//
+// However, CuDNN has a much more stringent requirement on strides:
+// if you are passing a contiguous input, it better be the case
+// that the stride for dim i is the product of the sizes of dims
+// i+1 to the end.  This stride is indeed uniquely determined.  This
+// function modifies 'stride' in place so this invariant holds.
+template<typename T>
+static inline void fixSizeOneDimStride(std::vector<T> &sizes, std::vector<T> &strides, bool nhwc) {
+  int64_t z = 1;
+  size_t index = 0;
+  size_t dim = strides.size();
+  std::vector<int64_t> permutation(dim);
+
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (size_t d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (size_t d : permutation) {
+    if (sizes[d] == 1) {
+      strides[d] = z;
+    } else {
+      z *= sizes[d];
+    }
+  }
+}
+
 cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(const Tensor &t, const int64_t id, const uint8_t alignment, const cudnnDataType_t dataType, const bool _virtual) {
-  auto shape = t.sizes();
+  auto sizes = t.sizes();
   auto strides = t.strides();
   auto r = cudnn_frontend::TensorBuilder()
-    .setDim(shape.size(), shape.data())
+    .setDim(sizes.size(), sizes.data())
     .setStrides(strides.size(), strides.data())
     .setId(id)
     .setAlignment(alignment)
@@ -654,9 +691,9 @@ void raw_cudnn_convolution_add_relu_out(
       alpha, stride, padding, dilation,
       groups, benchmark, deterministic, allow_tf32);
   } else {
-   raw_cudnn_convolution_add_relu_out_v7(output, input, weight, z,
-                                         alpha, bias, stride, padding, dilation,
-                                         groups, benchmark, deterministic, allow_tf32);
+    raw_cudnn_convolution_add_relu_out_v7(output, input, weight, z,
+                                          alpha, bias, stride, padding, dilation,
+                                          groups, benchmark, deterministic, allow_tf32);
   }
 }
 
