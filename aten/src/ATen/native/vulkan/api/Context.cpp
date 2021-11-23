@@ -111,17 +111,24 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
+#ifdef MAKE_VULKAN_THREADSAFE
+      threadcontext_(gpu()) {
+#else
+      command_(gpu()),
       descriptor_(gpu()),
       resource_(gpu()) {
+#endif /* MAKE_VULKAN_THREADSAFE */
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
 }
 
 Context::~Context() {
+#ifdef MAKE_VULKAN_THREADSAFE
+  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
+#else
   try {
     flush();
   }
@@ -135,6 +142,7 @@ Context::~Context() {
         "Vulkan: Context destructor raised an exception! "
         "Error: Unknown");
   }
+#endif /* MAKE_VULKAN_THREADSAFE */
 }
 
 void Context::flush() {
@@ -143,6 +151,23 @@ void Context::flush() {
   resource().pool.purge();
   descriptor().pool.purge();
   command().pool.purge();
+}
+
+void Context::wait(const at::Tensor& src) {
+  // wait only if Vulkan tensor
+  if (at::kVulkan == src.device().type()) {
+    api::Command::Pool& command_pool = command().pool;
+    api::Command::Buffer& command_buffer = command_pool.stream();
+
+    using Future = ops::vTensor::Future<const void, ops::vTensor::Access::Read>;
+    const ops::vTensor& v_src = ops::convert(src);
+    const Future v_src_future = v_src.host<const void>(command_buffer);
+
+    // This wait() is a no-op if data is not out of sync.  More often than
+    // not though, waits here are expected as the GPU catches up with
+    // compute submitted from CPU.
+    v_src_future.wait();
+  }
 }
 
 bool available() {
@@ -186,6 +211,42 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
   }
 };
 static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
+
+Descriptor::Set dispatch_prologue(
+    Command::Buffer& command_buffer,
+    const Shader::Layout::Signature& shader_layout_signature,
+    const Shader::Descriptor& shader_descriptor,
+    const Shader::WorkGroup& local_work_group_size) {
+  Context* const context = api::context();
+  const GPU gpu = context->gpu();
+  Descriptor& descriptor = context->descriptor();
+  Pipeline& pipeline = context->pipeline();
+  Shader& shader = context->shader();
+
+  const Shader::Layout::Object shader_layout =
+      shader.layout.cache.retrieve({
+        shader_layout_signature,
+      });
+
+  command_buffer.bind(
+      pipeline.cache.retrieve({
+        pipeline.layout.cache.retrieve({
+          shader_layout.handle,
+        }),
+        shader.cache.retrieve(shader_descriptor),
+        local_work_group_size,
+      }));
+
+  return descriptor.pool.allocate(shader_layout);
+}
+
+void dispatch_epilogue(
+    Command::Buffer& command_buffer,
+    const Descriptor::Set& descriptor_set,
+    const Shader::WorkGroup& global_work_group) {
+  command_buffer.bind(descriptor_set);
+  command_buffer.dispatch(global_work_group);
+}
 
 } // namespace api
 } // namespace vulkan

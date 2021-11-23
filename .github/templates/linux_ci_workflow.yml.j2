@@ -8,13 +8,7 @@ name: !{{ build_environment }}
 
 on:
   pull_request:
-  {%- if ciflow_config.enabled %}
-    {%- if ciflow_config.trigger_action_only %}
-    types: [!{{ ciflow_config.trigger_action }}]
-    {%- else %}
     types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-    {%- endif %}
-  {%- endif %}
 
 {%- if is_scheduled %}
   schedule:
@@ -43,8 +37,12 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_RETRY_TEST_CASES: 1
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -53,6 +51,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
@@ -60,14 +59,14 @@ jobs:
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
-      !{{ common.calculate_docker_image() }}
+      !{{ common.calculate_docker_image(false) }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
       !{{ common.parse_ref() }}
       - name: Build
         env:
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -76,9 +75,9 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
-            -e CIRCLE_PR_NUMBER \
-            -e CIRCLE_SHA1 \
-            -e CIRCLE_BRANCH \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -103,9 +102,9 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -115,7 +114,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if not is_libtorch %}
+      {%- if build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
@@ -143,9 +142,8 @@ jobs:
 {% block test +%}
   generate-test-matrix:
     runs-on: ubuntu-18.04
-    {%- if ciflow_config.enabled %}
     needs: [!{{ ciflow_config.root_job_name }}]
-    {%- endif %}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
@@ -160,6 +158,7 @@ jobs:
       ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
       NUM_TEST_SHARDS: !{{ num_test_shards }}
       MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
+      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
       NOGPU_RUNNER_TYPE: linux.2xlarge
       PR_BODY: ${{ github.event.pull_request.body }}
     outputs:
@@ -183,6 +182,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -227,12 +227,16 @@ jobs:
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+        # Time out the test phase after !{{ timeout_after }} minutes
+        timeout-minutes: !{{ timeout_after }}
         run: |
+          set -x
+
           if [[ $TEST_CONFIG == 'multigpu' ]]; then
             TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
+          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
+            TEST_COMMAND=.jenkins/caffe2/test.sh
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
@@ -248,9 +252,8 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e IS_GHA \
-            -e CIRCLE_BRANCH \
-            -e CIRCLE_SHA1 \
-            -e CIRCLE_PR_NUMBER \
+            -e BRANCH \
+            -e SHA1 \
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
@@ -258,6 +261,7 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -291,6 +295,7 @@ jobs:
 {%- if enable_doc_jobs %}
   build-docs:
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
@@ -316,15 +321,15 @@ jobs:
           set -ex
           time docker pull "${DOCKER_IMAGE}" > /dev/null
           echo "${GITHUB_REF}"
-          ref=${GITHUB_REF##*/}
-          target=${ref//v}
+          # TODO: Set it correctly when workflows are scheduled on tags
+          target="master"
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e CIRCLE_SHA1="$GITHUB_SHA" \
+            -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
             -e PR_LABELS \
@@ -350,7 +355,7 @@ jobs:
           retention-days: 14
           s3-bucket: doc-previews
           if-no-files-found: error
-          path: pytorch.github.io/docs/merge/
+          path: pytorch.github.io/docs/master/
           s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload C++ Docs Preview

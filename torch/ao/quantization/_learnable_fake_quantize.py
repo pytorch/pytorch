@@ -2,7 +2,7 @@ import torch
 from torch.nn.parameter import Parameter
 
 
-class _LearnableFakeQuantize(torch.quantization.FakeQuantizeBase):
+class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
     r""" This is an extension of the FakeQuantize module in fake_quantize.py, which
     supports more generalized lower-bit quantization and support learning of the scale
     and zero point parameters through backpropagation. For literature references,

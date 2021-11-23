@@ -123,6 +123,10 @@ struct InterpreterSessionImpl {
   int64_t ID(Obj obj) const {
     return obj.id_;
   }
+
+  bool isOwner(Obj obj) const {
+    return this == obj.interaction_;
+  }
 };
 
 struct InterpreterImpl {

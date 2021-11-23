@@ -1,9 +1,13 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/TensorBase.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/Scalar.h>
 
-namespace at { struct TensorIterator; }
+namespace at {
+struct TensorIterator;
+struct TensorIteratorBase;
+}
 
 namespace at { namespace native {
 
@@ -18,7 +22,7 @@ inline void alpha_check(const ScalarType dtype, const Scalar& alpha) {
 }
 
 // Basic checking for all sub functions.
-inline void sub_check(const Tensor& self, const Tensor& other) {
+inline void sub_check(const TensorBase& self, const TensorBase& other) {
   TORCH_CHECK(self.scalar_type() != kBool || other.scalar_type() != kBool,
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")
@@ -27,7 +31,7 @@ inline void sub_check(const Tensor& self, const Tensor& other) {
               "If you are trying to invert a mask, use the `~` or `logical_not()` operator instead.");
 }
 
-inline void sub_check(const Tensor& self, const Scalar& scalar) {
+inline void sub_check(const TensorBase& self, const Scalar& scalar) {
   TORCH_CHECK(self.scalar_type() != kBool || !scalar.isBoolean(),
               "Subtraction, the `-` operator, with two bool tensors is not supported. "
               "Use the `^` or `logical_xor()` operator instead.")

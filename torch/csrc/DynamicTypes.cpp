@@ -66,7 +66,7 @@ PyTypeObject* getPyTypeObject(
   if (storage.data() == nullptr && storage.nbytes() != 0) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
   }
-  at::ScalarType scalarType = at::typeMetaToScalarType(dtype);
+  at::ScalarType scalarType = at::ScalarType::Byte;
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
       scalarType);
@@ -120,18 +120,76 @@ PyObject* createPyObject(
   return obj.release();
 }
 
+PyTypeObject* loadTypedStorageTypeObject() {
+  PyObject* storage_module = PyImport_ImportModule("torch.storage");
+  TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
+
+  PyObject* typed_storage_obj = PyObject_GetAttrString(storage_module, "TypedStorage");
+  TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
+  return reinterpret_cast<PyTypeObject*>(
+      PyObject_GetAttrString(storage_module, "TypedStorage"));
+}
+
+PyTypeObject* getTypedStorageTypeObject() {
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+  static PyTypeObject* typed_storage_type_obj = loadTypedStorageTypeObject();
+  return typed_storage_type_obj;
+}
+
 bool isStorage(PyObject* obj)
 {
-  return py_storage_type_to_attype.count(Py_TYPE(obj));
-}
-at::Storage createStorage(PyObject* obj)
-{
-  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
-  if (it == py_storage_type_to_attype.end()) {
-    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+  if (PyObject_TypeCheck(obj, getTypedStorageTypeObject())) {
+    return true;
   }
-  auto& type = *it->second;
-  return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+  auto obj_type = Py_TYPE(obj);
+  for (auto const& item : py_storage_type_to_attype) {
+    auto const& storage_type = item.first;
+    if (obj_type == storage_type) {
+      return true;
+    }
+  }
+  return false;
+}
+
+at::Storage createStorageGetType(PyObject* obj, at::ScalarType& scalar_type, bool& is_typed_storage)
+{
+  is_typed_storage = PyObject_TypeCheck(obj, getTypedStorageTypeObject());
+  THPObjectPtr maybe_untyped_storage;
+  if (is_typed_storage) {
+    PyObject* maybe_untyped_storage_obj = PyObject_GetAttrString(obj, "_storage");
+    TORCH_INTERNAL_ASSERT(maybe_untyped_storage_obj);
+    maybe_untyped_storage = maybe_untyped_storage_obj;
+  }
+
+  auto obj_type = Py_TYPE(obj);
+  for (auto const& item : py_storage_type_to_attype) {
+    auto const& storage_type = item.first;
+    if (is_typed_storage) {
+      if (Py_TYPE(maybe_untyped_storage.get()) == storage_type) {
+        auto& type = *item.second;
+        auto ret = type.unsafeStorageFromTH(
+          ((THPVoidStorage*)maybe_untyped_storage.get())->cdata,
+          true);
+        PyObject* dtype_obj = PyObject_GetAttrString(obj, "dtype");
+        TORCH_INTERNAL_ASSERT(dtype_obj && THPDtype_Check(dtype_obj));
+        scalar_type = reinterpret_cast<THPDtype*>(dtype_obj)->scalar_type;
+        return ret;
+      }
+    }
+    if (obj_type == storage_type) {
+      auto& type = *item.second;
+      // UntypedStorage should always be interpreted with byte dtype
+      scalar_type = at::kByte;
+      return type.unsafeStorageFromTH(((THPVoidStorage*)obj)->cdata, true);
+    }
+  }
+  throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+}
+
+at::Storage createStorage(PyObject* obj) {
+  at::ScalarType scalar_type;
+  bool is_typed_storage = false;
+  return createStorageGetType(obj, scalar_type, is_typed_storage);
 }
 
 }  // namespace

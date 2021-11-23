@@ -10,10 +10,6 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
-
-#include <torch/csrc/jit/codegen/cuda/interface.h>
-#include <torch/csrc/jit/ir/ir.h>
-
 namespace torch {
 namespace jit {
 
@@ -106,9 +102,20 @@ ProfileIValueOp* ProfilingRecord::createProfileIValueNode(Value* in_val) {
   return pn;
 }
 
+ProfileIValueOp* ProfilingRecord::createProfileIValueNode(
+    ArrayRef<Value*> inputs) {
+  auto pn = new ProfileIValueOp(this->profiled_graph_.get(), nullptr);
+  for (auto inp : inputs) {
+    pn->addInput(inp);
+    auto pno = pn->addOutput();
+    pno->setType(inp->type());
+  }
+  return pn;
+}
+
 static void unprofileGraphInputs(const std::shared_ptr<Graph>& graph) {
   for (auto i : graph->inputs()) {
-    if (i->type()->isSubtypeOf(TensorType::get())) {
+    if (i->type()->isSubtypeOf(*TensorType::get())) {
       i->setType(unshapedType(i->type()));
     }
   }
@@ -124,7 +131,7 @@ static void unprofileBlock(Block* start_block) {
 
     for (auto n : block->nodes()) {
       for (auto o : n->outputs()) {
-        if (o->type()->isSubtypeOf(TensorType::get())) {
+        if (o->type()->isSubtypeOf(*TensorType::get())) {
           o->setType(unshapedType(o->type()));
         }
       }
@@ -207,7 +214,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 bool needsProfiledInputs(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::profileNode(n))
 #else
       false
 #endif
@@ -244,7 +251,7 @@ bool needsProfiledInputs(Node* n) {
 bool needsProfiledOutput(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::canFuseNode(n))
+      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::profileNode(n))
 #else
       false
 #endif
@@ -298,7 +305,7 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (size_t offset = 0; offset < block->return_node()->inputs().size();
        offset++) {
     auto i = block->return_node()->input(offset);
-    if (i->type()->isSubtypeOf(TensorType::get())) {
+    if (i->type()->isSubtypeOf(*TensorType::get())) {
       insertShapeProfile(block->return_node(), offset);
     }
   }

@@ -39,5 +39,7 @@ void isCuda(Stack& stack);
 
 void numToTensorBool(Stack& stack);
 
+void dictIndex(Stack& stack);
+
 } // namespace jit
 } // namespace torch

@@ -29,12 +29,12 @@ void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
     eg = I.self.attr("load_pickle")({"model", "example.pkl"}).toIValue();
   }
 
-  at::Tensor output = model(eg.toTuple()->elements()).toTensor();
+  at::Tensor output = model(eg.toTupleRef().elements()).toTensor();
 
   // Reference
   auto ref_model = torch::jit::load(jit_filename);
   at::Tensor ref_output =
-      ref_model.forward(eg.toTuple()->elements()).toTensor();
+      ref_model.forward(eg.toTupleRef().elements()).toTensor();
 
   ASSERT_TRUE(ref_output.allclose(output, 1e-03, 1e-05));
 }
@@ -62,7 +62,7 @@ TEST(TorchpyTest, InitTwice) {
 
 TEST(TorchpyTest, DifferentInterps) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("check_none", "check = id(None)\n");
+  m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
     auto I = m.allInstances()[0].acquireSession();
@@ -107,8 +107,8 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
   size_t ninterp = 3;
   std::vector<at::Tensor> outputs;
 
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(ninterp)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -151,11 +151,12 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   std::vector<at::Tensor> outputs;
 
   std::vector<std::future<at::Tensor>> futures;
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     futures.push_back(std::async(std::launch::async, [&model]() {
       auto input = torch::ones({10, 20});
-      for (const auto i : c10::irange(100)) {
+      for (const auto j : c10::irange(100)) {
+        (void)j;
         model({input.alias()}).toTensor();
       }
       auto result = model({input.alias()}).toTensor();
@@ -172,6 +173,28 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
   // Compare all to reference
   for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
+  }
+}
+
+TEST(TorchpyTest, ErrorsReplicatingObj) {
+  torch::deploy::InterpreterManager manager(4);
+  torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
+  auto replicatedObj = p.loadPickle("model", "model.pkl");
+  // Acquire two different interpreters
+  auto session1 = replicatedObj.acquireSession();
+  auto session2 = p.acquireSession();
+  // Create an obj reference on interpreter 1
+  auto obj = session1.fromMovable(replicatedObj);
+  // should throw an error when trying to access obj from different session
+  // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
+  EXPECT_THROW(session2.createMovable(obj), c10::Error);
+  try {
+    session2.createMovable(obj);
+  } catch (c10::Error& error) {
+    EXPECT_TRUE(
+        error.msg().find(
+            "Cannot create movable from an object that lives in different session") !=
+        std::string::npos);
   }
 }
 
@@ -230,8 +253,8 @@ TEST(TorchpyTest, TaggingRace) {
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
   torch::deploy::InterpreterManager m(nthreads);
-  // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
   for (const auto n : c10::irange(trials)) {
+    (void)n;
     at::Tensor t = torch::empty(2);
     std::atomic<int64_t> success(0);
     std::atomic<int64_t> failed(0);
@@ -266,7 +289,7 @@ TEST(TorchpyTest, DisarmHook) {
 
 TEST(TorchpyTest, RegisterModule) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("foomodule", "def add1(x): return x + 1\n");
+  m.registerModuleSource("foomodule", "def add1(x): return x + 1\n");
   for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
     AT_ASSERT(3 == I.global("foomodule", "add1")({2}).toIValue().toInt());
@@ -283,6 +306,7 @@ TEST(TorchpyTest, FxModule) {
   std::vector<at::Tensor> outputs;
   auto input = torch::ones({5, 10});
   for (const auto i : c10::irange(nthreads)) {
+    (void)i;
     outputs.push_back(model({input.alias()}).toTensor());
   }
 
@@ -297,6 +321,29 @@ TEST(TorchpyTest, FxModule) {
   for (const auto i : c10::irange(nthreads)) {
     ASSERT_TRUE(ref_output.equal(outputs[i]));
   }
+}
+
+// Moving a tensor between interpreters should share the underlying storage.
+TEST(TorchpyTest, TensorSerializationSharing) {
+  torch::deploy::InterpreterManager manager(2);
+  manager.registerModuleSource("test_module", R"PYTHON(
+import torch
+
+def get_tensor():
+    return torch.ones(2, 2)
+)PYTHON");
+
+  auto I = manager.acquireOne();
+  auto I2 = manager.acquireOne();
+
+  auto objOnI =
+      I.global("test_module", "get_tensor")(at::ArrayRef<at::IValue>{});
+  auto replicated = I.createMovable(objOnI);
+  auto objOnI2 = I2.fromMovable(replicated);
+
+  auto tensorOnI = objOnI.toIValue().toTensor();
+  auto tensorOnI2 = objOnI2.toIValue().toTensor();
+  ASSERT_TRUE(tensorOnI.storage().is_alias_of(tensorOnI2.storage()));
 }
 
 #ifdef TEST_CUSTOM_LIBRARY
@@ -381,7 +428,7 @@ TEST(TorchpyTest, UsesDistributed) {
 
 TEST(TorchpyTest, Autograd) {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("autograd_test", R"PYTHON(
+  m.registerModuleSource("autograd_test", R"PYTHON(
 import torch
 
 x = torch.ones(5)  # input tensor
@@ -405,3 +452,34 @@ result = torch.Tensor([1,2,3])
   }
   EXPECT_TRUE(w_grad0.equal(w_grad1));
 }
+
+// OSS build does not have bultin numpy support yet. Use this flag to guard the
+// test case.
+#if HAS_NUMPY
+TEST(TorchpyTest, TestNumpy) {
+  torch::deploy::InterpreterManager m(2);
+  auto noArgs = at::ArrayRef<torch::deploy::Obj>();
+  auto I = m.acquireOne();
+  auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
+  auto mat58 = I.global("numpy", "random").attr("rand")({5, 8});
+  auto mat38 = I.global("numpy", "matmul")({mat35, mat58});
+  EXPECT_EQ(2, mat38.attr("shape").attr("__len__")(noArgs).toIValue().toInt());
+  EXPECT_EQ(3, mat38.attr("shape").attr("__getitem__")({0}).toIValue().toInt());
+  EXPECT_EQ(8, mat38.attr("shape").attr("__getitem__")({1}).toIValue().toInt());
+}
+#endif
+
+#if HAS_PYYAML
+TEST(TorchpyTest, TestPyYAML) {
+  const std::string kDocument = "a: 1\n";
+
+  torch::deploy::InterpreterManager m(2);
+  auto I = m.acquireOne();
+
+  auto load = I.global("yaml", "load")({kDocument});
+  EXPECT_EQ(1, load.attr("__getitem__")({"a"}).toIValue().toInt());
+
+  auto dump = I.global("yaml", "dump")({load});
+  EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
+}
+#endif

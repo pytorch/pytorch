@@ -14,6 +14,7 @@ namespace torch {
 TORCH_CUDA_CU_API bool CudaIPCCollect();
 
 struct CudaIPCReceivedData final {
+  CudaIPCReceivedData() = default;
   explicit CudaIPCReceivedData(std::shared_ptr<void> shared_ptr)
       : shared_ptr_(std::move(shared_ptr)) {}
   std::shared_ptr<void> shared_ptr_;

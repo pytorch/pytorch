@@ -18,19 +18,14 @@ typename Pipeline::Layout::Factory::Handle Pipeline::Layout::Factory::operator()
       descriptor.descriptor_set_layout,
       "Invalid Vulkan descriptor set layout!");
 
-  VkPushConstantRange push_constant;
-  push_constant.offset = 0;
-  push_constant.size = descriptor.push_constant_size;
-  push_constant.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-
   const VkPipelineLayoutCreateInfo pipeline_layout_create_info{
     VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
     nullptr,
     0u,
     1u,
     &descriptor.descriptor_set_layout,
-    1u,
-    &push_constant,
+    0u,
+    nullptr,
   };
 
   VkPipelineLayout pipeline_layout{};

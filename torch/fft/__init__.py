@@ -874,7 +874,7 @@ Example:
 ihfft2 = _add_docstr(_fft.fft_ihfft2, r"""
 ihfft2(input, s=None, dim=(-2, -1), norm=None, *, out=None) -> Tensor
 
-Computes the N-dimensional inverse discrete Fourier transform of real
+Computes the 2-dimensional inverse discrete Fourier transform of real
 :attr:`input`. Equivalent to :func:`~torch.fft.ihfftn` but transforms only the
 two last dimensions by default.
 

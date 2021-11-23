@@ -1,7 +1,5 @@
 from io import IOBase
 from typing import Sized, Tuple
-from urllib.error import HTTPError, URLError
-import urllib.request as urllib
 from torch.utils.data import IterDataPipe
 from torch.utils.data.datapipes.utils.common import deprecation_warning_torchdata
 
@@ -23,22 +21,19 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         deprecation_warning_torchdata(type(self).__name__)
 
     def __iter__(self):
-        for furl in self.datapipe:
+        from requests import HTTPError, RequestException, Session
+        for url in self.datapipe:
             try:
-                if self.timeout is None:
-                    r = urllib.urlopen(furl)
-                else:
-                    r = urllib.urlopen(furl, timeout=self.timeout)
-
-                yield(furl, r)
+                with Session() as session:
+                    if self.timeout is None:
+                        r = session.get(url, stream=True)
+                    else:
+                        r = session.get(url, timeout=self.timeout, stream=True)
+                return url, r.raw
             except HTTPError as e:
-                raise Exception("Could not get the file.\
-                                [HTTP Error] {code}: {reason}."
-                                .format(code=e.code, reason=e.reason))
-            except URLError as e:
-                raise Exception("Could not get the file at {url}.\
-                                 [URL Error] {reason}."
-                                .format(reason=e.reason, url=furl))
+                raise Exception(f"Could not get the file. [HTTP Error] {e.response}.")
+            except RequestException as e:
+                raise Exception(f"Could not get the file at {url}. [RequestException] {e.response}.")
             except Exception:
                 raise
 

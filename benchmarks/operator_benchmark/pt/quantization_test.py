@@ -121,6 +121,8 @@ op_bench.generate_pt_test(
     QuantizePerChannelBenchmark)
 
 # === Fake Quantization ===
+# Generated benchmarks names start with 'learnable_kernel' or 'original_kernel',
+#    for ex. 'original_kernel_nbits8_cpu_N1_C1_H256_W256_zero_point_dtypetorch.int32_bwdall'
 
 fake_quantize_configs_short_dict = {
     'attr_names': ['N', 'C', 'H', 'W', 'zero_point_dtype'],
@@ -217,7 +219,7 @@ fake_quantize_configs_long_dict_float_zero_point['zero_point_dtype'] = [torch.fl
 
 fake_quantize_operator_configs_long_float_zero_point = op_bench.cross_product_configs(
     nbits=(8,),
-    device=('cpu', ),
+    device=('cpu', 'cuda'),
     **fake_quantize_configs_long_dict_float_zero_point
 )
 

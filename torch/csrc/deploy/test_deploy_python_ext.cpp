@@ -6,7 +6,7 @@
 
 bool run() {
   torch::deploy::InterpreterManager m(2);
-  m.reigsterModuleSource("check_none", "check = id(None)\n");
+  m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
     auto I = m.allInstances()[0].acquireSession();
