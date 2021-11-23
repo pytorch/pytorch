@@ -89,8 +89,8 @@ struct ListLenRefiner {
           ListRefinement refine;
           refine[li_len->node()->input()] = *ival;
           boolean_value_refinements_[n->output()] = n->kind() == aten::eq
-              ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
-              : BooleanRefinementMapping::FalseRefinements(std::move(refine));
+              ? BooleanListRefinement::TrueRefinements(std::move(refine))
+              : BooleanListRefinement::FalseRefinements(std::move(refine));
         }
       } else if (n->kind() == aten::len) {
         if (auto maybe_len = tryFindRefinement(n->input(0))) {
@@ -113,7 +113,7 @@ struct ListLenRefiner {
                 ? boolean_value_refinements_[if_n.cond()].false_refine()
                 : empty);
 
-        joinIfRefinements(
+        joinIfRefinements<ListRefinement>(
             n,
             throwing_blocks_,
             block_refinements,
@@ -121,7 +121,7 @@ struct ListLenRefiner {
             false_block_refinements,
             boolean_value_refinements_);
       } else {
-        handleCommonRefinentOperators(
+        handleCommonRefinentOperators<ListRefinement>(
             n, throwing_blocks_, boolean_value_refinements_);
       }
     }
@@ -146,8 +146,7 @@ struct ListLenRefiner {
   // A stack of active refinements, one for each block
   std::vector<ListRefinement*> active_refinements_;
   // A map from Boolean Value * -> associated refinements
-  std::unordered_map<Value*, BooleanRefinementMapping>
-      boolean_value_refinements_;
+  std::unordered_map<Value*, BooleanListRefinement> boolean_value_refinements_;
   std::unordered_set<Block*> throwing_blocks_;
   bool changed_ = false;
 };

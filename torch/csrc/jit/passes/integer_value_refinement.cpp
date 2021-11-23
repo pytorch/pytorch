@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 
-using IntegerRefinement = std::unordered_map<Value*, int64_t>;
+// using IntegerRefinement = std::unordered_map<Value*, int64_t>;
 
 // see [value refinement algorithm] for full explanation.
 // When a comparison like `cond = x == 4` or `cond = x != 4` is made,
@@ -27,7 +27,7 @@ struct IntegerValueRefiner {
     if (!blockHasIntComparisons(graph_->block())) {
       return false;
     }
-    IntegerRefinement refinements;
+    ListRefinement refinements;
     RefineIntegerValues(graph_->block(), refinements);
     return changed_;
   }
@@ -55,8 +55,8 @@ struct IntegerValueRefiner {
 
   void removeIfNodeOutputsWithRefinements(
       Node* if_node,
-      IntegerRefinement& true_block_refinements,
-      IntegerRefinement& false_block_refinements) {
+      ListRefinement& true_block_refinements,
+      ListRefinement& false_block_refinements) {
     // we are looking for cases where we can replace both block outputs with the
     // same value, which opens up further optimization opportunities. The pass
     // will already handle if both outputs are refined to the same constant.
@@ -117,20 +117,20 @@ struct IntegerValueRefiner {
   // iteratively look through the block `b` for refinements or Value uses that
   // can be refined, `block_refinements` are the refinements present starting at
   // this block (and for all blocks dominated by this block).
-  IntegerRefinement RefineIntegerValues(
+  ListRefinement RefineIntegerValues(
       Block* b,
-      IntegerRefinement block_refinements) {
+      ListRefinement block_refinements) {
     active_refinements_.push_back(&block_refinements);
     for (Node* n : b->nodes()) {
       if (n->matches("aten::eq(int a, int b) -> bool") ||
           n->matches("aten::ne(int a, int b) -> bool")) {
         for (size_t const_index : {0, 1}) {
           if (auto ival = constant_as<int64_t>(n->inputs().at(const_index))) {
-            IntegerRefinement refine;
+            ListRefinement refine;
             refine[n->inputs().at(1 - const_index)] = *ival;
             info_[n->output()] = n->kind() == aten::eq
-                ? BooleanRefinementMapping::TrueRefinements(std::move(refine))
-                : BooleanRefinementMapping::FalseRefinements(std::move(refine));
+                ? BooleanListRefinement::TrueRefinements(std::move(refine))
+                : BooleanListRefinement::FalseRefinements(std::move(refine));
           }
         }
       }
@@ -152,7 +152,7 @@ struct IntegerValueRefiner {
       if (n->kind() == prim::If) {
         IfView if_n(n);
         bool has_cond_ref = info_.count(if_n.cond()) != 0;
-        IntegerRefinement empty;
+        ListRefinement empty;
         auto true_block_refinements = RefineIntegerValues(
             if_n.thenBlock(),
             has_cond_ref ? info_[if_n.cond()].true_refine() : empty);
@@ -163,7 +163,7 @@ struct IntegerValueRefiner {
         removeIfNodeOutputsWithRefinements(
             n, true_block_refinements, false_block_refinements);
 
-        joinIfRefinements(
+        joinIfRefinements<ListRefinement>(
             n,
             throwing_blocks_,
             block_refinements,
@@ -171,7 +171,8 @@ struct IntegerValueRefiner {
             false_block_refinements,
             info_);
       } else {
-        handleCommonRefinentOperators(n, throwing_blocks_, info_);
+        handleCommonRefinentOperators<ListRefinement>(
+            n, throwing_blocks_, info_);
       }
     }
 
@@ -215,9 +216,9 @@ struct IntegerValueRefiner {
 
   std::shared_ptr<Graph> graph_;
   // A stack of active refinements, one for each block
-  std::vector<IntegerRefinement*> active_refinements_;
+  std::vector<ListRefinement*> active_refinements_;
   // A map from Boolean Value * -> associated refinements
-  std::unordered_map<Value*, BooleanRefinementMapping> info_;
+  std::unordered_map<Value*, BooleanListRefinement> info_;
   std::unordered_set<Block*> throwing_blocks_;
   bool changed_ = false;
 };
