@@ -27,7 +27,7 @@ class Wishart(Distribution):
         covariance_matrix (Tensor): positive-definite covariance matrix
         precision_matrix (Tensor): positive-definite precision matrix
         scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
-        df (Tensor): real-valued parameter > larger than dimension of Square matrix
+        df (float or Tensor): real-valued parameter larger than the (dimension of Square matrix) - 1
     Note:
         Only one of :attr:`covariance_matrix` or :attr:`precision_matrix` or
         :attr:`scale_tril` can be specified.
