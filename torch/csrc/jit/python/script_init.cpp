@@ -1599,15 +1599,14 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
 
-  m.def("_compile_graph_to_code_table",
-        [](
-          const std::string& name,
-          const std::shared_ptr<Graph>& graph) {
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
         CompilationOptions options;
         auto jitFunc = std::make_unique<GraphFunction>(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc.get(), options);
+        auto mobileFunc = convertJitFunctionToMobileFunction(*jitFunc, options);
         return convertMobileFunctionToCodeTable(mobileFunc.get(), options);
-  });
+      });
 
   m.def(
       "_jit_script_class_compile",
