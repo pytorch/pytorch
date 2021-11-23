@@ -426,7 +426,7 @@ class TestFrameworkUtils(TestCase):
 
 import torch
 from torch.testing._internal.common_utils import (TestCase, run_tests)
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, get_device_type_test_bases
 
 class TestEnvironmentVariable(TestCase):
 
@@ -439,6 +439,15 @@ instantiate_device_type_tests(
     TestEnvironmentVariable,
     globals(),
 )
+
+raise Exception("\\n".join(
+    (
+        "!DEBUG!",
+        *[name for name in globals() if name.startswith("TestEnvironmentVariable")], 
+        "#"*80, 
+        *[cls.__name__ for cls in get_device_type_test_bases()],
+    )
+))
 
 if __name__ == '__main__':
     run_tests()
