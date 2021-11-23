@@ -2990,6 +2990,28 @@ class TestCudaFuser(JitTestCase):
         self.assertGraphContains(graph, FUSION_GROUP, True)
         self.assertGraphContains(graph, 'aten::matmul', True)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_clean_profile_ivalue(self):
+        device = "cuda"
+        dtype = torch.float
+        x = torch.randn(2, 5, dtype=dtype, device=device, requires_grad=True)
+        # turn on autodiff subgraph inlining
+        # this is to verify that we clean up profile_ivalue node out side of
+        # fusion code path.
+        torch._C._debug_set_autodiff_subgraph_inlining(True)
+
+        def t(x: torch.Tensor, flag: bool):
+            return torch.dropout(x, 0.5, flag)
+
+        jit_t = torch.jit.script(t)
+        for idx in range(5) :
+            out = jit_t(x, True)
+
+        graph = jit_t.graph_for(x, True)
+        out = jit_t(x, False)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")

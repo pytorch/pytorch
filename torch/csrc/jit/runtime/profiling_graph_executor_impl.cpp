@@ -527,7 +527,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
       auto diff_graph = std::move(dnode->g(attr::Subgraph));
       Gradient gradient = differentiate(diff_graph);
       RemoveTensorTypeSpecializations(gradient.f);
-      RemoveProfilingNodes(gradient.f);
+      ProfilingRecord::removeProfilingNodes(gradient.f->block());
       GRAPH_DEBUG("Forward graph:\n", *(gradient.f));
       GRAPH_DEBUG("Backward graph:\n", *(gradient.df));
       // just like inside autograd.Functions, the forward of a differentiable
@@ -543,7 +543,7 @@ void ProfilingGraphExecutorImpl::runProfilingOptimizations(
         copy,
         getAutodiffSubgraphInlining() ? autodiffSubgraphNodeThreshold : 1);
     replaceFallbackGraphWithFallbackFunction(copy->block());
-    RemoveProfilingNodes(copy);
+    ProfilingRecord::removeProfilingNodes(copy->block());
     GRAPH_DEBUG(
         "After InlineAutodiffSubgraphs and Removing Profiling Nodes\n", *copy);
   } else {
