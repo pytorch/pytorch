@@ -1616,15 +1616,15 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   switch(backend) {
     case ConvBackend::CudaDepthwise2d:
       std::tie(backend_grad_input, backend_grad_weight) =
-        at::_conv_depthwise2d_backward(grad_output, input, weight, kernel_size,
+        at::_conv_depthwise2d_backward(grad_output.contiguous(), input.contiguous(), weight, kernel_size,
             params.stride, params.padding, params.dilation, {output_mask[0], output_mask[1]});
       break;
     case ConvBackend::CudaDepthwise3d:
       TORCH_CHECK(input.ndimension() == 5);
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::conv_depthwise3d_backward(
-          grad_output, input, weight, kernel_size, params.stride, params.padding, params.dilation,
-          output_mask);
+          grad_output.contiguous(), input.contiguous(), weight, kernel_size, params.stride, params.padding,
+          params.dilation, output_mask);
       break;
     case ConvBackend::Cudnn:
       check_input_same_type_as_parameters(input, weight, bias);
@@ -1699,6 +1699,10 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
           "The MKLDNN backend does not support weight as an MKLDNN tensor during training");
       TORCH_CHECK(!bias.is_mkldnn(),
           "The MKLDNN backend does not support bias as an MKLDNN tensor during training");
+      if (!input.is_mkldnn()) {
+        input = input.contiguous();
+        weight = weight.contiguous();
+      }
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
         at::mkldnn_convolution_backward(input, grad_output, weight, params.padding, params.stride, params.dilation,
             params.groups, output_mask);
@@ -1727,6 +1731,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     case ConvBackend::SlowTranspose2d:
     case ConvBackend::SlowTranspose3d:
     {
+      input = input.contiguous();
       if (params.groups == 1) {
         std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
           _convolution_backward_nogroup_backend(
