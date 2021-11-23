@@ -215,7 +215,6 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('linalg.cholesky'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
-    xfail('nn.functional.pad', 'circular'),
     xfail('nn.functional.ctc_loss'),
     xfail('empty_like'), # randomness
     xfail('randn_like'), # randomness
