@@ -74,6 +74,6 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     model = _lower_ref_linear_module(model)
     model.recompile()
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter.replace_pattern(model, pattern, replacement)
+        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
     model.graph.lint()
     return model
