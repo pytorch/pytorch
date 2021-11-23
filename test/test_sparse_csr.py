@@ -622,7 +622,10 @@ class TestSparseCSR(TestCase):
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype):
         for index_dtype in [torch.int32, torch.int64]:
-            for (m, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=2), [1, 2, 3], [True, False]):
+            block_sizes = [1, 2, 3]
+            if TEST_WITH_ROCM or not TEST_CUSPARSE_GENERIC:
+                block_sizes = [2, 3]
+            for (m, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=2), block_sizes, [True, False]):
                 nnz = random.randint(0, m * k)
                 a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
                 a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
@@ -926,7 +929,7 @@ class TestSparseCSR(TestCase):
         for index_dtype in [torch.int32, torch.int64]:
             run_test(index_dtype)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @skipCUDAIf(
         not _check_cusparse_triangular_solve_available(),
         "cuSparse Generic API SpSV is not available"
