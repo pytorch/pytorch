@@ -180,7 +180,7 @@ class BaseSparsifier(abc.ABC):
         for config in self.module_groups:
             module = config['module']
             param = config.get('parametrization', FakeSparsity)
-            mask = config.get('mask', torch.ones(module.weight.shape))
+            mask = config.get('mask', torch.ones_like(module.weight))
             self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
