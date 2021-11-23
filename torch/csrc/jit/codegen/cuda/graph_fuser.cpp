@@ -757,15 +757,18 @@ struct CudaGraphFuser {
           // longer valid so we rescan the new FusionGroup for more fusions...
           return std::make_pair(fusion_group.value()->reverseIterator(), true);
         }
-        // fusing nodes sharing inputs, this could save memory bandwidth by
-        // reducing number of tensor read.
-        for (const auto& u : producer->uses()) {
-          // only merge nodes before consumer, since any sibling after consumer
-          // has already considered merging this consumer to them already.
-          if (u.user->isBefore(consumer)) {
-            auto fusion_group = tryFuse(consumer, u.user);
-            if (fusion_group) {
-              return std::make_pair(fusion_group.value()->reverseIterator(), true);
+        // horizontal fusion only applies on tensor inputs
+        if (producer->type()->isSubtypeOf(*TensorType::get())) {
+          // fusing nodes sharing inputs, this could save memory bandwidth by
+          // reducing number of tensor read.
+          for (const auto& u : producer->uses()) {
+            // only merge nodes before consumer, since any sibling after consumer
+            // has already considered merging this consumer to them already.
+            if (u.user->isBefore(consumer)) {
+              auto fusion_group = tryFuse(consumer, u.user);
+              if (fusion_group) {
+                return std::make_pair(fusion_group.value()->reverseIterator(), true);
+              }
             }
           }
         }

@@ -3044,6 +3044,27 @@ class TestCudaFuser(JitTestCase):
         graph = jit_t.graph_for(x, True)
         out = jit_t(x, False)
 
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_sibling_fusion_no_scalar_inputs(self):
+        device = "cuda"
+        dtype = torch.float
+        x = torch.randn(2, 5, dtype=dtype, device=device)
+        y = torch.randn(3, dtype=dtype, device=device)
+
+        # no tensor dependency between o1/o2, we shouldn't be fusing them
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o1 = x + 1
+            o2 = y - 1
+            return o1, o2
+
+        jitted = torch.jit.script(t)
+        for i in range(3):
+            jit_o = jitted(x, y)
+        graph = jitted.graph_for(x, y)
+        self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+
 class TestPassManagerCudaFuser(JitTestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
