@@ -541,7 +541,6 @@ class TestOperators(TestCase):
         xfail('fill_'),
         xfail('gradient'),
         xfail('hsplit'),
-        xfail('nn.functional.pad', 'circular'),
         xfail('vsplit'),
         xfail('dstack'),
         xfail('hstack'),
