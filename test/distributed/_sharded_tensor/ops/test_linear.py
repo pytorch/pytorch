@@ -43,14 +43,14 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
 
         # Copy the weights and bias from local linear
         sharded_linear.weight = torch.nn.Parameter(local_linear.weight.detach().clone())
-        sharded_linear.bias = torch.nn.Parameter(local_linear.bias)
+        sharded_linear.bias = torch.nn.Parameter(local_linear.bias.detach().clone())
 
         # Shard the parameter.
         shard_parameter(sharded_linear, "weight", spec)
 
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
-        inp = torch.rand(*input_size, requires_grad=True).cuda(self.rank)
+        inp = torch.rand(*input_size).cuda(self.rank)
         sharded_output = sharded_linear(inp)
 
         # Run local computation
@@ -71,19 +71,13 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         # Generate expected for loss calculation.
         expected_result = torch.randint(0, 2, (input_size[0],)).cuda(self.rank)
 
-        # Compute loss.
-        local_loss = expected_result - torch.sum(local_output, dim=1)
-        sharded_loss = expected_result - torch.sum(sharded_output, dim=1)
-        self.assertEqual(local_loss, sharded_loss)
-
-        # Run backward pass
-        local_loss.backward(gradient=local_loss.detach())
+        # Compute loss and run backward pass.
+        local_output.sum().backward()
+        sharded_output.sum().backward()
         local_grad = local_linear.weight.grad
-        sharded_loss.backward(gradient=sharded_loss.detach())
 
         # Verify that both weight and bias in the sharded linear has non-None grad.
         sharded_weight = sharded_linear.weight.local_shards()[0].tensor
-        self.assertEqual(sharded_weight.requires_grad, True)
         self.assertNotEqual(sharded_linear.bias.grad, None)
         self.assertNotEqual(sharded_weight.grad, None)
 
@@ -99,7 +93,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
 
         # Test backward gradient calculation.
         self.assertEqual(sharded_linear.bias.grad, local_linear.bias.grad)
-        self.assertEqual(sharded_weight, local_weight_narrowed)
         self.assertEqual(sharded_weight.grad, local_grad_narrowed)
 
     @with_comms(init_rpc=False)

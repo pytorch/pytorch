@@ -133,6 +133,9 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [34], 15, 14, padding_idx=10)
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 23, 13, padding_idx=12)
             self._run_sharded_embedding(
+                spec, [4, 5, 6], 23, 13, max_norm=2.5, sharded_dim=1
+            )
+            self._run_sharded_embedding(
                 spec, [12, 7, 16], 23, 13, max_norm=2.5, sharded_dim=1
             )
             self._run_sharded_embedding(

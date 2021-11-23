@@ -79,7 +79,7 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     return _Reduce.apply(dst, op, group, tensor)
 
 
-def reduce_scatter(tensor, input_tensors, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+def reduce_scatter(output, input_tensors, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     """
     Reduces the tensor data across all machines, then scatters a list of
         tensors to all processes in a group.
@@ -87,8 +87,8 @@ def reduce_scatter(tensor, input_tensors, op=dist.ReduceOp.SUM, group=dist.group
     Each process is going to receive its corresponding final result.
 
     Arguments:
-        tensor (Tensor): Output of the collective.
-        tensors (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
+        output (Tensor): Output of the collective.
+        input_tensors (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
@@ -98,7 +98,7 @@ def reduce_scatter(tensor, input_tensors, op=dist.ReduceOp.SUM, group=dist.group
         Tensor: Output of the collective.
 
     """
-    return _Reduce_Scatter.apply(op, group, tensor, *input_tensors)
+    return _Reduce_Scatter.apply(op, group, output, *input_tensors)
 
 
 def all_gather(tensor, group=dist.group.WORLD):
@@ -116,7 +116,7 @@ def all_gather(tensor, group=dist.group.WORLD):
     return _AllGather.apply(group, tensor)
 
 
-def all_to_all(tensors, group=dist.group.WORLD, out_tensor_list=None):
+def all_to_all(output_tensor_list, input_tensor_list, group=dist.group.WORLD):
     """
     Each process scatters list of input tensors to all processes in a group and
     return gathered list of tensors in output list.
@@ -132,7 +132,7 @@ def all_to_all(tensors, group=dist.group.WORLD, out_tensor_list=None):
         tuple([Tensor]): Output of the collective.
 
     """
-    return _AlltoAll.apply(group, out_tensor_list, *tensors)
+    return _AlltoAll.apply(group, output_tensor_list, *input_tensor_list)
 
 
 def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
@@ -241,6 +241,8 @@ class _Reduce_Scatter(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
+        result = _AllGather.apply(ctx.group, grad_output.contiguous())
+        print("backward ", grad_output, result)
         return (None, None, None) + _AllGather.apply(ctx.group, grad_output.contiguous())
 
 

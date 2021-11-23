@@ -62,8 +62,7 @@ def _handle_col_wise_sharding_base(
     """
     if gathered_inputs is None:
         # allgather the inputs first.
-        gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-        dist.all_gather(gathered_inputs, input, group=pg)
+        gathered_inputs = all_gather(input, group=pg)
 
     # run the operator's function for all the inputs.
     results = []
@@ -141,7 +140,7 @@ def _result_distribute_with_col_rearrange(
 
     # distribute the outputs using all2all.
     output = torch.cat(
-        all_to_all(results, group=pg, out_tensor_list=output_tensor_list)
+        all_to_all(output_tensor_list, results, group=pg)
     )
 
     # Check if we need to rearrange columns appropriately for output.

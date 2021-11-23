@@ -221,9 +221,9 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     # Perform alltoall
     all_to_all(
+        output_tensor_list,
         list(torch.split(input_t, input_split_sizes)),
         group=pg,
-        out_tensor_list=output_tensor_list,
     )
 
     # Perform local matmuls for all shards
