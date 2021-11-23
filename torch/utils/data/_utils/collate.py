@@ -26,7 +26,11 @@ def default_convert(data):
             return data
         return torch.as_tensor(data)
     elif isinstance(data, collections.abc.Mapping):
-        return {key: default_convert(data[key]) for key in data}
+        try:
+            return elem_type((key, default_convert(data[key])) for key in data)
+        except BaseException:
+            # The mapping type may not support `__init__(iterable)`.
+            return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
@@ -75,7 +79,11 @@ def default_collate(batch):
     elif isinstance(elem, string_classes):
         return batch
     elif isinstance(elem, collections.abc.Mapping):
-        return {key: default_collate([d[key] for d in batch]) for key in elem}
+        try:
+            return elem_type((key, default_collate([d[key] for d in batch])) for key in elem)
+        except BaseException:
+            # The mapping type may not support `__init__(iterable)`.
+            return {key: default_collate([d[key] for d in batch]) for key in elem}
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
         return elem_type(*(default_collate(samples) for samples in zip(*batch)))
     elif isinstance(elem, collections.abc.Sequence):
