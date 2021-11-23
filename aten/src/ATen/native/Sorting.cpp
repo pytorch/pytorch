@@ -46,10 +46,12 @@ DEFINE_DISPATCH(sort_stub);
 DEFINE_DISPATCH(topk_stub);
 
 void _fill_indices(const TensorBase &indices, int64_t dim) {
+  auto ndim = indices.dim();
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
   auto idx_dim = at::arange(0, dim_size, indices.options().dtype(at::kLong));
-  auto idx_dim_sizes = std::vector<int64_t>(indices.dim(), 1);
-  auto idx_dim_strides = std::vector<int64_t>(indices.dim(), 0);
+  auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
+  auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
   idx_dim_sizes[dim] = dim_size;
   idx_dim_strides[dim] = 1;
   auto idx_dim_restrided = idx_dim.as_strided(idx_dim_sizes, idx_dim_strides);

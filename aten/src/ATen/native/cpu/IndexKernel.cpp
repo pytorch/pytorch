@@ -117,14 +117,14 @@ void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef inde
 struct IndexToOffset {
   const IntArrayRef sizes;
   const IntArrayRef strides;
-  const int ndim;
-  IndexToOffset(const TensorBase & tensor) : sizes(tensor.sizes()),
-                                             strides(tensor.strides()),
-                                             ndim(tensor.dim()) {}
+  const int64_t ndim;
+  explicit IndexToOffset(const TensorBase & tensor) :
+      sizes(tensor.sizes()), strides(tensor.strides()), ndim(tensor.dim()) {
+  }
 
   int64_t get(int64_t linear_index) const {
     int64_t offset = 0;
-    for (int i = ndim - 1; i > 0; i--) {
+    for (int64_t i = ndim - 1; i > 0; i--) {
       offset += (linear_index % sizes[i]) * strides[i];
       linear_index /= sizes[i];
     }
