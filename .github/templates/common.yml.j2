@@ -41,9 +41,9 @@ concurrency:
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment) -%}
+{%- macro upload_test_statistics(build_environment, when="always()") -%}
       - name: Display and upload test statistics (Click Me)
-        if: always()
+        if: !{{ when }}
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
