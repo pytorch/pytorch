@@ -223,7 +223,7 @@ concurrency:
         run: echo "${LABELS}"
 {%- endmacro -%}
 
-{%- macro calculate_docker_image(always_rebuild, is_rocm=false) -%}
+{%- macro calculate_docker_image(always_rebuild) -%}
       - name: Calculate docker image tag
         id: calculate-tag
         run: |
@@ -232,12 +232,6 @@ concurrency:
           echo "DOCKER_IMAGE=${DOCKER_IMAGE_BASE}:${DOCKER_TAG}" >> "${GITHUB_ENV}"
           echo "::set-output name=docker_tag::${DOCKER_TAG}"
           echo "::set-output name=docker_image::${DOCKER_IMAGE_BASE}:${DOCKER_TAG}"
-{%- if is_rocm %}
-          echo "DOCKER_COMMIT_TAG=tmp-${DOCKER_TAG}-${GITHUB_SHA}" >> "${GITHUB_ENV}"
-          echo "DOCKER_COMMIT_IMAGE=${DOCKER_IMAGE_BASE}:tmp-${DOCKER_TAG}-${GITHUB_SHA}" >> "${GITHUB_ENV}"
-          echo "::set-output name=docker_commit_tag::tmp-${DOCKER_TAG}-${GITHUB_SHA}"
-          echo "::set-output name=docker_commit_image::${DOCKER_IMAGE_BASE}:tmp-${DOCKER_TAG}-${GITHUB_SHA}"
-{%- endif %}
       - name: Check if image should be built
         id: check
         env:
