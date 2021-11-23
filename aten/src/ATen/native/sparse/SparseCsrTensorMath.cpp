@@ -7,6 +7,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
@@ -179,9 +180,7 @@ template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
 
   auto dim_i = sparse.size(0);
-  // auto dim_j = sparse.size(1); Unused
   auto dim_k = dense.size(1);
-  // auto nnz = sparse._nnz(); Unused
 
   auto csr = sparse.crow_indices();
   auto col_indices = sparse.col_indices();
@@ -304,9 +303,12 @@ Tensor& addmm_out_sparse_csr_cpu(
     return result;
   }
 
-#if !AT_MKL_ENABLED()
+#if !AT_USE_MKL_SPARSE()
     if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-      TORCH_CHECK(false, "Calling addmm on sparse CPU tensors requires compiling PyTorch with MKL. Please use PyTorch built with MKL.");
+      TORCH_CHECK(
+          false,
+          "Calling addmm on sparse CPU tensors requires Linux platform. ",
+          "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
     AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
