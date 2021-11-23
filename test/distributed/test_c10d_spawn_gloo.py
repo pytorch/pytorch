@@ -351,7 +351,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
             x1 = torch.ones(5, 5, device=device) + 2 * self.rank
             x0.requires_grad = True
             x1.requires_grad = True
-            tensors = torch.distributed.nn.all_to_all([x0, x1])
+            tensors = torch.distributed.nn.all_to_all(None, [x0, x1])
             for i, t in enumerate(tensors):
                 self.assertEqual(t, torch.ones(5, 5, device=device) + 2 * i)
             y = torch.sum(torch.stack(tensors), axis=0)
