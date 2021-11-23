@@ -22,7 +22,7 @@ namespace {
 c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
     const Tensor& tensor) {
   if (is_blas_compatible_column_major_order(tensor)) {
-    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+    return at::native::expect_resolved_conj(tensor);
   } else {
     return c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(tensor));
   }
@@ -75,7 +75,12 @@ void addmm_out_legacy(
   auto crow_indices = mat1.crow_indices().to(kInt);
   auto col_indices = mat1.col_indices().to(kInt);
   auto values = mat1.values();
-  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, result, alpha, crow_indices, col_indices, values, mat2);
+  auto mat2_ = at::native::expect_resolved_conj(mat2);
+  auto result_ = at::native::expect_resolved_conj(result);
+  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, *result_, alpha, crow_indices, col_indices, values, *mat2_);
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
 }
 
 c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
