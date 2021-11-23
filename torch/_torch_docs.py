@@ -3230,8 +3230,6 @@ Computes the n-th forward difference along the given dimension.
 The first-order differences are given by `out[i] = input[i + 1] - input[i]`. Higher-order
 differences are calculated by using :func:`torch.diff` recursively.
 
-.. note::  Only `n = 1` is currently supported
-
 Args:
     input (Tensor): the tensor to compute the differences on
     n (int, optional): the number of times to recursively compute the difference
