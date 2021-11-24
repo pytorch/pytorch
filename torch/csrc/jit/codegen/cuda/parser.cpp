@@ -1171,7 +1171,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)");
+          "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -1180,24 +1180,28 @@ class IrParser {
             std::tie(format, list_val) = getConsistentValues(
                 MemoryFormat::Contiguous(),
                 value_map[node->inputs()[0]->unique()],
-                value_map[node->inputs()[1]->unique()],
-                value_map[node->inputs()[2]->unique()]);
+                value_map[node->inputs()[1]->unique()]);
             auto input = list_val.front();
             list_val.pop_front();
             auto prob = list_val.front();
             list_val.pop_front();
-            auto scale = list_val.front();
-            list_val.pop_front();
-            auto train = constant_as<bool>(node->input(3));
+            auto train = constant_as<bool>(node->input(2));
 
             TORCH_INTERNAL_ASSERT(
-                train.has_value() and train.value(),
-                "Train parameter is incorrectly set to false!");
+                train.has_value(), "dropout needs constant `train` flag");
 
-            auto result = dropout(input->as<TensorView>(), prob, scale);
+            if (train.value()) {
+              auto result = dropout(input->as<TensorView>(), prob);
 
-            value_map.emplace(node->output(0)->unique(), result.output);
-            value_map.emplace(node->output(1)->unique(), result.mask);
+              value_map.emplace(node->output(0)->unique(), result.output);
+              value_map.emplace(node->output(1)->unique(), result.mask);
+            } else {
+              value_map.emplace(node->output(0)->unique(), input);
+              value_map.emplace(
+                  node->output(1)->unique(),
+                  ValueHolder(TensorViewBuilder().build(), format));
+            }
+
           },
           nullptr,
           nullptr);
@@ -1238,7 +1242,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::native_dropout_backward(Tensor grad, Tensor mask, float scale) -> Tensor");
+          "aten::native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -2743,12 +2747,12 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto native_dropout_schema =
       getOperatorForLiteral(
-          "aten::native_dropout(Tensor input, float p, float scale, bool train) -> (Tensor, Tensor)")
+          "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)")
           ->schema();
   if (node->matches(native_dropout_schema)) {
     switch (offset) {
-      // argument 3: Is training?
-      case 3:
+      // argument 2: Is training?
+      case 2:
         profileBool(pr, node, offset);
         break;
       default:

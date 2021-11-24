@@ -87,17 +87,26 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anomymous namepsace
 
 std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, double scale, bool train) {
-  TORCH_CHECK(train, "Train parameter is incorrectly set!");
+native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
 
-  auto noise = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  noise.bernoulli_(p);
+  Tensor mask;
+  Tensor output;
 
-  auto output = input.mul(noise).mul_(scale);
-  return std::make_tuple(output, noise);
+  if (!train.has_value() || *train) {
+    double p1m = 1. - p;
+    // Check for probability of zero to avoid divide by zero and NaN results
+    double scale = p1m == 0 ? 0. : 1. / p1m;
+    mask = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    mask.bernoulli_(p1m);
+    output = input.mul(mask).mul_(scale);
+  } else {
+    mask = at::ones_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    output = input.clone();
+  }
+  return std::make_tuple(output, mask);
 }
 
 Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
@@ -106,17 +115,12 @@ Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, doubl
 }
 
 Tensor dropout(const Tensor& input, double p, bool train) {
-  TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
   auto result = [&]() {
     NoNamesGuard guard;
-    double p1m = 1. - p;
-    // Check for probability of zero to avoid divide by zero and NaN results
-    double scale = p1m == 0 ? 0. : 1. / p1m;
-    if (train) {
-      return std::get<0>(at::native_dropout(input, p1m, scale, train));
-    } else {
-      return input;
+    if (train && is_fused_kernel_acceptable(input, p)) {
+      return std::get<0>(at::native_dropout(input, p, train));
     }
+    return _dropout<false>(input, p, train);
   }();
   namedinference::propagate_names(result, input);
   return result;
