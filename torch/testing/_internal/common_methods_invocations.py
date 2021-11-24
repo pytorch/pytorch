@@ -6612,6 +6612,28 @@ def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs)
     samples.append(SampleInput(input_list, ))
     return samples
 
+def sample_inputs_column_stack(op_info, device, dtype, requires_grad, **kwargs):
+    input_list = []
+    cases: Tuple[tuple, tuple] = (  # type: ignore[assignment]
+        ((S, 2, 1), (S, 3, 1)),
+        ((S,), (S, 5)), ((), (1, S))
+    )
+    make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for shape1, shape2 in cases:
+        input_list.append(SampleInput([make_tensor_partial(shape1), make_tensor_partial(shape2)]))
+
+    return input_list
+
+def sample_inputs_flatten(op_info, device, dtype, requires_grad, **kwargs):
+    samples = []
+    shapes = ((S, S, S), (S, S), (S, ), (),)
+    make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+    for shape in shapes:
+        samples.append(SampleInput(make_tensor_partial(shape)))
+        if len(shape) > 1:
+            samples.append(SampleInput(make_tensor_partial(shape), kwargs=dict(start_dim=1, end_dim=-1)))
+    return samples
+
 def sample_inputs_select(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
@@ -11727,6 +11749,30 @@ op_db: List[OpInfo] = [
            ),
            sample_inputs_func=sample_inputs_atleast1d2d3d,
            ),
+    OpInfo('flatten',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           supports_forward_ad=True,
+           sample_inputs_func=sample_inputs_flatten,
+           skips=(
+               # File "pytorch/torch/testing/_internal/common_jit.py", line 306, in test_type
+               # self.assertTrue(actual_type.isSubtypeOf(out_type))
+               # AssertionError: False is not true
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )
+           ),
+    OpInfo('column_stack',
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           supports_forward_ad=True,
+           skips=(
+               # JIT does not support variadic tensors.
+               # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":252,
+               # please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', dtypes=(torch.float32,)),),
+           sample_inputs_func=sample_inputs_column_stack,),
     OpInfo('pinverse',
            op=torch.pinverse,
            dtypes=floating_and_complex_types(),
