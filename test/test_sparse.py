@@ -19,7 +19,7 @@ from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, precisionOverride,
-     deviceCountAtLeast)
+     deviceCountAtLeast, OpDTypes)
 from torch.testing._internal.common_methods_invocations import \
     (sparse_unary_ufuncs)
 from torch.testing._internal.common_dtype import (
@@ -3428,9 +3428,9 @@ class TestSparseUnaryUfuncs(TestCase):
 
         assert isinstance(sample.input, torch.Tensor)
 
-        expected = op(sample.input)
+        expected = op(sample.input, *sample.args, **sample.kwargs)
         assert torch.is_tensor(expected)
-        output = op(sample.input.to_sparse())
+        output = op(sample.input.to_sparse(), *sample.args, **sample.kwargs)
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 
@@ -3448,6 +3448,38 @@ class TestSparseUnaryUfuncs(TestCase):
         expected = torch.sparse_coo_tensor(indices, op(values), (0, 0))
         actual = op(sparse_0x0)
         self.assertEqual(expected, actual)
+
+    @ops(sparse_unary_ufuncs)
+    def test_sparse_zeros(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        zero_input = torch.zeros((), device=device, dtype=dtype)
+        sparse_input = torch.zeros((), dtype=dtype, device=device,
+                                   layout=torch.sparse_coo)
+
+        expect = op(zero_input)
+        actual = op(sparse_input)
+        self.assertEqual(expect, actual.to_dense())
+
+    @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+         allowed_dtypes=[torch.double, torch.cdouble])
+    def test_sparse_fn_grad(self, device, dtype, op):
+        if not op.supports_autograd:
+            self.skipTest("Skipped! Op doesn't support autograd")
+
+        for sample in op.sample_inputs(device, dtype):
+            sparse_input = sample.input.to_sparse().detach().requires_grad_(True)
+            fn = lambda x: op(x, *sample.args, **sample.kwargs).to_dense()
+
+            self.assertTrue(gradcheck(
+                fn,
+                (sparse_input,),
+                check_batched_grad=False,
+                check_grad_dtypes=True,
+                check_sparse_nnz=True,
+                nondet_tol=op.gradcheck_nondet_tol,
+                fast_mode=op.gradcheck_fast_mode))
+
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
 instantiate_device_type_tests(TestSparseUnaryUfuncs, globals(), except_for='meta')

@@ -8070,6 +8070,8 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
+                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
+                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
     # NOTE: derivative for inplace asinh is not implemented
     UnaryUfuncInfo('asinh',
@@ -11294,7 +11296,10 @@ op_db: List[OpInfo] = [
                                     active_if=IS_MACOS),
                        # Reference: https://github.com/pytorch/pytorch/pull/47293#issuecomment-721774436
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                    dtypes=[torch.bfloat16])),
+                                    dtypes=[torch.bfloat16]),
+                       DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
+                                    'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+                   ),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
     UnaryUfuncInfo('square',
@@ -11390,6 +11395,7 @@ op_db: List[OpInfo] = [
                    ref=np.isnan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_out=False,
+                   supports_sparse=True,
                    supports_autograd=False),
     OpInfo('linalg.solve',
            aten_name='linalg_solve',
