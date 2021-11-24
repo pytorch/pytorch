@@ -64,6 +64,10 @@ TORCH_API void annotateInputShapes(
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 
+TORCH_API std::vector<int64_t> makeShapesSymbolic(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<int64_t>& sizes);
+
 // Inspect the graph and report whether it can be converted to TE IR.
 // TODO: add error reporting for graphs that can't be converted.
 TORCH_API bool isGraphCompilable(const std::shared_ptr<Graph>& graph);
