@@ -325,6 +325,10 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #   Each SampleInput defines an "input", "args", "kwargs",
 #   an "output_process_fn_grad" function, the "broadcasts_input" bool and
 #   a "name".
+#   All the "sample_inputs" functions are invoked within a `torch.no_grad()`
+#   environment for efficiency and correctness. As such remember to set the the
+#   "requires_grad" flag on the inputs **after** performing any transformations
+#   on them.
 #
 # The "input" is the first argument to the operator, or the tensor that
 #   the method or inplace variants of the operator should be called on, and
