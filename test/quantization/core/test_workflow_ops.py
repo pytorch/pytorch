@@ -763,7 +763,7 @@ class TestFakeQuantizeOps(TestCase):
             scale = to_tensor(scale, device)
 
             # Ensure that zero_point < quant_min
-            zero_point = torch.tensor(quant_min - zero_point - 1).to(dtype=torch.int32, device=device)
+            zero_point = torch.tensor(-1 - torch.full(zero_point.shape, quant_min)).to(dtype=torch.int32, device=device)
 
             # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
             with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
