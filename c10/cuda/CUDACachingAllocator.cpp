@@ -1659,14 +1659,14 @@ void parseArgs() {
 }
 
 // Public interface
-const std::string& allocatorBacked() {
+const char* allocatorBackend() {
   static const std::string backend = []() {
                                        if (!parsed) {
                                          parseArgs();
                                        }
                                        return m_allocator_backend;
                                      }();
-  return backend;
+  return backend.c_str();
 }
 
 size_t maxSplitSize() {

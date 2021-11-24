@@ -347,6 +347,7 @@ void init(int dev_count) {
 }
 
 void setMemoryFraction(double fraction, int device) {
+  // NEEDED FOR PR
   // How do we want this to behave?
   // Do we want it to be a soft hint for the driver to keep the pool's cached memory
   // trimmed to a certain threshold, via
@@ -372,6 +373,7 @@ void emptyCache(void) {
 }
 
 void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+  // NEEDED FOR PR
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
@@ -450,12 +452,14 @@ DeviceStats getDeviceStats(int device) {
                                            &used_mem_high));
   }
 
-  // just to get it to compile, WIP
+  // just to get it to compile
+  // NEEDED FOR PR
   return {};
 }
 
 void resetAccumulatedStats(int device) {
   assertValidDevice(device);
+  // NEEDED FOR PR
 }
 
 void resetPeakStats(int device) {
@@ -464,13 +468,19 @@ void resetPeakStats(int device) {
   CUDAGuard g(device);
   cudaMemPool_t mempool;
   C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, device));
-  uint64_t zero = 0;
+  uint64_t current = 0;
+  C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
+                                         cudaMemPoolAttrReservedMemCurrent,
+                                         &current));
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrReservedMemHigh,
-                                         &zero));
+                                         &current));
+  C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
+                                         cudaMemPoolAttrUsedMemCurrent,
+                                         &current));
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrUsedMemHigh,
-                                         &zero));
+                                         &current));
 }
 
 std::vector<SegmentInfo> snapshot() {
@@ -478,7 +488,9 @@ std::vector<SegmentInfo> snapshot() {
 }
 
 // CUDAGraph interactions
-void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {
+void notifyCaptureBegin(int device,
+                        CaptureId_t graph_id,
+                        MempoolId_t mempool_id) {
   std::lock_guard<std::mutex> lk(general_mutex);
 
   TORCH_INTERNAL_ASSERT(capture_free_streams.size() == 0);
@@ -524,6 +536,7 @@ void notifyCaptureEnded(int device, CaptureId_t graph_id) {
               "but CudaMallocAsync::capture_underway is false");
   capture_underway = false;
 
+  // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
   for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture ) {
     auto it = ptr_info.find(ptr);
     TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
@@ -532,9 +545,24 @@ void notifyCaptureEnded(int device, CaptureId_t graph_id) {
                           "ptr's stream uses vector is empty");
     free_impl(it);
   }
+
+  ungraphed_ptrs_defer_free_until_no_capture.clear();
 }
 
-void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {} // no-op
+void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
+  // Q: Do we need to do anything special here, like clear long-lived
+  //    pointers created during the original capture (for example,
+  //    tensors intended as the graph's I/O surface) that might still
+  //    be resident in ptr_info?
+  // A: I don't think so.
+  //    Those allocations survived capture because the user held
+  //    explicit tensor references to them,
+  //    Those tensors' destructors will call free() on each pointer
+  //    when the user is done with them.
+  //    The free()s will probably incur
+  //    TORCH_WARN("Attempting uncaptured free of a captured allocation..."
+  //    but stale ptrs will not permanently leak into ptr_info.
+}
 
 void* raw_alloc(size_t nbytes) {
   if (nbytes == 0) {
