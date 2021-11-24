@@ -683,8 +683,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     if (dims.size() != indices.size()) {
       throw malformed_input(
-        "dimensions and indices mismatch in check_bounds", v
-      );
+          "dimensions and indices mismatch in check_bounds", v);
     }
     for (const auto& i : c10::irange(dims.size())) {
       auto opt_dim = intValue(dims[i]);
@@ -697,7 +696,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       for (auto& j : ithDimIndices) {
         if (j < 0 || j >= dim_bound) {
           std::stringstream ss;
-          ss << "Index out of bounds in check_bounds. Index: " << j << "; bounds: [0, " << dim_bound << ").";
+          ss << "Index out of bounds in check_bounds. Index: " << j
+             << "; bounds: [0, " << dim_bound << ").";
           throw malformed_input(ss.str(), v);
         }
       }
