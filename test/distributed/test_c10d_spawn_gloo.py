@@ -12,7 +12,7 @@ import torch.nn as nn
 from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
-    create_device, MultiProcessTestCase, skip_if_lt_x_gpu
+    create_device, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_DEV_DBG_ASAN
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
