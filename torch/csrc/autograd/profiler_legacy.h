@@ -395,7 +395,7 @@ struct RangeEventList {
 };
 
 std::string getNvtxStr(
-    const at::StringView& name,
+    const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes);
 
