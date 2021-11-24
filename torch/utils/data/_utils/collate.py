@@ -97,8 +97,7 @@ def default_collate(batch):
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
         
         if elem is tuple:
-            
-            return [default_collate(samples) for samples in transposed]  # Backwards compatibility
+            return [default_collate(samples) for samples in transposed]  # Backwards compatibility.
         else:
             try:
                 return elem_type([default_collate(samples) for samples in transposed])
