@@ -168,6 +168,8 @@ const OperatorSet& supported_eltwise_set() {
       // elementwise or reductions:
       "aten::min.other(Tensor self, Tensor other) -> Tensor",
       "aten::max.other(Tensor self, Tensor other) -> Tensor",
+      "aten::maximum(Tensor self, Tensor other) -> Tensor",
+      "aten::minimum(Tensor self, Tensor other) -> Tensor",
       // TODO: enable slice, shape inference is not implemented for this op yet
   };
   // clang-format on
