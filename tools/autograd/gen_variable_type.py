@@ -83,7 +83,7 @@ DONT_REQUIRE_DERIVATIVE = {
 # C -> C, R -> C functions for which backward is correctly implemented and tested
 GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     't', 'view', 'reshape', 'reshape_as', 'view_as', 'roll', 'clone',
-    'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose',
+    'repeat', 'expand', 'flip', 'fliplr', 'flipud', 'rot90', 'transpose', 'transpose_copy',
     'permute', 'squeeze', 'unsqueeze', 'resize', 'resize_as', 'tril',
     'triu', 'chunk', 'zero_', 'eq_', 'ne_', 'add', '__radd__', 'sum',
     '_conj', 'sin', 'cos', 'mul', 'sinc', 'sinh', 'cosh', '__rmul__',
@@ -107,7 +107,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
     'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
-    'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
+    'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {

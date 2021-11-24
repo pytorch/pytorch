@@ -36,8 +36,10 @@ TORCH_META_FUNC(transpose_copy) (const Tensor& self, const int64_t dim0, const i
   auto dim1_ = maybe_wrap_dim(dim1, ndims);
   c10::TensorOptions options = self.options();
   DimVector sizes(self.sizes().begin(), self.sizes().end());
+  DimVector strides(self.strides().begin(), self.strides().end());
+  std::swap(strides[dim0_], strides[dim1_]);
   std::swap(sizes[dim0_], sizes[dim1_]);
-  set_output(sizes, options);
+  set_output(0, sizes, strides, options, {});
 }
 
 }  // namespace meta
