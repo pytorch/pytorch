@@ -343,17 +343,13 @@ class CallbackManager {
     bool found_needs_outputs = false;
     bool found_needs_ids = false;
 
-    for (const auto& cb: rf_tls().sorted_tls_callbacks_) {
+    const auto& sortedTLSCallbacks = rf_tls().sorted_tls_callbacks_;
+    for (const auto& cb: sortedTLSCallbacks) {
       if (cb.isEnabled() && callbackShouldRun(cb.callback, scope, pre_sampled)) {
-        if (cb.callback.needsInputs()) {
-          found_needs_inputs = true;
-        }
-        if (cb.callback.needsOutputs()) {
-          found_needs_outputs = true;
-        }
-        if (cb.callback.needsIds()) {
-          found_needs_ids = true;
-        }
+        found_needs_inputs |= cb.callback.needsInputs();
+        found_needs_outputs |= cb.callback.needsOutputs();
+        found_needs_ids |= cb.callback.needsIds();
+
         if (!rec_fn.state_) {
           rec_fn.state_.emplace(scope);
         }
@@ -363,15 +359,10 @@ class CallbackManager {
 
     for (const auto& cb: sorted_global_callbacks_) {
       if (cb.isEnabled() && callbackShouldRun(cb.callback, scope, pre_sampled)) {
-        if (cb.callback.needsInputs()) {
-          found_needs_inputs = true;
-        }
-        if (cb.callback.needsOutputs()) {
-          found_needs_outputs = true;
-        }
-        if (cb.callback.needsIds()) {
-          found_needs_ids = true;
-        }
+        found_needs_inputs |= cb.callback.needsInputs();
+        found_needs_outputs |= cb.callback.needsOutputs();
+        found_needs_ids |= cb.callback.needsIds();
+
         if (!rec_fn.state_) {
           rec_fn.state_.emplace(scope);
         }

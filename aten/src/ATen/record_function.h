@@ -424,15 +424,15 @@ class TORCH_API RecordFunctionCallback {
     return *this;
   }
 
-  bool needsInputs() const {
+  inline bool needsInputs() const {
     return needs_inputs_;
   }
 
-  bool needsOutputs() const {
+  inline bool needsOutputs() const {
     return needs_outputs_;
   }
 
-  bool needsIds() const {
+  inline bool needsIds() const {
     return needs_ids_;
   }
 
