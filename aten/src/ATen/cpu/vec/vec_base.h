@@ -843,25 +843,24 @@ inline mask_gather(const Vectorized<T>& src, T const* base_addr,
 // Vectorized<int64_t> of 512 bits containing all ones (i.e., eight negative 1s).
 // A Vec<double> of 256 bits containing all ones can be cast to a
 // Vec<int64_t> of 256 bits containing all ones (i.e., four negative 1s).
-namespace {
-  // There is a struct here because we don't have static_if and I can't
-  // partially specialize a templated function.
-  template<typename dst_t, typename src_t>
-  struct CastImpl {
-    static inline Vectorized<dst_t> apply(const Vectorized<src_t>& src) {
-      src_t src_arr[Vectorized<src_t>::size()];
-      src.store(static_cast<void*>(src_arr));
-      return Vectorized<dst_t>::loadu(static_cast<const void*>(src_arr));
-    }
-  };
+// There is a struct here because we don't have static_if and I can't
+// partially specialize a templated function.
+template<typename dst_t, typename src_t>
+struct CastImpl {
+  static inline Vectorized<dst_t> apply(const Vectorized<src_t>& src) {
+    src_t src_arr[Vectorized<src_t>::size()];
+    src.store(static_cast<void*>(src_arr));
+    return Vectorized<dst_t>::loadu(static_cast<const void*>(src_arr));
+  }
+};
 
-  template<typename scalar_t>
-  struct CastImpl<scalar_t, scalar_t> {
-    static inline Vectorized<scalar_t> apply(const Vectorized<scalar_t>& src) {
-      return src;
-    }
-  };
-}
+template<typename scalar_t>
+struct CastImpl<scalar_t, scalar_t> {
+  static inline Vectorized<scalar_t> apply(const Vectorized<scalar_t>& src) {
+    return src;
+  }
+};
+
 template<typename dst_t, typename src_t>
 inline Vectorized<dst_t> cast(const Vectorized<src_t>& src) {
   return CastImpl<dst_t, src_t>::apply(src);
