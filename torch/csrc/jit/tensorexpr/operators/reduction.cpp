@@ -128,7 +128,7 @@ Tensor computeMean(
       extra_args.emplace_back(idx);
     }
   }
-  extra_args.push_back(static_cast<int64_t>(keepdim));
+  extra_args.push_back(LongImm::make(static_cast<int64_t>(keepdim)));
   return Tensor(
       ResultBuf.node(),
       ExternalCall::make(ResultBuf, "nnc_aten_mean", {InputBuf}, extra_args));
