@@ -556,10 +556,6 @@ TEST(Expr, DynamicShapeAdd) {
   testWithSize(37);
 }
 
-TEST(Expr, StoreOutOfBounds) {
-  // TODO
-}
-
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);

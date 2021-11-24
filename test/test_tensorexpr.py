@@ -1578,5 +1578,69 @@ class TestTensorExprFuser(BaseTestClass):
             exp = traced(a, b, c)
             self.assertEqual(ref, exp)
 
+    def test_1d_strided_within_bounds(self):
+        ir = """
+            graph(%0 : Float(3, strides=[1], device=cpu),
+                  %1 : Float(3, strides=[2], device=cpu)):
+                %2 : int = prim::Constant[value=1]()
+                %3 : Float(3, strides=[1]) = aten::add(%0, %1, %2)
+                return (%3)
+        """
+
+        graph = torch._C.parse_ir(ir)
+        kernel = torch._C._te.TensorExprKernel(graph)
+
+        a = torch.rand(3, dtype=torch.float).cpu()
+        b = torch.rand(6, dtype=torch.float).cpu()[::2]
+
+        expected = a + b
+        result = kernel.run((a, b))
+
+        print(a, b)
+
+        self.assertEqual(expected, result)
+
+    def test_2d_strided_within_bounds(self):
+        ir = """
+            graph(%0 : Float(3, 5, strides=[5, 1], device=cpu),
+                  %1 : Float(3, 5, strides=[20, 2], device=cpu)):
+                %2 : int = prim::Constant[value=1]()
+                %3 : Float(3, 5, strides=[5, 1]) = aten::add(%0, %1, %2)
+                return (%3)
+        """
+
+        graph = torch._C.parse_ir(ir)
+        kernel = torch._C._te.TensorExprKernel(graph)
+
+        a = torch.rand(3, 5, dtype=torch.float).cpu()
+        b = torch.rand(6, 10, dtype=torch.float).cpu()[::2,::2]
+
+        expected = a + b
+        result = kernel.run((a, b))
+
+        self.assertEqual(expected, result)
+
+    def test_out_of_bounds(self):
+        # from https://github.com/pytorch/pytorch/issues/57872
+        i32 = torch._C._te.Dtype.Int
+        N = torch._C._te.ExprHandle.int(10)
+        start = torch._C._te.ExprHandle.int(0)
+        stop = torch._C._te.ExprHandle.int(15) # intentional overflow
+        i = torch._C._te.VarHandle('i', i32)
+
+        X = torch._C._te.BufHandle('X', [N], i32)
+
+        body = torch._C._te.Store.make(X, [i], i)
+        stmt = torch._C._te.For.make(i, start, stop, body)
+
+        cg = torch._C._te.construct_codegen('ir_eval', stmt, [X])
+
+        data = torch.zeros(20, dtype=torch.int32)
+
+        with self.assertRaisesRegex(RuntimeError, "MALFORMED INPUT"):
+            cg.call([data])
+
+
+
 if __name__ == '__main__':
     run_tests()
