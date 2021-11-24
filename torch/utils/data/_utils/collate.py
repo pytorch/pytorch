@@ -92,7 +92,7 @@ def default_collate(batch):
         elem_size = len(next(it))
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError('each element in list of batch should be of equal size')
-        transposed = zip(*batch)
+        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
         try:
             return elem_type([default_collate(samples) for samples in transposed])
         except TypeError:
