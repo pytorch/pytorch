@@ -463,7 +463,7 @@ REGISTER_OPERATOR_FUNCTOR(
         if (!out_l.isNone() && can_optimize) {
           return;
         }
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(size);
         for (const auto i : c10::irange(size)) {
@@ -484,13 +484,29 @@ REGISTER_OPERATOR_FUNCTOR(
           return;
         }
         // prepare inputs
-        const size_t size = p_node->inputs().size();
-        std::vector<IValue> vals;
-        vals.reserve(size);
-        for (const auto i : c10::irange(size)) {
-          vals.push_back(p_node->Input(i));
+        const size_t size = p_node->num_inputs();
+        switch (size) {
+          case 1:
+            p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
+            break;
+          case 2:
+            p_node->Output(0) =
+                c10::ivalue::Tuple::create(p_node->Input(0), p_node->Input(1));
+            break;
+          case 3:
+            p_node->Output(0) = c10::ivalue::Tuple::create(
+                p_node->Input(0), p_node->Input(1), p_node->Input(2));
+            break;
+          default: {
+            std::vector<IValue> vals;
+            vals.reserve(size);
+            for (const auto i : c10::irange(size)) {
+              vals.push_back(p_node->Input(i));
+            }
+            p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
+            break;
+          }
         }
-        p_node->Output(0) = c10::ivalue::Tuple::create(std::move(vals));
       };
     });
 
@@ -653,7 +669,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_VarStack,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const size_t num_inputs = p_node->inputs().size();
+        const size_t num_inputs = p_node->num_inputs();
 
         std::vector<at::Tensor> inputs(num_inputs - 1);
         for (size_t i = 0; i < num_inputs - 1; ++i) {
@@ -1051,7 +1067,7 @@ REGISTER_OPERATOR_FUNCTOR(
         // handle memory format
         bool copy_strides = false;
         c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
-        if (p_node->inputs().size() == 5) {
+        if (p_node->num_inputs() == 5) {
           memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
         }
         memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
@@ -1205,7 +1221,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -
     auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
     auto include_last_offset = p_node->Input(7).toBool();
     c10::optional<int64_t> padding_idx;
-    if (p_node->inputs().size() == 9) {
+    if (p_node->num_inputs() == 9) {
       if (p_node->Input(8).isNone()) {
         padding_idx = c10::nullopt;
       } else {
@@ -1339,7 +1355,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     c10::optional<c10::string_view> rounding_mode = c10::nullopt;
-    if (p_node->inputs().size() > 2) {
+    if (p_node->num_inputs() > 2) {
       rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
     const auto& in1_t = p_node->Input(1).isTensor()
@@ -1726,6 +1742,47 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::linear_dynamic_fp16,
+    quantized_linear_dynamic_fp16,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "quantized::linear_dynamic_fp16(Tensor X, __torch__.torch.classes."
+              "quantized.LinearPackedParamsBase W_prepack) -> Tensor Y"))) {
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      const auto weight = toIValue(n->inputs()[1]);
+      c10::intrusive_ptr<LinearPackedParamsBase> packed_weight;
+      if (weight) {
+        packed_weight = weight->toCustomClass<LinearPackedParamsBase>();
+      }
+      if (packed_weight) {
+        return [packed_weight](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = create_empty_from(input, at::kFloat);
+          }
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          packed_weight->apply_dynamic_out(input, out_t, false);
+        };
+      } else {
+        return [](ProcessedNode* p_node) {
+          const auto& input = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = create_empty_from(input, at::kFloat);
+          }
+          auto& out_t = p_node->Output(0).toTensor();
+          fastResizeToZero(out_t);
+          // Weights could be quantized on the fly
+          auto packed_weight_tmp =
+              p_node->Input(1).toCustomClass<LinearPackedParamsBase>();
+          packed_weight_tmp->apply_dynamic_out(input, out_t, false);
+        };
+      }
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
           "aten::full(int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"))) {
@@ -1931,7 +1988,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_VarConcat,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const size_t num_inputs = p_node->inputs().size();
+        const size_t num_inputs = p_node->num_inputs();
         std::vector<at::Tensor> inputs(num_inputs - 1);
         for (const auto i : c10::irange(num_inputs - 1)) {
           inputs[i] = p_node->Input(i).toTensor();
@@ -2090,6 +2147,28 @@ REGISTER_OPERATOR_FUNCTOR(aten::where, aten_where, [](Node* n) -> SROperator {
   LogAndDumpSchema(n);
   return nullptr;
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    prim::NumToTensor,
+    prim_NumToTensor,
+    [](Node* n) -> SROperator {
+      if (n->matches(
+              torch::schema("prim::NumToTensor.Scalar(Scalar s) -> Tensor")) ||
+          n->matches(
+              torch::schema("prim::NumToTensor.bool(bool a) -> Tensor"))) {
+        return [](ProcessedNode* pnode) {
+          const auto scalar = pnode->Input(0).toScalar();
+          if (pnode->Output(0).isNone()) {
+            pnode->Output(0) = at::scalar_to_tensor(scalar);
+            return;
+          }
+          auto& out = pnode->Output(0).toTensor();
+          at::detail::scalar_fill(out, scalar);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
 
 } // namespace jit
 } // namespace torch
