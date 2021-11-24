@@ -8,7 +8,8 @@ import random
 import unittest
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex)
+    all_types_and_complex,
+)
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard
@@ -3405,6 +3406,15 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+
+def _sparse_to_dense(tensor):
+    if tensor.dtype != torch.bool:
+        return tensor.to_dense()
+
+    # to_dense uses coalesce which isn't implemented for bool
+    return tensor.to(torch.int8).to_dense().to(torch.bool)
+
+
 _sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
@@ -3426,7 +3436,7 @@ class TestSparseUnaryUfuncs(TestCase):
         assert torch.is_tensor(expected)
         output = op(sample.input.to_sparse(), *sample.args, **sample.kwargs)
         assert torch.is_tensor(output)
-        self.assertEqual(output.to_dense(), expected)
+        self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
@@ -3448,7 +3458,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
         expect = op(zero_input)
         actual = op(sparse_input)
-        self.assertEqual(expect, actual.to_dense())
+        self.assertEqual(expect, _sparse_to_dense(actual))
 
     @ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
          allowed_dtypes=[torch.double, torch.cdouble])
