@@ -1229,6 +1229,8 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 }
 
 void TensorExprKernel::compile() {
+  graph_ = torch::jit::tensorexpr::removeGraphOutput(graph_, 1);
+  graph_ = torch::jit::tensorexpr::replaceListOutputWithTuple(graph_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
