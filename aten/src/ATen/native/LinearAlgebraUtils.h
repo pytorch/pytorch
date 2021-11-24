@@ -32,6 +32,14 @@ static char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
+static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
+  if (tensor.is_conj()) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
 template<class Vec>
 static inline Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
   static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
