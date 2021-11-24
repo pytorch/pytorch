@@ -251,7 +251,7 @@ class Measurement:
                 metadata=None,
             )
 
-        return [merge_group(t, g) for t, g in grouped_measurements.items()]
+        return [merge_group(t, g) for t, g in sorted(grouped_measurements.items(), key=lambda x: x[0].description)]
 
 
 def select_unit(t: float) -> Tuple[str, float]:
