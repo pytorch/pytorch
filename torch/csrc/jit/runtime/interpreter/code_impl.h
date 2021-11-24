@@ -772,22 +772,24 @@ struct CodeImpl {
     return size;
   }
 
-  void assert_stack_size(int32_t instruction_index, size_t init_size, size_t actual_size) const {
+  void assert_stack_size(
+      int32_t instruction_index,
+      size_t init_size,
+      size_t actual_size) const {
 #ifndef NDEBUG
     const auto& schema = full_operator_table_[instruction_index].schema();
-    int64_t expected_size =
-      static_cast<int64_t>(init_size)-
-      static_cast<int64_t>(schema.arguments().size()) +
-      static_cast<int64_t>(schema.returns().size());
+    int64_t expected_size = static_cast<int64_t>(init_size) -
+        static_cast<int64_t>(schema.arguments().size()) +
+        static_cast<int64_t>(schema.returns().size());
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      expected_size == actual_size || schema.is_varret() || schema.is_vararg(),
-      "Expected to find ",
-      expected_size,
-      " values on the stack, but found ",
-      actual_size,
-      " on the stack after ",
-      toString(full_operator_table_[instruction_index].schema())
-    );
+        expected_size == actual_size || schema.is_varret() ||
+            schema.is_vararg(),
+        "Expected to find ",
+        expected_size,
+        " values on the stack, but found ",
+        actual_size,
+        " on the stack after ",
+        toString(full_operator_table_[instruction_index].schema()));
 #endif
   }
 };
