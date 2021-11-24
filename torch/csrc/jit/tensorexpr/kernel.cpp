@@ -939,7 +939,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       }
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {0},
+          toExprHandles(*tt->sizes().concrete_sizes()),
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
