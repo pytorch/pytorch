@@ -20,6 +20,7 @@
   _(nnc_aten_quantized_linear)        \
   _(nnc_aten_quantized_linear_relu)   \
   _(nnc_aten_quantized_add)           \
+  _(nnc_aten_quantized_cat)           \
   _(nnc_aten_quantized_mul)           \
   _(nnc_aten_quantized_mul_scalar)    \
   _(nnc_aten_quantized_sigmoid)       \

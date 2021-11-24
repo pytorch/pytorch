@@ -155,6 +155,21 @@ at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
                       .typed<at::Tensor(at::Tensor, double, int64_t)>();
   return op.call(x, scale, zero);
 }
+
+at::Tensor quantized_cat(
+    const c10::List<at::Tensor>& qxs,
+    int64_t dim,
+    c10::optional<double> scale,
+    c10::optional<int64_t> zero) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::cat", "")
+                      .typed<at::Tensor(
+                          c10::List<at::Tensor>,
+                          int64_t,
+                          c10::optional<double>,
+                          c10::optional<int64_t>)>();
+  return op.call(qxs, dim, scale, zero);
+}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
@@ -507,6 +522,42 @@ void nnc_aten_quantized_sigmoid(
   auto r = quantized_sigmoid(qx, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
+
+void nnc_aten_quantized_cat(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  c10::List<at::Tensor> qxs;
+  for (int i = 0; i < bufs_num - 1; ++i) {
+    const double qscale = ((double*)extra_args)[3 * i + 0];
+    const int64_t qzero = extra_args[3 * i + 1];
+    const c10::ScalarType qdtype =
+        static_cast<c10::ScalarType>(extra_args[3 * i + 2]);
+    auto tensor = tensors[i + 1];
+    auto qx = from_blob_quantized(
+        buf_data[i + 1],
+        // NOLINTNEXTLINE
+        tensor.sizes(),
+        tensor.strides(),
+        qscale,
+        qzero,
+        toQIntType(qdtype));
+    qxs.push_back(qx);
+  }
+  const int64_t dim = extra_args[3 * bufs_num + 0];
+  const double out_qscale = ((double*)extra_args)[3 * bufs_num + 1];
+  const int64_t out_qzero = extra_args[3 * bufs_num + 2];
+
+  auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
 #endif // _WIN32
 
 #endif // DISABLE_NNC_QUANTIZATION
@@ -856,10 +907,12 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_aten_quantized_add",
     nnc_aten_quantized_add);
-
 const static RegisterNNCExternalFunction nnc_quantized_sigmoid(
     "nnc_aten_quantized_sigmoid",
     nnc_aten_quantized_sigmoid);
+const static RegisterNNCExternalFunction nnc_quantized_cat(
+    "nnc_aten_quantized_cat",
+    nnc_aten_quantized_cat);
 #endif // _WIN32
 const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
     "nnc_aten_quantize_per_tensor",

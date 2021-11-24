@@ -494,6 +494,44 @@ Tensor computeQuantizedMulScalar(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeQuantizedCat(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+  auto inputList = c10::get<BufList>(inputs[0]);
+  auto argDim = c10::get<int64_t>(inputs[1]);
+  auto n = inputList.size();
+  // TODO: handle optional out_qscale, out_qzero
+  const auto out_qscale = c10::get<double>(inputs[2]);
+  const auto out_qzero = c10::get<int64_t>(inputs[3]);
+
+  std::vector<BufHandle> args;
+  std::vector<ExprHandle> extra_args;
+  for (const auto i : c10::irange(n)) {
+    const BufHandle& bh = inputList[i];
+    args.push_back(bh);
+    extra_args.push_back(immQScale(bh));
+    extra_args.push_back(immQZero(bh));
+    extra_args.push_back((int64_t)immQDType(bh));
+  }
+  extra_args.push_back(argDim);
+  extra_args.push_back(out_qscale);
+  extra_args.push_back(out_qzero);
+  auto ResultBuf = makeQBufHandleNCHW(
+      "quantized_cat",
+      outputShape,
+      Dtype(immQDType(inputList[0])),
+      out_qscale,
+      out_qzero);
+  StmtPtr s =
+      ExternalCall::make(ResultBuf, "nnc_quantized_cat", args, extra_args);
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computeDequantize(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
