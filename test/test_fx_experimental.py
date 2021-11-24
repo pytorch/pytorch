@@ -1534,6 +1534,7 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_1d",
             "atleast_2d",
             "atleast_3d",
+            "column_stack",
         }
 
         # Unsupported input types
