@@ -400,6 +400,61 @@ inline {sig.defn(prefix="Tensor::")} const {{
 
         return result
 
+# Generates CodegenFunctions.h & CodegenFunctions.cpp.
+@dataclass(frozen=True)
+class ComputeUnboxingFunctions:
+    target: Union[
+        Literal[Target.DECLARATION],
+        Literal[Target.DEFINITION]
+    ]
+
+    @method_with_native_function
+    def __call__(self, f: NativeFunction) -> str:
+        sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
+        sig = sig_group.most_faithful_signature()
+
+        if self.target is Target.DECLARATION:
+            # Note [The ATen Codegen Unboxing API]
+            # Similar to the ATen Operators API, ATen Codegen Unboxing API lives in the at::unboxing namespace, and
+            # will be used by codegen unboxing wrappers (CodegenUnboxingWrappers.cpp).
+            # The Wrappers will be registered into torch::jit::OperatorRegistry using RegisterOperators API.
+            #
+            # Important characteristics about the Codegen Unboxing API:
+            # (1) It follows the OperatorRegistry API.
+            #     This is kind of necessary to avoid overhead.
+            #     For example: if it followed the C++ API, then all of the faithful C++ factory functions
+            #     would need to wrap their arguments into TensorOptions only to unwrap them again.
+            # (2) Under the hood it calls C++ API.
+            return f"""
+// aten::{f.func}
+TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack);
+"""
+        else:
+            # gather all the arguments from native function, including "out"
+            args = f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [])
+
+            # parse arguments into C++ code
+            arguments = unboxing.convert_arguments(args, f.func.arguments.tensor_options)
+
+            # for each C++ argument, generate the conversion code
+            code_connector = "\n\t"
+            code_list = []
+            for arg in arguments:
+                code_list.extend(arguments[arg].code)
+            code = code_connector.join(code_list)
+
+            # function call and push back to stack
+            func_call_and_push = code_connector.join(unboxing.generate_unboxed_kernel_call(f, sig, arguments))
+
+            return f"""
+// aten::{f.func}
+TORCH_API void {f.func.name.unambiguous_name()}(Stack & stack) {{
+    {code}
+    drop(stack, {len(args)});
+    {func_call_and_push}
+}}
+"""
+
 # Generates RedispatchFunctions.h.
 # This is similar to the C++ API defined in Functions.h, but provides access
 # to the dispatcher's redispatch API.
@@ -440,7 +495,7 @@ TORCH_API inline {sig.decl(is_redispatching_fn=True)} {{
 # Generates Static.cpp.
 # This generates static unboxing wrapper for ATen ops.
 @dataclass(frozen=True)
-class ComputeStaticUnboxingWrapper:
+class ComputeUnboxingWrapper:
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
@@ -448,26 +503,7 @@ class ComputeStaticUnboxingWrapper:
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
         def generate_defn(faithful: bool) -> str:
-            if faithful:
-                sig = sig_group.faithful_signature
-                assert sig is not None
-            else:
-                sig = sig_group.signature
-            # gather all the arguments from native function, including "out"
-            args = f.func.arguments.flat_non_out + (list(f.func.arguments.out) if f.func.arguments.out else [])
-
-            # parse arguments into C++ code
-            arguments = unboxing.convert_arguments(args, f.func.arguments.tensor_options)
-
-            # for each C++ argument, generate the conversion code
-            code_connector = "\n\t\t"
-            code_list = []
-            for arg in arguments:
-                code_list.extend(arguments[arg].code)
-            code = code_connector.join(code_list)
-
-            # function call and push back to stack
-            func_call_and_push = unboxing.generate_unboxed_kernel_call(f, sig, arguments)
+            sig = sig_group.most_faithful_signature()
 
             # escape double quote in schema, get rid of extra double quotes
             schema = json.dumps(sig.func.__str__())[1:-1]
@@ -477,9 +513,7 @@ OperatorGenerator(
     TORCH_SELECTIVE_SCHEMA("aten::{schema}"),
     [](Stack & stack) {{
         RECORD_FUNCTION("{sig.name()}", std::vector<c10::IValue>());
-        {code}
-        drop(stack, {len(args)});
-        {func_call_and_push}
+        at::unboxing::{f.func.name.unambiguous_name()}(stack);
     }},
     aliasAnalysisFromSchema()
 ),
@@ -1342,6 +1376,20 @@ def main() -> None:
             Target.DECLARATION), native_functions)),
     })
 
+    cpu_fm.write_sharded(
+        'CodegenFunctions.cpp',
+        native_functions,
+        key_fn=key_func,
+        env_callable=lambda fn: {
+            'definitions': [ComputeUnboxingFunctions(Target.DEFINITION)(fn)]},
+        num_shards=5,
+        sharded_keys={'definitions'}
+    )
+    cpu_fm.write('CodegenFunctions.h', lambda: {
+        'declarations': list(mapMaybe(ComputeUnboxingFunctions(
+            Target.DECLARATION), native_functions)),
+    })
+
     cpu_fm.write('Functions.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
         'function_definitions': list(mapMaybe(ComputeFunction(
@@ -1350,8 +1398,8 @@ def main() -> None:
 
     cpu_fm.write('Functions.cpp', lambda: {})
 
-    cpu_fm.write('StaticUnboxingWrappers.cpp', lambda: {
-        'unboxed_ops': list(mapMaybe(ComputeStaticUnboxingWrapper(), native_functions)),
+    cpu_fm.write('CodegenUnboxingWrappers.cpp', lambda: {
+        'unboxed_ops': list(mapMaybe(ComputeUnboxingWrapper(), native_functions)),
     })
 
     core_fm.write('TensorBody.h', lambda: {

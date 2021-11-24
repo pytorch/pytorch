@@ -209,10 +209,10 @@ for (c10::IValue {elem_name}: {in_name}) {{
 
 
 # Generate code to call C++ unboxed kernel with argument variable names
-def generate_unboxed_kernel_call(f: NativeFunction, sig: CppSignature, arguments: Dict[str, ArgumentCppCode]) -> str:
+def generate_unboxed_kernel_call(f: NativeFunction, sig: CppSignature, arguments: Dict[str, ArgumentCppCode]) -> List[str]:
     use_tensor_options = any(
         isinstance(a.nctype.type, BaseCType) and a.nctype.type.type == tensorOptionsT for a in sig.arguments())
-    arg_connector = ",\n\t\t\t"
+    arg_connector = ",\n\t"
     # find dispatch native function namespace
     if use_tensor_options:
         namespace = 'torch'
@@ -226,7 +226,7 @@ def generate_unboxed_kernel_call(f: NativeFunction, sig: CppSignature, arguments
     else:
         ret_str = "auto result_ = "
         push_str = """
-        pack(stack, std::move(result_));
+pack(stack, std::move(result_));
         """
     if Variant.method in f.variants:
         self_arg = f.func.arguments.self_arg
@@ -234,15 +234,15 @@ def generate_unboxed_kernel_call(f: NativeFunction, sig: CppSignature, arguments
         arg_list = arg_connector.join(
             [arguments[a.name].val_name for a in sig.arguments() if a.name != self_arg.argument.name])
         function_call = f"""
-        {ret_str}{arguments[self_arg.argument.name].val_name}.{sig.name()}(
-            {arg_list}
-        );
+{ret_str}{arguments[self_arg.argument.name].val_name}.{sig.name()}(
+    {arg_list}
+);
     """
     else:
         arg_list = arg_connector.join([arguments[a.name].val_name for a in sig.arguments()])
         function_call = f"""
-        {ret_str}{namespace}::{sig.name()}(
-            {arg_list}
-        );
+{ret_str}{namespace}::{sig.name()}(
+    {arg_list}
+);
     """
-    return function_call + push_str
+    return (function_call + push_str).split('\n')
