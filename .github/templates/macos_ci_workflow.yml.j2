@@ -85,6 +85,8 @@ jobs:
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
       !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
+      !{{ common.parse_ref() }}
+      !{{ common.upload_test_statistics(build_environment, when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
 {%- endif %}
 {% endblock +%}
 
