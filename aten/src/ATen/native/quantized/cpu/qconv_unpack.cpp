@@ -89,6 +89,10 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
         at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
             kSpatialDim>(unpacked_weights, groups);
   }
+  std::cout << "XXX qlinear_unpack:" << unpacked_weights.sizes() << std::endl;
+  if (bias.has_value()) {
+    std::cout << "XXX qlinear_unpack: bias" << bias->sizes() << std::endl;
+  }
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       unpacked_weights, bias);
 }
