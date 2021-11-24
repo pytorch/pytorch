@@ -2168,7 +2168,6 @@ class DistributedDataParallelTest(
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     find_unused_parameters=True,
-                    static_graph=False,
                 )
 
     # DDP will fail when the same layer is checkpointed twice, for both settings
@@ -2187,13 +2186,11 @@ class DistributedDataParallelTest(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
-                    static_graph=False,
                 )
                 model = self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
-                    static_graph=False,
                     find_unused_parameters=True,
                 )
 
@@ -2232,6 +2229,9 @@ class DistributedDataParallelTest(
                 run_checkpoint=True,
             )
 
+    # Checkpointing should work with static graph
+    # in the case of checkpointing same layer twice and
+    # having weights shared across layers.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpoint_twice_weight_sharing(self):
