@@ -319,7 +319,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
 
     // N.B. rank is specialized even with dynamic shapes
     // all axes but channel to reduce to the bias size
-    auto grad_rank = dynamic_cast<const ir::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
+    auto grad_rank = dynamic_cast<const torch::lazy::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
     std::vector<int64_t> axes(grad_rank);
     std::iota(axes.begin(), axes.end(), 0);
     TORCH_INTERNAL_ASSERT(grad_rank >= 3, "Convolution outputs should have 3+ dimensions");

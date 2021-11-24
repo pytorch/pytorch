@@ -7,7 +7,8 @@ namespace ir {
 namespace ops {
 
 static torch::lazy::Shape inferBiasShape(const torch::lazy::Value& grad_output) {
-  auto grad_shape = ir::GetShapeFromTsValue(grad_output);
+  auto grad_shape = torch::lazy::GetShapeFromTsValue(grad_output);
+  TORCH_INTERNAL_ASSERT(grad_shape.dim() > 1);
   auto bias_dim = grad_shape.size(1);
   return torch::lazy::Shape(grad_shape.scalar_type(), {bias_dim});
 }
