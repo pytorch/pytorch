@@ -3,7 +3,7 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import _standard_normal, lazy_property
+from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
 
@@ -51,9 +51,7 @@ class Wishart(Distribution):
     support = constraints.positive_definite
     has_rsample = True
 
-    def __init__(self, covariance_matrix=None, precision_matrix=None, scale_tril=None, df=None,
-                 bartlett_decomposition=True, validate_args=None):
-
+    def __init__(self, covariance_matrix=None, precision_matrix=None, scale_tril=None, df=None, validate_args=None):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
             "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
@@ -83,7 +81,6 @@ class Wishart(Distribution):
             "Degree of Freedom paramter should be larger than the dimension - 1"
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
-        self.bartlett_decomposition = bartlett_decomposition
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
@@ -153,18 +150,9 @@ class Wishart(Distribution):
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
 
-        # Implemented Bartlett decomposition
-        if self.bartlett_decomposition:
-            noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
-            noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
-        else:
-            #Sampling p x n Normal Random Variables and
-            assert 
-            noise = _standard_normal(
-                shape,
-                dtype=self._unbroadcasted_scale_tril.dtype,
-                device=self._unbroadcasted_scale_tril.device,
-            )
+        # Implemented Sampling using Bartlett decomposition
+        noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
+        noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
         chol = torch.einsum("ik,...kj->...ij", self._unbroadcasted_scale_tril, noise)
         return torch.einsum("...ik,...jk->...ij", chol, chol)
 
