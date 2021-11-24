@@ -346,7 +346,7 @@ jobs:
       - name: ROCm set GPU_FLAG
         if: ${{ contains(env.BUILD_ENVIRONMENT, 'rocm') && !contains(matrix.config, 'nogpu') }}
         run: |
-          echo "GPU_FLAG=--device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -427,8 +427,10 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          # jenkins user does not have write permission to mounted workspace; work-around by copying to jenkins home
+          # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+          # copy test results back to the mounted workspace, needed sudo, resulting permissions were correct
+          docker exec -t "${container_name}" sh -c "cd ../pytorch && sudo cp -R test/test-reports ../workspace/test"
       - name: Install render_test_results dependencies
         if: always()
         shell: bash
