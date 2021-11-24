@@ -1482,6 +1482,8 @@ class TestNormalizeOperators(JitTestCase):
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1490,6 +1492,8 @@ class TestNormalizeOperators(JitTestCase):
             "resize_as_",
             "special.zeta",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
@@ -1510,6 +1514,12 @@ class TestNormalizeOperators(JitTestCase):
             'randn_like',
             'zeros_like',
             'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1521,6 +1531,10 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
+            "column_stack",
         }
 
         # Unsupported input types
