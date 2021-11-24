@@ -1465,6 +1465,7 @@ class TestNormalizeOperators(JitTestCase):
             # See: https://github.com/pytorch/pytorch/issues/64997
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
