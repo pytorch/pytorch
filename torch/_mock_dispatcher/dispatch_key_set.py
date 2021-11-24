@@ -27,7 +27,7 @@ class DispatchKeySet:
 
         # full/empty constructor
         if full is not None:
-            assert ks is None
+            assert k is None
             if full:
                 # this converts to a 64-length str of 1's in binary
                 self.repr_ = self.SIXTY_FOUR_ONES
@@ -36,6 +36,7 @@ class DispatchKeySet:
             return
 
         # DispatchKey constructor
+        assert k is not None
         assert full is None and raw_repr is None
         assert not isAliasDispatchKey(k)
         if k == DispatchKey.Undefined:
@@ -310,6 +311,13 @@ def getBackendKeySetFromAutograd(k: DispatchKey) -> DispatchKeySet:
         return autogradother_backends
     return DispatchKeySet(full=False)
 
+# This is used at runtime to compute the offset into the operator table
+# total perf cost:
+# 1x load
+# 2x highestPriorityTypeId()
+# 2x >>
+# 2x &
+# 1x +
 def getDispatchTableIndexForDispatchKeySet(ks: DispatchKeySet) -> int:
     functionality_idx = (ks >> NUM_BACKENDS).highestPriorityTypeId().value
     functionality_offset, is_per_backend_functionality_mask = functionality_key_offset_and_mask[functionality_idx]
@@ -327,18 +335,3 @@ def getDispatchTableIndexForDispatchKey(k: DispatchKey) -> int:
     if k == DispatchKey.Undefined:
         return 0
     return getDispatchTableIndexForDispatchKeySet(DispatchKeySet(k))
-
-# This is used at runtime to compute the offset into the operator table, and includes fallthrough keys in the calculation
-# total perf cost:
-# 2x load
-# 3x highestPriorityTypeId() (can drop this by 1)
-# 3x >> (can drop this by 1)
-# 3x &
-# 1x +
-def getDispatchTableIndexForDispatchKeySetGivenFallthroughKeys(ks: DispatchKeySet, nonFallthroughKeys: List[DispatchKeySet]) -> int:
-    # Note: this python code currently redundantly figures out the backend idx:
-    # once here to grab the fallthrough keyset and once in the next function to compute the offset into the table.
-    # We can probably figure out how to deduplicate.
-    backend_idx = ((ks & backend_bitset_mask) >> 1).highestPriorityTypeId().value
-    keyset_with_fallthroughs_masked = ks & nonFallthroughKeys[backend_idx]
-    return getDispatchTableIndexForDispatchKeySet(keyset_with_fallthroughs_masked)

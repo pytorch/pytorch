@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict
 from torch._mock_dispatcher.dispatch_key import DispatchKey, getAutogradKeyFromBackend, isAliasDispatchKey, isRuntimeDispatchKey
-from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd, autogradother_backends, getRuntimeDispatchKeySet, isBackendDispatchKey, getDispatchTableIndexForDispatchKeySetGivenFallthroughKeys, getDispatchTableIndexForDispatchKey
+from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd, autogradother_backends, getRuntimeDispatchKeySet, isBackendDispatchKey, getDispatchTableIndexForDispatchKeySet, getDispatchTableIndexForDispatchKey
 from torch._mock_dispatcher.dispatch_key_extractor import DispatchKeyExtractor
 from torch._mock_dispatcher.kernel_function import KernelFunction
 
@@ -59,13 +59,13 @@ class OperatorEntry:
                 return self.kernels_[k].name()
             return '[None]'
         kernels_str = "\n".join(f"{str(k)}: {key_to_name(k)}" for k in DispatchKey
-            if isRuntimeDispatchKey(k) or isAliasDispatchKey(k))
+                                if isRuntimeDispatchKey(k) or isAliasDispatchKey(k))
         return f"""name: {self.name_}
 
 {kernels_str}"""
 
-    def lookup(self, ks: DispatchKeySet, nonFallthroughKeys: List[DispatchKeySet]) -> KernelFunction:
-        idx = getDispatchTableIndexForDispatchKeySetGivenFallthroughKeys(ks, nonFallthroughKeys)
+    def lookup(self, ks: DispatchKeySet) -> KernelFunction:
+        idx = getDispatchTableIndexForDispatchKeySet(ks)
         return self.dispatchTable_[idx]
 
     def hasKernelForAnyDispatchKey(self, ks: DispatchKeySet) -> bool:

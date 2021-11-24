@@ -1,7 +1,7 @@
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch._mock_dispatcher.library import Library
 from torch._mock_dispatcher.dispatcher import Dispatcher
-from torch._mock_dispatcher.dispatch_key import DispatchKey
+from torch._mock_dispatcher.dispatch_key import DispatchKey, isRuntimeDispatchKey
 from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, getDispatchTableIndexForDispatchKeySet, getRuntimeDispatchKeySet
 
 # Below are some basic expecttests and runtime tests for the python implementation of the dispatcher.
@@ -16,13 +16,12 @@ class TestMockDispatchKey(TestCase):
     def assert_has_keys(self, keyset, list_of_keys):
         for contained_key in list_of_keys:
             self.assertTrue(keyset.has(contained_key))
-        other_keys = [k for k in DispatchKey if k not in list_of_keys]
+        other_keys = [k for k in DispatchKey if
+                      k not in list_of_keys
+                      and isRuntimeDispatchKey(k)
+                      and k != DispatchKey.Undefined]
         for other_key in other_keys:
-            if (other_key != DispatchKey.Undefined
-                    and other_key.value < DispatchKey.EndOfPerBackendKeys.value
-                    # Should we consider not making NumDispatchKeys an actual key?
-                    and other_key.value != DispatchKey.NumDispatchKeys.value):
-                self.assertFalse(keyset.has(other_key))
+            self.assertFalse(keyset.has(other_key))
 
     def test_has_dense_cuda(self):
         ks = DispatchKeySet.from_keys([DispatchKey.CUDA])
@@ -492,6 +491,23 @@ TESTING_ONLY_GenericMode: _missing_fn''')
         Dispatcher.singleton().call("foo1", [])
         self.assertEqual(3, self._foo1_composite_implicit)
 
+    def test_fallthrough_simple(self) -> None:
+        # Give every backend the same fallthrough kernel.
+        # This should cause us to hit the fast-path logic for calculating fallthrough keys.
+        autograd_libs = []
+        for dispatch_key_idx in range(DispatchKey.AutogradCPU.value, DispatchKey.AutogradPrivateUse3.value + 1):
+            lib = Library("test", DispatchKey(dispatch_key_idx))
+            lib.impl_fallthrough("foo1")
+            autograd_libs.append(lib)
+
+        self.lib_cpu.impl("foo1", self.cpu_incr)
+        self.lib_cuda.impl("foo1", self.cuda_incr)
+
+        Dispatcher.singleton().call("foo1", [DispatchKeySet(DispatchKey.AutogradCPU), DispatchKeySet(DispatchKey.CPU)])
+        self.assertEqual(1, self._foo1_cpu)
+        Dispatcher.singleton().call("foo1", [DispatchKeySet(DispatchKey.AutogradCUDA), DispatchKeySet(DispatchKey.CUDA)])
+        self.assertEqual(1, self._foo1_cuda)
+
     def test_fallbacks_and_fallthroughs(self) -> None:
         # give cpu / cuda ordinary kernels
         self.lib_cpu.impl("foo1", self.cpu_incr)
@@ -499,6 +515,7 @@ TESTING_ONLY_GenericMode: _missing_fn''')
 
         self.lib_composite_implicit.impl("foo1", self.composite_implicit_incr)
 
+        # per-backend fallthrough
         # give cuda autograd a fallthrough, but give cpu autograd a fallback
         self.lib_cuda_autograd.impl_fallthrough("foo1")
         self.lib_cpu_autograd.fallback(self.cpu_autograd_incr)

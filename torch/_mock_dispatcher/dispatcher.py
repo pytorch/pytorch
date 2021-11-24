@@ -33,14 +33,14 @@ class Dispatcher:
         assert op in self.operatorLookupTable_, f"nothing registered for {op}"
         op_entry = self.operatorLookupTable_[op]
         dispatchKeySet = op_entry.dispatchKeyExtractor_.getDispatchKeySetUnboxed(args)
-        kernel = op_entry.lookup(dispatchKeySet, op_entry.dispatchKeyExtractor_.nonFallthroughKeys_)
+        kernel = op_entry.lookup(dispatchKeySet)
         kernel.callBoxed()
 
     def call(self, op: str, args: List[DispatchKeySet]) -> None:
         assert op in self.operatorLookupTable_, f"nothing registered for {op}"
         op_entry = self.operatorLookupTable_[op]
         dispatchKeySet = op_entry.dispatchKeyExtractor_.getDispatchKeySetUnboxed(args)
-        kernel = op_entry.lookup(dispatchKeySet, op_entry.dispatchKeyExtractor_.nonFallthroughKeys_)
+        kernel = op_entry.lookup(dispatchKeySet)
         kernel.call()
 
     def registerImpl(self, op: str, k: Optional[DispatchKey], f: KernelFunction) -> None:
