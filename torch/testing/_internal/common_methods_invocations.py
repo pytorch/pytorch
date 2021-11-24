@@ -8273,7 +8273,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_cartesian_prod,
            skips=(
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
-               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
                DecorateInfo(unittest.skip("Skipped!"),
                             'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
            )),
