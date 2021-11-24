@@ -2926,16 +2926,14 @@ class TestLinalg(TestCase):
                     svd(a, out=(out_u, out_s, out_v))
 
             # if input contains NaN then an error is triggered for svd
-            error_msg = 'The algorithm failed to converge' \
-                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
-                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
+            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
             a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
             a[0] = float('nan')
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
-            error_msg = r'\(Batch element 1\): The algorithm failed to converge' \
-                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
-                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
             a[1, 0, 0] = float('nan')
             with self.assertRaisesRegex(RuntimeError, error_msg):
