@@ -180,7 +180,7 @@ at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
   auto node =
       torch::lazy::MakeNode<ir::ops::Cat>(values, dim, std::move(shapes));
   auto result = CreateAtenFromLtcTensor(
-      lazy_tensors[0].CreateFrom(torch::lazy::Value(node, 0)));
+      LazyTensor::Create(torch::lazy::Value(node, 0), lazy_tensors[0].GetDevice()));
   return result;
 }
 

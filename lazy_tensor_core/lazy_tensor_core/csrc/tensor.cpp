@@ -7,7 +7,6 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -102,8 +101,7 @@ torch::lazy::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
     return torch::lazy::GetShapeFromTsValue(data()->ir_value);
   }
   CHECK(data()->tensor_data);
-  const torch::lazy::BackendDevice& device = GetDevice();
-  return torch::lazy::Shape(data()->tensor_data->type().scalarType(),
+  return torch::lazy::Shape(data()->tensor_data->scalar_type(),
                             ToI64Vector(data()->tensor_data->sizes()));
 }
 
@@ -425,7 +423,7 @@ std::vector<LazyTensor> LazyTensor::MakeOutputTensors(
   std::vector<LazyTensor> tensors;
   tensors.reserve(node->num_outputs());
   for (size_t i = 0; i < node->num_outputs(); ++i) {
-    tensors.push_back(CreateFrom(torch::lazy::Value(node, i)));
+    tensors.push_back(Create(torch::lazy::Value(node, i), GetDevice()));
   }
   return tensors;
 }
@@ -433,15 +431,6 @@ std::vector<LazyTensor> LazyTensor::MakeOutputTensors(
 LazyTensor LazyTensor::CopyTensorToDevice(const torch::lazy::BackendDevice& device) {
   // TODO: This can be optimized.
   return Create(ToTensor(/*detached=*/true), device);
-}
-
-LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value) const {
-  return Create(std::move(ir_value), GetDevice());
-}
-
-LazyTensor LazyTensor::CreateFrom(torch::lazy::Value ir_value,
-                                  const torch::lazy::BackendDevice& device) const {
-  return Create(std::move(ir_value), device);
 }
 
 void LazyTensor::ApplyPendingGraph() {

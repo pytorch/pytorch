@@ -129,18 +129,18 @@ void as_strided_(LazyTensor& input, std::vector<int64_t> size,
 
 LazyTensor bernoulli(const LazyTensor& input, double probability) {
   auto input_shape = input.shape();
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Bernoulli>(
+  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Bernoulli>(
       LazyGraphExecutor::Get()->GetIrValueForScalar(probability, input_shape,
                                                     input.GetDevice()),
       LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
-      input_shape.Get()));
+      input_shape.Get()), input.GetDevice());
 }
 
 LazyTensor bernoulli(const LazyTensor& input) {
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Bernoulli>(
+  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Bernoulli>(
       input.GetIrValue(),
       LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
-      input.shape().Get()));
+      input.shape().Get()), input.GetDevice());
 }
 
 void bernoulli_(LazyTensor& input, double probability) {
@@ -163,8 +163,8 @@ LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
                            const at::Scalar& value) {
   std::vector<int64_t> complete_pad(pad.begin(), pad.end());
   complete_pad.resize(2 * input.shape().Get().dim());
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::ConstantPadNd>(
-      input.GetIrValue(), complete_pad, value));
+  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::ConstantPadNd>(
+      input.GetIrValue(), complete_pad, value), input.GetDevice());
 }
 
 LazyTensor convolution_overrideable(
@@ -177,7 +177,7 @@ LazyTensor convolution_overrideable(
           input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue(),
           std::move(stride), std::move(padding), std::move(dilation),
           transposed, std::move(output_padding), groups);
-  return input.CreateFrom(ir_value);
+  return LazyTensor::Create(ir_value, input.GetDevice());
 }
 
 LazyTensor convolution_overrideable(
@@ -190,7 +190,7 @@ LazyTensor convolution_overrideable(
           input.GetIrValue(), weight.GetIrValue(), std::move(stride),
           std::move(padding), std::move(dilation), transposed,
           std::move(output_padding), groups);
-  return input.CreateFrom(ir_value);
+  return LazyTensor::Create(ir_value, input.GetDevice());
 }
 
 std::tuple<LazyTensor, LazyTensor, LazyTensor>
@@ -206,19 +206,19 @@ convolution_backward_overrideable(
           std::move(stride), std::move(padding), std::move(dilation),
           transposed, std::move(output_padding), groups,
           std::move(output_mask));
-  LazyTensor grad_input = out_backprop.CreateFrom(torch::lazy::Value(node, 0));
-  LazyTensor grad_weight = out_backprop.CreateFrom(torch::lazy::Value(node, 1));
-  LazyTensor grad_bias = out_backprop.CreateFrom(torch::lazy::Value(node, 2));
+  LazyTensor grad_input = LazyTensor::Create(torch::lazy::Value(node, 0), out_backprop.GetDevice());
+  LazyTensor grad_weight = LazyTensor::Create(torch::lazy::Value(node, 1), out_backprop.GetDevice());
+  LazyTensor grad_bias = LazyTensor::Create(torch::lazy::Value(node, 2), out_backprop.GetDevice());
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
 }
 
 LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {
   auto input_shape = input.shape();
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Expand>(
+  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Expand>(
       input.GetIrValue(),
       GetExpandDimensions(input_shape.Get(), std::move(size)),
-      /*is_scalar_expand=*/false));
+      /*is_scalar_expand=*/false), input.GetDevice());
 }
 
 void fill_(LazyTensor& input, const at::Scalar& value) {
@@ -228,13 +228,13 @@ void fill_(LazyTensor& input, const at::Scalar& value) {
 }
 
 LazyTensor mul(const LazyTensor& input, const LazyTensor& other) {
-  return input.CreateFrom(input.GetIrValue() * other.GetIrValue());
+  return LazyTensor::Create(input.GetIrValue() * other.GetIrValue(), input.GetDevice());
 }
 
 LazyTensor mul(const LazyTensor& input, const at::Scalar& other) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       other, input.shape(), input.GetDevice());
-  return input.CreateFrom(input.GetIrValue() * constant);
+  return LazyTensor::Create(input.GetIrValue() * constant, input.GetDevice());
 }
 
 LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
@@ -271,10 +271,10 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm(
       torch::lazy::MakeNode<ir::ops::TSNativeBatchNormForward>(
           input.GetIrValue(), weight_value, bias_value, running_mean_value,
           running_var_value, training, momentum, eps);
-  LazyTensor output = input.CreateFrom(torch::lazy::Value(node, 0));
+  LazyTensor output = LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice());
   LazyTensor running_mean_output =
-      input.CreateFrom(torch::lazy::Value(node, 1));
-  LazyTensor running_var_output = input.CreateFrom(torch::lazy::Value(node, 2));
+      LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice());
+  LazyTensor running_var_output = LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice());
   return std::make_tuple(std::move(output), std::move(running_mean_output),
                          std::move(running_var_output));
 }
@@ -302,9 +302,9 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
         save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   }
-  LazyTensor grad_input = input.CreateFrom(torch::lazy::Value(node, 0));
-  LazyTensor grad_weight = input.CreateFrom(torch::lazy::Value(node, 1));
-  LazyTensor grad_bias = input.CreateFrom(torch::lazy::Value(node, 2));
+  LazyTensor grad_input = LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice());
+  LazyTensor grad_weight = LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice());
+  LazyTensor grad_bias = LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice());
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
 }
@@ -334,12 +334,12 @@ LazyTensor pow(const LazyTensor& input, const at::Scalar& exponent) {
   torch::lazy::Value exponent_node =
       LazyGraphExecutor::Get()->GetIrValueForScalar(exponent, input.shape(),
                                                     input.GetDevice());
-  return input.CreateFrom(ir::ops::Pow(input.GetIrValue(), exponent_node));
+  return LazyTensor::Create(ir::ops::Pow(input.GetIrValue(), exponent_node), input.GetDevice());
 }
 
 LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats) {
-  return input.CreateFrom(torch::lazy::MakeNode<ir::ops::Repeat>(
-      input.GetIrValue(), std::move(repeats)));
+  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Repeat>(
+      input.GetIrValue(), std::move(repeats)), input.GetDevice());
 }
 
 LazyTensor rsub(const LazyTensor& input, const at::Scalar& other,
@@ -348,7 +348,7 @@ LazyTensor rsub(const LazyTensor& input, const at::Scalar& other,
       alpha, input.shape(), input.GetDevice());
   torch::lazy::Value other_ir = LazyGraphExecutor::Get()->GetIrValueForScalar(
       other, input.shape(), input.GetDevice());
-  return input.CreateFrom(other_ir - alpha_ir * input.GetIrValue());
+  return LazyTensor::Create(other_ir - alpha_ir * input.GetIrValue(), input.GetDevice());
 }
 
 void copy_(LazyTensor& input, LazyTensor& src) {
@@ -427,15 +427,15 @@ LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
   }
   int64_t canonical_dim =
       GetCanonicalDimensionIndex(dim, tensors.front().shape().Get().dim() + 1);
-  return tensors[0].CreateFrom(
-      torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim));
+  return LazyTensor::Create(
+      torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0].GetDevice());
 }
 
 LazyTensor sub(const LazyTensor& input, const LazyTensor& other,
                const at::Scalar& alpha) {
   torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
       alpha, other.shape(), other.GetDevice());
-  return input.CreateFrom(input.GetIrValue() - other.GetIrValue() * constant);
+  return LazyTensor::Create(input.GetIrValue() - other.GetIrValue() * constant, input.GetDevice());
 }
 
 LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
@@ -446,16 +446,16 @@ LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
   torch::lazy::Value alpha_constant =
       LazyGraphExecutor::Get()->GetIrValueForScalar(alpha, input.shape(),
                                                     input.GetDevice());
-  return input.CreateFrom(input.GetIrValue() - other_constant * alpha_constant);
+  return LazyTensor::Create(input.GetIrValue() - other_constant * alpha_constant, input.GetDevice());
 }
 
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv) {
   torch::lazy::NodePtr node =
       torch::lazy::MakeNode<ir::ops::SVD>(input.GetIrValue(), some, compute_uv);
-  return std::make_tuple(input.CreateFrom(torch::lazy::Value(node, 0)),
-                         input.CreateFrom(torch::lazy::Value(node, 1)),
-                         input.CreateFrom(torch::lazy::Value(node, 2)));
+  return std::make_tuple(LazyTensor::Create(torch::lazy::Value(node, 0), input.GetDevice()),
+                         LazyTensor::Create(torch::lazy::Value(node, 1), input.GetDevice()),
+                         LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice()));
 }
 
 LazyTensor tanh_backward(const LazyTensor& grad_output,
