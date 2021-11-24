@@ -441,7 +441,7 @@ adjoint(Tensor) -> Tensor
 Returns a view of the tensor conjugated and with the last two dimensions transposed.
 
 ``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
-``x.transpose(-2, -1)`` for real tensors.
+to ``x.transpose(-2, -1)`` for real tensors.
 
 Example::
     >>> x = torch.arange(4, dtype=torch.float)
@@ -452,6 +452,8 @@ Example::
     >>> A.adjoint()
     tensor([[0.-0.j, 2.-2.j],
             [1.-1.j, 3.-3.j]])
+    >>> (A.adjoint() == A.mH).all()
+    tensor(True)
 """)
 
 add_docstr(torch.sspaddmm,
@@ -9924,11 +9926,11 @@ add_docstr(torch.triangular_solve,
            r"""
 triangular_solve(b, A, upper=True, transpose=False, unitriangular=False, *, out=None) -> (Tensor, Tensor)
 
-Solves a system of equations with a triangular coefficient matrix :math:`A`
+Solves a system of equations with a square upper or lower triangular invertible matrix :math:`A`
 and multiple right-hand sides :math:`b`.
 
-In particular, solves :math:`AX = b` and assumes :math:`A` is upper-triangular
-with the default keyword arguments.
+In symbols, it solves :math:`AX = b` and assumes :math:`A` is square upper-triangular
+(or lower-triangular if :attr:`upper`\ `= False`) and does not have zeros on the diagonal.
 
 `torch.triangular_solve(b, A)` can take in 2D inputs `b, A` or inputs that are
 batches of 2D matrices. If the inputs are batches, then returns
@@ -9945,10 +9947,9 @@ Args:
                 :math:`*` is zero of more batch dimensions
     A (Tensor): the input triangular coefficient matrix of size :math:`(*, m, m)`
                 where :math:`*` is zero or more batch dimensions
-    upper (bool, optional): whether to solve the upper-triangular system
-        of equations (default) or the lower-triangular system of equations. Default: ``True``.
-    transpose (bool, optional): whether :math:`A` should be transposed before
-        being sent into the solver. Default: ``False``.
+    upper (bool, optional): whether :math:`A` is upper or lower triangular. Default: ``True``.
+    transpose (bool, optional): solves `op(A)X = b` where `op(A) = A^T` if this flag is ``True``,
+                                and `op(A) = A` if it is ``False``. Default: ``False``.
     unitriangular (bool, optional): whether :math:`A` is unit triangular.
         If True, the diagonal elements of :math:`A` are assumed to be
         1 and not referenced from :math:`A`. Default: ``False``.
@@ -10520,10 +10521,9 @@ Keyword args:
 
 Example::
 
-    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
-    >>> torch.empty_like(a)
-    tensor([[0, 0, 0],
-            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
+    >>> torch.empty((2,3), dtype=torch.int64)
+    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
+            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10546,9 +10546,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty((2,3), dtype=torch.int64)
-    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
-            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty_strided,
