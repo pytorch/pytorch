@@ -10730,8 +10730,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_permute),
@@ -10891,8 +10889,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
            supports_out=False,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_autodiffed=True),
     OpInfo('split',
            variant_test_name='list_args',
@@ -10902,8 +10898,6 @@ op_db: List[OpInfo] = [
     OpInfo('split_with_sizes',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_split_with_sizes,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            supports_out=False,
            assert_autodiffed=True),
     OpInfo('__radd__',
@@ -12330,8 +12324,6 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -12424,8 +12416,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            sample_inputs_func=sample_unsqueeze),
     OpInfo('xlogy',
            aliases=('special.xlogy',),
@@ -12838,8 +12828,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
            supports_forward_ad=True,
-           autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
-           autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
