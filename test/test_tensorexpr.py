@@ -1613,7 +1613,7 @@ class TestTensorExprFuser(BaseTestClass):
         kernel = torch._C._te.TensorExprKernel(graph)
 
         a = torch.rand(3, 5, dtype=torch.float).cpu()
-        b = torch.rand(6, 10, dtype=torch.float).cpu()[::2,::2]
+        b = torch.rand(6, 10, dtype=torch.float).cpu()[::2, ::2]
 
         expected = a + b
         result = kernel.run((a, b))
@@ -1625,15 +1625,15 @@ class TestTensorExprFuser(BaseTestClass):
         i32 = torch._C._te.Dtype.Int
         N = torch._C._te.ExprHandle.int(10)
         start = torch._C._te.ExprHandle.int(0)
-        stop = torch._C._te.ExprHandle.int(15) # intentional overflow
-        i = torch._C._te.VarHandle('i', i32)
+        stop = torch._C._te.ExprHandle.int(15)  # intentional overflow
+        i = torch._C._te.VarHandle("i", i32)
 
-        X = torch._C._te.BufHandle('X', [N], i32)
+        X = torch._C._te.BufHandle("X", [N], i32)
 
         body = torch._C._te.Store.make(X, [i], i)
         stmt = torch._C._te.For.make(i, start, stop, body)
 
-        cg = torch._C._te.construct_codegen('ir_eval', stmt, [X])
+        cg = torch._C._te.construct_codegen("ir_eval", stmt, [X])
 
         data = torch.zeros(20, dtype=torch.int32)
 
