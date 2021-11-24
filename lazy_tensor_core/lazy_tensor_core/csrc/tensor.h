@@ -48,13 +48,6 @@ class LazyTensor {
   static LazyTensor Create(torch::lazy::BackendDataPtr handle);
   static LazyTensor Create(std::shared_ptr<Data> data);
 
-  // TODO(whc) just a hack for now to get codegen to compile... need to refactor
-  // Create a new lazy tensor with the same metadata of the input tensor (with
-  // possible overrides), and the new IR value.
-  LazyTensor CreateFrom(torch::lazy::Value ir_value) const;
-  LazyTensor CreateFrom(torch::lazy::Value ir_value,
-                        const torch::lazy::BackendDevice& device) const;
-
   // Creates an empty/null tensor.
   LazyTensor() = default;
 
