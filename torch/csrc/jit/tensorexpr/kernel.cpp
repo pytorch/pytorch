@@ -939,8 +939,9 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       }
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          toExprHandles(*tt->sizes().concrete_sizes()),
+          {0},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
+      inBuffer.node()->set_is_flattened(true);
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
         auto const size = *tt->sizes()[i];

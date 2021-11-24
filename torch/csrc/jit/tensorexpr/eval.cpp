@@ -676,7 +676,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   void check_bounds(T v) {
     const std::vector<ExprPtr>& dims = v->buf()->dims();
     const std::vector<ExprPtr>& indices = v->indices();
-    if (indices.size() == 1 && dims.size() != 1) {
+    if (v->buf()->is_flattened() || (indices.size() == 1 && dims.size() != 1)) {
       // indices are already flattened
       return;
     }

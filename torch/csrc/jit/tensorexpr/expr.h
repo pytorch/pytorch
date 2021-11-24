@@ -290,6 +290,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
     return true;
   }
 
+  bool is_flattened() const {
+    return is_flattened_;
+  }
+
+  void set_is_flattened(bool is_flattened) {
+    is_flattened_ = is_flattened;
+  }
+
  private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
@@ -298,6 +306,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
   // qscale_ and qzero_ are used only for quantized dtypes Bufs: kQUInt8, kQInt8
   ExprPtr qscale_;
   ExprPtr qzero_;
+  bool is_flattened_;
 };
 
 class TORCH_API BufHandle : public ExprHandle {
