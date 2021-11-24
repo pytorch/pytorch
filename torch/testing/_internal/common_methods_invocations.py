@@ -1432,6 +1432,35 @@ def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
 
     return tuple(samples)
 
+def sample_inputs_cartesian_prod(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # constructs 1-D tensors with varying number of elements
+    a = make_arg((0,))
+    b = make_arg((0, 1))
+    c = make_arg((0, 1, 2, 3))
+
+    samples = []
+
+    # sample with only 1 tensor
+    samples.append(SampleInput(
+        a
+    ))
+
+    # sample with 2 tensors
+    samples.append(SampleInput(
+        a,
+        args=(b,)
+    ))
+
+    # sample with 3 tensors
+    samples.append(SampleInput(
+        a,
+        args=(b, c)
+    ))
+
+    return tuple(samples)
+
 def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8267,6 +8296,18 @@ op_db: List[OpInfo] = [
             supports_autograd=False,
             supports_out=False,
             sample_inputs_func=sample_inputs_combinations),
+    OpInfo('cartesian_prod',
+            op=torch.cartesian_prod,
+            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+            supports_autograd=False,
+            supports_out=False,
+            sample_inputs_func=sample_inputs_cartesian_prod,
+            skips=(
+                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+                DecorateInfo(unittest.skip("Skipped!"),
+                    'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+            )),
     OpInfo('cdist',
            dtypes=floating_types(),
            supports_out=False,
