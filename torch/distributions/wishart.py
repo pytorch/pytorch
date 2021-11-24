@@ -173,13 +173,14 @@ class Wishart(Distribution):
         )
 
     def entropy(self):
+        nu = self.df
         p = self._event_shape[0]
         V = self.covariance_matrix
         H = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
             + torch.mvlgamma(nu / 2, p=p)
-            - (nu - p - 1) * _mvdigamma(nu / 2) / 2
+            - (nu - p - 1) * _mvdigamma(nu / 2, p=p) / 2
             + nu * p / 2
         )
         if len(self._batch_shape) == 0:
