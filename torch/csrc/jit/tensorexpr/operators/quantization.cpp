@@ -558,7 +558,7 @@ Tensor computeQuantizedCat(
       out_qscale,
       out_qzero);
   StmtPtr s =
-      ExternalCall::make(ResultBuf, "nnc_quantized_cat", args, extra_args);
+      ExternalCall::make(ResultBuf, "nnc_aten_quantized_cat", args, extra_args);
   return Tensor(ResultBuf.node(), s);
 }
 
