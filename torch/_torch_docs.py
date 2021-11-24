@@ -441,7 +441,7 @@ adjoint(Tensor) -> Tensor
 Returns a view of the tensor conjugated and with the last two dimensions transposed.
 
 ``x.adjoint()`` is equivalent to ``x.transpose(-2, -1).conj()`` for complex tensors and
-``x.transpose(-2, -1)`` for real tensors.
+to ``x.transpose(-2, -1)`` for real tensors.
 
 Example::
     >>> x = torch.arange(4, dtype=torch.float)
@@ -452,6 +452,8 @@ Example::
     >>> A.adjoint()
     tensor([[0.-0.j, 2.-2.j],
             [1.-1.j, 3.-3.j]])
+    >>> (A.adjoint() == A.mH).all()
+    tensor(True)
 """)
 
 add_docstr(torch.sspaddmm,
@@ -9922,7 +9924,7 @@ See also :func:`torch.t`.
 
 add_docstr(torch.transpose_copy,
            r"""
-transpose_copy(input, dim0, dim1) -> Tensor
+transpose_copy(input, dim0, dim1, *, out=None) -> Tensor
 
 Returns a tensor that is a copy of transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
@@ -9934,6 +9936,9 @@ Args:
     {input}
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
+
+Keyword args:
+    {out}
 
 Example::
 
