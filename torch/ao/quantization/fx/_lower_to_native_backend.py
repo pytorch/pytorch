@@ -73,7 +73,11 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     """
     model = _lower_ref_linear_module(model)
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        while True:
+        # eliminate the possibility of an infinite loop
+        MAX_ITER = 1000
+        cur_iter = 0
+        while cur_iter < MAX_ITER:
+            cur_iter += 1
             # replace the pattern until there is no more matches
             matches = subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
             if not matches:
