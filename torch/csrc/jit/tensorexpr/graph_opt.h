@@ -64,6 +64,10 @@ TORCH_API void annotateInputShapes(
 TORCH_API std::shared_ptr<Graph> removeUnusedSelfArgument(
     const std::shared_ptr<Graph>& graph);
 
+TORCH_API std::vector<int64_t> makeShapesSymbolic(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<int64_t>& sizes);
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
