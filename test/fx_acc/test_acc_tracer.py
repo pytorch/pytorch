@@ -111,6 +111,9 @@ class AccTracerTest(unittest.TestCase):
         self._make_acc_op_function_test(acc_ops.sum, torch_sum)
         self._make_acc_op_function_test(acc_ops.sum, torch_sum, dim=(1,), keepdim=True)
 
+    def test_pad(self):
+        self._make_acc_op_function_test(acc_ops.pad, torch.nn.functional.pad, pad=(2, 0))
+
     def test_max(self):
         def torch_max(x, *args, **kwargs):
             return x.max(*args, **kwargs)
@@ -1922,6 +1925,7 @@ class AccTracerTest(unittest.TestCase):
                 acc_ops.embedding_bag_byte_rowwise_offsets,
                 acc_ops.embedding_bag_4bit_rowwise_offsets,
                 acc_ops.contiguous,
+                acc_ops.pad,
                 acc_ops.sin,
                 acc_ops.cos,
                 acc_ops.tan,
