@@ -1980,8 +1980,6 @@ TEST(LoopNest, LoopNestComputeAt_2) {
 # CHECK:     cons[
 # CHECK: Free(temp))IR");
 
-    std::cerr << *s << std::endl;
-
     // Now check that the loop still produces the correct result.
     std::vector<int> c_data(kW * kH, 0);
     SimpleIREvaluator cg(s, {c, W, H});
