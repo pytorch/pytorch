@@ -620,6 +620,11 @@ const std::string shape_compute_functions =
           (weight, bias, stride, padding, dilation, groups) = unchecked_cast(Tuple[List[int], Optional[List[int]], List[int], List[int], List[int], int], ops.quantized.conv2d_unpack_sizes(conv2dOpContext))
           return conv2d(input, weight, bias, stride, padding, dilation, groups)
 
+        def quantized_prepacked_linear(input: List[int], linearOpContext: Any):
+          assert isinstance(linearOpContext, __torch__.torch.classes.quantized.LinearPackedParamsBase)
+          (weight, bias) = unchecked_cast(Tuple[Tensor, Optional[Tensor]], ops.quantized.linear_unpack(linearOpContext))
+          return linear(input, weight.shape, None if bias is None else bias.shape)
+
     )"
 #ifdef USE_XNNPACK
     R"(
@@ -722,6 +727,7 @@ static const OperatorMap<std::string>& get_schema_to_function_graph() {
       {"aten::dequantize(Tensor self) -> Tensor", "unary"},
       {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
       {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> Tensor", "quantized_prepacked_conv2d"},
+      {"quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> (Tensor)", "quantized_prepacked_linear"},
       {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc", "broadcast"},
 #ifdef USE_XNNPACK
       {"prepacked::conv2d_clamp_run(Tensor X, __torch__.torch.classes.xnnpack.Conv2dOpContext W_prepack) -> Tensor Y", "prepacked_conv2d_clamp_run"},
