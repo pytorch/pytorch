@@ -1411,6 +1411,27 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             dim=(0, 1))))
         return inputs
 
+def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
+    inputs = (
+        (0,),
+        (0, 1),
+        (0, 1, 2, 3),
+    )
+
+    rvals = [1, 2, 4]
+
+    products = product(inputs, rvals, [False, True])
+
+    samples = []
+
+    for input_data, r, with_replacement in products:
+        input_t = torch.tensor(input_data, device=device, dtype=dtype, requires_grad=requires_grad)
+        kwargs = dict(r=r, with_replacement=with_replacement)
+
+        samples.append(SampleInput(input_t, kwargs=kwargs))
+
+    return tuple(samples)
+
 def sample_inputs_cosine_similarity(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -2277,6 +2298,37 @@ def sample_inputs_randint_like(self, device, dtype, requires_grad, **kwargs):
             get_independent_tensor(sample.input),
             args=(low, high,) + sample.args,
             kwargs=sample.kwargs))
+    return tuple(samples)
+
+def sample_inputs_randint(self, device, dtype, requires_grad, **kwargs):
+    low = 2
+    high = 10
+    sizes = (
+        (),
+        (S,),
+        (S, S),
+        (S, S, S),
+        (S, 1, S),
+        (S, 0, S)
+    )
+
+    samples = []
+
+    for size in sizes:
+        # With high
+        samples.append(SampleInput(
+            high,
+            args=(size,),
+            kwargs=dict(device=device, dtype=dtype, requires_grad=requires_grad)
+        ))
+
+        # With low and high
+        samples.append(SampleInput(
+            low,
+            args=(high, size,),
+            kwargs=dict(device=device, dtype=dtype, requires_grad=requires_grad)
+        ))
+
     return tuple(samples)
 
 def sample_inputs_new_fns(self, device, dtype, requires_grad, **kwargs):
@@ -8209,6 +8261,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_bitwise_shift),
+    OpInfo('combinations',
+            op=torch.combinations,
+            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+            supports_autograd=False,
+            supports_out=False,
+            sample_inputs_func=sample_inputs_combinations),
     OpInfo('cdist',
            dtypes=floating_types(),
            supports_out=False,
@@ -12151,6 +12209,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
            supports_autograd=False),
+    # TODO: figure out what to do about sample inputs whose first argument is not a tensor or iterable of tensors
+    # OpInfo('randint',
+           # dtypes=all_types_and(torch.half, torch.bfloat16),
+           # op=lambda inp, *args, **kwargs:
+               # wrapper_set_seed(torch.randint, inp, *args, **kwargs),
+           # supports_out=True,
+           # sample_inputs_func=sample_inputs_randint,
+           # supports_autograd=False,
+           # ),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_scatter_add,
