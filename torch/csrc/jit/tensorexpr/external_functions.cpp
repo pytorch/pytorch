@@ -932,6 +932,9 @@ const static RegisterNNCExternalFunction nnc_conv2d(
     nnc_aten_conv2d);
 
 #ifndef DISABLE_NNC_QUANTIZATION
+const static RegisterNNCExternalFunction nnc_quantized_conv1d(
+    "nnc_aten_quantized_conv1d",
+    nnc_aten_quantized_conv1d);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
