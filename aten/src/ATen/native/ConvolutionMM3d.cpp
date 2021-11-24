@@ -197,7 +197,8 @@ static void slow_conv3d_update_output_frame(
       (stride_depth == 1) && (stride_height == 1) && (stride_width == 1) && (groups == 1)) {
     // 1x1x1 kernel, no need to unfold input and finput is already set
   } else {
-    Unfold3dCopyCPU(
+    unfolded3d_copy_stub(
+        kCPU,
         c10::CppTypeToScalarType<scalar_t>::value,
         input.data(),
         n_input_plane,
@@ -279,7 +280,8 @@ void slow_conv3d_backward_update_grad_input_frame(
       static_cast<scalar_t>(0),
       fgrad_input.data(), ldc, fgrad_input.stride(0) * n);
 
-  Unfold3dAccCPU(
+  unfolded3d_acc_stub(
+      kCPU,
       c10::CppTypeToScalarType<scalar_t>::value,
       fgrad_input.data(),
       grad_input.size(0),

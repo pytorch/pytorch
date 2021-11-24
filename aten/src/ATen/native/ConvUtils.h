@@ -322,7 +322,8 @@ static Tensor compute_columns3d(
         for (int64_t t = start; t < end; t++) {
           auto input_t = input_a[t];
           auto columns_t = columns_a[t];
-          Unfold3dCopyCPU(
+          unfolded3d_copy_stub(
+            input_.device().type(),
             c10::CppTypeToScalarType<scalar_t>::value,
             input_t.data(),
             n_input_plane,

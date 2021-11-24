@@ -1031,6 +1031,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/TensorCompareKernel.cpp",
     "aten/src/ATen/native/cpu/UnaryOpsKernel.cpp",
     "aten/src/ATen/native/cpu/Unfold2d.cpp",
+    "aten/src/ATen/native/cpu/Unfold3d.cpp",
     "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
