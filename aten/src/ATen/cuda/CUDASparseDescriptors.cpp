@@ -71,7 +71,7 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
 
   auto leading_dimension =
       is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
-  auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
+  auto order = is_column_major ? CUSPARSE_ORDER_COL : CUSPARSE_ORDER_ROW;
 
   void* values_ptr = input.data_ptr();
 
