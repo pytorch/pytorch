@@ -523,7 +523,7 @@ void RecordFunction::before(const char* name, int64_t sequence_nr) {
     return;
   }
   state_->op_input_size = state_->inputs_.size();
-  state_->name_ = StringView(name);
+  state_->name_ = name;
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
@@ -536,7 +536,7 @@ void RecordFunction::before(std::string name, int64_t sequence_nr) {
     return;
   }
   state_->op_input_size = state_->inputs_.size();
-  state_->name_ = StringView(std::move(name));
+  state_->name_ = std::move(name);
   state_->sequence_nr_ = sequence_nr;
   state_->thread_id_ = currentThreadId();
   state_->operator_name_.reset();
@@ -555,7 +555,7 @@ void RecordFunction::before(
   state_->operator_name_ = op.operator_name();
   state_->op_input_size = op.schema().arguments().size();
   state_->op_output_size = op.schema().returns().size();
-  state_->name_ = StringView(op.schema().name());
+  state_->name_ = op.schema().name();
 
   manager().runStartCallbacks(*this);
 }
