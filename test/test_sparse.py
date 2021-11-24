@@ -7,6 +7,8 @@ import operator
 import random
 import unittest
 from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    all_types_and_complex)
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard
@@ -3403,15 +3405,14 @@ class TestSparseOneOff(TestCase):
         with self.assertRaisesRegex(RuntimeError, "add: expected 'self' to be a CUDA tensor, but got a CPU tensor"):
             x + sparse_y
 
+_sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
+                        allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    @ops(sparse_unary_ufuncs)
-    def test_sparse_consistency(self, device, dtype, op):
-        unsupportedTypes = [torch.bfloat16, torch.float16]
-        if dtype in unsupportedTypes:
-            self.skipTest('Skipped! Unsupported dtypes for Sparse')
 
+    @_sparse_unary_ops
+    def test_sparse_consistency(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
         if len(samples) == 0:
@@ -3427,14 +3428,9 @@ class TestSparseUnaryUfuncs(TestCase):
         assert torch.is_tensor(output)
         self.assertEqual(output.to_dense(), expected)
 
-    @ops(sparse_unary_ufuncs)
+    @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
         # test 0x0 sparse_coo_tensor
-
-        unsupportedTypes = [torch.bfloat16, torch.float16]
-        if dtype in unsupportedTypes:
-            self.skipTest('Skipped! Unsupported dtypes for Sparse')
-
         indices = torch.empty(2, 0, dtype=torch.int64)
         values = torch.empty(0, dtype=dtype)
         sparse_0x0 = torch.sparse_coo_tensor(indices, values, (0, 0))
@@ -3442,7 +3438,7 @@ class TestSparseUnaryUfuncs(TestCase):
         actual = op(sparse_0x0)
         self.assertEqual(expected, actual)
 
-    @ops(sparse_unary_ufuncs)
+    @_sparse_unary_ops
     def test_sparse_zeros(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
