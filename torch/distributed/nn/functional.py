@@ -79,7 +79,7 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     return _Reduce.apply(dst, op, group, tensor)
 
 
-def reduce_scatter(output, input_tensors, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
+def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     """
     Reduces the tensor data across all machines, then scatters a list of
         tensors to all processes in a group.
@@ -88,7 +88,7 @@ def reduce_scatter(output, input_tensors, op=dist.ReduceOp.SUM, group=dist.group
 
     Arguments:
         output (Tensor): Output of the collective.
-        input_tensors (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
+        input_list (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
@@ -98,7 +98,7 @@ def reduce_scatter(output, input_tensors, op=dist.ReduceOp.SUM, group=dist.group
         Tensor: Output of the collective.
 
     """
-    return _Reduce_Scatter.apply(op, group, output, *input_tensors)
+    return _Reduce_Scatter.apply(op, group, output, *input_list)
 
 
 def all_gather(tensor, group=dist.group.WORLD):
@@ -110,7 +110,7 @@ def all_gather(tensor, group=dist.group.WORLD):
         group (ProcessGroup, optional): The process group to work on.
 
     Returns:
-        tuple[Tensor]): Output of the collective.
+        tuple([Tensor]): Output of the collective.
 
     """
     return _AllGather.apply(group, tensor)
@@ -133,6 +133,37 @@ def all_to_all(output_tensor_list, input_tensor_list, group=dist.group.WORLD):
 
     """
     return _AlltoAll.apply(group, output_tensor_list, *input_tensor_list)
+
+
+def all_to_all_single(
+    output,
+    input,
+    output_split_sizes=None,
+    input_split_sizes=None,
+    group=dist.group.WORLD,
+):
+    """
+    Each process splits input tensor and then scatters the split list
+    to all processes in a group. Then concatenate the received tensors from all
+    the processes in the group and return single output tensor.
+
+    Arguments:
+        output (Tensor): Gathered cancatenated output tensor.
+        input (Tensor): Input tensor to scatter.
+        output_split_sizes: (list[Int], optional): Output split sizes for dim 0
+            if specified None or empty, dim 0 of ``output`` tensor must divide
+            equally by ``world_size``.
+        input_split_sizes: (list[Int], optional): Input split sizes for dim 0
+            if specified None or empty, dim 0 of ``input`` tensor must divide
+            equally by ``world_size``.
+
+    Returns:
+        Tensor: Output of the collective.
+
+    """
+    return _AlltoAllSingle.apply(
+        group, output, output_split_sizes, input_split_sizes, input
+    )
 
 
 def all_reduce(tensor, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
@@ -241,9 +272,9 @@ class _Reduce_Scatter(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        result = _AllGather.apply(ctx.group, grad_output.contiguous())
-        print("backward ", grad_output, result)
-        return (None, None, None) + _AllGather.apply(ctx.group, grad_output.contiguous())
+        return (None, None, None) + _AllGather.apply(
+            ctx.group, grad_output.contiguous()
+        )
 
 
 class _AllGather(Function):
@@ -258,7 +289,10 @@ class _AllGather(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        gxs = _AlltoAll.apply(ctx.group, None, *grad_outputs)
+        tensor_list = [
+            torch.empty_like(tensor) for tensor in grad_outputs
+        ]
+        gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
         gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
 
@@ -267,18 +301,10 @@ class _AlltoAll(Function):
     @staticmethod
     def forward(ctx, group, out_tensor_list, *tensors):
         ctx.group = group
-        ctx.input_tensor_list = [
-            torch.empty_like(tensors[i])
-            for i in range(dist.get_world_size(group=group))
+        ctx.input_tensor_size_list = [
+            tensors[i].size() for i in range(dist.get_world_size(group=group))
         ]
-        if out_tensor_list is None:
-            out_tensor_list = [
-                torch.empty_like(tensors[i])
-                for i in range(dist.get_world_size(group=group))
-            ]
-        else:
-            out_tensor_list = [tensor.contiguous() for tensor in out_tensor_list]
-        reqs = [None] * dist.get_world_size(group=group)
+        out_tensor_list = [tensor.contiguous() for tensor in out_tensor_list]
         my_rank = dist.get_rank(group=group)
         # Implement it on means of scatter/gather, send/recv async operations have issues
         if dist.get_backend(group=group) is dist.Backend.GLOO:
@@ -297,9 +323,40 @@ class _AlltoAll(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        return (None, None) + _AlltoAll.apply(
-            ctx.group, ctx.input_tensor_list, *grad_outputs
+        tensor_list = [
+            torch.empty(size, device=grad_outputs[0].device)
+            for size in ctx.input_tensor_size_list
+        ]
+        return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
+
+
+class _AlltoAllSingle(Function):
+    @staticmethod
+    def forward(ctx, group, output, output_split_sizes, input_split_sizes, input):
+        ctx.group = group
+        ctx.input_size = input.size()
+        ctx.output_split_sizes_grad = input_split_sizes
+        ctx.input_split_sizes_grad = output_split_sizes
+        dist.all_to_all_single(
+            output,
+            input,
+            output_split_sizes=output_split_sizes,
+            input_split_sizes=input_split_sizes,
+            group=group,
         )
+        return output
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        tensor = torch.empty(ctx.input_size, device=grad_output.device)
+        tensor = _AlltoAllSingle.apply(
+            ctx.group,
+            grad_output,
+            ctx.output_split_sizes_grad,
+            ctx.input_split_sizes_grad,
+            tensor,
+        )
+        return (None, None, None, None, tensor)
 
 
 class _AllReduce(Function):
