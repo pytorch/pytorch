@@ -361,7 +361,7 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
 
 def _recurse_update_module(module, state_dict, prefix):
     for submodule_name, submodule in module.named_modules():
-        for attr_name, attr in module.__dict__.items():
+        for attr_name, attr in submodule.__dict__.items():
             key = prefix + submodule_name + '.' + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
@@ -369,7 +369,7 @@ def _recurse_update_module(module, state_dict, prefix):
 
 def _recurse_update_dict(module, destination, prefix):
     for submodule_name, submodule in module.named_modules():
-        for attr_name, attr in module.__dict__.items():
+        for attr_name, attr in submodule.__dict__.items():
             if isinstance(attr, ShardedTensor):
                 destination[prefix + submodule_name + '.' + attr_name] = attr
 
