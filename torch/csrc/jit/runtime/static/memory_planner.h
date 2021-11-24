@@ -132,31 +132,26 @@ class MemoryPlanner {
     if (!tensor.has_storage() || !tensor.storage().data_ptr()) {
       return false;
     }
-    // TODO: Improve this once D31357486 is landed.
-    uint8_t* tensor_ptr =
-        static_cast<uint8_t*>(tensor.storage().data_ptr().get());
-    uint8_t* buffer_start = static_cast<uint8_t*>(output_buffer_.get());
-    uint8_t* buffer_end = buffer_start + output_buffer_bytes_;
-    return buffer_start <= tensor_ptr && tensor_ptr < buffer_end;
+    auto buffer_start = static_cast<uint8_t*>(output_buffer_.get());
+    return overlapWithBuffer(
+        /*data_ptr=*/tensor.storage().data_ptr().get(),
+        /*start=*/buffer_start,
+        /*end=*/buffer_start + output_buffer_bytes_);
   }
 
   bool isManagedStorageImpl(const at::StorageImpl* impl) const {
     if (managed_tensor_storage_impls_.empty()) {
       return false;
     }
-    // Comparing pointers that aren't within the same array is
-    // UB. We're doing fancy memory allocation stuff, so we cast to an
-    // integer type and carry on.
-    const auto impl_p = reinterpret_cast<uintptr_t>(impl);
-    const auto start =
-        reinterpret_cast<uintptr_t>(managed_tensor_storage_impls_.data());
-    const auto end = reinterpret_cast<uintptr_t>(
+    return overlapWithBuffer(
+        /*data_ptr=*/impl,
+        /*start=*/managed_tensor_storage_impls_.data(),
+        /*end=*/
         &managed_tensor_storage_impls_[managed_tensor_storage_impls_.size()]);
-    return impl_p >= start && impl_p < end;
   }
 
-  bool overlapWithInternalBuffer(void* data_ptr) {
-    return buffer_start_ <= data_ptr && data_ptr < buffer_end_;
+  C10_ALWAYS_INLINE bool overlapWithInternalBuffer(const void* data_ptr) const {
+    return overlapWithBuffer(data_ptr, buffer_start_, buffer_end_);
   }
 
  private:
@@ -209,6 +204,13 @@ class MemoryPlanner {
 
   static size_t compute_aligned_tensor_size(size_t nbytes);
   static at::DataPtr allocate_buffer(size_t size);
+
+  static C10_ALWAYS_INLINE bool overlapWithBuffer(
+      const void* data_ptr,
+      const void* start,
+      const void* end) {
+    return start <= data_ptr && data_ptr < end;
+  }
 };
 
 } // namespace jit
