@@ -1100,7 +1100,8 @@ class AbstractTestCases:
 
             # Expected error when target shape cannot cover source indices
             self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([1, 2]), torch.tensor([], dtype=torch.int64)))
-            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([10, 11]), torch.tensor([1, 2], dtype=torch.int64)))
+            self.assertRaises(ValueError, lambda: torch.unravel_index(torch.tensor([10, 11]),
+                                                                      torch.tensor([1, 2], dtype=torch.int64)))
 
         @staticmethod
         def _test_gather(self, cast, test_bounds=True):

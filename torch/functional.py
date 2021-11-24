@@ -1779,7 +1779,7 @@ def align_tensors(*tensors):
 
 def unravel_index(
     indices: Tensor,
-    shape: Union[Tensor, Tuple[int, ...]],
+    shape: Union[int, Sequence, Tensor],
     *,
     as_tuple: bool = True
 ) -> Union[Tuple[Tensor, ...], Tensor]:
@@ -1787,7 +1787,7 @@ def unravel_index(
 
     Args:
         indices: An integral `Tensor` containing flattened indices of a `Tensor` of dimension `shape`.
-        shape: The shape (can be a `Sequence` or a `Tensor`) of the `Tensor` for which
+        shape: The shape (can be an `int`, a `Sequence` or a `Tensor`) of the `Tensor` for which
         the flattened `indices` are unraveled.
 
     Keyword Args:
