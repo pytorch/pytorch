@@ -205,6 +205,50 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 self.assertTrue(torch.isclose(quant_value, fused_quant_value).all())
                 self.assertTrue(torch.isclose(fused_quant_value, ref_quant_value).all())
 
+    def test_fused_fake_quant_embedding_bag_linear(self):
+        """
+        Test EmbeddingBag op with fused FakeQuant when using
+        an EmbeddingBagLinear model.
+        """
+        prepare_mapping = get_default_qat_module_mappings()
+        prepare_mapping[nn.EmbeddingBag] = torch.nn.qat.FusedFakeQuantEmbeddingBag
+
+        convert_mapping = get_embedding_static_quant_module_mappings()
+        convert_mapping[torch.nn.qat.FusedFakeQuantEmbeddingBag] = torch.nn.quantized.EmbeddingBag
+
+        fp32_model = ManualEmbeddingBagLinear().train()
+        #fp32_model.emb.weight = nn.Parameter(torch.arange(0, fp32_model.emb.weight.numel()).reshape(fp32_model.emb.weight.size()).to(torch.float32))
+        #print(fp32_model.emb.weight)
+        model = prepare_qat(fp32_model, mapping=prepare_mapping)
+        model_ref = prepare_qat(fp32_model, mapping=get_default_qat_module_mappings())
+        self.checkObservers(model)
+
+        test_only_train_fn(model, self.embed_linear_data_train)
+        test_only_train_fn(model_ref, self.embed_linear_data_train)
+        # make sure activation_post_process is inserted after Linear.
+        self.assertEqual(type(model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
+        # make sure that Embedding has a noop for activation.
+        self.assertEqual(type(model.emb.activation_post_process), NoopObserver)
+
+        model = convert(model, mapping=convert_mapping)
+        model_ref = convert(model_ref, mapping=get_embedding_static_quant_module_mappings())
+
+        def checkQuantized(model):
+            # make sure Embedding is now a QuantizedEmbedding
+            self.assertEqual(type(model.emb), nn.quantized.EmbeddingBag)
+            # make sure Linear is now a QuantizedLinear
+            self.assertEqual(type(model.linear), nn.quantized.Linear)
+
+            test_only_eval_fn(model, self.embed_data)
+            self.checkScriptable(model, self.embed_data)
+            self.checkNoQconfig(model)
+
+        checkQuantized(model)
+        test_data = torch.randint(0, 10, (12, 100))
+        model_out = model.emb(test_data)
+        model_ref_out = model_ref.emb(test_data)
+        self.assertTrue(torch.all(torch.isclose(model.emb.weight().dequantize(), model_ref.emb.weight().dequantize())))
+
     def test_fused_fake_quant_embedding(self):
         """
         Test Embedding op with fused FakeQuant when using

@@ -5,6 +5,7 @@ from .embedding_ops import (
     EmbeddingBag,
     Embedding,
     FusedFakeQuantEmbedding,
+    FusedFakeQuantEmbeddingBag,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "Embedding",
     "EmbeddingBag",
     "FusedFakeQuantEmbedding",
+    "FusedFakeQuantEmbeddingBag",
 ]

@@ -181,6 +181,9 @@ def build_constructor_arg_db():
         torch.nn.qat.FusedFakeQuantEmbedding: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
+        torch.nn.qat.FusedFakeQuantEmbeddingBag: ((10, 12), {
+            'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
+        }),
         torch.nn.qat.EmbeddingBag: ((10, 12), {
             'qconfig': torch.ao.quantization.float_qparams_weight_only_qconfig,
         }),
