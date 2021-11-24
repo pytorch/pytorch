@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import \
      GRADCHECK_NONDET_TOL,)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_methods_invocations import (
-    OpInfo, DecorateInfo, SampleInput, sample_inputs_hardshrink_hardtanh,
+    OpInfo, DecorateInfo, SampleInput, sample_inputs_softshrink_hardshrink_hardtanh,
     sample_inputs_softmax_variant, S
 )
 
