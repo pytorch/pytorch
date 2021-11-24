@@ -158,6 +158,8 @@ class Wishart(Distribution):
             noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
             noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
         else:
+            #Sampling p x n Normal Random Variables and
+            assert 
             noise = _standard_normal(
                 shape,
                 dtype=self._unbroadcasted_scale_tril.dtype,
