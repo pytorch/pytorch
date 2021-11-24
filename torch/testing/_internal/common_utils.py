@@ -1470,6 +1470,17 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
+    # TODO: Remove this when https://github.com/pytorch/pytorch/issues/68592 is resolved
+    def _check_supported(self, tensor, *, id) -> None:
+        # Performing any operation on a meta tensor that would require data, will raise a `NotImplementedError`.
+        # Setting `TestCase._ignore_not_implemented_error = True` turns it into `unittest.SkipTest`. Thus, we also
+        # raise a `NotImplementedError` here instead of the more fitting `ValueError` that would be raised by
+        # `TensorLikePair._check_supported()`.
+        if tensor.device.type == "meta":
+            raise ErrorMeta(NotImplementedError, "Comparing meta tensors is currently not supported", id=id)
+
+        super()._check_supported(tensor, id=id)
+
     # TODO: As discussed in https://github.com/pytorch/pytorch/issues/68590#issuecomment-975333883,
     #  this relaxation should only be temporary and this overwrite should be removed completely in the future.
     def _equalize_attributes(self, actual, expected):
