@@ -1,14 +1,12 @@
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
 from torch.fx.node import Node
-from torch.fx.node import map_arg
 from torch.fx._symbolic_trace import symbolic_trace
 from torch.fx._compatibility import compatibility
 
 import copy
 from typing import Callable, Dict, List, NamedTuple, Optional, Set
 import torch
-from functools import partial
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):

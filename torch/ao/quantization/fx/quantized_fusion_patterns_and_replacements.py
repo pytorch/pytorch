@@ -18,9 +18,9 @@ def relu_replacement(x, scale, zero_point):
     x = torch.nn.functional.relu(x)
     return x
 
-# pattern and replacement for bop + relu module
-def get_bop_mrelu_pr(bop, qboprelu):
-    class BOpReLUPattern(torch.nn.Module):
+# pattern and replacement for binary_op + relu module
+def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
+    class BinaryOpReLUPattern(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
@@ -30,12 +30,12 @@ def get_bop_mrelu_pr(bop, qboprelu):
         def forward(self, x, y):
             y = y.dequantize()
             x = x.dequantize()
-            x = bop(x, y)
+            x = binary_op(x, y)
             x = self.relu(x)
             x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
             return x
 
-    class BOpReLUReplacement(torch.nn.Module):
+    class BinaryOpReLUReplacement(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
@@ -43,10 +43,10 @@ def get_bop_mrelu_pr(bop, qboprelu):
             self.zero_point = torch.tensor([0])
 
         def forward(self, x, y):
-            x = qboprelu(x, y, self.scale.item(), self.zero_point.item())
+            x = qbinary_oprelu(x, y, self.scale.item(), self.zero_point.item())
             return x
 
-    class BOpScalarReLU1Pattern(torch.nn.Module):
+    class BinaryOpScalarReLU1Pattern(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
@@ -55,12 +55,12 @@ def get_bop_mrelu_pr(bop, qboprelu):
 
         def forward(self, x, num):
             x = x.dequantize()
-            x = bop(x, num)
+            x = binary_op(x, num)
             x = self.relu(x)
             x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
             return x
 
-    class BOpScalarReLU2Pattern(torch.nn.Module):
+    class BinaryOpScalarReLU2Pattern(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
@@ -69,12 +69,12 @@ def get_bop_mrelu_pr(bop, qboprelu):
 
         def forward(self, x, num):
             x = x.dequantize()
-            x = bop(num, x)
+            x = binary_op(num, x)
             x = self.relu(x)
             x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
             return x
 
-    class BOpScalarReLUReplacement(torch.nn.Module):
+    class BinaryOpScalarReLUReplacement(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
@@ -82,135 +82,135 @@ def get_bop_mrelu_pr(bop, qboprelu):
             self.zero_point = torch.tensor([])
 
         def forward(self, x, num):
-            x = qboprelu(x, num)
+            x = qbinary_oprelu(x, num)
             return x
 
     return copy.deepcopy([
-        (BOpReLUPattern(), BOpReLUReplacement()),
-        (BOpScalarReLU1Pattern(), BOpScalarReLUReplacement()),
-        (BOpScalarReLU2Pattern(), BOpScalarReLUReplacement()),
+        (BinaryOpReLUPattern(), BinaryOpReLUReplacement()),
+        (BinaryOpScalarReLU1Pattern(), BinaryOpScalarReLUReplacement()),
+        (BinaryOpScalarReLU2Pattern(), BinaryOpScalarReLUReplacement()),
     ])
 
-def get_bop_frelu_pr(bop, qboprelu):
+def get_binary_op_frelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
 
-    def bop_relu_inplace_pattern(x, y, scale, zero_point):
+    def binary_op_relu_inplace_pattern(x, y, scale, zero_point):
         y = y.dequantize()
         x = x.dequantize()
-        x = bop(x, y)
+        x = binary_op(x, y)
         x = torch.nn.functional.relu(x, inplace=True)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_relu_non_inplace_pattern(x, y, scale, zero_point):
+    def binary_op_relu_non_inplace_pattern(x, y, scale, zero_point):
         y = y.dequantize()
         x = x.dequantize()
-        x = bop(x, y)
+        x = binary_op(x, y)
         x = torch.nn.functional.relu(x, inplace=False)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_relu_replacement(x, y, scale, zero_point):
-        x = qboprelu(x, y, scale, zero_point)
+    def binary_op_relu_replacement(x, y, scale, zero_point):
+        x = qbinary_oprelu(x, y, scale, zero_point)
         return x
 
-    def bop_scalar_relu_1_inplace_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_relu_1_inplace_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(x, num)
+        x = binary_op(x, num)
         x = torch.nn.functional.relu(x, inplace=True)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_relu_1_non_inplace_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_relu_1_non_inplace_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(x, num)
+        x = binary_op(x, num)
         x = torch.nn.functional.relu(x, inplace=False)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_relu_2_inplace_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_relu_2_inplace_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(num, x)
+        x = binary_op(num, x)
         x = torch.nn.functional.relu(x, inplace=True)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_relu_2_non_inplace_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_relu_2_non_inplace_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(num, x)
+        x = binary_op(num, x)
         x = torch.nn.functional.relu(x, inplace=False)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_relu_replacement(x, num, scale, zero_point):
-        return qboprelu(x, num)
+    def binary_op_scalar_relu_replacement(x, num, scale, zero_point):
+        return qbinary_oprelu(x, num)
 
     return copy.deepcopy([
-        (bop_relu_inplace_pattern, bop_relu_replacement),
-        (bop_relu_non_inplace_pattern, bop_relu_replacement),
-        (bop_scalar_relu_1_inplace_pattern, bop_scalar_relu_replacement),
-        (bop_scalar_relu_1_non_inplace_pattern, bop_scalar_relu_replacement),
-        (bop_scalar_relu_2_inplace_pattern, bop_scalar_relu_replacement),
-        (bop_scalar_relu_2_non_inplace_pattern, bop_scalar_relu_replacement),
+        (binary_op_relu_inplace_pattern, binary_op_relu_replacement),
+        (binary_op_relu_non_inplace_pattern, binary_op_relu_replacement),
+        (binary_op_scalar_relu_1_inplace_pattern, binary_op_scalar_relu_replacement),
+        (binary_op_scalar_relu_1_non_inplace_pattern, binary_op_scalar_relu_replacement),
+        (binary_op_scalar_relu_2_inplace_pattern, binary_op_scalar_relu_replacement),
+        (binary_op_scalar_relu_2_non_inplace_pattern, binary_op_scalar_relu_replacement),
     ])
 
 
-def get_bop_pr(bop, qbop):
+def get_binary_op_pttn_and_rplcmnt(binary_op, qbinary_op):
 
-    def bop_pattern(x, y, scale, zero_point):
+    def binary_op_pattern(x, y, scale, zero_point):
         y = y.dequantize()
         x = x.dequantize()
-        x = bop(x, y)
+        x = binary_op(x, y)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_replacement(x, y, scale, zero_point):
-        x = qbop(x, y, scale, zero_point)
+    def binary_op_replacement(x, y, scale, zero_point):
+        x = qbinary_op(x, y, scale, zero_point)
         return x
 
-    def bop_scalar_1_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_1_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(x, num)
+        x = binary_op(x, num)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_2_pattern(x, num, scale, zero_point):
+    def binary_op_scalar_2_pattern(x, num, scale, zero_point):
         x = x.dequantize()
-        x = bop(num, x)
+        x = binary_op(num, x)
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def bop_scalar_replacement(x, num, scale, zero_point):
-        x = qbop(x, num)
+    def binary_op_scalar_replacement(x, num, scale, zero_point):
+        x = qbinary_op(x, num)
         return x
 
-    return copy.deepcopy([
-        (bop_pattern, bop_replacement),
-        (bop_scalar_1_pattern, bop_scalar_replacement),
-        (bop_scalar_2_pattern, bop_scalar_replacement),
-    ])
+    return [
+        (binary_op_pattern, binary_op_replacement),
+        (binary_op_scalar_1_pattern, binary_op_scalar_replacement),
+        (binary_op_scalar_2_pattern, binary_op_scalar_replacement),
+    ]
 
 def get_binary_op_pattern_and_replacements():
     binary_ops = [operator.add, operator.mul, torch.add, torch.mul]
-    bop_to_qbop = {
+    binary_op_to_qbinary_op = {
         operator.add: torch.ops.quantized.add,
         operator.mul: torch.ops.quantized.mul,
         torch.add: torch.ops.quantized.add,
         torch.mul: torch.ops.quantized.mul,
     }
-    bop_to_qboprelu = {
+    binary_op_to_qbinary_oprelu = {
         operator.add: torch.ops.quantized.add_relu,
         operator.mul: torch.ops.quantized.mul_relu,
         torch.add: torch.ops.quantized.add_relu,
         torch.mul: torch.ops.quantized.mul_relu,
     }
     pattern_and_replacements = []
-    for bop in binary_ops:
-        if bop in bop_to_qboprelu:
-            pattern_and_replacements.extend(get_bop_mrelu_pr(bop, bop_to_qboprelu[bop]))
-            pattern_and_replacements.extend(get_bop_frelu_pr(bop, bop_to_qboprelu[bop]))
+    for binary_op in binary_ops:
+        if binary_op in binary_op_to_qbinary_oprelu:
+            pattern_and_replacements.extend(get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, binary_op_to_qbinary_oprelu[binary_op]))
+            pattern_and_replacements.extend(get_binary_op_frelu_pttn_and_rplcmnt(binary_op, binary_op_to_qbinary_oprelu[binary_op]))
 
-        if bop in bop_to_qbop:
-            pattern_and_replacements.extend(get_bop_pr(bop, bop_to_qbop[bop]))
+        if binary_op in binary_op_to_qbinary_op:
+            pattern_and_replacements.extend(get_binary_op_pttn_and_rplcmnt(binary_op, binary_op_to_qbinary_op[binary_op]))
 
     return pattern_and_replacements
 
