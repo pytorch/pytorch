@@ -459,7 +459,7 @@ std::vector<Dimname> broadcast_to_outnames(
   return unify_from_right(reference_names, tensor_names);
 }
 
-std::vector<Dimname> compute_cat_outnames(TensorList tensors) {
+std::vector<Dimname> compute_cat_outnames(ITensorList tensors) {
   if (!at::has_names(tensors)) {
     return {};
   }

@@ -150,7 +150,8 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
         .memory_format(memory_format);
   }
 
-  set_output(sizes, options);
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+  set_output(0, sizes, {}, options, maybe_outnames);
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
     at::assert_no_internal_overlap(result);
@@ -371,7 +372,7 @@ static void check_cat_sparse_dims(Tensor const &t,
             ", but tensor at position ", pos, " has ", t.sparse_dim(), ", ", t.dense_dim(), ".");
 }
 
-static Tensor cat_sparse(TensorList tensors, int64_t dim) {
+static Tensor cat_sparse_impl(TensorList tensors, int64_t dim) {
   std::vector<Tensor> indices;
   std::vector<Tensor> values;
   int64_t wrapped = maybe_wrap_dim(dim, tensors[0].dim());
@@ -483,6 +484,13 @@ static Tensor cat_sparse(TensorList tensors, int64_t dim) {
         tensors[0].options().device_opt(),
         tensors[0].options().pinned_memory_opt());
   }
+}
+
+Tensor cat_sparse(TensorList tensors, int64_t dim) {
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+  auto result = cat_sparse_impl(tensors, at::legacy_cat_wrap_dim(dim, tensors));
+  namedinference::propagate_names_if_nonempty(result, maybe_outnames);
+  return result;
 }
 
 Tensor block_diag(TensorList tensors) {

@@ -10,7 +10,7 @@ namespace at {
 
 using NameVector = SmallVector<Dimname, kDimVectorStaticSize>;
 
-inline bool has_names(TensorList tensors) {
+inline bool has_names(ITensorList tensors) {
   return std::any_of(
       tensors.begin(), tensors.end(), [](const Tensor& t) { return t.has_names(); });
 }
@@ -98,7 +98,7 @@ TORCH_API void propagate_names_for_reduction(const Tensor& result, const Tensor&
 
 TORCH_API void propagate_names_for_expand(const Tensor& result, const Tensor& self);
 
-TORCH_API std::vector<Dimname> compute_cat_outnames(TensorList tensors);
+TORCH_API std::vector<Dimname> compute_cat_outnames(ITensorList tensors);
 
 TORCH_API std::vector<Dimname> compute_broadcast_outnames(
     const Tensor& self,
