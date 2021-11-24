@@ -6579,6 +6579,26 @@ def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     return list(generator())
 
 
+def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # list of tuples (shape, shape) defining the shapes of the input and output tensors
+    sample_shapes = [
+        ((), ()),
+        ((S), (1)),
+        ((S, S), (1, 1)),
+        ((S, S), (1, S)),
+        ((S, S, S), (S, S, 1)),
+    ]
+
+    samples = []
+
+    for input_shape, output_shape in sample_shapes:
+        input_t = make_arg(input_shape)
+        samples.append(SampleInput(input_t, args=(output_shape,)))
+
+    return samples
+
 def sample_inputs_resize_ops(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device)
     cases = (((S, S, S), (S * S, S)),
@@ -8343,6 +8363,12 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            autodiff_fusible_nodes=['aten::contiguous'],
            assert_jit_shape_analysis=True,
+           supports_out=False),
+    OpInfo('sum_to_size',
+           op=lambda x, *args, **kwargs: x.sum_to_size(*args, **kwargs),
+           dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           sample_inputs_func=sample_inputs_sum_to_size,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
