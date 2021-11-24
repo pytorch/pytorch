@@ -51,6 +51,7 @@ bool Function::append_operator(
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
+  code_->operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
   auto func = makeOperatorFunction(opname, num_specified_args, model_version);
   if (!func.has_value()) {
     return false;
