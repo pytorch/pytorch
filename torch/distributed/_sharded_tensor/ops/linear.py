@@ -11,7 +11,7 @@ from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
 )
 from torch.distributed.nn.functional import (
-    all_to_all,
+    all_to_all_single,
     reduce_scatter,
 )
 
@@ -208,31 +208,23 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    output_tensor_list = [
-        torch.empty(
-            input_split_sizes[rank],
-            input_t_size[1],
-            device=input.device,
-            dtype=local_shard_t.dtype,
-            requires_grad=local_shard_t.requires_grad,
-        )
-        for _ in range(world_size)
-    ]
+    gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
 
-    # Perform alltoall
-    all_to_all(
-        output_tensor_list,
-        list(torch.split(input_t, input_split_sizes)),
-        group=pg,
-    )
+    # Perform autograd enabled alltoall
+    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+
+    gathered_input = gathered_input.t()
 
     # Perform local matmuls for all shards
+    shard_size = local_shard_t.size()[0]
     results = []
-    for inp in output_tensor_list:
-        results.append(inp.t().contiguous().matmul(local_shard_t))
+    for r in range(world_size):
+        inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
+        results.append(inp.matmul(local_shard_t))
 
     # Gather all the results appropriately.
-    local_result = reduce_scatter(torch.empty_like(results[rank]), results, group=pg)
+    local_result = torch.empty_like(results[rank])
+    local_result = reduce_scatter(local_result, results, group=pg)
 
     # Return the appropriate local result.
     return local_result + bias

@@ -68,9 +68,6 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         )
         self.assertEqual(local_output, sharded_output)
 
-        # Generate expected for loss calculation.
-        expected_result = torch.randint(0, 2, (input_size[0],)).cuda(self.rank)
-
         # Compute loss and run backward pass.
         local_output.sum().backward()
         sharded_output.sum().backward()

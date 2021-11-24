@@ -135,7 +135,6 @@ def _result_distribute_with_col_rearrange(
         output_tensor_list[placement.rank()] = torch.empty(
             *dims,
             device=input.device,
-            dtype=combined_results.dtype,
         )
 
     # distribute the outputs using all2all.
