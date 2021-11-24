@@ -941,16 +941,28 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d(
 const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
     "nnc_aten_quantized_conv2d_relu",
     nnc_aten_quantized_conv2d_relu);
+const static RegisterNNCExternalFunction nnc_quantized_linear(
+    "nnc_aten_quantized_linear",
+    nnc_aten_quantized_linear);
 #ifndef _WIN32
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_aten_quantized_add",
     nnc_aten_quantized_add);
+const static RegisterNNCExternalFunction nnc_quantized_mul(
+    "nnc_aten_quantized_mul",
+    nnc_aten_quantized_mul);
+const static RegisterNNCExternalFunction nnc_quantized_mul_scalar(
+    "nnc_aten_quantized_mul_scalar",
+    nnc_aten_quantized_mul_scalar);
 const static RegisterNNCExternalFunction nnc_quantized_sigmoid(
     "nnc_aten_quantized_sigmoid",
     nnc_aten_quantized_sigmoid);
 const static RegisterNNCExternalFunction nnc_quantized_cat(
     "nnc_aten_quantized_cat",
     nnc_aten_quantized_cat);
+const static RegisterNNCExternalFunction nnc_quantized_relu(
+    "nnc_aten_quantized_relu",
+    nnc_aten_quantized_relu);
 #endif // _WIN32
 const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
     "nnc_aten_quantize_per_tensor",

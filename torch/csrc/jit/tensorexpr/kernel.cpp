@@ -8,6 +8,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 #include <torch/csrc/jit/tensorexpr/ir_printer.h>
@@ -1231,6 +1232,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
 void TensorExprKernel::compile() {
   graph_ = torch::jit::tensorexpr::removeGraphOutput(graph_, 1);
   graph_ = torch::jit::tensorexpr::replaceListOutputWithTuple(graph_);
+  torch::jit::LowerAllTuples(graph_);
   GRAPH_DUMP("TensorExprKernel graph:", graph_);
 
   device_ = *pickDeviceType(graph_);
