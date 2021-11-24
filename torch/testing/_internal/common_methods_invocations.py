@@ -9420,6 +9420,26 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     dtypes=[torch.cfloat, torch.cdouble]),
                    )),
+    BinaryUfuncInfo('ldexp',
+                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_inplace_autograd=False,
+                    sample_inputs_func=sample_inputs_binary_pwise,
+                    supports_out=True,
+                    skips=(
+                        # RuntimeError: mul(): functions with out=... arguments don't support automatic differentiation, but one of the arguments requires grad.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                    ),
+                    decorators=[
+                        DecorateInfo(
+                            toleranceOverride({
+                                torch.complex64: tol(atol=1e-05, rtol=1e-05)
+                            }),
+                            'TestCommon', device_type='cpu',
+                        ),
+                    ], ),
     OpInfo('logaddexp',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
