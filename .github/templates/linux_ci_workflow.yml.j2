@@ -243,7 +243,7 @@ jobs:
           PROXY_ENV=
           if [[ $TEST_CONFIG != 'xla' ]]; then
             # shellcheck disable=SC2089
-            PROXY_ENV=-e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}"
+            PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
