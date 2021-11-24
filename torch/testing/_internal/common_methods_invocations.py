@@ -10704,6 +10704,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    error_inputs_func=error_inputs_neg,
                    supports_forward_ad=True,
+                   supports_sparse=True,
                    assert_autodiffed=True,),
     OpInfo('dist',
            op=torch.dist,
