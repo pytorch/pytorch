@@ -331,9 +331,9 @@ SparseCsrTensor clone_sparse_csr(
       optional_memory_format.value());
   TensorOptions options = self.options();
   return at::native::_sparse_csr_tensor_unsafe(
-                                               self.crow_indices().clone(optional_memory_format),
-                                               self.col_indices().clone(optional_memory_format),
-                                               self.values().clone(optional_memory_format),
+                                               self.crow_indices().clone(),
+                                               self.col_indices().clone(),
+                                               self.values().clone(),
                                                self.sizes(),
                                                optTypeMetaToScalarType(options.dtype_opt()),
                                                options.layout_opt(),

@@ -981,9 +981,11 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.topk: lambda input, k, dim=-1, descending=False, out=None: -1,
         torch.trace: lambda input: -1,
         torch.transpose: lambda input, dim0, dim1: -1,
+        torch.transpose_copy: lambda input, dim0, dim1: -1,
         torch.trapz: lambda y, x=None, dim=-1: -1,
         torch.trapezoid: lambda y, x=None, dim=-1: -1,
         torch.triangular_solve: lambda input, A, upper=True, transpose=False, unitriangular=False: -1,
+        torch.linalg.solve_triangular: lambda input, B, upper, left=True, unitriangular=False: -1,
         torch.tril: lambda input, diagonal=0, out=None: -1,
         torch.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False,
 
