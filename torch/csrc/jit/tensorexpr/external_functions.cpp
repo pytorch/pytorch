@@ -469,7 +469,7 @@ void nnc_aten_mean(
   const at::Tensor& x = tensors[1];
   std::vector<int64_t> mean_dims(args_num - 1);
   bool keepdim = (bool)extra_args[args_num - 1];
-  if (args_num > 0) {
+  if (args_num > 1) {
     memcpy(mean_dims.data(), extra_args, sizeof(int64_t) * (args_num - 1));
   }
   try {
