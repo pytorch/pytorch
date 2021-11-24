@@ -9920,6 +9920,35 @@ Example::
 See also :func:`torch.t`.
 """.format(**common_args))
 
+add_docstr(torch.transpose_copy,
+           r"""
+transpose_copy(input, dim0, dim1) -> Tensor
+
+Returns a tensor that is a copy of transposed version of :attr:`input`.
+The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
+
+The resulting :attr:`out` tensor does not share its underlying storage with the
+:attr:`input` tensor.
+
+Args:
+    {input}
+    dim0 (int): the first dimension to be transposed
+    dim1 (int): the second dimension to be transposed
+
+Example::
+
+    >>> x = torch.randn(2, 3)
+    >>> x
+    tensor([[ 1.0028, -0.9893,  0.5809],
+            [-0.1669,  0.7299,  0.4942]])
+    >>> torch.transpose_copy(x, 0, 1)
+    tensor([[ 1.0028, -0.1669],
+            [-0.9893,  0.7299],
+            [ 0.5809,  0.4942]])
+
+See also :func:`torch.transpose`
+""".format(**common_args))
+
 add_docstr(torch.triangular_solve,
            r"""
 triangular_solve(b, A, upper=True, transpose=False, unitriangular=False, *, out=None) -> (Tensor, Tensor)

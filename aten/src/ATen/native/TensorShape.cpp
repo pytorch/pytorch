@@ -25,8 +25,24 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <iostream>
 
 namespace at {
+
+namespace meta {
+
+TORCH_META_FUNC(transpose_copy) (const Tensor& self, const int64_t dim0, const int64_t dim1) {
+  auto ndims = self.dim();
+  auto dim0_ = maybe_wrap_dim(dim0, ndims);
+  auto dim1_ = maybe_wrap_dim(dim1, ndims);
+  c10::TensorOptions options = self.options();
+  DimVector sizes(self.sizes().begin(), self.sizes().end());
+  std::swap(sizes[dim0_], sizes[dim1_]);
+  set_output(sizes, options);
+}
+
+}  // namespace meta
+
 namespace native {
 
 DEFINE_DISPATCH(cat_serial_stub);
@@ -2581,6 +2597,10 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
     slice.copy_(src);
     return output;
+}
+
+TORCH_IMPL_FUNC(transpose_copy_out) (const Tensor& self, const int64_t dim0, const int64_t dim1, const Tensor& out) {
+  out.copy_(self.transpose(dim0, dim1));
 }
 
 } // namespace native

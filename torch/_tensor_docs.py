@@ -4168,6 +4168,13 @@ transpose_(dim0, dim1) -> Tensor
 In-place version of :meth:`~Tensor.transpose`
 """)
 
+add_docstr_all('transpose_copy',
+               r"""
+transpose_copy(dim0, dim1) -> Tensor
+
+See :func:`torch.transpose_copy`
+""")
+
 add_docstr_all('triangular_solve',
                r"""
 triangular_solve(A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
