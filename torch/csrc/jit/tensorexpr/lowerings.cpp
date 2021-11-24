@@ -475,6 +475,10 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
+        auto A = c10::get<BufHandle>(inputs[0]);
+        if (A.node()->qscale()) {
+          return computeQuantizedRelu(inputs, outputShape, outputType, device);
+        }
         return computeOneOperand(
             "aten_relu",
             inputs,

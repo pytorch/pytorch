@@ -170,6 +170,13 @@ at::Tensor quantized_cat(
                           c10::optional<int64_t>)>();
   return op.call(qxs, dim, scale, zero);
 }
+
+at::Tensor quantized_relu(const at::Tensor& qx) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::relu", "")
+                      .typed<at::Tensor(at::Tensor)>();
+  return op.call(qx);
+}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
@@ -491,6 +498,34 @@ void nnc_aten_quantized_mul_scalar(
       toQIntType(a_qdtype));
   const double scalar = ((double*)extra_args)[3];
   auto r = quantized_mul_scalar(qa, scalar);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_relu(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  TORCH_INTERNAL_ASSERT(tensors.size() == 2);
+
+  const double a_qscale = ((double*)extra_args)[0];
+  const int64_t a_qzero = extra_args[1];
+  const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto qa = from_blob_quantized(
+      buf_data[1],
+      // NOLINTNEXTLINE
+      tensors[1].sizes(),
+      tensors[1].strides(),
+      a_qscale,
+      a_qzero,
+      toQIntType(a_qdtype));
+  auto r = at::relu(qa);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 

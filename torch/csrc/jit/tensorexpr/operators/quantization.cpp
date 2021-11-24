@@ -494,6 +494,36 @@ Tensor computeQuantizedMulScalar(
   return Tensor(ResultBuf.node(), s);
 }
 
+Tensor computeQuantizedRelu(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    // NOLINTNEXTLINE
+    const c10::optional<ScalarType>& outputType,
+    // NOLINTNEXTLINE
+    at::Device device) {
+  const BufHandle& qa = c10::get<BufHandle>(inputs[0]);
+  const auto out_qdtype = immQDType(qa);
+  const bool isQAChannelsLast = isChannelsLast(qa);
+  auto ResultBuf = isQAChannelsLast ? makeQBufHandleNHWC(
+                                          "quantized_relu",
+                                          outputShape,
+                                          Dtype(out_qdtype),
+                                          immQScale(qa),
+                                          immQZero(qa))
+                                    : makeQBufHandleNCHW(
+                                          "quantized_relu",
+                                          outputShape,
+                                          Dtype(out_qdtype),
+                                          immQScale(qa),
+                                          immQZero(qa));
+  StmtPtr s = ExternalCall::make(
+      ResultBuf,
+      "nnc_aten_quantized_relu",
+      {qa},
+      {immQScale(qa), immQZero(qa), (int64_t)immQDType(qa)});
+  return Tensor(ResultBuf.node(), s);
+}
+
 Tensor computeQuantizedCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
