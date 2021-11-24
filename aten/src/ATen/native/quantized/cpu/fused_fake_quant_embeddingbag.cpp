@@ -144,6 +144,9 @@ bool FusedFakeQuantEmbeddingLookup(
   const int64_t quant_max = 255;
 
   int64_t current = 0;
+
+  /* Inefficient hack, create tensor as temp weight buffer for FakeQuant calc*/
+  at::Tensor w_row = at::empty({1, block_size},at::kFloat);
   for (const auto m : c10::irange(output_size)) {
     memset(out, 0, sizeof(data_t) * block_size);
     if (current + lengths[m] > index_size) {
@@ -169,8 +172,7 @@ bool FusedFakeQuantEmbeddingLookup(
         w = w * scale_bias[2 * indices[current]];
       }
 
-      /* Inefficient hack, create tensor for row */
-      at::Tensor w_row = at::empty({1, block_size},at::kFloat);
+      /* Inefficient hack, copy tensor for row */
       std::memcpy(w_row.data_ptr(), input + (block_size * indices[current]), block_size * sizeof(data_t));
 
       at::Tensor w_min, w_max;
