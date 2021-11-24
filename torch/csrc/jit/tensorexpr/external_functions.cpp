@@ -230,7 +230,9 @@ void nnc_aten_quantized_conv1d(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto qx = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
+      // NOLINTNEXTLINE
       tensors[1].strides(),
       x_qscale,
       x_qzero,
@@ -320,7 +322,9 @@ void nnc_aten_quantized_linear(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto qx = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
+      // NOLINTNEXTLINE
       tensors[1].strides(),
       x_qscale,
       x_qzero,
@@ -350,7 +354,9 @@ void nnc_aten_quantized_linear_relu(
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto qx = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
+      // NOLINTNEXTLINE
       tensors[1].strides(),
       x_qscale,
       x_qzero,
@@ -365,7 +371,6 @@ void nnc_aten_quantized_linear_relu(
 }
 
 #ifndef _WIN32
-
 void nnc_aten_quantized_add(
     int64_t bufs_num,
     void** buf_data,
@@ -423,6 +428,7 @@ void nnc_aten_quantized_mul(
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto qa = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
       tensors[1].strides(),
       a_qscale,
@@ -462,6 +468,7 @@ void nnc_aten_quantized_mul_scalar(
   const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
   auto qa = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
       tensors[1].strides(),
       a_qscale,
@@ -490,6 +497,7 @@ void nnc_aten_quantized_sigmoid(
   const int64_t out_qzero = extra_args[4];
   auto qx = from_blob_quantized(
       buf_data[1],
+      // NOLINTNEXTLINE
       tensors[1].sizes(),
       tensors[1].strides(),
       x_qscale,
