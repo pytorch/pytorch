@@ -9401,6 +9401,8 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                        # FIXME: ldexp does not accept scalar inputs
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     ),
                     decorators=[
                         DecorateInfo(
