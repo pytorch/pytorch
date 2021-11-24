@@ -672,12 +672,46 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     return {};
   }
 
+  template <typename T>
+  void check_bounds(T v) {
+    const std::vector<ExprPtr>& dims = v->buf()->dims();
+    const std::vector<ExprPtr>& indices = v->indices();
+    if (indices.size() == 1 && dims.size() != 1) {
+      // indices are already flattened
+      return;
+    }
+
+    if (dims.size() != indices.size()) {
+      throw malformed_input(
+        "dimensions and indices mismatch in check_bounds", v
+      );
+    }
+    for (const auto& i : c10::irange(dims.size())) {
+      auto opt_dim = intValue(dims[i]);
+      if (!opt_dim) {
+        continue;
+      }
+      auto dim_bound = *opt_dim;
+      indices[i]->accept(this);
+      const auto& ithDimIndices = indexVec(value());
+      for (auto& j : ithDimIndices) {
+        if (j < 0 || j >= dim_bound) {
+          std::stringstream ss;
+          ss << "Index out of bounds in check_bounds. Index: " << j << "; bounds: [0, " << dim_bound << ").";
+          throw malformed_input(ss.str(), v);
+        }
+      }
+    }
+  }
+
   TORCH_API void visit(LoadPtr v) override {
     auto iter = buffer_mapping_.find(v->buf());
     if (iter == buffer_mapping_.end()) {
       throw malformed_input("could not find base node in Load", v);
     }
     void* ptr = iter->second;
+
+    check_bounds(v);
 
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
@@ -721,6 +755,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
 
     void* ptr = iter->second;
+
+    check_bounds(v);
 
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
