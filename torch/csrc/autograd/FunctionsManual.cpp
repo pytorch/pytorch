@@ -4777,21 +4777,16 @@ std::tuple<Tensor, Tensor> linalg_lu_jvp(
   auto L1 = L.narrow(-2, 0, k).narrow(-1, 0, k);
   auto U1 = U.narrow(-2, 0, k).narrow(-1, 0, k);
 
-  // We form using two triangular_solve the matrix
+  // We form using two triangular_solve the matrix, the second one in place
   // dK = L1^{-1} PdA1 U2^{-1}
-  auto dK = std::get<0>(at::triangular_solve(
-    PdA1,
-    L1,
-    /*upper=*/false,
-    /*transpose=*/false,
-    /*unitriangular=*/true
-  ));
-  dK = std::get<0>(at::triangular_solve(
-    dK.mT(),
-    U1.mT(),
-    /*upper=*/false,
-    /*transpose=*/false
-  )).mT();
+  auto dK = at::linalg_solve_triangular(L1, PdA1, /*upper=*/false, /*left=*/true, /*unitriangular*/true);
+
+  // TODO We should be able to do this in-place. At the moment it raises:
+  //  RuntimeError: linalg_solve_triangular(): functions with out=...
+  //  arguments don't support automatic differentiation, but one of the arguments requires grad.
+
+  //  at::linalg_solve_triangular_out(dK, U1, dK, /*upper=*/true, /*left=*/false);
+  dK = at::linalg_solve_triangular(U1, dK, /*upper=*/true, /*left=*/false);
 
   auto dL1 = L1.matmul(dK.tril(-1));
   auto dU1 = dK.triu().matmul(U1);
@@ -4803,25 +4798,14 @@ std::tuple<Tensor, Tensor> linalg_lu_jvp(
     // dU2 := L1^{-1} PdA2 - dK.tril(-1) U2)
     const auto PdA2 = PdA.narrow(-1, k, n - k);
     const auto U2 = U.narrow(-1, k, n - k);
-    auto dU2 = std::get<0>(at::triangular_solve(
-      PdA2,
-      L1,
-      /*upper=*/false,
-      /*transpose=*/false,
-      /*unitriangular=*/true
-    )) - dK.tril(-1).matmul(U2);
+    auto dU2 = at::linalg_solve_triangular(L1, PdA2, /*upper=*/false, /*left=*/true, /*unitriangular*/true) - dK.tril(-1).matmul(U2);
     return std::make_tuple(std::move(dL1), at::cat({dU1, dU2}, /*dim=*/-1));
   } else {
     // we only need to update dL2 defined as
     // dL2 := PdA2 U^{-1} - L2 dK.triu()
     const auto PdA2 = PdA.narrow(-2, k, m - k);
     const auto L2 = L.narrow(-2, k, m - k);
-    auto dL2 = std::get<0>(at::triangular_solve(
-      PdA2.mT(),
-      U1.mT(),
-      /*upper=*/false,
-      /*transpose=*/false
-    )).mT() - L2.matmul(dK.triu());
+    auto dL2 = at::linalg_solve_triangular(U1, PdA2, /*upper=*/true, /*left=*/false) - L2.matmul(dK.triu());
     return std::make_tuple(at::cat({dL1, dL2}, /*dim=*/-2), std::move(dU1));
   }
 }
