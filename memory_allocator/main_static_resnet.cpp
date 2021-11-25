@@ -179,6 +179,7 @@ int main(int argc, const char* argv[]) {
   auto num_loops = str2int(argv[3]);
   auto batch_size = str2int(argv[4]);
   auto hw = str2int(argv[5]);
+  auto thresh = str2int(argv[6]);
 
   std::vector<std::thread> threads;
   threads.reserve(num_workers);
@@ -191,7 +192,6 @@ int main(int argc, const char* argv[]) {
       threads[thread_id].join();
     }
   }
-  auto thresh = str2int(std::getenv("OVERSIZED_THRESHOLD"));
   std::string normal;
   if (thresh < 0) {
     normal = "normal";

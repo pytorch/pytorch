@@ -78,19 +78,21 @@ for NAME in $names ; do
   for BATCH_SIZE in 1 ; do
     for HW in 64 ; do
       NUM_LOOPS=1
-      for i in 0 1 2 3 4 5 6 ; do
+      # for i in 0 1 2 3 4 5 6 ; do
+      for i in 0 6 ; do
         NUM_WORKERS=$((2**i))
         echo $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW
 
-#        OVERSIZED_THRESHOLD=-1 ../cmake-build-debug/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW
-        OVERSIZED_THRESHOLD=-1 perf record -g ../build/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW
+        JEMALLOC_CONF="" perf record -g ../build/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW -1
         mv perf.data "/home/mlevental/dev_projects/pytorch_memory_planning/perf_records/${NAME}/normal_${NUM_WORKERS}_${NUM_LOOPS}_${BATCH_SIZE}_${HW}.perf.data"
 
-#        OVERSIZED_THRESHOLD=0 JEMALLOC_CONF="narenas:1,tcache:false" ../cmake-build-debug/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW
-        OVERSIZED_THRESHOLD=0 JEMALLOC_CONF="narenas:1,tcache:false" perf record -g ../build/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW
+        JEMALLOC_CONF="narenas:1,tcache:false" perf record -g ../build/bin/pytorch_memory_allocator $NAME $NUM_WORKERS $NUM_LOOPS $BATCH_SIZE $HW 1
         mv perf.data "/home/mlevental/dev_projects/pytorch_memory_planning/perf_records/${NAME}/one_arena_${NUM_WORKERS}_${NUM_LOOPS}_${BATCH_SIZE}_${HW}.perf.data"
       done
+      break
     done
+    break
   done
+  break
 done
 
