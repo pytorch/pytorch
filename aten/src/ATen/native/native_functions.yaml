@@ -10143,7 +10143,7 @@
   variants: function, method
   structured_delegate: isposinf.out
   dispatch:
-      SparseCPU, SparseCUDA: isposinf_sparse
+    SparseCPU, SparseCUDA: isposinf_sparse
 
 - func: isposinf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -10156,7 +10156,7 @@
   variants: function, method
   structured_delegate: isneginf.out
   dispatch:
-      SparseCPU, SparseCUDA: isneginf_sparse
+    SparseCPU, SparseCUDA: isneginf_sparse
 
 - func: isneginf.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
