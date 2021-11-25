@@ -23,6 +23,7 @@ The following constraints are implemented:
 - ``constraints.real``
 - ``constraints.simplex``
 - ``constraints.square``
+- ``constraints.symmetric``
 - ``constraints.stack``
 - ``constraints.symmetric``
 - ``constraints.unit_interval``
