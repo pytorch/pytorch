@@ -1009,10 +1009,10 @@ Miscellanea
 
 -  Gotcha around ``training`` flag and submodules
 
-   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value
-    
+   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value.
+
     ::
-   
+
         import torch
         import torch.fx
 
@@ -1042,9 +1042,9 @@ Miscellanea
         """
 
    - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
-   
+
     ::
-  
+
         class DropoutRepro2(torch.nn.Module):
           def __init__(self):
             super().__init__()
