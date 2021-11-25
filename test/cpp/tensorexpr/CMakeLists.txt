@@ -68,6 +68,24 @@ if(USE_CUDA)
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
   target_compile_definitions(tutorial_tensorexpr PRIVATE USE_CUDA)
+
+  # Make sure the CUDA stubs folder doesn't end up in the RPATH of tutorial_tensorexpr:
+  set(CUDA_LINK_LIBS ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
+  foreach(LIB IN LISTS CUDA_LINK_LIBS)
+    message("LIB: ${LIB}")
+    if(LIB MATCHES "stubs")
+      message("Filtering ${LIB} from being set in test_tensorexpr and tutorial_tensorexpr RPATH, because it appears to point to the CUDA stubs directory, which should not be RPATHed.")
+    else()
+      cmake_path(GET LIB PARENT_PATH LIB_PATH)
+      message("LIBPATH: ${LIB_PATH}")
+      list(APPEND TENSOREXPR_RPATH ${LIB_PATH})
+    endif()
+  endforeach()
+  message("TENSOREXPR_RPATH: ${TENSOREXPR_RPATH}")
+  set_target_properties(test_tensorexpr PROPERTIES INSTALL_RPATH_USE_LINK_PATH FALSE)
+  set_target_properties(test_tensorexpr PROPERTIES INSTALL_RPATH "${TENSOREXPR_RPATH}")
+  set_target_properties(tutorial_tensorexpr PROPERTIES INSTALL_RPATH_USE_LINK_PATH FALSE)
+  set_target_properties(tutorial_tensorexpr PROPERTIES INSTALL_RPATH "${TENSOREXPR_RPATH}")
 elseif(USE_ROCM)
   target_link_libraries(test_tensorexpr PRIVATE
     ${ROCM_HIPRTC_LIB}

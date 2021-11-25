@@ -39,6 +39,22 @@ if(USE_CUDA)
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
 
+  # Make sure the CUDA stubs folder doesn't end up in the RPATH of test_cpp_rpc:
+  set(CPP_RPC_LIBS ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
+  foreach(LIB IN LISTS CPP_RPC_LIBS)
+    message("LIB: ${LIB}")
+    if(LIB MATCHES "stubs")
+      message("Filtering ${LIB} from being set in caffe2_nvrtc's RPATH, because it appears to point to the CUDA stubs directory, which should not be RPATHed.")
+    else()
+      cmake_path(GET LIB PARENT_PATH LIB_PATH)
+      message("LIBPATH: ${LIB_PATH}")
+      list(APPEND CPP_RPC_RPATH ${LIB_PATH})
+    endif()
+  endforeach()
+  message("CPP_RPC_RPATH: ${CPP_RPC_RPATH}")
+  set_target_properties(test_cpp_rpc PROPERTIES INSTALL_RPATH_USE_LINK_PATH FALSE)
+  set_target_properties(test_cpp_rpc PROPERTIES INSTALL_RPATH "${CPP_RPC_RPATH}")
+
   target_compile_definitions(test_cpp_rpc PRIVATE "USE_CUDA")
 endif()
 

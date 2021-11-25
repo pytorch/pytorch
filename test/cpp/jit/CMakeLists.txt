@@ -111,6 +111,7 @@ if(MSVC)
   list(APPEND JIT_TEST_DEPENDENCIES onnx_library)
 endif(MSVC)
 
+
 target_link_libraries(test_jit PRIVATE ${JIT_TEST_DEPENDENCIES})
 target_include_directories(test_jit PRIVATE ${ATen_CPU_INCLUDE})
 if(NOT MSVC)
@@ -128,6 +129,22 @@ if(USE_CUDA)
     ${CUDA_NVRTC_LIB}
     ${CUDA_CUDA_LIB}
     ${TORCH_CUDA_LIBRARIES})
+
+  # Make sure the CUDA stubs folder doesn't end up in the RPATH of test_jit:
+  set(TEST_JIT_LIBS ${CUDA_LIBRARIES} ${CUDA_NVRTC_LIB} ${CUDA_CUDA_LIB} ${TORCH_CUDA_LIBRARIES})
+  foreach(LIB IN LISTS TEST_JIT_LIBS)
+    message("LIB: ${LIB}")
+    if(LIB MATCHES "stubs")
+      message("Filtering ${LIB} from being set in test_jit's RPATH, because it appears to point to the CUDA stubs directory, which should not be RPATHed.")
+    else()
+      cmake_path(GET LIB PARENT_PATH LIB_PATH)
+      message("LIBPATH: ${LIB_PATH}")
+      list(APPEND TEST_JIT_RPATH ${LIB_PATH})
+    endif()
+  endforeach()
+  message("TEST_JIT_RPATH: ${TEST_JIT_RPATH}")
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH_USE_LINK_PATH FALSE)
+  set_target_properties(test_jit PROPERTIES INSTALL_RPATH "${TEST_JIT_RPATH}")
 
   target_compile_definitions(test_jit PRIVATE USE_CUDA)
 elseif(USE_ROCM)
