@@ -1411,6 +1411,23 @@ def sample_inputs_linalg_norm(op_info, device, dtype, requires_grad):
                             dim=(0, 1))))
         return inputs
 
+def sample_inputs_as_strided(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # input shape, output shape, output stride, output storage offset
+    test_cases = [
+        ((1,), (1,), (1,), 0),
+    ]
+
+    samples = []
+
+    for input_shape, output_shape, stride, storage_offset in test_cases:
+        input_t = make_arg(input_shape)
+        kwargs = dict(storage_offset=storage_offset)
+        samples.append(SampleInput(input_t, args=(output_shape, stride), kwargs=kwargs))
+
+    return samples
+
 def sample_inputs_combinations(op_info, device, dtype, requires_grad, **kwargs):
     inputs = (
         (0,),
@@ -9922,6 +9939,19 @@ op_db: List[OpInfo] = [
            skips=(
                # FIXME: aminmax does not check for safe casting to output
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+           )),
+    OpInfo('as_strided',
+           op=lambda x, size, stride, storage_offset=0:
+               torch.as_strided(x, size, stride, storage_offset=storage_offset),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           supports_out=False,
+           sample_inputs_func=sample_inputs_as_strided,
+           skips=(
+               # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
+               # With rtol=1e-07 and atol=1e-07, found 1 element(s) (out of 1) whose difference(s)
+               # exceeded the margin of error (including 0 nan comparisons). The greatest difference
+               # was 1.0 (1.0 vs. -0.0), which occurred at index 0.
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
