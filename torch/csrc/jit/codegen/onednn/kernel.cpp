@@ -107,11 +107,17 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   return inputSpecs;
 }
 
-ArgSpecs LlgaKernel::initializeOutputSpecs() const {
+ArgSpecs LlgaKernel::initializeOutputSpecs(
+    const partition& partition,
+    const ArgSpecs& inputSpecs) const {
+  auto inputs = fmap(inputSpecs, toLogicalTensor);
+  auto outputs = fmap(graph_->outputs(), toLogicalTensor);
+  partition.infer_shape(inputs, outputs);
+
   ArgSpecs outputSpecs;
   outputSpecs.reserve(nOutputs_);
   for (size_t i = 0; i < nOutputs_; i++) {
-    auto spec = ArgSpec(graph_->outputs()[i]);
+    auto spec = ArgSpec(outputs[i]).dtype(inputSpecs[0].dtype());
     if (useOpaqueLayout(i))
       spec = spec.any();
     outputSpecs.emplace_back(spec);
@@ -212,7 +218,7 @@ void LlgaKernel::run(Stack& stack) {
       GRAPH_DEBUG("Initializing input logical tensors");
       inputSpecs_ = initializeInputSpecs(inputs);
       GRAPH_DEBUG("Initializing output logical tensors");
-      outputSpecs_ = initializeOutputSpecs();
+      outputSpecs_ = initializeOutputSpecs(partition_, inputSpecs_);
       GRAPH_DEBUG("Compiling partition");
       compilation_ = compile(partition_);
       is_initialized_ = true;

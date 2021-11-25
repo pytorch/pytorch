@@ -41,7 +41,9 @@ class LlgaKernel {
 
   ArgSpecs initializeInputSpecs(const TensorArgs& inputs);
 
-  ArgSpecs initializeOutputSpecs() const;
+  ArgSpecs initializeOutputSpecs(
+      const dnnl::graph::partition& partition,
+      const ArgSpecs& inputSpecs) const;
 
   dnnl::graph::compiled_partition compile(
       const dnnl::graph::partition& partition);
