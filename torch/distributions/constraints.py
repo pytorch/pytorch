@@ -22,7 +22,9 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.square``
 - ``constraints.stack``
+- ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
 
@@ -53,7 +55,9 @@ __all__ = [
     'real',
     'real_vector',
     'simplex',
+    'square',
     'stack',
+    'symmetric',
     'unit_interval',
 ]
 
@@ -456,13 +460,35 @@ class _CorrCholesky(Constraint):
         return _LowerCholesky().check(value) & unit_row_norm
 
 
-class _PositiveDefinite(Constraint):
+class _Square(Constraint):
+    """
+    Constrain to square matrices.
+    """
+    event_dim = 2
+    
+    def check(self, value):
+        return torch.zeros(value.shape[:-2], dtype=torch.bool).fill_(value.shape[-2] == value.shape[-1])
+
+
+class _Symmetric(_Square):
+    """
+    Constrain to Symmetric square matrices.
+    """
+
+    def check(self, value):
+        assert super().check(value).all(), \
+            "Cannot check symmetricity if the input is not a square matrix."
+        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
+
+
+class _PositiveDefinite(_Symmetric):
     """
     Constrain to positive-definite matrices.
     """
-    event_dim = 2
 
     def check(self, value):
+        assert super().check(value).all(), \
+            "Cannot check positive definiteness if the input is not a symmetric matrix."
         # info == 0 means no error, that is, it's SPD
         return (value.eq(value.mT).all(-2).all(-1) and torch.linalg.cholesky_ex(value).info.eq(0)).unsqueeze(0)
 
@@ -556,6 +582,8 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
+square = _Square()
+symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
