@@ -8720,6 +8720,21 @@ class TestTorch(AbstractTestCases._TestTorchMixin):
         self.assertEqual(y1, y1_expect.tolist())
         self.assertEqual(y2, y1_expect.imag.tolist())
 
+class TestRPATH(TestCase):
+    @unittest.skipIf(not sys.platform.startswith('linux'), "linux-only test")
+    def test_rpath(self):
+        """
+        Make sure RPATH (or RUNPATH) in nvrtc does not contain a cuda stubs directory
+        issue gh-35418
+        """
+        libdir = os.path.join(os.path.dirname(torch._C.__file__), 'lib')
+        caffe2_nvrtc = os.path.join(libdir, 'libcaffe2_nvrtc.so')
+        if os.path.exists(caffe2_nvrtc):
+            output = subprocess.check_output(['objdump', '-x', caffe2_nvrtc])
+            for line in output.split(b'\n'):
+                if b'RPATH' in line or b'RUNPATH' in line:
+                    self.assertFalse(b'stubs' in line)
+
 # TODO: these empy classes are temporarily instantiated for XLA compatibility
 #   once XLA updates their test suite it should be removed
 class TestViewOps(TestCase):
