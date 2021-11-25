@@ -101,8 +101,8 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   GRAPH_DEBUG(
       "Concatenating constant input logical tensors to graph input "
       "logical tensors");
-  for (size_t i = 0; i < constantValues_.size(); i++) {
-    inputSpecs.emplace_back(ArgSpec(constantValues_[i]));
+  for (Value* constant_value : constantValues_) {
+    inputSpecs.emplace_back(ArgSpec(constant_value));
   }
   return inputSpecs;
 }
