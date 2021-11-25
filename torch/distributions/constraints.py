@@ -467,7 +467,7 @@ class _Square(Constraint):
     event_dim = 2
 
     def check(self, value):
-        return torch.zeros(value.shape[:-2], dtype=torch.bool).fill_(value.shape[-2] == value.shape[-1])
+        return torch.full(value.shape[:-2], value.shape[-2] == value.shape[-1], dtype=torch.bool)
 
 
 class _Symmetric(_Square):
