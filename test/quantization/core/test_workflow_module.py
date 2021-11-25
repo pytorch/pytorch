@@ -12,7 +12,7 @@ from torch.ao.quantization import (
     PlaceholderObserver,
     NoopObserver,
     FakeQuantize,
-    FixedQParamsFakeQuantize,
+    FixedQParamsObserver,
     default_debug_qconfig,
     default_observer,
     default_histogram_observer,
@@ -369,9 +369,9 @@ class TestObserver(QuantizationTestCase):
         obs_list = [MinMaxObserver, MovingAverageMinMaxObserver,
                     PerChannelMinMaxObserver,
                     MovingAveragePerChannelMinMaxObserver, HistogramObserver,
-                    FakeQuantize, FixedQParamsFakeQuantize]
+                    FakeQuantize, FixedQParamsObserver]
         for obs_cls in obs_list:
-            if obs_cls is FixedQParamsFakeQuantize:
+            if obs_cls is FixedQParamsObserver:
                 obs = obs_cls(0.1, 0)
             else:
                 obs = obs_cls()
