@@ -440,7 +440,10 @@ Note that operator implementations currently only
 support per channel quantization for weights of the **conv** and **linear**
 operators. Furthermore the minimum and the maximum of the input data is
 mapped linearly to the minimum and the maximum of the quantized data
-type such that zero is represented with no quantization error.
+type such that zero is represented with no quantization error. This is slightly altered
+for symmetric qschemes, which instead use the negative and positive of the `maximum absolute 
+value of the input data` in place of the minimum and maximum. For more info see how
+scale and zero point are calculated by `torch.quantization.MinMaxObserver`
 
 Additional data types and quantization schemes can be implemented through
 the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
