@@ -478,7 +478,7 @@ class _Symmetric(_Square):
     def check(self, value):
         assert super().check(value).all(), \
             "Cannot check symmetricity if the input is not a square matrix."
-        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
+        return (value.mT == value).all(dim=-1).all(dim=-1)
 
 
 class _PositiveDefinite(_Symmetric):
