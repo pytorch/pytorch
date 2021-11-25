@@ -22,9 +22,8 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
-- ``constraints.square``
-- ``constraints.symmetric``
 - ``constraints.stack``
+- ``constraints.square``
 - ``constraints.symmetric``
 - ``constraints.unit_interval``
 """
