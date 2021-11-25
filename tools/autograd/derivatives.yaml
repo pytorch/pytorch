@@ -1854,6 +1854,10 @@
   self: pixel_unshuffle(grad, upscale_factor)
   result: auto_linear
 
+- name: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  self: pixel_shuffle(grad, downscale_factor)
+  result: auto_linear
+
 - name: _adaptive_avg_pool2d(Tensor self, int[2] output_size) -> Tensor
   self: _adaptive_avg_pool2d_backward(grad, self)
 

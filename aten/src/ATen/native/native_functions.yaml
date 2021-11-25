@@ -3367,6 +3367,8 @@
     QuantizedCPU: quantized_pixel_shuffle_cpu
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
+  dispatch:
+    CPU, CUDA: pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
