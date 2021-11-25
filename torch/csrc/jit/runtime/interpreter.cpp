@@ -108,6 +108,7 @@ struct TLSCurrentInterpreterGuard {
   InterpreterStateImpl* prev_state_;
 };
 
+
 // InterpreterState state that and used to compute a Code
 struct InterpreterStateImpl : c10::intrusive_ptr_target {
   InterpreterStateImpl(const Code& code, TaskLauncher taskLauncher)
@@ -115,7 +116,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     enterFrame(code, 0);
   }
 
- private:
   using Frame = torch::jit::interpreter::Frame;
   struct WarnedNodes {
    public:
@@ -166,6 +166,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     registers.resize(registers.size() + code.pImpl->register_size_);
   }
 
+ private:
   void leaveFrame() {
     registers.resize(registers.size() - frames.back().function->register_size_);
     frames.pop_back();
@@ -1021,12 +1022,18 @@ size_t Code::register_size() const {
 InterpreterState::InterpreterState(const Code& code, TaskLauncher taskLauncher)
     : pImpl(c10::make_intrusive<InterpreterStateImpl>(
           code,
-          std::move(taskLauncher))) {}
+          std::move(taskLauncher))) {
+}
 InterpreterState::~InterpreterState() = default;
 
 void InterpreterState::run(Stack& stack) {
   static_cast<InterpreterStateImpl*>(pImpl.get())->run(stack);
 }
+
+void InterpreterState::reset_frame(const Code& code) {
+  static_cast<InterpreterStateImpl*>(pImpl.get())->enterFrame(code, 0);
+}
+
 
 c10::intrusive_ptr<Future> InterpreterState::runAsync(Stack& stack) {
   return static_cast<InterpreterStateImpl*>(pImpl.get())->runAsync(stack);

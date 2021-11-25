@@ -36,6 +36,7 @@ file(GLOB C10_SRCS
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
+        core/HugePagesAllocator.cpp
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
 file(GLOB_RECURSE C10_HEADERS *.h)
@@ -117,3 +118,13 @@ install(FILES ${CMAKE_BINARY_DIR}/c10/macros/cmake_macros.h
 if(MSVC AND C10_BUILD_SHARED_LIBS)
   install(FILES $<TARGET_PDB_FILE:c10> DESTINATION lib OPTIONAL)
 endif()
+
+# find jemalloc
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(JEMALLOC REQUIRED jemalloc)
+pkg_search_module(JEMALLOC REQUIRED jemalloc)
+include_directories(${JEMALLOC_INCLUDE_DIRS})
+
+# make all connections for jemallc
+target_link_directories(c10 PRIVATE ${JEMALLOC_LIBRARY_DIRS})
+target_link_libraries(c10 PRIVATE ${JEMALLOC_LIBRARIES})

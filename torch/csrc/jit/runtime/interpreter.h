@@ -96,6 +96,8 @@ struct InterpreterState {
   c10::intrusive_ptr<Future> getFuture();
   TORCH_API ~InterpreterState();
 
+  TORCH_API void reset_frame(const Code& code);
+
  private:
   InterpreterState(c10::intrusive_ptr<c10::intrusive_ptr_target> pImpl);
   // Ideally we should use c10::intrusive_ptr<InterpreterStateImpl> for pImpl;

@@ -90,10 +90,10 @@ if(INTERN_BUILD_ATEN_OPS)
     # instructions when using the default tuning. This is a bad choice on
     # new Intel and AMD processors so we disable it when compiling with AVX2.
     # See https://stackoverflow.com/questions/52626726/why-doesnt-gcc-resolve-mm256-loadu-pd-as-single-vmovupd#tab-top
-    check_cxx_compiler_flag("-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store" COMPILER_SUPPORTS_NO_AVX256_SPLIT)
-    if(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
-      set(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
-    endif(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+#    check_cxx_compiler_flag("-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store" COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+#    if(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
+#      set(CPU_NO_AVX256_SPLIT_FLAGS "-mno-avx256-split-unaligned-load -mno-avx256-split-unaligned-store")
+#    endif(COMPILER_SUPPORTS_NO_AVX256_SPLIT)
 
     list(APPEND CPU_CAPABILITY_NAMES "AVX2")
     if(DEFINED ENV{ATEN_AVX512_256})

@@ -106,6 +106,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/irange.h>
 #include <c10/util/signal_handler.h>
+#include <c10/core/HugePagesAllocator.h>
 #include <caffe2/serialize/inline_container.h>
 
 #include <ATen/core/function_schema.h>
@@ -378,6 +379,7 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
+      .def("_jit_pass_installOversizeAllocator", &c10::installOversizeAllocator)
       .def("_jit_pass_optimize_for_inference", &optimize_for_inference)
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
