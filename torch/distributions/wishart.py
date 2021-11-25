@@ -46,7 +46,7 @@ class Wishart(Distribution):
         'covariance_matrix': constraints.positive_definite,
         'precision_matrix': constraints.positive_definite,
         'scale_tril': constraints.positive_definite,
-        'df': constraints.Constraint,
+        'df': constraints.greater_than(0),
     }
     support = constraints.positive_definite
     has_rsample = True
