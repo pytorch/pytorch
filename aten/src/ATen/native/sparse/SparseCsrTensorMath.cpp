@@ -95,7 +95,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... arg
 }
 
 template <typename input_t, typename output_t>
-void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices, const bool transpose=false) {
+void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
   int64_t nrows = crow_indices.numel() - 1;
   if (nrows == 0) {
     indices.zero_();
@@ -104,10 +104,9 @@ void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& cr
   auto crow_indices_ = crow_indices.expect_contiguous();
   const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
   TORCH_INTERNAL_ASSERT(indices.is_contiguous());
-  auto row0 = indices.select(0, transpose?1:0);
-  auto row1 = indices.select(0, transpose?0:1);
-  output_t* data_out = row0.data_ptr<output_t>();
-  row1.copy_(*col_indices.expect_contiguous());
+  output_t* data_out = indices.data_ptr<output_t>();
+
+  indices.select(0, 1).copy_(*col_indices.expect_contiguous());
   at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
     for (int64_t i = start; i < end; i++) {
       std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
@@ -522,59 +521,6 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
       convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices);
     });
   }
-}
-
-Tensor transpose_copy_sparse_csr_cpu(const Tensor& self, const int64_t dim0, const int64_t dim1) {
-  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
-  auto dim0_ = maybe_wrap_dim(dim0, 2);
-  auto dim1_ = maybe_wrap_dim(dim1, 2);
-
-  if (dim0_ == dim1_) {
-    return self.clone();
-  }
-
-  auto sizes = self.sizes();
-  auto crow_indices = self.crow_indices();
-  auto col_indices = self.col_indices();
-  auto values = self.values();
-
-  // convert CSR indices to COO indices and swap its rows
-  Tensor indices_transposed = at::empty({2, self._nnz()}, crow_indices.options());
-  auto out_int32 = crow_indices.scalar_type() == ScalarType::Int;
-  if (out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(indices_transposed, crow_indices, col_indices, /*transpose=*/true);
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
-      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(indices_transposed, crow_indices, col_indices, /*transpose=*/true);
-    });
-  }
-
-  // sort transposed indices
-  auto indices_scalar = flatten_indices(indices_transposed, {sizes[1], sizes[0]});
-  auto indicesPermutation = std::get<1>(indices_scalar.sort(0));
-  auto indices_transposed_sorted = indices_transposed.index_select(1, indicesPermutation);
-
-  // construct a CSR tensor that is transpose of self
-  auto new_row_indices = indices_transposed_sorted.select(0, 0);
-  auto new_col_indices = indices_transposed_sorted.select(0, 1);
-  auto new_values = values.index_select(0, indicesPermutation);
-  Tensor new_crow_indices = at::empty({sizes[1] + 1}, crow_indices.options());
-  if (out_int32) {
-    AT_DISPATCH_INTEGRAL_TYPES(new_row_indices.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
-      convert_indices_from_coo_to_csr_cpu<scalar_t, int32_t>(new_crow_indices, new_row_indices, sizes[1]);
-    });
-  } else {
-    AT_DISPATCH_INTEGRAL_TYPES(new_row_indices.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
-      convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(new_crow_indices, new_row_indices, sizes[1]);
-    });
-  }
-  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {sizes[1], sizes[0]},
-                                               new_values.scalar_type(),
-                                               self.layout(),
-                                               new_values.device());
 }
 
 } // namespace native
