@@ -3475,7 +3475,10 @@ class TestSparseUnaryUfuncs(TestCase):
 
         for sample in op.sample_inputs(device, dtype):
             sparse_input = sample.input.to_sparse().detach().requires_grad_(True)
-            fn = lambda x: op(x, *sample.args, **sample.kwargs).to_dense()
+
+            def fn(x):
+                return _sparse_to_dense(
+                    op(x, *sample.args, **sample.kwargs))
 
             self.assertTrue(gradcheck(
                 fn,
