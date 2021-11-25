@@ -1008,8 +1008,10 @@ Miscellanea
 
 
 -  Gotcha around ``training`` flag and submodules
-   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value:
-     ::
+   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value
+    
+    ::
+   
         import torch
         import torch.fx
 
@@ -1039,27 +1041,29 @@ Miscellanea
         """
 
   - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
+   
     ::
-      class DropoutRepro2(torch.nn.Module):
-        def __init__(self):
-          super().__init__()
-          self.drop = torch.nn.Dropout()
+  
+        class DropoutRepro2(torch.nn.Module):
+          def __init__(self):
+            super().__init__()
+            self.drop = torch.nn.Dropout()
 
+          def forward(self, x):
+            return self.drop(x)
+
+        traced = torch.fx.symbolic_trace(DropoutRepro2())
+        print(traced.code)
+        """
         def forward(self, x):
-          return self.drop(x)
+          drop = self.drop(x);  x = None
+          return drop
+        """
 
-      traced = torch.fx.symbolic_trace(DropoutRepro2())
-      print(traced.code)
-      """
-      def forward(self, x):
-        drop = self.drop(x);  x = None
-        return drop
-      """
+        traced.eval()
 
-      traced.eval()
-
-      x = torch.randn(5, 3)
-      torch.testing.assert_allclose(traced(x), x)
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
 
 
 API Reference
