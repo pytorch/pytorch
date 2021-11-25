@@ -21,9 +21,13 @@ def warmup_forward(f, *args, profiling_count=2):
 
 class JitLlgaTestCase(JitTestCase):
     def checkTrace(self, m, x, *args, **kwargs):
+        if isinstance(m, torch.nn.Module):
+            m.eval()
         with torch.no_grad(), \
                 torch._jit_internal._disable_emit_hooks():
             traced = torch.jit.trace(m, x)
+            if isinstance(m, torch.nn.Module):
+                traced = torch.jit.freeze(traced)
             warmup_forward(traced, *x)
             fwd_graph = traced.graph_for(*x)
 

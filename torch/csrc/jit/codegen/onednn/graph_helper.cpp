@@ -296,6 +296,10 @@ LlgaGraphHelper::LlgaGraphHelper(
     auto op = createLlgaOp(node);
     g.add_op(op);
     GRAPH_DEBUG("  Added node ", node->kind().toQualString());
+
+    for (Value* input : node->inputs()) {
+      tensorIdToValue_.emplace(input->unique(), input);
+    }
   }
 
   GRAPH_DEBUG("Get Partitions");
@@ -431,6 +435,10 @@ size_t LlgaGraphHelper::countSupportedOps(
 
 std::vector<dnnl::graph::partition> LlgaGraphHelper::getPartitions() const {
   return partitions_;
+}
+
+std::map<size_t, Value*> LlgaGraphHelper::getTensorIdToValue() const {
+  return tensorIdToValue_;
 }
 
 LlgaNodeWrapper::LlgaNodeWrapper(const Node* node)

@@ -60,11 +60,15 @@ class LlgaGraphHelper {
 
   std::vector<dnnl::graph::partition> getPartitions() const;
 
+  std::map<size_t, Value*> getTensorIdToValue() const;
+
  private:
   size_t countSupportedOps(const std::shared_ptr<Graph>& graph) const;
 
   OpPartitionMap opToOwningPartition_;
   std::vector<dnnl::graph::partition> partitions_;
+  std::map<size_t, Value*>
+      tensorIdToValue_; // map from tensorId to torch::jit::Value
 };
 
 class LlgaNodeWrapper {
