@@ -9210,11 +9210,7 @@ op_db: List[OpInfo] = [
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
-           sample_inputs_func=sample_inputs_lu_unpack,
-           skips=(
-               # LU_pivots is expected to be a contiguous tensor
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),  # noq>
-           )),
+           sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
@@ -9242,11 +9238,7 @@ op_db: List[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu_solve,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
-           skips=(
-               # RuntimeError: lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),  # noqa: B950
-           )),
+           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_masked_fill,
@@ -10820,7 +10812,7 @@ op_db: List[OpInfo] = [
                             device_type='cpu', dtypes=(torch.long,)),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04)}),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cuda', active_if=TEST_WITH_ROCM)],
            skips=(

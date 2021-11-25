@@ -116,8 +116,8 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
   auto loop = [=]C10_DEVICE(const int idx) {
     const auto offsets = offset_calculator.get(idx);
 
-    const int64_t* const __restrict__ perm_data = reinterpret_cast<int64_t*>(perm_ptr + offsets[0]);
-    const int64_t* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr + offsets[1]);
+    int64_t* const __restrict__ perm_data = reinterpret_cast<int64_t*>(perm_ptr + offsets[0]);
+    const int32_t* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr + offsets[1]);
 
     // QUESTION: can we mix 64bit offsets with 32bit Iterator indexing?
     for (int64_t i = 0; i < dim_size; ++i) {

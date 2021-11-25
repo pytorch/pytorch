@@ -261,8 +261,7 @@ TORCH_META_FUNC(linalg_lu_factor_ex)(const Tensor& A, bool pivot, bool check_err
 TORCH_META_FUNC(lu_unpack)(const Tensor& LU, const Tensor& pivots, bool unpack_data, bool unpack_pivots) {
   TORCH_CHECK(LU.dim() >= 2, "torch.lu_unpack: Expected tensor with 2 or more dimensions. Got size: ", LU.sizes(), " instead");
   if (unpack_pivots) {
-    // Could this be pivots.stride(-1) == 1?
-    TORCH_CHECK(pivots.scalar_type() == at::kInt && pivots.is_contiguous(),
+    TORCH_CHECK(pivots.scalar_type() == at::kInt,
         "torch.lu_unpack: LU_pivots is expected to be a contiguous tensor of torch.int32 dtype.\n"
         "Note: this function is intended to be used with the output produced by torch.linalg.lu_factor");
   }
@@ -1822,7 +1821,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
     const auto perm_sizes = IntArrayRef(P.sizes().data(), P.dim() - 1);
 
     // Fill `perm` with the identity permutation (perhaps batched)
-    const auto perm = at::arange(m, pivots.options().dtype(kLong))
+    const auto perm = at::arange(m, pivots.options().memory_format(at::MemoryFormat::Contiguous).dtype(kLong))
                         .expand(perm_sizes)
                         .contiguous();
 
@@ -1832,7 +1831,7 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .resize_outputs(false)
       .declare_static_shape(pivots.sizes(), /*squash_dim=*/pivots.dim() - 1)
       .add_output(perm)
-      .add_input(pivots)
+      .add_owned_input(pivots.contiguous())
       .build();
 
     if (iter.numel() != 0) {
