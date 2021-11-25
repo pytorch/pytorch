@@ -32,7 +32,7 @@ void insertTypeGuardForFusionGroup(
 
     // fusion outputs are already guarded
     if (input->node()->kind() == prim::Constant ||
-        input->node()->kind() == prim::LlgaFusionGroup) {
+        input->node()->kind() == prim::oneDNNFusionGroup) {
       continue;
     }
     inputs_to_check.push_back(input);
@@ -42,11 +42,11 @@ void insertTypeGuardForFusionGroup(
     return;
   }
 
-  // Add ipex::LlgaFusionGuard node
+  // Add prim::oneDNNFusionGuard node
   //
-  // ipex::LlgaFusionGuard nodes  look like the following:
+  // prim::oneDNNFusionGuard nodes  look like the following:
   //   %out1 : Float(2, 3), %out2 : Int(10, 30), %types_match : bool =
-  //   ipex::LlgaFusionGuard(%inp1 : Tensor, %inp2 : Tensor)
+  //   prim::oneDNNFusionGuard(%inp1 : Tensor, %inp2 : Tensor)
   //
   // They have N inputs whose types we are going to check and N+1 outputs. The
   // first N outputs specify expected types and N+1-th output holds the result
@@ -123,7 +123,7 @@ void prepareFusionGroupAndGuardOutputs(Block* block) {
     for (Block* b : n->blocks()) {
       prepareFusionGroupAndGuardOutputs(b);
     }
-    if (n->kind() == prim::LlgaFusionGroup) {
+    if (n->kind() == prim::oneDNNFusionGroup) {
       fusion_groups.push_back(n);
     }
   }
@@ -135,7 +135,7 @@ void prepareFusionGroupAndGuardOutputs(Block* block) {
     insertTypeGuardForFusionGroup(
         fusion_group,
         [](const TensorTypePtr& t) { return t; },
-        prim::LlgaFusionGuard);
+        prim::oneDNNFusionGuard);
   }
 }
 

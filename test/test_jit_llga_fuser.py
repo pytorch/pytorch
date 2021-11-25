@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.testing._internal.common_utils import run_tests, TEST_SCIPY, IS_WINDOWS, IS_MACOS
 
-LLGA_FUSION_GROUP = 'prim::LlgaFusionGroup'
+LLGA_FUSION_GROUP = 'prim::oneDNNFusionGroup'
 LLGA_NOT_ENABLED = not torch._C.has_mkldnn or IS_WINDOWS or IS_MACOS
 
 

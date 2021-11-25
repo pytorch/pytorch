@@ -29,8 +29,8 @@ void fuseGraph(std::shared_ptr<Graph>& g) {
 
   // We rely on the shape specialization and shape guard to ensure the validity
   // of the cached compilation in the kernel, thus only support profiling mode.
-  // TODO: add check on LlgaFusionGroup to ensure allShapesAreKnown on nodes to
-  // fuse: torch/csrc/jit/passes/tensorexpr_fuser.cpp: allShapesAreKnown
+  // TODO: add check on oneDNNFusionGroup to ensure allShapesAreKnown on nodes
+  // to fuse: torch/csrc/jit/passes/tensorexpr_fuser.cpp: allShapesAreKnown
   if (getProfilingMode()) {
     GRAPH_DUMP(
         "Before RemoveProfileNodesAndSpecializeTypes. Beginning of LLGA "
@@ -82,9 +82,9 @@ Operation createLlgaKernel(const Node* node) {
   };
 }
 
-RegisterOperators LLGAFusionGroupOp({
+RegisterOperators oneDNNFusionGroupOp({
     torch::jit::Operator(
-        prim::LlgaFusionGroup,
+        prim::oneDNNFusionGroup,
         createLlgaKernel,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
@@ -134,9 +134,9 @@ Operation createLlgaGuardKernel(const Node* node) {
   };
 }
 
-RegisterOperators LLGAGuardOp({
+RegisterOperators oneDNNGuardOp({
     torch::jit::Operator(
-        prim::LlgaFusionGuard,
+        prim::oneDNNFusionGuard,
         createLlgaGuardKernel,
         AliasAnalysisKind::FROM_SCHEMA),
 });

@@ -41,8 +41,8 @@ namespace c10 {
   _(prim, FusionGroup)               \
   _(prim, CudaFusionGroup)           \
   _(prim, CudaFusionGuard)           \
-  _(prim, LlgaFusionGroup)           \
-  _(prim, LlgaFusionGuard)           \
+  _(prim, oneDNNFusionGroup)         \
+  _(prim, oneDNNFusionGuard)         \
   _(prim, FunctionalGraph)           \
   _(prim, add_optional)              \
   _(prim, DifferentiableGraph)       \

@@ -321,7 +321,7 @@ LlgaGraphHelper::LlgaGraphHelper(
 
 bool LlgaGraphHelper::isLlgaSubgraph(const Node* node) {
   return node->hasAttribute(attr::Subgraph) &&
-      node->kind() == prim::LlgaFusionGroup;
+      node->kind() == prim::oneDNNFusionGroup;
 }
 
 bool LlgaGraphHelper::shouldMerge(Node* toMerge, Node* subgraph) {
@@ -365,7 +365,7 @@ Node* LlgaGraphHelper::createSingletonSubgraph(Node* n, AliasDb& aliasDb) {
   GRAPH_DEBUG(
       "Creating FusionGroup_", partitionId, " for ", n->kind().toQualString());
   auto group = SubgraphUtils::createSingletonSubgraphAndUpdateAliasing(
-      n, prim::LlgaFusionGroup, aliasDb);
+      n, prim::oneDNNFusionGroup, aliasDb);
   opToOwningPartition_.add(group, partitionId);
   LlgaNodeWrapper(group).initOutputLayouts();
   return group;
