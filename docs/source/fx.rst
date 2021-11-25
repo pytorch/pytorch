@@ -1008,6 +1008,7 @@ Miscellanea
 
 
 -  Gotcha around ``training`` flag and submodules
+
    -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value
     
     ::
