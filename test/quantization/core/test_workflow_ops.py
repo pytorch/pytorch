@@ -775,7 +775,7 @@ class TestFakeQuantizeOps(TestCase):
                 Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
                 Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
                                                                     axis, quant_min, quant_max)
-                np.testing.assert_allclose(Y, Y_ref.cpu(), rtol=tolerance, atol=tolerance)
+                np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
 
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
