@@ -1835,9 +1835,11 @@ TORCH_IMPL_FUNC(lu_unpack_out)(const Tensor& LU,
       .add_input(pivots)
       .build();
 
-    unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n));
+    if (iter.numel() != 0) {
+      unpack_pivots_stub(pivots.device().type(), iter, std::min(m, n));
+    }
 
-    // Transform the permutation to a permutation matrix
+    // Transform the permutation into a permutation matrix
     P.zero_();
     P.scatter_(-2, perm.unsqueeze(-2), 1.);
   }

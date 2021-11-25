@@ -101,10 +101,6 @@ static void _launch_kernel(int total_n_elems, func_t f) {
 }
 
 void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
-  if (iter.numel() == 0) {
-    return;
-  }
-
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       unpack_pivots_cuda_kernel(sub_iter, dim_size);
@@ -114,20 +110,20 @@ void unpack_pivots_cuda_kernel(TensorIterator& iter, const int64_t dim_size) {
 
   const auto offset_calculator = make_offset_calculator<2>(iter);
 
-  const auto unpacked_pivots_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
+  const auto perm_ptr = reinterpret_cast<char*>(iter.data_ptr(0));
   const auto pivots_ptr = reinterpret_cast<const char*>(iter.data_ptr(1));
 
   auto loop = [=]C10_DEVICE(const int idx) {
     const auto offsets = offset_calculator.get(idx);
 
-    const auto __restrict__ unpacked_pivots_data = reinterpret_cast<int64_t*>(unpacked_pivots_ptr + offsets[0]);
-    const auto __restrict__ pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr + offsets[1]);
+    const int64_t* const __restrict__ perm_data = reinterpret_cast<int64_t*>(perm_ptr + offsets[0]);
+    const int64_t* const __restrict__ pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr + offsets[1]);
 
     // QUESTION: can we mix 64bit offsets with 32bit Iterator indexing?
     for (int64_t i = 0; i < dim_size; ++i) {
       thrust::swap(
-        unpacked_pivots_data[i],
-        unpacked_pivots_data[pivots_data[i] - 1]
+        perm_data[i],
+        perm_data[pivots_data[i] - 1]
       );
     }
   };

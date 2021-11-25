@@ -944,29 +944,25 @@ void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
 }
 
 void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
-  if (iter.numel() == 0) {
-    return;
-  }
-
   auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
-    auto* unpacked_pivots_ptr = data[0];
+    auto* perm_ptr = data[0];
     const auto* pivots_ptr = data[1];
 
     for (const auto elem : c10::irange(nelems)) {
       (void)elem; //Suppress unused variable warning
       // WARNING: torch.lu returns int32 pivots,
       // this behavior could change in the future.
-      const auto unpacked_pivots_data = reinterpret_cast<int64_t*>(unpacked_pivots_ptr);
+      const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
       const auto pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
 
       for (const auto i : c10::irange(dim_size)) {
         std::swap(
-          unpacked_pivots_data[i],
-          unpacked_pivots_data[pivots_data[i] - 1]
+          perm_data[i],
+          perm_data[pivots_data[i] - 1]
         );
       }
 
-      unpacked_pivots_ptr += strides[0];
+      perm_ptr += strides[0];
       pivots_ptr += strides[1];
     }
   };
