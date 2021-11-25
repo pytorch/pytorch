@@ -589,7 +589,7 @@ class TensorLikePair(Pair):
             ) from error
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
-        if tensor.is_quantized and tensor.qscheme() not in (torch.per_tensor_affine, torch.per_channel_affine):
+        if tensor.is_quantized and tensor.qscheme() not in self._QUANTIZED_COMPONENT_COMPARE_FNS.keys():
             raise ErrorMeta(ValueError, f"Quantization scheme {tensor.qscheme()} is currently not supported")
 
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]

@@ -1490,6 +1490,11 @@ class TensorOrArrayPair(TensorLikePair):
 
         return actual.coalesce(), expected.coalesce()
 
+    # TODO: Remove this when https://github.com/pytorch/pytorch/issues/68548#issuecomment-979074461 is resolved
+    TensorLikePair._QUANTIZED_COMPONENT_COMPARE_FNS[
+        torch.per_channel_affine_float_qparams
+    ] = lambda *args, **kwargs: None
+
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
