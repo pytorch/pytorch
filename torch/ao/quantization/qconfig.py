@@ -249,7 +249,7 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
     """
     Verifies that this `qconfig` is valid.
     """
-    if qconfig is None:
+    if qconfig is None or qconfig.weight is None:
         return
     is_conv_transpose_mod = (
         isinstance(mod, torch.nn.ConvTranspose1d) or
