@@ -67,6 +67,9 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
   cat_check_no_zero_dim(tensors);
   dim = at::legacy_cat_wrap_dim(dim, tensors);
 
+  // Checking names before the actual dimensions.
+  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
+
   TORCH_CHECK(
       tensors.size() > 0, "torch.cat(): expected a non-empty list of Tensors");
 
@@ -123,7 +126,7 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
           t.device(), " and ", tensors[valid].device());
     }
 
-     // Compute the output tensor size.
+    // Compute the output tensor size.
     // It should have the same shape as any other valid tensor,
     // except in the dimension 'dim'.
     size_t size_at_dim = 0;
@@ -150,7 +153,6 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
         .memory_format(memory_format);
   }
 
-  auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   set_output(0, sizes, {}, options, maybe_outnames);
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
