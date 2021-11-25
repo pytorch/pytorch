@@ -1476,7 +1476,7 @@ class TensorOrArrayPair(TensorLikePair):
         # Setting `TestCase._ignore_not_implemented_error = True` turns it into `unittest.SkipTest`. Thus, we also
         # raise a `NotImplementedError` here instead of the more fitting `ValueError` that would be raised by
         # `TensorLikePair._check_supported()`.
-        if tensor.device.type == "meta":
+        if tensor.is_meta:
             raise ErrorMeta(NotImplementedError, "Comparing meta tensors is currently not supported", id=id)
 
         super()._check_supported(tensor, id=id)
