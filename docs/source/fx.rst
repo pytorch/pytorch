@@ -1041,7 +1041,7 @@ Miscellanea
         Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
         """
 
-  - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
+   - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
    
     ::
   
