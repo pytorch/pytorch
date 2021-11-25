@@ -582,7 +582,7 @@ class TensorLikePair(Pair):
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
         # TODO: See https://github.com/pytorch/pytorch/issues/68592
-        if tensor.device.type == "meta":
+        if tensor.is_meta:
             raise ErrorMeta(ValueError, "Comparing meta tensors is currently not supported", id=id)
 
     def compare(self) -> None:
@@ -1071,6 +1071,7 @@ def assert_close(
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
+        ValueError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.

@@ -761,7 +761,15 @@ class TestAssertClose(TestCase):
         expected = actual.to_mkldnn()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaises(ValueError):
+            with self.assertRaisesRegex(ValueError, "layout"):
+                fn()
+
+    def test_meta(self):
+        actual = torch.empty((2, 2))
+        expected = actual.to("meta")
+
+        for fn in assert_close_with_inputs(actual, expected):
+            with self.assertRaisesRegex(ValueError, "meta"):
                 fn()
 
     def test_mismatching_layout(self):
