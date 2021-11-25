@@ -1,6 +1,8 @@
+
 #pragma once
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 
 #include <c10/util/Optional.h>
@@ -11,6 +13,9 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+class GpuLower;
+
 namespace kir {
 
 //! Calculate Kernel IR expressions
@@ -34,6 +39,9 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
   //! Set a concrete value for a symbolic value
   void bind(const Val* value, Int::ScalarType concrete_value);
 
+  //! Set a concrete value for a parallel dimension
+  void bind(ParallelType pt, Int::ScalarType concrete_value);
+
   //! Try to evaluate a Kernel IR value
   c10::optional<Int::ScalarType> evaluate(const Val* value);
 
@@ -42,6 +50,10 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
 
   //! Debugging helper, prints all the currently known values
   void print() const;
+
+  auto& precomputedIntegers() {
+    return precomputed_integers_;
+  }
 
  private:
   void unhandled(const void*) final;
@@ -52,6 +64,9 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
 
  private:
   std::unordered_map<const Val*, Int::ScalarType> known_values_;
+  KernelPrecomputedIntegers* precomputed_integers_ = nullptr;
+  std::unordered_map<ParallelType, Int::ScalarType, TypeHash>
+      known_parallel_dimensions_;
 };
 
 } // namespace kir

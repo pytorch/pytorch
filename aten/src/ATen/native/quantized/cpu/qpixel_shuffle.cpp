@@ -106,7 +106,7 @@ Tensor quantized_pixel_shuffle_impl(
 
 } // namespace
 
-Tensor quantized_pixel_shuffle(
+Tensor quantized_pixel_shuffle_cpu(
     const Tensor& self,
     int64_t upscale_factor) {
   return quantized_pixel_shuffle_impl(self, upscale_factor);
