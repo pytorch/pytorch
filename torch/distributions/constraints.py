@@ -465,7 +465,7 @@ class _Square(Constraint):
     Constrain to square matrices.
     """
     event_dim = 2
-    
+
     def check(self, value):
         return torch.zeros(value.shape[:-2], dtype=torch.bool).fill_(value.shape[-2] == value.shape[-1])
 
