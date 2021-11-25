@@ -60,21 +60,30 @@ class Wishart(Distribution):
             batch_shape = scale_tril.shape[:-2]
             event_shape = scale_tril.shape[-2:]
             self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
-            self.df = self.scale_tril.shape[-1] if df is None else df
+            self.df = torch.tensor(
+                [self.scale_tril.shape[-1] if df is None else df],
+                dtype=scale_tril.dtype
+            )
         elif covariance_matrix is not None:
             assert covariance_matrix.dim() > 1, \
                 "covariance_matrix must be at least two-dimensional, with optional leading batch dimensions"
             batch_shape = covariance_matrix.shape[:-2]
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
-            self.df = self.covariance_matrix.shape[-1] if df is None else df
+            self.df = torch.tensor(
+                [self.covariance_matrix.shape[-1] if df is None else df],
+                dtype=covariance_matrix.dtype
+            )
         else:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
             batch_shape = precision_matrix.shape[:-2]
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
-            self.df = self.precision_matrix.shape[-1] if df is None else df
+            self.df = torch.tensor(
+                [self.precision_matrix.shape[-1] if df is None else df],
+                dtype=precision_matrix.dtype
+            )
 
         assert self.df > event_shape[-1] - 1, \
             "Degree of Freedom paramter should be larger than the dimension - 1"
