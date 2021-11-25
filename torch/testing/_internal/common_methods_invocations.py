@@ -10824,7 +10824,7 @@ op_db: List[OpInfo] = [
                             device_type='cpu', dtypes=(torch.long,)),
                DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestMathBits', 'test_conj_view'),
-               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-04)}),
+               DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1.2e-03)}),
                             'TestCommon', 'test_noncontiguous_samples',
                             device_type='cuda', active_if=TEST_WITH_ROCM)],
            skips=(
