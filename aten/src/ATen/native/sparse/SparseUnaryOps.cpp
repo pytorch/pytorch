@@ -1,5 +1,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/SparseTensorUtils.h>
 
 namespace at {
 namespace native {
@@ -41,14 +42,16 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
   TORCH_CHECK(self.is_sparse() && result.is_sparse());
   const auto input = self.coalesce();
   sparse_resize_(result, input.sizes(), input.sparse_dim(), input.dense_dim());
+  auto *input_impl = sparse::get_sparse_impl(input);
+  auto *result_impl = sparse::get_sparse_impl(result);
 
-  auto input_values = input.values();
-  auto result_values = result._values();
+  auto input_values = input_impl->values();
+  auto result_values = result_impl->values();
   result_values.resize_(input_values.sizes());
   ufunc(input_values, result_values);
 
-  auto input_indices = input.indices();
-  auto result_indices = result._indices();
+  auto input_indices = input_impl->indices();
+  auto result_indices = result_impl->indices();
   result_indices.resize_(input_indices.sizes());
   result_indices.copy_(input_indices);
   result._coalesced_(true);
