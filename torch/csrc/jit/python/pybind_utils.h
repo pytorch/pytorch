@@ -692,6 +692,8 @@ inline py::object toPyObject(IValue ivalue) {
     }
     guardAgainstNamedTensor<at::Tensor>(tensor);
     return py::cast(autograd::Variable(std::move(tensor)));
+  } else if (ivalue.isStorage()) {
+    return py::cast(ivalue.toStorage());
   } else if (ivalue.isDouble()) {
     return py::cast(std::move(ivalue).toDouble());
   } else if (ivalue.isComplexDouble()) {
