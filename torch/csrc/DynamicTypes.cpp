@@ -68,6 +68,7 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage) {
   auto attype = &at::getDeprecatedTypeProperties(
       at::dispatchKeyToBackend(c10::computeDispatchKey(scalarType, c10::nullopt, storage.device_type())),
       scalarType);
+  auto it = attype_to_py_storage_type.find(attype);
   TORCH_INTERNAL_ASSERT(it != attype_to_py_storage_type.end(),
         "Failed to get the Python type of `UntypedStorage`.");
   return it->second;
