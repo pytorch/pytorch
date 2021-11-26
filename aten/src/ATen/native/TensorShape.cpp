@@ -2604,5 +2604,23 @@ TORCH_IMPL_FUNC(transpose_copy_out) (const Tensor& self, const int64_t dim0, con
   out.copy_(self.transpose(dim0, dim1));
 }
 
+Tensor transpose_copy_sparse(const Tensor& self, const int64_t dim0, const int64_t dim1) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse());
+  int64_t ndim = self.dim();
+  auto dim0_ = maybe_wrap_dim(dim0, ndim);
+  auto dim1_ = maybe_wrap_dim(dim1, ndim);
+
+  Tensor output = self.clone();
+
+  if (dim0_ != dim1_) {
+    // TODO: implement transpose of dense-dense dimensions
+    // TODO: implement transpose of sparse-dense dimensions
+    // transpose of sparse-sparse dimensions:
+    sparse_transpose_(output, dim0_, dim1_);
+  }
+
+  return output;
+}
+
 } // namespace native
 } // namespace at

@@ -771,25 +771,30 @@ class TestSparse(TestCase):
         x = torch.sparse.FloatTensor(2, 3, 4, 0)
         test_tensor(x)
 
-    @coalescedonoff
-    @dtypes(torch.double, torch.cdouble)
-    def test_transpose(self, device, dtype, coalesced):
+    def _test_transpose(self, device, dtype, coalesced, mth):
         def test_shape(sparse_dims, nnz, with_size):
             x = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
             y = self.safeToDense(x)
 
             for i, j in itertools.combinations(range(4), 2):
-                x = x.transpose_(i, j)
-                y = y.transpose(i, j)
-                self.assertEqual(self.safeToDense(x), y)
-
-                x = x.transpose(i, j)
+                x = mth(x, i, j)
                 y = y.transpose(i, j)
                 self.assertEqual(self.safeToDense(x), y)
 
         test_shape(4, 6, 3)
         test_shape(4, 3, [7, 7, 7, 3, 3, 3, 0])
         test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_transpose(self, device, dtype, coalesced):
+        self._test_transpose(device, dtype, coalesced, torch.Tensor.transpose)
+        self._test_transpose(device, dtype, coalesced, torch.Tensor.transpose_)
+
+    @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_transpose_copy(self, device, dtype, coalesced):
+        self._test_transpose(device, dtype, coalesced, torch.Tensor.transpose_copy)
 
     @coalescedonoff
     @onlyCPU
