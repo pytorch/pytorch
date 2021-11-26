@@ -470,10 +470,10 @@ of very low signal to reviewers.
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
 - user-facing documentation.
-These are the docs that you see over at [our docs website](pytorch.org/docs).
+These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - developer facing documentation.
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://pytorch.org/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.
