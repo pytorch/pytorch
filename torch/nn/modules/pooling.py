@@ -371,14 +371,20 @@ class MaxUnpool2d(_MaxUnpoolNd):
                   [  0.,   6.,   0.,   8.],
                   [  0.,   0.,   0.,   0.],
                   [  0.,  14.,   0.,  16.]]]])
+        >>> # Now using output_size to resolve an ambiguous size for the inverse
+        >>> input = torch.torch.tensor([[[[ 1.,  2,  3,  4, 5],
+                                          [ 6,  7,  8, 9, 10],
+                                          [11, 12, 13, 14, 15],
+                                          [16, 17, 18, 19, 20]]]])
+        >>> output, indices = pool(input)
+        >>> # This call will not work without specifying output_size
+        >>> unpool(output, indices, output_size=input.size())
+        tensor([[[[ 0.,  0.,  0.,  0.,  0.],
+                  [ 0.,  7.,  0.,  9.,  0.],
+                  [ 0.,  0.,  0.,  0.,  0.],
+                  [ 0., 17.,  0., 19.,  0.]]]]) 
 
-        >>> # specify a different output size than input size
-        >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-        tensor([[[[  0.,   0.,   0.,   0.,   0.],
-                  [  6.,   0.,   8.,   0.,   0.],
-                  [  0.,   0.,   0.,  14.,   0.],
-                  [ 16.,   0.,   0.,   0.,   0.],
-                  [  0.,   0.,   0.,   0.,   0.]]]])
+
     """
 
     kernel_size: _size_2_t
