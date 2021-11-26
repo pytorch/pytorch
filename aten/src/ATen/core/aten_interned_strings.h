@@ -539,9 +539,12 @@ _(aten, logical_not) \
 _(aten, logical_or) \
 _(aten, logical_xor) \
 _(aten, bitwise_and) \
+_(aten, bitwise_and_) \
 _(aten, bitwise_not) \
 _(aten, bitwise_or) \
+_(aten, bitwise_or_) \
 _(aten, bitwise_xor) \
+_(aten, bitwise_xor_) \
 _(aten, element_size) \
 _(aten, nll_loss) \
 _(aten, nll_loss2d) \
