@@ -3927,6 +3927,7 @@
   dispatch:
     CPU, CUDA: sin_out
     SparseCsrCPU, SparseCsrCUDA: sin_sparse_csr_out
+    SparseCPU, SparseCUDA: sin_sparse_out
 
 - func: sinc(Tensor self) -> Tensor
   structured_delegate: sinc.out

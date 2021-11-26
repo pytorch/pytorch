@@ -3439,6 +3439,48 @@ class TestSparseUnaryUfuncs(TestCase):
         self.assertEqual(_sparse_to_dense(output), expected)
 
     @_sparse_unary_ops
+    def test_out(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        if not op.supports_out:
+            self.skipTest("Skipped! Out not supported")
+
+        sample = samples[0]
+        sample.input = sample.input.to_sparse()
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+
+        out = torch.zeros(sample.input.shape, device=device,
+                          dtype=expect.dtype, layout=torch.sparse_coo)
+        op(sample.input, *sample.args, **sample.kwargs, out=out)
+        self.assertEqual(out, expect)
+
+    @_sparse_unary_ops
+    def test_inplace(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        if op.inplace_variant is None:
+            self.skipTest("Skipped! Out not supported")
+
+        sample = samples[0]
+        sample.input = sample.input.to_sparse().coalesce()
+        expect = op(sample.input, *sample.args, **sample.kwargs)
+
+        if not torch.can_cast(expect.dtype, dtype):
+            with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
+                op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+            return
+
+        actual = op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+        self.assertIs(actual, sample.input)
+        self.assertEqual(actual, expect)
+
+    @_sparse_unary_ops
     def test_sparse_zero_dims(self, device, dtype, op):
         # test 0x0 sparse_coo_tensor
         indices = torch.empty(2, 0, dtype=torch.int64)
