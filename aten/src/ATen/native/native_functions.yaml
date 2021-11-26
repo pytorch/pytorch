@@ -8432,6 +8432,7 @@
   structured_delegate: transpose_copy.out
   dispatch:
     SparseCsrCPU: transpose_copy_sparse_csr_cpu
+    SparseCsrCUDA: transpose_copy_sparse_csr_cuda
 
 - func: transpose_copy.out(Tensor self, int dim0, int dim1, *, Tensor(a!) out) -> Tensor(a!)
   structured: True

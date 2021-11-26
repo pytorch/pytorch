@@ -984,7 +984,6 @@ class TestSparseCSR(TestCase):
 
             self.assertEqual(coo_sparse.to_sparse_csr().to_sparse_coo(), coo_sparse)
 
-    @onlyCPU
     @skipMeta
     @dtypes(*get_all_dtypes())
     def test_transpose_copy(self, device, dtype):
