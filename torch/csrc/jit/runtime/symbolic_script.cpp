@@ -866,8 +866,8 @@ const std::vector<std::string> functions = {
                 return grad_self, None, None
             return result, backward
 
-        def max(self, other):
-            result = torch.max(self, other)
+        def maximum(self, other):
+            result = torch.maximum(self, other)
             self_size, other_size = AD_sizes_if_not_equal_multi_0(self, other, result)
 
             def backward(grad_output):
@@ -877,13 +877,13 @@ const std::vector<std::string> functions = {
 
             return result, backward
 
-        def min(self, other):
+        def minimum(self, other):
             def backward(grad_output):
                 grad_self = (grad_output * (self < other).type_as(grad_output))._grad_sum_to_size(self.size())
                 grad_other = (grad_output * (other < self).type_as(grad_output))._grad_sum_to_size(other.size())
                 return grad_self, grad_other
 
-            return torch.min(self, other), backward
+            return torch.minimum(self, other), backward
 
         def sigmoid(self):
             result = torch.sigmoid(self)

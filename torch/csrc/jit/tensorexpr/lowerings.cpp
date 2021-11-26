@@ -284,7 +284,7 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_min_pointwise(
-      {"aten::min.other(Tensor self, Tensor other) -> (Tensor)"},
+      {"aten::minimum(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
@@ -300,7 +300,7 @@ int nnc_lowerings_lazy_registration() {
       });
 
   RegisterNNCLoweringsFunction aten_max_pointwise(
-      {"aten::max.other(Tensor self, Tensor other) -> (Tensor)"},
+      {"aten::maximum(Tensor self, Tensor other) -> (Tensor)"},
       [](const std::vector<ArgValue>& inputs,
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,

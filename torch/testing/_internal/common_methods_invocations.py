@@ -9616,6 +9616,9 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_max_min_binary,
         supports_forward_ad=True,
         assert_autodiffed=True,
+        # 'max' is mapped to 'maximum' on JIT trace and scripts.
+        # See: https://github.com/pytorch/pytorch/pull/64735
+        autodiff_nonfusible_nodes=['aten::maximum'],
         ref=np.maximum,
         skips=(
             # FIXME: maximum does not accept scalar inputs
@@ -9626,6 +9629,7 @@ op_db: List[OpInfo] = [
         'maximum',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
+        assert_autodiffed=True,
         sample_inputs_func=sample_inputs_max_min_binary,
         ref=np.maximum,
         skips=(
@@ -9641,6 +9645,9 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_max_min_binary,
         supports_forward_ad=True,
         assert_autodiffed=True,
+        # 'min' is mapped to 'minimum' on JIT trace and scripts.
+        # See: https://github.com/pytorch/pytorch/pull/64735
+        autodiff_nonfusible_nodes=['aten::minimum'],
         ref=np.minimum,
         skips=(
             # FIXME: min does not accept scalar inputs
@@ -9651,6 +9658,7 @@ op_db: List[OpInfo] = [
         'minimum',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
+        assert_autodiffed=True,
         sample_inputs_func=sample_inputs_max_min_binary,
         ref=np.minimum,
         skips=(
