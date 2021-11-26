@@ -9965,8 +9965,7 @@ op_db: List[OpInfo] = [
                # With rtol=1e-07 and atol=1e-07, found 1 element(s) (out of 1) whose difference(s)
                # exceeded the margin of error (including 0 nan comparisons). The greatest difference
                # was 1.0 (1.0 vs. -0.0), which occurred at index 0.
-               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-           )),
+               DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'))),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
