@@ -493,9 +493,9 @@ class _PositiveDefinite(_Symmetric):
     """
 
     def check(self, value):
-        sym_check = super().check(value)
-        if not sym_check.all():
-            return sym_check
+        #sym_check = super().check(value)
+        #if not sym_check.all():
+        #    return sym_check
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
