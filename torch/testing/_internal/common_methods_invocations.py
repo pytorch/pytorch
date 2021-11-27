@@ -3695,6 +3695,57 @@ def sample_inputs_bilinear(self, device, dtype, requires_grad):
 
     return sample_inputs
 
+def sample_inputs_binary_cross_entropy(self, device, dtype, requires_grad):
+    sample_inputs = []
+
+    shapes = [
+        (0,),
+        (1,),
+        (0, 0),
+        (0, 1),
+        (1, 0),
+        (2, 3),
+        (3, 2),
+        (1, 2, 3),
+        (L, M, S)]
+
+    reductions = ['none', 'mean', 'sum']
+
+    weights = [None]
+
+    for shape in shapes:
+        input = make_tensor(
+            shape=shape,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad)
+
+        target = make_tensor(
+            shape=shape,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            low=0,
+            high=1)
+
+        weight = make_tensor(
+            shape=shape,
+            device=device,
+            dtype=dtype,
+            requires_grad=requires_grad,
+            low=0,
+            high=1)
+        weights.append(weight)
+
+        for reduction in reductions:
+            for weight in weights:
+                args = (target,)
+                kwargs = {'reduction': reduction, 'weight': weight}
+                sample_inputs.append(
+                    SampleInput(input, args=args, kwargs=kwargs))
+
+    return sample_inputs
+
 def sample_inputs_glu(self, device, dtype, requires_grad):
     features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
     batch_options: List[List[int]] = [
@@ -10244,6 +10295,10 @@ op_db: List[OpInfo] = [
            ),
            supports_forward_ad=False,
            supports_out=False),
+    OpInfo('nn.functional.binary_cross_entropy',
+           aten_name='binary_cross_entropy',
+           sample_inputs_func=sample_inputs_binary_cross_entropy,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
     OpInfo('nn.functional.glu',
            aten_name='glu',
            supports_autograd=True,
