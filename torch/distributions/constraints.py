@@ -467,7 +467,12 @@ class _Square(Constraint):
     event_dim = 2
 
     def check(self, value):
-        return torch.full(value.shape[:-2], value.shape[-2] == value.shape[-1], dtype=torch.bool)
+        return torch.full(
+            size=value.shape[:-2],
+            fill_value=(value.shape[-2] == value.shape[-1]),
+            dtype=torch.bool,
+            device=value.device
+        )
 
 
 class _Symmetric(_Square):
@@ -476,9 +481,10 @@ class _Symmetric(_Square):
     """
 
     def check(self, value):
-        assert super().check(value).all(), \
-            "Cannot check symmetricity if the input is not a square matrix."
-        return (value.mT == value).all(dim=-1).all(dim=-1)
+        square_check = super().check(value)
+        if not square_check.all():
+            return square_check
+        return value.eq(value.mT).all(dim=-2).all(dim=-1)
 
 
 class _PositiveDefinite(_Symmetric):
@@ -487,10 +493,10 @@ class _PositiveDefinite(_Symmetric):
     """
 
     def check(self, value):
-        assert super().check(value).all(), \
-            "Cannot check positive definiteness if the input is not a symmetric matrix."
-        # info == 0 means no error, that is, it's SPD
-        return (value.eq(value.mT).all(-2).all(-1) and torch.linalg.cholesky_ex(value).info.eq(0)).unsqueeze(0)
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
+        return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
 class _Cat(Constraint):
