@@ -1139,8 +1139,10 @@ class TestMathBits(TestCase):
         def math_op_view(x):
             return torch._neg_view(x).conj()
 
+        def is_bit_set(x):
+            return torch.is_neg(x) and torch.is_conj(x)
+
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
-        is_bit_set = lambda x : torch.is_neg(x) and torch.is_conj(x)
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         # Only test one sample
         samples = samples[:1]
