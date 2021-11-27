@@ -19,6 +19,10 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
   // we only need a separate instantiation per dtype size. This would
   // probably save us a little bit of code size here
+  // TODO: not sure if optimizer is able to compile two levels of
+  // conditionals into a single jump table.  We should have a
+  // single jump table here; might be worth just writing out the
+  // dispatch statement by hand instead of using AT_DISPATCH
   ScalarType dtype = iter.dtype(0);
   if (isQIntType(dtype)) {
     AT_DISPATCH_QINT_TYPES(dtype, "copy_kernel", [&] {
@@ -51,6 +55,10 @@ void neg_conj_kernel(TensorIteratorBase &iter) {
 }
 
 void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
+  // TODO: not sure if optimizer is able to compile two levels of
+  // conditionals into a single jump table.  We should have a
+  // single jump table here; might be worth just writing out the
+  // dispatch statement by hand instead of using AT_DISPATCH
   if (requires_neg) {
     // This case should never actually happen since currently there's no way to get a complex tensor
     // with negative bit.
@@ -75,10 +83,6 @@ void copy_kernel(TensorIterator& iter, bool non_blocking) {
   const bool requires_neg = (iter.tensor_base(0).is_neg() == iter.tensor_base(1).is_neg());
 
   if (dtype == iter.dtype(1)) {
-    // TODO: not sure if optimizer is able to compile two levels of
-    // conditionals into a single jump table.  We should have a
-    // single jump table here; might be worth just writing out the
-    // dispatch statement by hand instead of using AT_DISPATCH
     copy_same_dtype(iter, requires_conj, requires_neg);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, dtype, "copy_", [&] {
