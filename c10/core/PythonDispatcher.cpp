@@ -1,5 +1,7 @@
 #include <c10/core/PythonDispatcher.h>
 
+#include <cstdint>
+
 namespace c10 {
 
 PythonDispatcher::PythonDispatcher(PyObject* type,
@@ -14,6 +16,10 @@ void PythonDispatcher::dispatch(const OperatorHandle& op, torch::jit::Stack* s) 
   interpreter_->dispatch(op, s, type_);
 }
 
+intrusive_ptr<TensorImpl> PythonDispatcher::detach(const c10::TensorImpl* self) const {
+  return interpreter_->detach(self, type_);
+}
+
 PyObject* PythonDispatcher::type() const noexcept {
   return type_;
 }
@@ -24,15 +30,26 @@ c10::impl::PyInterpreter* PythonDispatcher::interpreter() const noexcept {
 
 namespace {
 
+const std::shared_ptr<PythonDispatcher> null_dispatcher_{};
+
 thread_local std::shared_ptr<PythonDispatcher> dispatcher_{};
+thread_local std::size_t disabled_{};
 
 } // namespace
 
 const std::shared_ptr<PythonDispatcher>& getPythonDispatcher() noexcept {
-  return dispatcher_;
+  if (C10_UNLIKELY(disabled_ > 0)) {
+    return null_dispatcher_;
+  } else {
+    return dispatcher_;
+  }
 }
 
 void setPythonDispatcher(const std::shared_ptr<PythonDispatcher>& dispatcher) noexcept {
+  if (C10_UNLIKELY(disabled_ > 0)) {
+    return;
+  }
+
   dispatcher_ = dispatcher;
 
   c10::impl::tls_set_dispatch_key_included(
@@ -40,13 +57,31 @@ void setPythonDispatcher(const std::shared_ptr<PythonDispatcher>& dispatcher) no
 }
 
 void popPythonDispatcher() noexcept {
+  if (C10_UNLIKELY(disabled_ > 0)) {
+    return;
+  }
+
   dispatcher_ = {};
 
   c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
 }
 
 bool hasPythonDispatcher() noexcept {
-  return dispatcher_ != nullptr;
+  if (C10_UNLIKELY(disabled_ > 0)) {
+    return false;
+  } else {
+    return dispatcher_ != nullptr;
+  }
+}
+
+DisablePythonDispatcherGuard::DisablePythonDispatcherGuard() {
+  disabled_ += 1;
+}
+
+DisablePythonDispatcherGuard::~DisablePythonDispatcherGuard() {
+  TORCH_INTERNAL_ASSERT(disabled_ >= 1);
+
+  disabled_ -= 1;
 }
 
 } // namespace c10

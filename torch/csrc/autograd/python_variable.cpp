@@ -99,7 +99,11 @@ void concrete_decref_fn(const c10::impl::PyInterpreter* self, PyObject* pyobj, b
   Py_DECREF(pyobj);
 };
 
-c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self);
+c10::intrusive_ptr<TensorImpl> concrete_detach_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self,
+    PyObject* dispatcher);
+
 void concrete_dispatch_fn(
     const c10::impl::PyInterpreter*,
     const c10::OperatorHandle& op,
@@ -377,8 +381,12 @@ static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, P
   if (!PyType_Check(cls)) {
     throw torch::TypeError("cls must be a type (got %s)", Py_TYPE(cls)->tp_name);
   }
-  auto data =
-      r.tensor(1).detach(); // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
+  // Avoid hijacking the following `detach()` if the tensor is of type `Tensor`,
+  // i.e. not a subclass. Otherwise, a Python object will be allocated for the
+  // tensor before we attempt to subclass it which will eventually fail.
+  DisablePythonDispatcherGuard py_dispatcher_guard{};
+  // creates a fresh Tensor (DEFINITELY_UNINITIALIZED)
+  auto data = r.tensor(1).detach();
   // We set `data`'s `allow_tensor_metadata_change` to true here, because we want to
   // allow the following use case for backward compatibility:
   //
@@ -1795,16 +1803,24 @@ void concrete_dispatch_fn(
   }
 }
 
-c10::intrusive_ptr<TensorImpl> concrete_detach_fn(const c10::impl::PyInterpreter*, const c10::TensorImpl* self) {
+c10::intrusive_ptr<TensorImpl> concrete_detach_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self,
+    PyObject* dispatcher_type) {
   pybind11::gil_scoped_acquire gil;
 
   // Setup the arguments expected for the detach call
   std::vector<py::handle> overloaded_args;
+
+  if (dispatcher_type != nullptr) {
+    append_overloaded_type(&overloaded_args, dispatcher_type);
+  }
+
   // TODO: there should be a shorter way to spell this
   // TODO: fix the constness of target
   Tensor self_t = Tensor(c10::intrusive_ptr<c10::TensorImpl, c10::UndefinedTensorImpl>::unsafe_reclaim_from_nonowning(const_cast<c10::TensorImpl*>(self)));
   auto self_p = py::reinterpret_steal<py::object>(THPVariable_Wrap(self_t));
-  TORCH_INTERNAL_ASSERT(isPythonTensor(self_t));
+  TORCH_INTERNAL_ASSERT(dispatcher_type != nullptr || isPythonTensor(self_t));
   append_overloaded_tensor(&overloaded_args, self_p.ptr());
   auto args = py::reinterpret_steal<py::object>(PyTuple_New(1));
   PyTuple_SET_ITEM(args.ptr(), 0, self_p.release().ptr());

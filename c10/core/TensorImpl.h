@@ -250,12 +250,14 @@ struct C10_API AutogradMetaFactoryRegisterer {
 struct C10_API PyInterpreter {
   using name_sig = std::string(const PyInterpreter*);
   using decref_sig = void(const PyInterpreter*, PyObject*, bool);
-  using detach_sig =
-      c10::intrusive_ptr<TensorImpl>(const PyInterpreter*, const TensorImpl*);
+  using detach_sig = c10::intrusive_ptr<TensorImpl>(
+      const PyInterpreter*,
+      const TensorImpl* self,
+      PyObject* dispatcher_type);
   using dispatch_sig = void(
       const PyInterpreter*,
       const c10::OperatorHandle&,
-      torch::jit::Stack* stack,
+      torch::jit::Stack*,
       PyObject* dispatcher_type);
 
   PyInterpreter(
@@ -294,8 +296,9 @@ struct C10_API PyInterpreter {
   // detach, which will also arrange for the PyObject to get copied in this
   // situation
   __ubsan_ignore_function__ c10::intrusive_ptr<TensorImpl> detach(
-      const TensorImpl* self) const {
-    return (*detach_fn_)(this, self);
+      const TensorImpl* self,
+      PyObject* dispatcher_type = nullptr) const {
+    return (*detach_fn_)(this, self, dispatcher_type);
   }
 
   // Invoke the Python boxed fallback dispatch to go back into Python

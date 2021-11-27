@@ -2,6 +2,7 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/PythonDispatcher.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
@@ -31,7 +32,8 @@ static void noop_decref_fn(const PyInterpreter*, PyObject*, bool) {
 
 static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
     const PyInterpreter*,
-    const TensorImpl*) {
+    const TensorImpl*,
+    PyObject*) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to detach (shallow_copy_and_detach) Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -39,9 +41,9 @@ static c10::intrusive_ptr<TensorImpl> noop_detach_fn(
 
 static void noop_dispatch_fn(
     const PyInterpreter*,
-    const c10::OperatorHandle& op,
-    torch::jit::Stack* stack,
-    PyObject* dispatcher_type) {
+    const c10::OperatorHandle&,
+    torch::jit::Stack*,
+    PyObject*) {
   TORCH_INTERNAL_ASSERT(
       0,
       "attempted to dispatch (__torch_dispatch__) an operator on Tensor with nontrivial PyObject after corresponding interpreter died");
@@ -500,22 +502,25 @@ template <typename VariableVersion>
 c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach_core(
     VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
-  if (key_set_.has(DispatchKey::Python) &&
-      !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
-    auto r = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
-    if (r) {
-      r->set_version_counter(std::forward<VariableVersion>(version_counter));
-      r->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-      return r;
+  c10::intrusive_ptr<TensorImpl> impl{};
+  if (!c10::impl::tls_is_dispatch_key_excluded(DispatchKey::Python)) {
+    const auto& py_dispatcher = getPythonDispatcher();
+    if (py_dispatcher != nullptr) {
+      impl = py_dispatcher->detach(this);
+    } else if (key_set_.has(DispatchKey::Python)) {
+      impl = pyobj_interpreter_.load(std::memory_order_acquire)->detach(this);
     }
-    // otherwise just copy the TensorImpl and not the PyObject.  Since
-    // the interpreter is dead no one can call us out on it
+    if (impl) {
+      impl->set_version_counter(std::forward<VariableVersion>(version_counter));
+      impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+
+      return impl;
+    }
+    // Otherwise just copy the TensorImpl and not the PyObject. Since the
+    // interpreter is dead no one can call us out on it.
   }
-  auto impl = c10::make_intrusive<TensorImpl>(
-      // No need to populate Storage; copy_tensor_metadata will do it for us.
-      key_set_,
-      data_type_,
-      device_opt_);
+  // No need to populate Storage; copy_tensor_metadata will do it for us.
+  impl = c10::make_intrusive<TensorImpl>(key_set_, data_type_, device_opt_);
   copy_tensor_metadata(
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),

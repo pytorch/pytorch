@@ -31,6 +31,8 @@ struct C10_API PythonDispatcher {
 
   void dispatch(const OperatorHandle& op, torch::jit::Stack* s) const;
 
+  intrusive_ptr<TensorImpl> detach(const c10::TensorImpl* self) const;
+
   PyObject* type() const noexcept;
 
   c10::impl::PyInterpreter* interpreter() const noexcept;
@@ -47,5 +49,24 @@ C10_API void setPythonDispatcher(const std::shared_ptr<PythonDispatcher>& dispat
 C10_API void popPythonDispatcher() noexcept;
 
 C10_API bool hasPythonDispatcher() noexcept;
+
+// Temporarily disables the Python dispatcher. Note that this guard disables
+// only the thread-local dispatcher, not the Python dispatch key; this means
+// instances of Tensor subclasses with `__torch_dispatch__` will continue to
+// work.
+class C10_API DisablePythonDispatcherGuard {
+ public:
+  DisablePythonDispatcherGuard() noexcept;
+
+  DisablePythonDispatcherGuard(const DisablePythonDispatcherGuard&) = delete;
+
+  DisablePythonDispatcherGuard& operator=(const DisablePythonDispatcherGuard&) = delete;
+
+  DisablePythonDispatcherGuard(DisablePythonDispatcherGuard&&) = delete;
+
+  DisablePythonDispatcherGuard& operator=(DisablePythonDispatcherGuard&&) = delete;
+
+  ~DisablePythonDispatcherGuard();
+};
 
 } // namespace c10

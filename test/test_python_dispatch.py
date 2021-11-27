@@ -447,5 +447,24 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
 
+    def test_detach_dispatched_for_non_subclassed_tensor(self) -> None:
+        num_detach_dispatched = 0
+
+        class FakeTensor(torch.Tensor):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                nonlocal num_detach_dispatched
+
+                if func == torch.ops.aten.detach:
+                    num_detach_dispatched += 1
+
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        with enable_python_mode(FakeTensor):
+            tmp = torch.ones([10, 10]).detach()
+
+        self.assertEqual(num_detach_dispatched, 2)
+
 if __name__ == '__main__':
     run_tests()
