@@ -210,7 +210,7 @@ static void imag_kernel(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-static void conj_kernel(TensorIteratorBase& iter) {
+void conj_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool, kBFloat16, kHalf, iter.common_dtype(), "conj_cpu", [&]() {
         cpu_kernel_vec(
