@@ -3106,7 +3106,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('histogram'),
         xfail('hsplit'),
         xfail('index_add'),
-        xfail('index_copy'),
         xfail('index_fill'),
         xfail('index_put'),
         xfail('isin'),
