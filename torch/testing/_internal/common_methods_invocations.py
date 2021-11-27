@@ -12086,6 +12086,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            )),
@@ -12189,6 +12191,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                # Empty tensor data is garbage so it's hard to make comparisons with it.
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+               # Empty tensor data is garbage so it's hard to make comparisons with it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
