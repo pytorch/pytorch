@@ -74,7 +74,7 @@ bool hasPythonDispatcher() noexcept {
   }
 }
 
-DisablePythonDispatcherGuard::DisablePythonDispatcherGuard() {
+DisablePythonDispatcherGuard::DisablePythonDispatcherGuard() noexcept {
   disabled_ += 1;
 }
 
