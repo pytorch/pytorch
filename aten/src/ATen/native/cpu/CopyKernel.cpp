@@ -61,11 +61,11 @@ void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires
     if (requires_conj) {
       neg_conj_kernel(iter);
     } else {
-      CPU_CAPABILITY::neg_kernel(iter);
+      neg_kernel(iter);
     }
   } else {
     if (requires_conj) {
-      CPU_CAPABILITY::conj_kernel(iter);
+      conj_kernel(iter);
     } else {
       direct_copy_kernel(iter);
     }
@@ -75,8 +75,8 @@ void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires
 void copy_kernel(TensorIterator& iter, bool non_blocking) {
   ScalarType dtype = iter.dtype(0);
   const bool requires_conj = (
-      isComplexType(dtype) && (iter.tensor_base(0).is_conj() == iter.tensor_base(1).is_conj()));
-  const bool requires_neg = (iter.tensor_base(0).is_neg() == iter.tensor_base(1).is_neg());
+      isComplexType(dtype) && (iter.tensor_base(0).is_conj() != iter.tensor_base(1).is_conj()));
+  const bool requires_neg = (iter.tensor_base(0).is_neg() != iter.tensor_base(1).is_neg());
 
   if (dtype == iter.dtype(1)) {
     copy_same_dtype(iter, requires_conj, requires_neg);
