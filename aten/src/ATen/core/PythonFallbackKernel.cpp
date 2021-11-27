@@ -1,14 +1,14 @@
 #include <torch/library.h>
+#include <c10/core/PythonDispatcher.h>
 #include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/PythonModeTLS.h>
 
 namespace {
 
 void pythonFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
-  // If Python Mode is active, use its PyInterpreter for dispatch
-  const auto& maybe_python_mode_state = at::impl::PythonModeTLS::get_state();
-  if (maybe_python_mode_state) {
-    maybe_python_mode_state->pyinterpreter()->dispatch(op, stack, maybe_python_mode_state);
+  // If Python Mode is active, use its PyInterpreter for dispatch.
+  const auto& dispatcher = c10::getPythonDispatcher();
+  if (dispatcher != nullptr) {
+    dispatcher->dispatch(op, stack);
     return;
   }
 

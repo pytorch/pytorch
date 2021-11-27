@@ -17,7 +17,7 @@ ThreadLocalState::ThreadLocalState()
   saved_tensors_default_hooks_ = SavedTensorDefaultHooks::get_hooks();
 
   bumped_record_all_functions_ = at::checkRecordAllFunctions();
-  python_mode_state_ = at::impl::PythonModeTLS::get_state();
+  python_dispatcher_ = c10::getPythonDispatcher();
 }
 
 void ThreadLocalState::set_grad_mode(bool enabled) {
@@ -31,7 +31,7 @@ void ThreadLocalState::setThreadLocalState(
   // restore the dispatch key set TLS at the same time.
   c10::AutogradState::set_tls_state(state.autograd_tls_);
 
-  at::impl::PythonModeTLS::set_state(state.python_mode_state_);
+  c10::setPythonDispatcher(state.python_dispatcher_);
 
   at::set_record_function_tls_(state.rf_tls_);
 

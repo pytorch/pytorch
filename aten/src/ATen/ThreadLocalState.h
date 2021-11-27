@@ -1,12 +1,12 @@
 #pragma once
 
 #include <c10/core/InferenceMode.h>
+#include <c10/core/PythonDispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
-#include <ATen/core/PythonModeTLS.h>
 
 namespace at {
 
@@ -41,7 +41,7 @@ class TORCH_API ThreadLocalState {
   // TLS for AutogradModes
   AutogradState autograd_tls_;
 
-  std::shared_ptr<TorchDispatchTypeObject> python_mode_state_;
+  std::shared_ptr<PythonDispatcher> python_dispatcher_;
 
   // TLS for saved tensors default hooks
   std::pair<PyObject*, PyObject*> saved_tensors_default_hooks_;
