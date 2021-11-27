@@ -62,7 +62,7 @@ void copy_kernel(TensorIterator& iter, bool non_blocking) {
       // with negative bit.
       if (isComplexType(dtype) &&
           (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
-        CPU_CAPABILITY::conj_kernel(iter);
+        conj_kernel(iter);
       } else {
         direct_copy_kernel(iter);
       }
@@ -71,7 +71,7 @@ void copy_kernel(TensorIterator& iter, bool non_blocking) {
           (iter.tensor(0).is_conj() != iter.tensor(1).is_conj())) {
         neg_conj_kernel(iter);
       } else {
-        CPU_CAPABILITY::neg_kernel(iter);
+        neg_kernel(iter);
       }
     }
   } else {
