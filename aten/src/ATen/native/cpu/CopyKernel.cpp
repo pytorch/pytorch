@@ -55,10 +55,6 @@ void neg_conj_kernel(TensorIteratorBase &iter) {
 }
 
 void copy_same_dtype(TensorIteratorBase &iter, bool requires_conj, bool requires_neg) {
-  // TODO: not sure if optimizer is able to compile two levels of
-  // conditionals into a single jump table.  We should have a
-  // single jump table here; might be worth just writing out the
-  // dispatch statement by hand instead of using AT_DISPATCH
   if (requires_neg) {
     // This case should never actually happen since currently there's no way to get a complex tensor
     // with negative bit.
