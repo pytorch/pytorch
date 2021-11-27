@@ -32,3 +32,8 @@ def enable_python_mode(cls) -> Iterator[None]:
         yield
     finally:
         torch._C._exit_python_mode()
+
+
+def python_mode_enabled() -> bool:
+    """Indicates whether Python mode is enabled."""
+    return torch._C._python_mode_enabled()

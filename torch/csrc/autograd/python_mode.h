@@ -12,6 +12,8 @@ struct TORCH_API PythonMode {
 
   // Exit the current python mode.
   static void exit();
+
+  static bool enabled() noexcept;
 };
 
 }}

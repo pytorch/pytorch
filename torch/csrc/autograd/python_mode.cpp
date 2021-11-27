@@ -26,4 +26,8 @@ void PythonMode::exit() {
   c10::popPythonDispatcher();
 }
 
+bool PythonMode::enabled() noexcept {
+  return c10::hasPythonDispatcher();
+}
+
 }}

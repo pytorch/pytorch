@@ -573,6 +573,16 @@ static PyObject * exit_python_mode(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * python_mode_enabled(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (PythonMode::enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
   {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -597,6 +607,7 @@ static PyMethodDef methods[] = { // NOLINT
   {"_exit_dual_level", castPyCFunctionWithKeywords(python_exit_dual_level), METH_VARARGS | METH_KEYWORDS, nullptr},
   {"_enter_python_mode", enter_python_mode, METH_O, nullptr},
   {"_exit_python_mode", exit_python_mode, METH_NOARGS, nullptr},
+  {"_python_mode_enabled", python_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

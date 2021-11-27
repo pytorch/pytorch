@@ -4,7 +4,7 @@ import torch
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.logging_tensor import LoggingTensor, log_input, capture_logs, no_dispatch
 from torch.utils._pytree import tree_map
-from torch.utils._python_dispatch import enable_python_mode
+from torch.utils._python_dispatch import enable_python_mode, python_mode_enabled
 
 import logging
 
@@ -465,6 +465,14 @@ $6 = torch._ops.aten.add_($1, $5)''')
             tmp = torch.ones([10, 10]).detach()
 
         self.assertEqual(num_detach_dispatched, 2)
+
+    def test_python_mode_enabled_works_as_expected(self) -> None:
+        self.assertFalse(python_mode_enabled())
+
+        with enable_python_mode(LoggingTensor):
+            self.assertTrue(python_mode_enabled())
+
+        self.assertFalse(python_mode_enabled())
 
 if __name__ == '__main__':
     run_tests()
