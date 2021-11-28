@@ -481,9 +481,9 @@ class _Symmetric(_Square):
     """
 
     def check(self, value):
-        square_check = super().check(value)
-        if not square_check.all():
-            return square_check
+        # square_check = super().check(value)
+        # if not square_check.all():
+        #    return square_check
         return value.eq(value.mT).all(dim=-2).all(dim=-1)
 
 
@@ -493,9 +493,9 @@ class _PositiveDefinite(_Symmetric):
     """
 
     def check(self, value):
-        # sym_check = super().check(value)
-        # if not sym_check.all():
-        #    return sym_check
+        sym_check = super().check(value)
+        if not sym_check.all():
+            return sym_check
         return torch.linalg.cholesky_ex(value).info.eq(0)
 
 
