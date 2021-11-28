@@ -3890,6 +3890,46 @@ def sample_inputs_fractional_max_pool2d(op_info, device, dtype, requires_grad, *
 
     return samples
 
+def sample_inputs_fractional_max_pool3d(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Order: input_shape, kernel_size
+    cases = (((2, 3, 5, 5, 5), (2, 2, 2)),
+             ((1, 2, 6, 5, 4), 2),
+             ((1, 2, 5, 6, 5), (2, 3, 2)),
+             ((1, 2, 6, 6, 6), (2, 3, 2)),
+             ((1, 1, 7, 6, 7), (2, 3, 4)),
+             ((1, 1, 4, 5, 4), (2, 2, 1)),
+             ((1, 1, 8, 7, 6), (4, 3, 2)),
+             ((0, 1, 4, 5, 4), (2, 2, 1)))
+
+    samples = []
+
+    for input_shape, kernel_size in cases:
+        for return_indices in [False, True]:
+            # test case passing a single output size
+            samples.append(SampleInput(
+                make_arg(input_shape),
+                args=(kernel_size,),
+                kwargs=dict(output_size=(2), return_indices=return_indices)
+            ))
+
+            # test case passing a tuple output size
+            samples.append(SampleInput(
+                make_arg(input_shape),
+                args=(kernel_size,),
+                kwargs=dict(output_size=(2, 3, 2), return_indices=return_indices)
+            ))
+
+            # test case passing an output ratio
+            samples.append(SampleInput(
+                make_arg(input_shape),
+                args=(kernel_size,),
+                kwargs=dict(output_ratio=(0.5, 0.5, 0.5), return_indices=return_indices)
+            ))
+
+    return samples
+
 def sample_inputs_avgpool2d(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -10243,6 +10283,25 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
+           decorators=[
+               # FIXME: both derivatives are implemented incorrectly
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+               # FIXME: produces incorrect output on non-contiguous inputs
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
+               # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # RuntimeError: input->type()->kind() == TypeKind::OptionalType
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ], ),
+    OpInfo('nn.functional.fractional_max_pool3d',
+           supports_autograd=True,
+           supports_out=False,
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16),
+           test_neg_view=False,
+           sample_inputs_func=sample_inputs_fractional_max_pool3d,
            decorators=[
                # FIXME: both derivatives are implemented incorrectly
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
