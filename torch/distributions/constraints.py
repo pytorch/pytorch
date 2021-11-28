@@ -22,6 +22,7 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.symmetric``
 - ``constraints.stack``
 - ``constraints.square``
 - ``constraints.symmetric``
