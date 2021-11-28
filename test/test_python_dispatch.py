@@ -330,7 +330,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             with enable_python_mode(torch.Tensor):
                 pass
         z = LoggingTensor(torch.empty([]))
-        with self.assertRaisesRegex(ValueError, "must be the type"):
+        with self.assertRaisesRegex(ValueError, "must be a type"):
             with enable_python_mode(z):
                 pass
 
@@ -450,7 +450,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
     def test_detach_dispatched_for_non_subclassed_tensor(self) -> None:
         num_detach_dispatched = 0
 
-        class FakeTensor(torch.Tensor):
+        class FakeDispatcher:
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 nonlocal num_detach_dispatched
@@ -461,7 +461,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 with no_dispatch():
                     return func(*args, **kwargs)
 
-        with enable_python_mode(FakeTensor):
+        with enable_python_mode(FakeDispatcher):
             tmp = torch.ones([10, 10]).detach()
 
         self.assertEqual(num_detach_dispatched, 2)
