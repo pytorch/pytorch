@@ -928,7 +928,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     result = result.unsqueeze_(-1);
   }
 
-  // lu_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
+  // lu_factor_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
@@ -945,7 +945,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
   pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
   Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
-  lu_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
+  lu_factor_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
 
   // solve the linear system using the LU factorization
   lu_solve_stub(input.device().type(), result, input_working_copy, pivots);
@@ -1593,30 +1593,109 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-DEFINE_DISPATCH(lu_stub);
+DEFINE_DISPATCH(lu_factor_stub);
 
-// TODO: remove check_errors argument
-// https://github.com/pytorch/pytorch/issues/64014
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
-  TORCH_CHECK(self.dim() >= 2,
-           "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
-           " instead");
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto req_size = self.sizes().vec();
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
+                                                              bool pivot,
+                                                              bool check_errors,
+                                                              Tensor& LU,
+                                                              Tensor& pivots,
+                                                              Tensor& info) {
+  TORCH_CHECK(A.dim() >= 2,
+              "expected tensor with 2 or more dimensions, got size: ", A.sizes(), " instead");
+  auto req_size = A.sizes().vec();
+  const auto m = req_size.cend()[-2];
+  const auto n = req_size.cend()[-1];
+
+  // TODO reimplementation of resize_output with format F-contiguous
+  // We should make this a standalone function
+  if (resize_output_check(LU, req_size)) {
+    // Transpose size
+    std::iter_swap(req_size.end() - 1, req_size.end() - 2);
+    LU.resize_(req_size, MemoryFormat::Contiguous);
+    LU.transpose_(-2, -1);  // make 'LU' have Fortran contiguous memory
+  }
   req_size.pop_back();
   req_size.back() = std::min(m, n);
-  auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
+  at::native::resize_output(pivots, req_size);
   req_size.pop_back();
-  auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
+  at::native::resize_output(info, req_size);
 
-  // lu_stub (apply_lu) requires batched column major (Fortran-contiguous) tensors
-  // 'lu' tensor is modified in-place and must be a copy of 'self'
-  Tensor lu = cloneBatchedColumnMajor(self);
-  lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
-  return std::make_tuple(lu, pivots_tensor, infos_tensor);
+  const auto LU_f_contig = LU.transpose(-2, -1).is_contiguous() ;
+
+  if (LU_f_contig && !LU.is_same(A)) {
+    LU.copy_(A);
+  }
+  const auto LU_ = borrow_else_clone(LU_f_contig, LU, A, /*C-contig*/false);
+
+  const auto pivots_contig = pivots.is_contiguous();
+  const auto pivots_ = borrow_else_clone(pivots_contig, pivots, pivots, /*C-contig*/true);
+
+  const auto info_contig = info.is_contiguous();
+  const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
+
+  lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
+
+  if (!LU_f_contig) {
+    LU.copy_(*LU_);
+  }
+  if (!pivots_contig) {
+    pivots.copy_(*pivots_);
+  }
+  if (!info_contig) {
+    info.copy_(*info_);
+  }
+
+  if (check_errors) {
+    if (A.dim() > 2) {
+      batchCheckErrors(info, "torch.linalg.lu_factor_ex");
+    } else {
+      singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor_ex");
+    }
+  }
+
+  return std::tie(LU, pivots, info);
+}
+
+std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool pivot, bool check_errors) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  at::native::linalg_lu_factor_ex_out(A, pivot, check_errors, LU, pivots, info);
+  return std::make_tuple(std::move(LU), std::move(pivots), std::move(info));
+}
+
+std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor & LU, Tensor & pivots) {
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
+  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*chech_errors=*/false);
+  if (A.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.lu_factor");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
+  }
+
+  return std::tie(LU, pivots);
+}
+
+std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
+  Tensor LU, pivots, info;
+  std::tie(LU, pivots, info) = at::linalg_lu_factor_ex(A, pivot, /*check_errors=*/false);
+
+  if (A.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.lu_factor");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
+  }
+
+  return std::make_tuple(std::move(LU), std::move(pivots));
+}
+
+// TODO Deprecate this function in favour of linalg_lu_factor_ex
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
+  return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
