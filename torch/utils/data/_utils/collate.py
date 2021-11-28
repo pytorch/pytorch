@@ -33,7 +33,7 @@ def default_convert(data):
             return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return elem_type(*(default_convert(d) for d in data))
-    elif elem_type is tuple:
+    elif isinstance(data, tuple):
         return [default_convert(d) for d in data]  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
         try:
@@ -96,7 +96,7 @@ def default_collate(batch):
             raise RuntimeError('each element in list of batch should be of equal size')
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
 
-        if elem is tuple:
+        if isinstance(elem,  tuple):
             return [default_collate(samples) for samples in transposed]  # Backwards compatibility.
         else:
             try:
