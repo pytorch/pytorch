@@ -6656,7 +6656,8 @@ def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
         ((S), (1)),
         ((S, S), (1, 1)),
         ((S, S), (1, S)),
-        ((S, S, S), (S, S, 1)),
+        ((S, S), (S, S)),
+        ((S, S, S), (S, 1, S)),
     ]
 
     samples = []
@@ -8422,7 +8423,11 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_sum_to_size,
            supports_forward_ad=True,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # RuntimeError: inputSet && outputSet
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
     OpInfo('symeig',
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
@@ -10003,8 +10008,7 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # AssertionError: False is not true : Scalars failed to compare as equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-           )),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),)),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
