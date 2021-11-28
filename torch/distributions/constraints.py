@@ -484,7 +484,7 @@ class _Symmetric(_Square):
         # square_check = super().check(value)
         # if not square_check.all():
         #    return square_check
-        return value.eq(value.transpose(-2, -1)).all(dim=-2).all(dim=-1)
+        return value.eq(value.mT).all(dim=-1).all(dim=-1)
 
 
 class _PositiveDefinite(_Symmetric):
