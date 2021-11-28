@@ -9486,9 +9486,10 @@ op_db: List[OpInfo] = [
                     skips=(
                         # RuntimeError: mul(): functions with out=... arguments don't support
                         # automatic differentiation, but one of the arguments requires grad
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                        # https://github.com/pytorch/pytorch/issues/68966
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
+                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                         # FIXME: ldexp does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     ),
