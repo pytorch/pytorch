@@ -7,6 +7,7 @@ from enum import Enum
 import operator
 import random
 import unittest
+import math
 
 import torch
 import numpy as np
@@ -239,6 +240,19 @@ def _getattr_qual(obj, name, default=_NOTHING):
             return default
         else:
             raise
+
+
+# test if a tensor is close to an integer
+def close_to_int(x, eps=0.1):
+    if x.is_complex():
+        y = torch.abs(torch.view_as_complex(torch.frac(torch.view_as_real(x))))
+    else:
+        y = torch.abs(torch.frac(x))
+    return (y < eps) | (y > (1 - eps))
+
+
+NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_val'])
+
 
 # Note [OpInfos]
 # ~~~~~~~~~~~~~~
@@ -1146,6 +1160,7 @@ class UnaryUfuncInfo(OpInfo):
                  sample_inputs_func=sample_inputs_unary,
                  sample_kwargs=lambda device, dtype, input: ({}, {}),
                  supports_sparse=False,
+                 reference_numerics_filter=None,  # Filter for singular input values for test_reference_numerics_normal
                  **kwargs):
         super(UnaryUfuncInfo, self).__init__(name,
                                              dtypes=dtypes,
@@ -1162,6 +1177,7 @@ class UnaryUfuncInfo(OpInfo):
         self.handles_extremals = handles_extremals
         self.handles_complex_extremals = handles_complex_extremals
         self.supports_complex_to_float = supports_complex_to_float
+        self.reference_numerics_filter = reference_numerics_filter
 
         # test_unary_ufuncs.py generates its own inputs to test the consistency
         # of the operator on sliced tensors, non-contig tensors, etc.
@@ -7951,9 +7967,6 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cuda', dtypes=[torch.cdouble],
                                     active_if=IS_WINDOWS),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cuda', dtypes=[torch.cdouble],
-                                    active_if=IS_WINDOWS),
                        # Reference: https://github.com/pytorch/pytorch/issues/50692
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad',
                                     device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
@@ -7961,7 +7974,11 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                     device_type='cuda', dtypes=[torch.cdouble], active_if=IS_WINDOWS),
-                   )),
+                   ),
+                   # acosh is not defined at x < 1 (real) or |z| < 1 (complex)
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: (torch.abs(x) < 1 if x.is_complex() else x < 1),
+                       safe_val=2)),
     BinaryUfuncInfo('add',
                     # NumPy has no builtin reference for the alpha kwarg, but it is easy enough to emulate
                     ref=lambda input, other, *, alpha=1: np.add(input, np.multiply(alpha, other)),
@@ -8204,9 +8221,6 @@ op_db: List[OpInfo] = [
                                     device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                    device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
-                                    active_if=IS_WINDOWS),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     device_type='cuda', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
                    )),
@@ -9373,7 +9387,9 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                   )),
+                   ),
+                   # log(z)->-inf for |z|->0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     UnaryUfuncInfo('log10',
                    ref=np.log10,
                    domain=(0, None),
@@ -9387,7 +9403,9 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=IS_WINDOWS),
-                   )),
+                   ),
+                   # log10(z)->-inf for |z|->0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     UnaryUfuncInfo('log1p',
                    ref=np.log1p,
                    aliases=('special.log1p',),
@@ -9410,9 +9428,9 @@ op_db: List[OpInfo] = [
                    skips=(
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                                     dtypes=[torch.cfloat, torch.cdouble]),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=[torch.cfloat, torch.cdouble]),
-                   )),
+                   ),
+                   # log2(z)->-inf for |z|->0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: torch.abs(x) < 0.1, safe_val=1)),
     OpInfo('logaddexp',
            dtypes=floating_types(),
            dtypesIfCPU=floating_types_and(torch.bfloat16),
@@ -11266,13 +11284,13 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
-                                    active_if=(IS_MACOS or IS_WINDOWS)),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cuda', dtypes=[torch.float64],
                                     active_if=TEST_WITH_ROCM),
-                   )),
+                   ),
+                   # tan(pi/2 * odd_number) is nan
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: close_to_int(x / (math.pi * 0.5)), safe_val=math.pi)),
     UnaryUfuncInfo('tanh',
                    ref=np.tanh,
                    aliases=('nn.functional.tanh',),
@@ -11292,13 +11310,15 @@ op_db: List[OpInfo] = [
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
                                     active_if=(IS_MACOS or IS_WINDOWS)),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble],
-                                    active_if=(IS_MACOS or IS_WINDOWS)),
                        # alias, nn.functional.tanh, will produce (because of warning string saved):
                        # "RuntimeError: Expected to not find "tanh" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
-                   )),
+                   ),
+                   # tan(j * pi/2 * odd_number) is nan
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                            if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+                       safe_val=0)),
     OpInfo('tensor_split',
            ref=np.array_split,
            dtypes=all_types_and_complex_and(torch.bool),
@@ -11681,7 +11701,9 @@ op_db: List[OpInfo] = [
                        # AssertionError: JIT Test does not execute any logic
                        DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                    ),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0})),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 0}, {'n': 0}),
+                   # polygamma functions have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_1',
@@ -11700,9 +11722,10 @@ op_db: List[OpInfo] = [
                        # Mismatch: https://github.com/pytorch/pytorch/issues/55357
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal'),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal'),
                    ),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1})),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 1}, {'n': 1}),
+                   # polygamma functions have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_2',
@@ -11724,7 +11747,9 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     active_if=TEST_WITH_ROCM),),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2})),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 2}, {'n': 2}),
+                   # polygamma functions have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_3',
@@ -11746,7 +11771,9 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     active_if=TEST_WITH_ROCM),),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3})),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 3}, {'n': 3}),
+                   # polygamma functions have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     UnaryUfuncInfo('polygamma',
                    op=lambda x, n, **kwargs: torch.polygamma(n, x, **kwargs),
                    variant_test_name='polygamma_n_4',
@@ -11769,7 +11796,9 @@ op_db: List[OpInfo] = [
                                     active_if=TEST_WITH_ROCM),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                                     active_if=TEST_WITH_ROCM),),
-                   sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4})),
+                   sample_kwargs=lambda device, dtype, input: ({'n': 4}, {'n': 4}),
+                   # polygamma functions have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     OpInfo('ravel',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -12782,8 +12811,6 @@ op_db: List[OpInfo] = [
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    device_type='cpu', dtypes=[torch.cfloat, torch.cdouble]),
                        # alias, nn.functional.sigmoid, will produce (because of warning string saved):
                        # "RuntimeError: Expected to not find "sigmoid" but found it"
                        DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping')),
@@ -12791,7 +12818,12 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
-                   assert_autodiffed=True),
+                   assert_autodiffed=True,
+                   # sigmoid(z) = 1 / (1 + exp(-z)), at z = j * pi * odd_number, the denominator is zero
+                   reference_numerics_filter=NumericsFilter(
+                       condition=lambda x: (close_to_int(x / (math.pi * 1j))
+                                            if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+                       safe_val=0)),
     UnaryUfuncInfo('digamma',
                    ref=scipy.special.digamma if TEST_SCIPY else _NOTHING,
                    aliases=('special.psi', 'special.digamma',),
@@ -12880,10 +12912,10 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                    ),
-                   safe_casts_outputs=True),
+                   safe_casts_outputs=True,
+                   # lgamma have multiple singularities at x <= 0
+                   reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
     OpInfo(
         'logdet',
         supports_out=False,
