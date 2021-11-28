@@ -811,7 +811,7 @@ tensor is constructed using :func:`torch.from_numpy`.
 Args:
     {data}
     {dtype}
-    device - the device of the constructed tensor. If None and data is a tensor
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
         the result tensor is constructed on the CPU.
 
@@ -8029,7 +8029,7 @@ Args:
 
 Keyword args:
     {dtype}
-    device - the device of the constructed tensor. If None and data is a tensor
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
         then the device of data is used. If None and data is not a tensor then
         the result tensor is constructed on the CPU.
     {requires_grad}
