@@ -96,7 +96,7 @@ def default_collate(batch):
             raise RuntimeError('each element in list of batch should be of equal size')
         transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
 
-        if isinstance(elem,  tuple):
+        if isinstance(elem, tuple):
             return [default_collate(samples) for samples in transposed]  # Backwards compatibility.
         else:
             try:
