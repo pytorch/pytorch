@@ -847,14 +847,14 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   For further details, please see the LAPACK documentation for GETRF.
 */
 template <typename scalar_t>
-void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
       "Calling torch.lu on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  TORCH_CHECK(compute_pivots, "lu without pivoting is not implemented on the CPU");
+  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
   auto input_data = input.data_ptr<scalar_t>();
   auto pivots_data = pivots.data_ptr<int>();
@@ -876,9 +876,9 @@ void apply_lu(const Tensor& input, const Tensor& pivots, const Tensor& infos, bo
 }
 
 // This is a type dispatching helper function for 'apply_lu'
-void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_cpu", [&]{
-    apply_lu<scalar_t>(input, pivots, infos, compute_pivots);
+    apply_lu_factor<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
 
@@ -890,8 +890,8 @@ void lu_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, b
   Args:
   * `b` -  [in] the right hand side matrix B
            [out] the solution matrix X
-  * `lu` - [in] the LU factorization of matrix A (see at::_lu_with_info)
-  * `pivots` - [in] the pivot indices (see at::_lu_with_info)
+  * `lu` - [in] the LU factorization of matrix A (see at::linalg_lu_factor)
+  * `pivots` - [in] the pivot indices (see at::linalg_lu_factor)
 
   For further details, please see the LAPACK documentation for GETRS.
 */
@@ -995,10 +995,10 @@ REGISTER_AVX512_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_AVX2_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 REGISTER_VSX_DISPATCH(triangular_solve_stub, &triangular_solve_kernel);
 
-REGISTER_ARCH_DISPATCH(lu_stub, DEFAULT, &lu_kernel);
-REGISTER_AVX512_DISPATCH(lu_stub, &lu_kernel);
-REGISTER_AVX2_DISPATCH(lu_stub, &lu_kernel);
-REGISTER_VSX_DISPATCH(lu_stub, &lu_kernel);
+REGISTER_ARCH_DISPATCH(lu_factor_stub, DEFAULT, &lu_factor_kernel);
+REGISTER_AVX512_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel);
+REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 
 REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
