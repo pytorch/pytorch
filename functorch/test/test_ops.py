@@ -330,7 +330,6 @@ class TestOperators(TestCase):
         xfail('linalg.norm'),
         xfail('linalg.slogdet'),
         xfail('logdet'),
-        xfail('lu'),
         xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
