@@ -7,7 +7,11 @@ from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 Tensor = torch.Tensor
 
 common_notes = {
-    "sync_note": """When inputs are on a CUDA device, this function synchronizes that device with the CPU."""
+    "experimental_warning": """This function is "experimental" and it may change in a future PyTorch release.""",
+    "sync_note": "When inputs are on a CUDA device, this function synchronizes that device with the CPU.",
+    "sync_note_ex": r"When the inputs are on a CUDA device, this function synchronizes only when :attr:`check_errors`\ `= True`.",
+    "sync_note_has_ex": ("When inputs are on a CUDA device, this function synchronizes that device with the CPU. "
+                         "For a version of this function that does not synchronize, see :func:`{}`.")
 }
 
 
@@ -161,9 +165,11 @@ and the decomposition could not be completed.
 ``info`` filled with zeros indicates that the decomposition was successful.
 If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
 
-.. note:: If :attr:`A` is on a CUDA device, this function may synchronize that device with the CPU.
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
 
-.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
 
 .. seealso::
         :func:`torch.linalg.cholesky` is a NumPy compatible variant that always checks for errors.
@@ -290,11 +296,11 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-.. note::
-    If :attr:`A` is on a CUDA device then this function may synchronize
-    that device with the CPU.
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
 
-.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
 
 .. seealso::
 
@@ -2019,6 +2025,112 @@ Examples::
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
 
+lu_factor = _add_docstr(_linalg.linalg_lu_factor, r"""
+linalg.lu_factor(A, *, bool pivot=True, out=None) -> (Tensor, Tensor)
+
+Computes a compact representation of the LU factorization with partial pivoting of a matrix.
+
+This function computes a compact representation of the decomposition given by :func:`torch.linalg.lu`.
+If the matrix is square, this representation may be used in :func:`torch.linalg.lu_solve`
+to solve system of linear equations that share the matrix :attr:`A`.
+
+The returned decomposition is represented as a named tuple `(LU, pivots)`.
+The ``LU`` matrix has the same shape as the input matrix ``A``. Its upper and lower triangular
+parts encode the non-constant elements of ``L`` and ``U`` of the LU decomposition of ``A``.
+
+The returned permutation matrix is represented by a 1-indexed vector. `pivots[i] == j` represents
+that in the `i`-th step of the algorithm, the `i`-th row was permuted with the `j-1`-th row.
+
+On CUDA, one may use :attr:`pivot`\ `= False`. In this case, this function returns the LU
+decomposition without pivoting if it exists.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if the inputs are batches of matrices then
+the output has the same batch dimensions.
+
+""" + fr"""
+.. note:: {common_notes["sync_note_has_ex"].format("torch.linalg.lu_factor_ex")}
+""" + r"""
+.. warning:: The LU decomposition is almost never unique, as often there are different permutation
+             matrices that can yield different LU decompositions.
+             As such, different platforms, like SciPy, or inputs on different devices,
+             may produce different valid decompositions.
+
+.. warning:: Gradient computations are only supported if the input matrix is full-rank.
+             If this condition is not met, no error will be thrown, but the gradient may not be finite.
+             This is because the LU decomposition with pivoting is not differentiable at these points.
+
+.. seealso::
+
+        :func:`torch.linalg.lu_solve` solves a system of linear equations given the output of this
+        function provided the input matrix was square and invertible.
+
+        :func:`torch.linalg.lu` computes the LU decomposition with partial pivoting of a possibly
+        non-square matrix.
+
+        :func:`torch.linalg.solve` solves a system of linear equations. It is a composition
+        of :func:`~lu_factor` and :func:`~lu_solve`.
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+
+Keyword args:
+    pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                            decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(LU, pivots)`.
+
+Raises:
+    RuntimeError: if the :attr:`A` matrix is not invertible or any matrix in a batched :attr:`A`
+                  is not invertible.
+
+Examples::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> B1 = torch.randn(2, 3, 4)
+    >>> B2 = torch.randn(2, 3, 7)
+    >>> A_factor = torch.linalg.lu_factor(A)
+    >>> X1 = torch.linalg.lu_solve(A_factor, B1)
+    >>> X2 = torch.linalg.lu_solve(A_factor, B2)
+    >>> torch.allclose(A @ X1, B1)
+    True
+    >>> torch.allclose(A @ X2, B2)
+    True
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
+lu_factor_ex = _add_docstr(_linalg.linalg_lu_factor_ex, r"""
+linalg.lu_factor_ex(A, *, pivot=True, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
+
+This is a version of :func:`~lu_factor` that does not perform error checks unless :attr:`check_errors`\ `= True`.
+It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
+
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
+
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
+
+Args:
+    A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
+
+Keyword args:
+    pivot (bool, optional): Whether to compute the LU decomposition with partial pivoting, or the regular LU
+                            decomposition. :attr:`pivot`\ `= False` not supported on CPU. Default: `True`.
+    check_errors (bool, optional): controls whether to check the content of ``infos`` and raise
+                                   an error if it is non-zero. Default: `False`.
+    out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(LU, pivots, info)`.
+
+.. _LAPACK's getrf:
+    https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
+""")
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor
