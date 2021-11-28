@@ -792,7 +792,7 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Converts dataa into a tensor, sharing data and preserving autograd
+Converts data into a tensor, sharing data and preserving autograd
 history if possible.
 
 If data is already a tensor with the requeseted dtype and device
