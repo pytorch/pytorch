@@ -91,7 +91,8 @@ static void BM_deep_wide_static(benchmark::State& state) {
 }
 
 std::shared_ptr<torch::jit::StaticModule> getStaticModule() {
-  static auto smod = std::make_shared<torch::jit::StaticModule>(getDeepAndWideSciptModel());
+  static auto smod =
+      std::make_shared<torch::jit::StaticModule>(getDeepAndWideSciptModel());
   return smod;
 }
 
@@ -193,17 +194,16 @@ BENCHMARK(BM_deep_wide_static)->RangeMultiplier(8)->Ranges({{1, 20}});
 BENCHMARK(BM_deep_wide_static_threaded)->Threads(8);
 
 BENCHMARK(BM_long_static_memory_optimization)
-  ->Args({2<<0, 0})
-  ->Args({2<<2, 0})
-  ->Args({2<<4, 0})
-  ->Args({2<<8, 0})
-  ->Args({2<<0, 1})
-  ->Args({2<<2, 1})
-  ->Args({2<<4, 1})
-  ->Args({2<<8, 1});
+    ->Args({2 << 0, 0})
+    ->Args({2 << 2, 0})
+    ->Args({2 << 4, 0})
+    ->Args({2 << 8, 0})
+    ->Args({2 << 0, 1})
+    ->Args({2 << 2, 1})
+    ->Args({2 << 4, 1})
+    ->Args({2 << 8, 1});
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv) {
   c10::ParseCommandLineFlags(&argc, &argv);
   ::benchmark::Initialize(&argc, argv);
   ::benchmark::RunSpecifiedBenchmarks();
