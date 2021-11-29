@@ -86,42 +86,16 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 namespace at { namespace native {
 
 /* Note [Jiterator]
-TensorIterator TODOs:
- - fix Trivial Offsetcalculator cases
- - review caching
- - review dynamic casting reimplementation
- -   (in particular an output dtype distinct from the common dtype like abs)
- - review jitted_can_vectorize_up_to and verify matches non-jitted version
- - add INFINITY and NAN macros for Zeta
- - WORKING: 
-     - noncontiguous
-     - noncontiguous with out
-     - noncontiguous with out (different dtype)
-     - contiguous
-     - contiguous with out
-     - contiguous with out (different dtypes)
- - UNTESTED:
-     - binary inputs different dtypes from each other
-     - binary inputs different dtypes from out
-     - binary all three tensors different dtypes
-     - inplace and method variations
 
-
-Jit TODOs:
-
-Project TODOs:
- - verify no perf regression for non-nvrtc use cases
- - compare before/after jiterator performance for jiterated kernels
- - benchmark jiterated kernel compilation time
- - compare before/after built time, build size, CUDA context size
 */
+
 // Entrypoint for jitted GPU kernels.
-// Only handles elementwise unary and binary kernels with a 
+// Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
 template <char const *name, typename return_type, typename compute_type, int arity>
 void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
-  // TODO: this preamble is common to both jitted_gpu_kernel and gpu_kernel
+  // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
   for (int arg = 0; arg < iter.ntensors(); arg++) {
     TORCH_INTERNAL_ASSERT(
@@ -149,7 +123,7 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
   //   casting is needed.
   // TODO: this needs additional review
   bool needs_dynamic_casting = false;
-  
+
   // Checks output
   const ScalarType return_scalar_type = c10::CppTypeToScalarType<return_type>::value;
   if (iter.dtype(0) != return_scalar_type) {
@@ -158,7 +132,7 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
     std::cout << "return_scalar_type is " << return_scalar_type << std::endl;
     needs_dynamic_casting = true;
   }
-  
+
   // Checks input(s)
   const ScalarType compute_scalar_type = c10::CppTypeToScalarType<compute_type>::value;
   for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
@@ -171,13 +145,11 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
     }
   }
 
-  jitted_gpu_kernel_impl</*name*/ name, 
-                  /*return_type=*/ return_type, 
-                  /*compute_type=*/ compute_type, 
+  jitted_gpu_kernel_impl</*name*/ name,
+                  /*return_type=*/ return_type,
+                  /*compute_type=*/ compute_type,
                   arity>(iter, f, needs_dynamic_casting);
 }
-
-const char NO_NAME[] = "";
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
@@ -199,12 +171,7 @@ void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
     return;
   }
 
-  // Acquires information from the lambda
-  using traits = function_traits<func_t>;
-  constexpr int arity = traits::arity;
-  const bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
-
-  gpu_kernel_impl<arity>(iter, f, dynamic_casting);
+  gpu_kernel_impl(iter, f);
 }
 
 template<typename arg1_t, typename arg2_t, typename return_t, typename func_t>

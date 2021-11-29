@@ -91,33 +91,34 @@ __global__ void unrolled_elementwise_kernel(int N, func_t f, array_t data,
 }
 
 // this function assume trivial 1d and no dynamic casting
-template<int arity, typename func_t, typename array_t>
+template<typename func_t, typename array_t>
 static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
+  using traits = function_traits<func_t>;
   int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
-
   int vec_size = memory::can_vectorize_up_to<func_t>(data);
+
   switch (vec_size) {
-    case 4:
-      vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      break;
-    case 2:
-      vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      break;
-    case 1: {
-      auto input_calc = TrivialOffsetCalculator<arity>();
-      auto output_calc = TrivialOffsetCalculator<1>();
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer);
-      C10_CUDA_KERNEL_LAUNCH_CHECK();
-      break;
-    }
-    default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
+  case 4:
+    vectorized_elementwise_kernel<4, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    break;
+  case 2:
+    vectorized_elementwise_kernel<2, func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    break;
+  case 1: {
+    auto input_calc = TrivialOffsetCalculator<traits::arity>();
+    auto output_calc = TrivialOffsetCalculator<1>();
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    unrolled_elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data, input_calc, output_calc, loader, storer);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    break;
+  }
+  default:
+    TORCH_INTERNAL_ASSERT(false, "Unexpected vectorization size");
   }
 }
 
@@ -130,31 +131,36 @@ template<char const *name,
          typename loader_t,
          typename storer_t>
 static inline void launch_jitted_unrolled_kernel(
-  int64_t N, const std::string& f, array_t data,
+  DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
   inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  const int64_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  // std::cout << "jitting is true!" << std::endl;
-  // std::cout << "launch_unrolled_kernel!" << std::endl;
-  static at::cuda::jit::NvrtcFunction fn;
-  if (!fn.function) {
-//    std::cout << "generating code\n";
+  std::cout << "launch_jitted_unrolled_kernel!" << std::endl;
+  std::cout << "input device is " << dev_idx << std::endl;
+  std::cout << "current device index is " << c10::cuda::current_device() << std::endl;
+  std::cout << "device count is " << c10::cuda::device_count() << std::endl;
+
+  static std::vector<at::cuda::jit::NvrtcFunction> fns(c10::cuda::device_count());
+
+  at::cuda::jit::NvrtcFunction* fn_ptr = &fns[dev_idx];
+  if (!fn_ptr->function) {
+    std::cout << "Generating code because no cached program found" << std::endl;
     constexpr int nTensors = array_t::size();
     constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() || !std::is_same<decltype(s), memory::StoreWithoutCast>();
-    // std::string common_type_str = at::cuda::jit::typeName<compute_type>();
-    // std::string result_type_str = at::cuda::jit::typeName<result_type>();
     std::string string_name{name};
     std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
     std::string result_type_str = at::cuda::jit::typeName<result_type>();
     auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
                                              compute_type_str, result_type_str,
                                              contiguous, dynamic_casting);
-    // std::cout << "generated code: " << std::endl;
-    // std::cout << code << std::endl;
-    fn = at::cuda::jit::jit_pwise_function(code, name); // TODO proper name
+    std::cout << "generated code: " << std::endl;
+    std::cout << code << std::endl;
+    *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
   }
+
+
 
   // packs args
   std::array<void*, 6> args = {
@@ -165,7 +171,8 @@ static inline void launch_jitted_unrolled_kernel(
     (void*)&l,
     (void*)&s
   };
-  at::cuda::jit::launch_jitted_pwise_function(fn, args, grid, num_threads());
+
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -175,25 +182,33 @@ template<
   typename compute_type,
   int arity,
   typename array_t>
-static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string& f, array_t data) {
+static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
-  int64_t grid = (N + block_work_size - 1) / block_work_size;
+  const int64_t grid = (N + block_work_size() - 1) / block_work_size();
 
-  //std::cout << "launch_jitted_vectorized_kernel!" << std::endl;
+  std::cout << "launch_jitted_vectorized_kernel!" << std::endl;
+  std::cout << "input device is " << dev_idx << std::endl;
+  std::cout << "current device index is " << c10::cuda::current_device() << std::endl;
+
   const int vec_size = memory::jitted_can_vectorize_up_to<result_type, compute_type, arity>(data);
-  //std::cout << "jitted vec_size is " << vec_size << std::endl;
+  std::cout << "jitted vec_size is " << vec_size << std::endl;
 
-  //TODO handle 2 and 4 vec sizes, so far only one vecsize will be compiled (4)
-  static at::cuda::jit::NvrtcFunction fn4;
-  static at::cuda::jit::NvrtcFunction fn2;
-  static at::cuda::jit::NvrtcFunction fn1;
-  at::cuda::jit::NvrtcFunction * fn_ptr;
+  // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
+  //   fn_ptr is set to the appropriate function based on the vec size and GPU used
+  // TODO: Memory use can probably be optimized by re-using kernels across GPUs with
+  //   the same compute capability
+  static std::vector<at::cuda::jit::NvrtcFunction> fns4(c10::cuda::device_count());
+  static std::vector<at::cuda::jit::NvrtcFunction> fns2(c10::cuda::device_count());
+  static std::vector<at::cuda::jit::NvrtcFunction> fns1(c10::cuda::device_count());
+
+
+  at::cuda::jit::NvrtcFunction* fn_ptr;
   if (vec_size == 4) {
-    fn_ptr = &fn4;
+    fn_ptr = &fns4[dev_idx];
   } else if (vec_size == 2) {
-    fn_ptr = &fn2;
+    fn_ptr = &fns2[dev_idx];
   } else if (vec_size ==1) {
-    fn_ptr = &fn1;
+    fn_ptr = &fns1[dev_idx];
   } else {
     TORCH_INTERNAL_ASSERT(false, "unexpected vec_size for jitter vectorized kernel");
   }
@@ -201,7 +216,7 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
   bool vectorized = vec_size > 1;
 
   if (!fn_ptr->function) {
-//    std::cout << "generating code\n";
+    std::cout << "Generating code because no cached program found" << std::endl;
     constexpr int nTensors = array_t::size();
     std::string string_name{name};
     std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
@@ -210,8 +225,8 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
                                               compute_type_str, result_type_str,
                                               /*contiguous=*/true, /*dynamic_casting=*/false,
                                               vectorized, vec_size);
-    //std::cout << "generated code: " << std::endl;
-    //std::cout << code << std::endl;
+    std::cout << "generated code: " << std::endl;
+    std::cout << code << std::endl;
     std::string kernel_name = vectorized ? string_name + "_vectorized" + std::to_string(vec_size) : string_name;
     *fn_ptr = at::cuda::jit::jit_pwise_function(code, kernel_name);
   }
@@ -225,6 +240,7 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
       nullptr,
       nullptr
     };
+
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
@@ -241,6 +257,7 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
       (void*)&l,
       (void*)&s
     };
+
     at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, num_threads());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
@@ -248,10 +265,9 @@ static inline void launch_jitted_vectorized_kernel(int64_t N, const std::string&
 }
 
 template<typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t, typename loader_t, typename storer_t>
-static inline void launch_unrolled_kernel(
-  int64_t N, const func_t& f, array_t data,
-  inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous) {
-
+static inline void launch_unrolled_kernel(int64_t N, const func_t& f, array_t data,
+                                          inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s)
+{
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   int64_t grid = (N + block_work_size() - 1) / block_work_size();
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -274,79 +290,113 @@ void jitted_gpu_kernel_impl(TensorIteratorBase& iter, const std::string& f, cons
   int64_t numel = iter.numel();
   bool contiguous = iter.is_contiguous();
 
+  // Decides which of 4 kernel types to launch
+  // Variations are:
+  //   - Case 1: no dynamic casting and contiguous
+  //   - Case 2: no dynamic casting and noncontiguous
+  //   - Case 3: dynamic casting and contiguous
+  //   - Case 4: dynamic casting and noncontiguous
+  // These cases align with the non-jitted CUDALoops.cuh cases in gpu_kernel_impl
+
   if (!dynamic_casting) {
     if (contiguous) {
-//      std::cout << "jitted_gpu_kernel_impl !dynamic_casting and contiguous" << std::endl;
-      launch_jitted_vectorized_kernel<name, result_type, compute_type, arity>(numel, f, data);
-    } else {
-//      std::cout << "jitted_gpu_kernel_impl !dynamic_casting " << std::endl;
-      auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
-      auto output_offset_calculator = make_output_offset_calculator(iter);
-      auto loader = memory::LoadWithoutCast();
-      auto storer = memory::StoreWithoutCast();
-      launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
+      // Case 1: no dynamic casting and contiguous
+      std::cout << "jitted_gpu_kernel_impl Case 1: no dynamic casting and contiguous" << std::endl;
+      launch_jitted_vectorized_kernel<name, result_type, compute_type, arity>(
+        iter.device().index(), numel, f, data);
+      return;
     }
-  } else {
-    at::detail::Array<ScalarType, arity> dtypes;
-    for (auto i = decltype(arity){0}; i < arity; ++i) {
-      dtypes[i] = iter.dtype(i + 1);
-    }
-    auto loader = memory::LoadWithCast<arity>(dtypes);
-    auto storer = memory::StoreWithCast(iter.dtype(0));
-    if (contiguous) {
-//      std::cout << "jitted_gpu_kernel_impl dynamic_casting and contiguous" << std::endl;
-      auto input_offset_calculator = TrivialOffsetCalculator<arity>();
-      auto output_offset_calculator = TrivialOffsetCalculator<1>();
-      launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
-    } else {
-//      std::cout << "jitted_gpu_kernel_impl dynamic_casting" << std::endl;
-      auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
-      auto output_offset_calculator = make_output_offset_calculator(iter);
-      launch_jitted_unrolled_kernel<name, result_type, compute_type>(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
-    }
+
+    // Case 2: no dynamic casting and noncontiguous
+    std::cout << "jitted_gpu_kernel_impl Case 2: no dynamic casting and noncontiguous" << std::endl;
+    auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
+    auto output_offset_calculator = make_output_offset_calculator(iter);
+    auto loader = memory::LoadWithoutCast();
+    auto storer = memory::StoreWithoutCast();
+    launch_jitted_unrolled_kernel<name, result_type, compute_type>(
+      iter.device().index(), numel, f, data, input_offset_calculator,
+      output_offset_calculator, loader, storer, contiguous);
+    return;
   }
+
+  // Cases 3 and 4 are handled below
+  // Both require construction of a storer (this asserts 1 output) and one or more loaders
+
+  // Creates store cast to output (the zeroth tensor in TensorIterator)
+  auto storer = memory::StoreWithCast(iter.dtype(0));
+
+  // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
+  at::detail::Array<ScalarType, arity> dtypes;
+  for (auto i = decltype(arity){0}; i < arity; ++i) {
+    dtypes[i] = iter.dtype(i + 1);
+  }
+  auto loader = memory::LoadWithCast<arity>(dtypes);
+
+  if (contiguous) {
+    // Case 3: dynamic casting and contiguous
+    std::cout << "jitted_gpu_kernel_impl Case 3: dynamic casting and contiguous" << std::endl;
+    auto input_offset_calculator = TrivialOffsetCalculator<arity>();
+    auto output_offset_calculator = TrivialOffsetCalculator<1>();
+    launch_jitted_unrolled_kernel<name, result_type, compute_type>(
+      iter.device().index(), numel, f, data, input_offset_calculator,
+      output_offset_calculator, loader, storer, contiguous);
+    return;
+  }
+
+  // Case 4: dynamic casting and noncontiguous
+  std::cout << "jitted_gpu_kernel_impl Case 4: dynamic casting and noncontiguous" << std::endl;
+  auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
+  auto output_offset_calculator = make_output_offset_calculator(iter);
+  launch_jitted_unrolled_kernel<name, result_type, compute_type>(
+    iter.device().index(), numel, f, data, input_offset_calculator,
+    output_offset_calculator, loader, storer, contiguous);
 }
 
-template<int arity, typename func_t>
-void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f, const bool dynamic_casting) {
+template <typename func_t>
+void gpu_kernel_impl(TensorIteratorBase& iter, const func_t& f) {
+  using traits = function_traits<func_t>;
+  using arg0_t = typename traits::result_type;
+  constexpr int ntensors = traits::arity + 1;
+
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
-  TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
+  TORCH_INTERNAL_ASSERT(iter.ninputs() == traits::arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
 
-  constexpr int ntensors = arity + 1;
   at::detail::Array<char*, ntensors> data;
-  for (auto i = decltype(ntensors){0}; i < ntensors; ++i) {
+  for (int i = 0; i < ntensors; i++) {
     data[i] = (char*)iter.data_ptr(i);
   }
 
   int64_t numel = iter.numel();
+
   bool contiguous = iter.is_contiguous();
+  bool dynamic_casting = needs_dynamic_casting<func_t>::check(iter);
 
   if (!dynamic_casting) {
     if (contiguous) {
-      launch_vectorized_kernel<arity>(numel, f, data);
+      launch_vectorized_kernel(numel, f, data);
     } else {
-      auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
       auto loader = memory::LoadWithoutCast();
       auto storer = memory::StoreWithoutCast();
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     }
   } else {
-    at::detail::Array<ScalarType, arity> dtypes;
-    for (auto i = decltype(arity){0}; i < arity; ++i) {
+    at::detail::Array<ScalarType, traits::arity> dtypes;
+    for (int i = 0; i < traits::arity; i++) {
       dtypes[i] = iter.dtype(i + 1);
     }
-    auto loader = memory::LoadWithCast<arity>(dtypes);
+    auto loader = memory::LoadWithCast<traits::arity>(dtypes);
     auto storer = memory::StoreWithCast(iter.dtype(0));
     if (contiguous) {
-      auto input_offset_calculator = TrivialOffsetCalculator<arity>();
+      auto input_offset_calculator = TrivialOffsetCalculator<traits::arity>();
       auto output_offset_calculator = TrivialOffsetCalculator<1>();
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     } else {
-      auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
+      auto input_offset_calculator = make_input_offset_calculator<traits::arity>(iter);
       auto output_offset_calculator = make_output_offset_calculator(iter);
-      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer, contiguous);
+      launch_unrolled_kernel(numel, f, data, input_offset_calculator, output_offset_calculator, loader, storer);
     }
   }
 }

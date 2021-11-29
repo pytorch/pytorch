@@ -9,36 +9,455 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <c10/util/irange.h>
+
 namespace at{
 
 namespace cuda{
 
 namespace jit {
 
+const std::string jit_code_template = R"ESCAPE(
+  typedef long long int int64_t;
+  typedef unsigned int uint32_t;
+  typedef signed char int8_t;
+  typedef char uint8_t;
+  typedef short int16_t;
+  static_assert(sizeof(int64_t) == 8, "expected size does not match");
+  static_assert(sizeof(uint32_t) == 4, "expected size does not match");
+  static_assert(sizeof(int8_t) == 1, "expected size does not match");
+  constexpr int num_threads = 64;
+  constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
+  constexpr int block_work_size = thread_work_size * num_threads;
+  #define ERROR_UNSUPPORTED_CAST assert(false);
+
+
+  // NB: Order matters for this macro; it is relied upon in
+  // _promoteTypesLookup and the serialization format.
+  // Note, some types have ctype as void because we don't support them in codegen
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(_) \
+  _(uint8_t, Byte) /* 0 */                               \
+  _(int8_t, Char) /* 1 */                                \
+  _(int16_t, Short) /* 2 */                              \
+  _(int, Int) /* 3 */                                    \
+  _(int64_t, Long) /* 4 */                               \
+  _(void, Half) /* 5 */                              \
+  _(float, Float) /* 6 */                                \
+  _(double, Double) /* 7 */                              \
+  _(void, ComplexHalf) /* 8 */        \
+  _(void, ComplexFloat) /* 9 */           \
+  _(void, ComplexDouble) /* 10 */        \
+  _(bool, Bool) /* 11 */                                 \
+  _(void, QInt8) /* 12 */                          \
+  _(void, QUInt8) /* 13 */                        \
+  _(void, QInt32) /* 14 */                        \
+  _(void, BFloat16) /* 15 */                     \
+  _(void, QUInt4x2) /* 16 */
+
+  #define AT_FORALL_SCALAR_TYPES(_) \
+  _(uint8_t, Byte)                \
+  _(int8_t, Char)                 \
+  _(int16_t, Short)               \
+  _(int, Int)                     \
+  _(int64_t, Long)                \
+  _(float, Float)                 \
+  _(double, Double)
+
+  enum class ScalarType : int8_t {
+  #define DEFINE_ENUM(_1, n) n,
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
+  #undef DEFINE_ENUM
+      Undefined,
+  NumOptions
+  };
+
+  // Fetch a value with dynamic type src_type from ptr, and cast it to static type dest_t.
+  // For now, simplified version that does not handle complex and special casting to uint8
+  #define FETCH_AND_CAST_CASE(type, scalartype) case ScalarType::scalartype: return static_cast<dest_t>(*(const type *)ptr);
+  template<typename dest_t>
+  __device__ inline dest_t fetch_and_cast(const ScalarType src_type, const void *ptr) {
+    switch (src_type) {
+        AT_FORALL_SCALAR_TYPES(FETCH_AND_CAST_CASE)
+        default:
+          ERROR_UNSUPPORTED_CAST
+    }
+    return dest_t(0); // just to avoid compiler warning
+  }
+
+  // Cast a value with static type src_t into dynamic dest_type, and store it to ptr.
+  #define CAST_AND_STORE_CASE(type, scalartype) case ScalarType::scalartype: *(type *)ptr = static_cast<type>(value); return;
+  template<typename src_t>
+  __device__ inline void cast_and_store(const ScalarType dest_type, void *ptr, src_t value) {
+  switch (dest_type) {
+      AT_FORALL_SCALAR_TYPES(CAST_AND_STORE_CASE)
+      default:;
+  }
+  ERROR_UNSUPPORTED_CAST
+  }
+
+  template <typename T, int size>
+  struct Array {
+  T data[size];
+
+  __device__ T operator[](int i) const {
+      return data[i];
+  }
+  __device__ T& operator[](int i) {
+      return data[i];
+  }
+  Array() = default;
+  Array(const Array&) = default;
+  Array& operator=(const Array&) = default;
+  };
+
+  struct LoadWithoutCast {
+  template <typename scalar_t>
+  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg=0) {
+      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+  }
+  };
+
+  template <int N>
+  struct LoadWithCast {
+  using array_t = Array<ScalarType, N==0? 1 : N>;
+  using size_array_t = Array<uint32_t, N==0? 1: N>;
+
+  array_t dtypes;
+  size_array_t element_sizes;
+  template <typename scalar_t>
+  __device__ scalar_t load(char* base_ptr, uint32_t offset, int arg) {
+      void* ptr = base_ptr + element_sizes[arg] * offset;
+      return fetch_and_cast<scalar_t>(dtypes[arg], ptr);
+  }
+  };
+
+  struct StoreWithoutCast {
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+      *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+  };
+
+  struct StoreWithCast {
+  ScalarType dtype;
+  uint32_t element_size;
+  //StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
+  template<typename scalar_t>
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+      void *ptr = base_ptr + element_size * offset;
+      cast_and_store<scalar_t>(dtype, ptr, value);
+  }
+  };
+
+  template <typename T>
+  struct DivMod {
+  T div;
+  T mod;
+
+  __device__ DivMod(T _div, T _mod) {
+      div = _div;
+      mod = _mod;
+  }
+  };
+
+  //<unsigned int>
+  struct IntDivider {
+  IntDivider() = default;
+
+  __device__ inline unsigned int div(unsigned int n) const {
+  unsigned int t = __umulhi(n, m1);
+  return (t + n) >> shift;
+  }
+
+  __device__ inline unsigned int mod(unsigned int n) const {
+  return n - div(n) * divisor;
+  }
+
+  __device__ inline DivMod<unsigned int> divmod(unsigned int n) const {
+  unsigned int q = div(n);
+  return DivMod<unsigned int>(q, n - q * divisor);
+  }
+
+  unsigned int divisor;  // d above.
+  unsigned int m1;  // Magic number: m' above.
+  unsigned int shift;  // Shift amounts.
+  };
+
+  template <int NARGS>
+  struct TrivialOffsetCalculator {
+    // The offset for each argument. Wrapper around fixed-size array.
+    // The offsets are in # of elements, not in bytes.
+    Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
+      Array<${index_type}, NARGS> offsets;
+      #pragma unroll
+      for (int arg = 0; arg < NARGS; arg++) {
+        offsets[arg] = linear_idx;
+      }
+      return offsets;
+    }
+  };
+
+  template<int NARGS>
+  struct OffsetCalculator {
+  OffsetCalculator() = default;
+  __device__ __forceinline__ Array<${index_type}, NARGS> get(${index_type} linear_idx) const {
+      Array<${index_type}, NARGS> offsets;
+      #pragma unroll
+      for (int arg = 0; arg < NARGS; ++arg) {
+      offsets[arg] = 0;
+      }
+
+      #pragma unroll
+      for (int dim = 0; dim < 25; ++dim) {
+      if (dim == dims) {
+          break;
+      }
+
+      auto divmod = sizes_[dim].divmod(linear_idx);
+      linear_idx = divmod.div;
+
+      #pragma unroll
+      for (int arg = 0; arg < ${nInputs}; ++arg) {
+          offsets[arg] += divmod.mod * strides_[dim][arg];
+      }
+      }
+      return offsets;
+  }
+
+    int dims;
+    IntDivider sizes_[25];
+    // NOTE: this approach will not support nInputs == 0
+    ${index_type} strides_[25][NARGS];
+  };
+
+  ${functor}
+
+  // TODO: setup grid-stride loop
+  extern "C" __global__
+  void ${name}_kernel(
+      const int numel,
+      Array<char*, ${nInputs}+1> data, //[${nInputs}+1],
+      ${offset_calculator}<${nInputs}> input_calculator,
+      ${offset_calculator}<1> output_calculator,
+      ${loader} l,
+      ${storer} s) {
+    ${declare_load_arrays}
+    ${declare_store_arrays}
+
+    int idx = blockIdx.x;
+
+    int remaining = numel - block_work_size * idx;
+    auto thread_idx = threadIdx.x;
+
+    #pragma unroll
+    for (int j = 0; j < thread_work_size; j++){
+        if (thread_idx >= remaining) {
+            break;
+        }
+
+        int linear_idx = thread_idx + block_work_size * idx;
+        auto input_offsets = input_calculator.get(linear_idx);
+        // printf(
+        //     "thread %d data %p %p offset %d\n",
+        //     threadIdx.x,
+        //     data[0], data[1],
+        //     input_offsets[0]);
+        ${load_inputs}
+        // printf(
+        //    "thread %d a %f offsets %d\n", threadIdx.x, arg0[j], input_offsets[0]);
+        thread_idx += num_threads;
+    }
+
+    #pragma unroll
+    for (int j = 0; j < thread_work_size; j++) {
+        out[j] = ${name}<${scalar_type}>(${args});
+    }
+
+    thread_idx = threadIdx.x;
+    #pragma unroll
+    for (int j = 0; j < thread_work_size; j++){
+        if (thread_idx >= remaining) {
+            break;
+        }
+        //TODO maybe think about unifying offset calculators and reuse
+        //offsets computed in the load loop
+        int linear_idx = thread_idx + block_work_size * idx;
+        auto output_offsets = output_calculator.get(linear_idx);
+        //TODO handle multi-return functors
+        ${store_outputs}
+        //*(reinterpret_cast<${scalar_type}*>(data[0])+output_offsets[0]) = out[j];
+        thread_idx += num_threads;
+    }
+  }
+)ESCAPE";
+
+const std::string jit_vectorized_code_template = R"ESCAPE(
+  typedef long long int int64_t;
+  typedef unsigned int uint32_t;
+  typedef signed char int8_t;
+  typedef char uint8_t;
+  typedef short int16_t;
+  static_assert(sizeof(int64_t) == 8, "expected size does not match");
+  static_assert(sizeof(uint32_t) == 4, "expected size does not match");
+  static_assert(sizeof(int8_t) == 1, "expected size does not match");
+  constexpr int num_threads = 64;
+  constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
+  constexpr int block_work_size = thread_work_size * num_threads;
+  #define ERROR_UNSUPPORTED_CAST assert(false);
+
+
+  // NB: Order matters for this macro; it is relied upon in
+  // _promoteTypesLookup and the serialization format.
+  // Note, some types have ctype as void because we don't support them in codegen
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(_) \
+  _(uint8_t, Byte) /* 0 */                               \
+  _(int8_t, Char) /* 1 */                                \
+  _(int16_t, Short) /* 2 */                              \
+  _(int, Int) /* 3 */                                    \
+  _(int64_t, Long) /* 4 */                               \
+  _(void, Half) /* 5 */                              \
+  _(float, Float) /* 6 */                                \
+  _(double, Double) /* 7 */                              \
+  _(void, ComplexHalf) /* 8 */        \
+  _(void, ComplexFloat) /* 9 */           \
+  _(void, ComplexDouble) /* 10 */        \
+  _(bool, Bool) /* 11 */                                 \
+  _(void, QInt8) /* 12 */                          \
+  _(void, QUInt8) /* 13 */                        \
+  _(void, QInt32) /* 14 */                        \
+  _(void, BFloat16) /* 15 */                     \
+  _(void, QUInt4x2) /* 16 */
+
+  #define AT_FORALL_SCALAR_TYPES(_) \
+  _(uint8_t, Byte)                \
+  _(int8_t, Char)                 \
+  _(int16_t, Short)               \
+  _(int, Int)                     \
+  _(int64_t, Long)                \
+  _(float, Float)                 \
+  _(double, Double)
+
+  enum class ScalarType : int8_t {
+  #define DEFINE_ENUM(_1, n) n,
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
+  #undef DEFINE_ENUM
+      Undefined,
+  NumOptions
+  };
+
+
+  template <typename T, int size>
+  struct Array {
+  T data[size];
+
+  __device__ T operator[](int i) const {
+      return data[i];
+  }
+  __device__ T& operator[](int i) {
+      return data[i];
+  }
+  Array() = default;
+  Array(const Array&) = default;
+  Array& operator=(const Array&) = default;
+  };
+
+  template <typename scalar_t>
+  __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
+      return *(reinterpret_cast<scalar_t*>(base_ptr) + offset);
+  }
+
+  template<typename scalar_t>
+  __device__ __inline__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+      *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
+  }
+
+  // aligned vector generates vectorized load/store on CUDA
+  template<typename scalar_t, int vec_size>
+  struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
+    scalar_t val[vec_size];
+  };
+
+
+
+
+
+
+  ${functor}
+
+  // TODO: setup grid-stride loop
+
+  extern "C" __global__
+  void ${name}_vectorized${vec_size}_kernel(
+      const int N,
+      Array<char*, ${nInputs}+1> data) //[${nInputs}+1],
+      {
+      constexpr int vec_size = ${vec_size};
+      int remaining = N - block_work_size * blockIdx.x;
+      auto thread_idx = threadIdx.x;
+      int idx = blockIdx.x;
+      ${declare_load_arrays}
+      ${declare_store_arrays}
+
+      if (remaining < block_work_size) {
+        #pragma unroll
+        for (int j = 0; j < thread_work_size; j++){
+          if (thread_idx >= remaining) {
+            break;
+          }
+          int linear_idx = thread_idx + block_work_size * idx;
+          ${load_unrolled_inputs}
+          thread_idx += num_threads;
+        }
+        #pragma unroll
+        for (int j = 0; j < thread_work_size; j++) {
+          out[j] = ${name}<${scalar_type}>(${args});
+        }
+        thread_idx = threadIdx.x;
+        #pragma unroll
+        for (int j = 0; j < thread_work_size; j++) {
+          if (thread_idx >= remaining) {
+              break;
+          }
+          int linear_idx = thread_idx + block_work_size * idx;
+          store<${result_type}>(out[j], data[0], linear_idx);
+          thread_idx += num_threads;
+        }
+      } else {
+        static constexpr int loop_size = thread_work_size / vec_size;
+  //actual loading
+        using vec_t_input = aligned_vector<${scalar_type}, vec_size>;
+        ${vector_pointers}
+        #pragma unroll
+        for (int i = 0; i<loop_size; i++){
+          vec_t_input v;
+          ${load_vectorized_inputs}
+          thread_idx += num_threads;
+        }
+
+
+        #pragma unroll
+        for (int j = 0; j < thread_work_size; j++) {
+          out[j] = ${name}<${scalar_type}>(${args});
+        }
+        using vec_t_output = aligned_vector<${result_type}, vec_size>;
+        vec_t_output * to_ = reinterpret_cast<vec_t_output *>(data[0]) + block_work_size / vec_size * idx;
+        int thread_idx = threadIdx.x;
+        #pragma unroll
+        for (int i = 0; i<loop_size; i++){
+          vec_t_output v;
+          #pragma unroll
+          for (int j=0; j<vec_size; j++){
+            v.val[j] = out[vec_size * i + j];
+          }
+          to_[thread_idx] = v;
+          thread_idx += num_threads;
+        }
+      }
+  }
+)ESCAPE";
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
-
-
-torch::jit::CodeTemplate load_code_template(const std::string& path) {
-  std::ifstream ifs{path};
-  std::string s{
-    std::istreambuf_iterator<char>(ifs),
-    std::istreambuf_iterator<char>()};
-  return s;
-
-}
-
-// std::string silly_generate_code() {
-//     torch::jit::TemplateEnv env;
-//     env.s("name", "i0");
-//     env.s("scalar_t", "float");
-//     env.s("nTensorArgs", "2");
-//     env.s("nInputTensors", "1");
-//     static auto cuda_template = load_code_template(
-//       "/private/home/mruberry/git/pytorch/aten/src/ATen/native/cuda/silly_code_template.cuh");
-//     return cuda_template.format(env);
-// }
 
 std::string generate_code(
     int nTensors,
@@ -76,6 +495,7 @@ std::string generate_code(
   }
   functor_args << "arg" << std::to_string(nInputs - 1) << "[j]";
   env.s("args", functor_args.str());
+
   if (!vectorized) {
     if (!dynamic_casting) {
       env.s("loader", "LoadWithoutCast");
@@ -98,48 +518,47 @@ std::string generate_code(
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
     }
+
     env.s("load_inputs", load_inputs.str());
     std::stringstream store_outputs;
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-      static auto cuda_template = load_code_template(
-        "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_code_template.cuh");
-    return cuda_template.format(env);
-  } else {
-    env.s("vec_size", std::to_string(vec_size));
-    env.s("result_type", result_type);
-    std::stringstream vector_pointers;
-    for (const auto i : c10::irange(nInputs)){
-      auto i_string = std::to_string(i);
-      vector_pointers << "vec_t_input * vec" << i_string <<
-      " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+1])" <<
-      " + block_work_size / vec_size * idx;\n";
-    }
-    env.s("vector_pointers", vector_pointers.str());
-    std::stringstream load_vectorized_inputs;
-    for (const auto i : c10::irange(nInputs)) {
-      auto i_string = std::to_string(i);
-      load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
-      load_vectorized_inputs << "#pragma unroll\n";
-      load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
-      load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
-      load_vectorized_inputs << "}\n";
-    }
-    env.s("load_vectorized_inputs", load_vectorized_inputs.str());
-    std::stringstream load_unrolled_inputs;
-    for (const auto i: c10::irange(nInputs)){
-      auto i_string = std::to_string(i);
-      load_unrolled_inputs << "arg" << i_string << "[j] = load<" << common_type
-        << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
-    }
-    env.s("load_unrolled_inputs", load_unrolled_inputs.str());
-
-    static auto cuda_template = load_code_template(
-      "/home/ngimel/local/pytorch/aten/src/ATen/native/cuda/jit_vectorized_template.cuh");
+      static auto cuda_template = torch::jit::CodeTemplate(jit_code_template);
     return cuda_template.format(env);
   }
 
+  // vectorized case
+  env.s("vec_size", std::to_string(vec_size));
+  env.s("result_type", result_type);
+  std::stringstream vector_pointers;
+  for (const auto i : c10::irange(nInputs)){
+    auto i_string = std::to_string(i);
+    vector_pointers << "vec_t_input * vec" << i_string <<
+    " = reinterpret_cast<vec_t_input *>(data[" << i_string << "+1])" <<
+    " + block_work_size / vec_size * idx;\n";
+  }
+  env.s("vector_pointers", vector_pointers.str());
+  std::stringstream load_vectorized_inputs;
+  for (const auto i : c10::irange(nInputs)) {
+    auto i_string = std::to_string(i);
+    load_vectorized_inputs << "v = vec" << i_string << "[thread_idx];\n";
+    load_vectorized_inputs << "#pragma unroll\n";
+    load_vectorized_inputs << "for (int j=0; j < vec_size; j++){\n";
+    load_vectorized_inputs << "  arg" << i_string << "[vec_size * i + j] = v.val[j];\n";
+    load_vectorized_inputs << "}\n";
+  }
+  env.s("load_vectorized_inputs", load_vectorized_inputs.str());
+  std::stringstream load_unrolled_inputs;
+  for (const auto i: c10::irange(nInputs)){
+    auto i_string = std::to_string(i);
+    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << common_type
+      << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
+  }
+  env.s("load_unrolled_inputs", load_unrolled_inputs.str());
+
+  static auto cuda_template = torch::jit::CodeTemplate(jit_vectorized_code_template);
+  return cuda_template.format(env);
 }
 
 
