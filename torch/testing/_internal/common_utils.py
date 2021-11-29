@@ -73,6 +73,10 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
+RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
+OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
+MAX_NUM_RETRIES = 3
+
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
@@ -524,11 +528,13 @@ def repeat_test_for_types(dtypes):
     return repeat_helper
 
 
+
 def discover_test_cases_recursively(suite_or_case):
     if isinstance(suite_or_case, unittest.TestCase):
         return [suite_or_case]
     rc = []
     for element in suite_or_case:
+        print(element)
         rc.extend(discover_test_cases_recursively(element))
     return rc
 
@@ -552,6 +558,24 @@ def sanitize_test_filename(filename):
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
+def lint_test_case_extension(suite):
+    succeed = True
+    for test_case_or_suite in suite:
+        test_case = test_case_or_suite
+        if isinstance(test_case_or_suite, unittest.TestSuite):
+            first_test = test_case_or_suite._tests[0] if len(test_case_or_suite._tests) > 0 else None
+            if first_test is not None and isinstance(first_test, unittest.TestSuite):
+                return succeed and lint_test_case_extension(test_case_or_suite)
+            test_case = first_test
+
+        if test_case is not None:
+            test_class = test_case.id().split('.', 1)[1].split('.')[0]
+            if not isinstance(test_case, TestCase):
+                err = "This test class should extend from torch.testing._internal.common_utils.TestCase but it doesn't."
+                print(f"{test_class} - failed. {err}")
+                succeed = False
+    return succeed
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
@@ -571,20 +595,37 @@ def run_tests(argv=UNITTEST_ARGS):
     # Determine the test launch mechanism
     if TEST_DISCOVER:
         _print_test_names()
-    elif TEST_IN_SUBPROCESS:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
-        test_cases = discover_test_cases_recursively(suite)
+        return
+
+    # Before running the tests, lint to check that every test class extends from TestCase
+    suite = unittest.TestLoader().loadTestsFromModule(__main__)
+    if not lint_test_case_extension(suite):
+        sys.exit(1)
+
+    if TEST_IN_SUBPROCESS:
         failed_tests = []
+        test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
+                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            string_cmd = " ".join(cmd)
+            exitcode = shell(cmd)
             if exitcode != 0:
+                # This is sort of hacky, but add on relevant env variables for distributed tests.
+                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                    backend = os.environ.get("BACKEND", "")
+                    world_size = os.environ.get("WORLD_SIZE", "")
+                    env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
+                    string_cmd = env_prefix + " " + string_cmd
+                # Log the command to reproduce the failure.
+                print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
             len(failed_tests), '\n\t'.join(failed_tests))
     elif RUN_PARALLEL > 1:
-        suite = unittest.TestLoader().loadTestsFromModule(__main__)
         test_cases = discover_test_cases_recursively(suite)
         test_batches = chunk_list(get_test_names(test_cases), RUN_PARALLEL)
         processes = []
@@ -623,7 +664,7 @@ def is_avx512_vnni_supported():
         return False
     with open("/proc/cpuinfo", encoding="ascii") as f:
         lines = f.read()
-    return "avx512vnni" in lines
+    return "vnni" in lines
 
 IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
@@ -668,16 +709,19 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name):
+def _check_module_exists(name: str) -> bool:
     r"""Returns if a top-level module with :attr:`name` exists *without**
     importing it. This is generally safer than try-catch block around a
     `import X`. It avoids third party libraries breaking assumptions of some of
     our tests, e.g., setting multiprocessing start method when imported
     (see librosa/#747, torchvision/#544).
     """
-    import importlib.util
-    spec = importlib.util.find_spec(name)
-    return spec is not None
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec(name)
+        return spec is not None
+    except ImportError:
+        return False
 
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_SCIPY = _check_module_exists('scipy')
@@ -687,6 +731,8 @@ TEST_NUMBA = _check_module_exists('numba')
 TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
+
+BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -941,6 +987,8 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
+    if not BUILD_WITH_CAFFE2:
+        return unittest.skip("Pytorch is compiled without Caffe2")
     try:
         from caffe2.python import core
         skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
@@ -1174,9 +1222,16 @@ class CudaMemoryLeakCheck():
         afters = self.get_cuda_memory_usage()
 
         for i, (before, after) in enumerate(zip(self.befores, afters)):
-            self.testcase.assertEqual(
-                before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
-                    self.name, after - before, i))
+            if not TEST_WITH_ROCM:
+                self.testcase.assertEqual(
+                    before, after, msg='{} leaked {} bytes CUDA memory on device {}'.format(
+                        self.name, after - before, i))
+            else:
+                # See #62533
+                # ROCM: Sometimes the transient memory is reported as leaked memory
+                if before != after:
+                    warnings.warn('{} leaked {} bytes ROCm memory on device {}'.format(
+                        self.name, after - before, i), RuntimeWarning)
 
 @contextmanager
 def skip_exception_type(exc_type):
@@ -1411,11 +1466,52 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def run(self, result=None):
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
+    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
+    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
+    # show up red).
+    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
+        if num_runs_left == 0:
+            return
+
+        using_unittest = isinstance(result, unittest.TestResult)
+
+        if using_unittest:
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
+
+        if not RETRY_TEST_CASES or not using_unittest:
+            return
+
+        err = sys.exc_info()
+        num_retries_left = num_runs_left - 1
+        if failures_before < len(result.failures):
+            print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.failures.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif errors_before < len(result.errors):
+            print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.errors.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+
+
+    def run(self, result=None):
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)
@@ -1621,7 +1717,7 @@ class TestCase(expecttest.TestCase):
     def safeToDense(self, t):
         return t.coalesce().to_dense()
 
-    # Compares torch function with reference function for given sample input (object of SampleInput)
+    # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
         n_inp, n_args, n_kwargs = sample_input.numpy()
@@ -2099,7 +2195,7 @@ class TestCase(expecttest.TestCase):
             with open(expected_file, 'w') as f:
                 # Adjust for producer_version, leave s unmodified
                 s_tag = re.sub(r'(producer_version): "[0-9.]*"',
-                               r'\1producer_version: "CURRENT_VERSION"', s)
+                               r'\1: "CURRENT_VERSION"', s)
                 f.write(s_tag)
 
         try:
@@ -2218,6 +2314,14 @@ def download_file(url, binary=True):
         raise unittest.SkipTest(msg) from e
 
 def find_free_port():
+    """
+    Finds an available port and returns that port number.
+
+    NOTE: If this function is being used to allocate a port to Store (or
+    indirectly via init_process_group or init_rpc), it should be used
+    in conjuction with the `retry_on_connect_failures` decorator as there is a potential
+    race condition where the allocated port may become unavailable before it can be used
+    """
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(('localhost', 0))
@@ -2230,22 +2334,23 @@ CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     """Reruns a test if the test returns a RuntimeError and the exception
-    matches exactly with one of the strings in connect_errors."""
+    contains one of the strings in connect_errors."""
     # This if block is executed when using this function as a decorator with arguments.
     if func is None:
         return partial(retry_on_connect_failures, connect_errors=connect_errors)
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        tries_remaining = 10
+        n_retries = 10
+        tries_remaining = n_retries
         while True:
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) in connect_errors:
+                if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
                     time.sleep(random.random())
                     continue
                 raise
@@ -2308,6 +2413,39 @@ def random_well_conditioned_matrix(*shape, dtype, device, mean=1.0, sigma=0.001)
     s = (torch.randn(*(shape[:-2] + (min(m, n),)), dtype=primitive_dtype[dtype], device=device) * sigma + mean) \
         .sort(-1, descending=True).values.to(dtype)
     return (u * s.unsqueeze(-2)) @ vh
+
+# Returns a noncontiguous (tensor with the same shape and values as t
+# The noncontiguous tensor is constructed such that elements in the innermost
+#   dimension are separated by zeros or (whenever possible) nans
+# TODO: consider more complicated noncontiguity schemes
+def noncontiguous_like(t):
+    # Short-circuits if t is already noncontiguous
+    if not t.is_contiguous():
+        return t
+
+    # Special-cases 0-dim tensors
+    if t.ndim == 0:
+        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
+        if t.dtype.is_floating_point or t.dtype.is_complex:
+            result[0] = math.nan
+        else:
+            result[0] = 0
+        result.set_(result.storage(), 1, t.size(), ())
+        result.requires_grad_(t.requires_grad)
+        return result
+
+    # 1+ dim tensor case
+    result = torch.repeat_interleave(t.detach(), 2, dim=-1)
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        result[..., 1::2] = math.nan
+    else:
+        result[..., 1::2] = 0
+
+    strides = list(result.stride())
+    strides[-1] = strides[-1] * 2
+    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    result.requires_grad_(t.requires_grad)
+    return result
 
 # TODO: remove this (prefer make_symmetric_matrices below)
 def random_symmetric_matrix(l, *batches, **kwargs):
@@ -2405,16 +2543,17 @@ def random_fullrank_matrix_distinct_singular_value(matrix_size, *batch_dims,
 
 # Creates a full rank matrix with distinct signular values or
 #   a batch of such matrices
-# Shape must be a square matrix or batch of square matrices
-def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype):
-    assert shape[-1] == shape[-2]
-    t = make_tensor(shape, device=device, dtype=dtype)
-    u, _, vh = torch.linalg.svd(t, full_matrices=False)
-    # TODO: improve the handling of complex tensors here
-    real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
-    s = torch.arange(1., shape[-1] + 1, dtype=real_dtype, device=device).mul_(1.0 / (shape[-1] + 1))
-    return (u * s.to(dtype)) @ vh
-
+def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
+    with torch.no_grad():
+        t = make_tensor(shape, device=device, dtype=dtype)
+        u, _, vh = torch.linalg.svd(t, full_matrices=False)
+        # TODO: improve the handling of complex tensors here
+        real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
+        k = min(shape[-1], shape[-2])
+        s = torch.arange(1., k + 1, dtype=real_dtype, device=device).mul_(1.0 / (k + 1))
+        x = (u * s.to(dtype)) @ vh
+    x.requires_grad_(requires_grad)
+    return x
 
 def random_matrix(rows, columns, *batch_dims, **kwargs):
     """Return rectangular matrix or batches of rectangular matrices.
@@ -2432,6 +2571,8 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
         return torch.ones(rows, columns, dtype=dtype, device=device)
 
     A = torch.randn(batch_dims + (rows, columns), dtype=dtype, device=device)
+    if A.numel() == 0:
+        return A
     u, _, vh = torch.linalg.svd(A, full_matrices=False)
     k = min(rows, columns)
     s = torch.linspace(1 / (k + 1), 1, k, dtype=dtype, device=device)
