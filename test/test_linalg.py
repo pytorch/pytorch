@@ -5441,8 +5441,15 @@ class TestLinalg(TestCase):
 
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
+            print(LU)
+            if pivot:
+                print(pivots)
 
             P, L, U = torch.lu_unpack(LU, pivots, unpack_pivots=pivot)
+            if pivot:
+                print(P)
+            print(L)
+            print(U)
 
             self.assertEqual(P @ L @ U if pivot else L @ U, A)
 

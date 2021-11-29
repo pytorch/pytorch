@@ -10573,7 +10573,7 @@ op_db: List[OpInfo] = [
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_qr,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            # batched gradients do not work for empty inputs
            # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
            check_batched_gradgrad=False,
