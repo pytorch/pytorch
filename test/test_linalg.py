@@ -5474,7 +5474,7 @@ class TestLinalg(TestCase):
             # Reproducer of a magma bug,
             # see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
             # This is also a bug in cuSOLVER < 11.3
-            if (dtype == torch.double and singular and torch.version.cuda.split('.') >= ["11", "3"]:
+            if dtype == torch.double and singular and torch.version.cuda.split('.') >= ["11", "3"]:
                 A = torch.ones(batch + ms, dtype=dtype, device=device)
                 run_test(A, pivot, singular, fn)
 
