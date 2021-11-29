@@ -83,6 +83,11 @@ class AutoQuantizationState(torch.nn.Module):
         # in order of iteration through the output type. Non-tensor outputs
         # are represented with `None`.
         self.output_qtensor_infos: List[Optional[QTensorInfo]] = []
+        # If defined, input_dtypes and output_dtypes specify dtypes which
+        # we need to enforce at the beginning and end of the module.
+        # A common example is enforcing that model outputs are torch.float.
+        # TODO(future PR): implement or remove input_dtypes, currently it
+        # does not do anything.
         self.input_dtypes = input_dtypes
         self.output_dtypes = output_dtypes
         # key: idx of seen op
@@ -115,7 +120,7 @@ class AutoQuantizationState(torch.nn.Module):
         # to the dtype specified by the user. If this is False, module outputs
         # will be returned as is. This value can be precalculated and it is set
         # to its final value after tracing.
-        self.needs_dtype_transform_on_outputs = True
+        self.needs_dtype_transform_on_outputs = False
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
@@ -144,6 +149,9 @@ class AutoQuantizationState(torch.nn.Module):
         for i in self.output_qtensor_infos:
             s += f"{i} "
         s += "]\n"
+        # output_dtypes
+        if self.output_dtypes:
+            s += f"(output_dtypes): {self.output_dtypes}\n"
         # idx_to_packed_weight_name
         if len(self.idx_to_packed_weight_name):
             s += "(idx_to_packed_weight_name): {\n"
@@ -152,6 +160,7 @@ class AutoQuantizationState(torch.nn.Module):
             s += "}\n"
         else:
             s += "(idx_to_packed_weight_name): {}\n"
+        # tensor_id_to_scale_zp
         if len(self.tensor_id_to_scale_zp):
             s += "(tensor_id_to_scale_zp): {\n"
             for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
@@ -215,6 +224,7 @@ class AutoQuantizationState(torch.nn.Module):
         if first_call:
             outputs = self._first_call_assign_qtensor_infos_to_mod_outputs(
                 outputs, qtensor_id)
+            self._set_needs_dtype_transform_on_outputs()
         return outputs
 
     def outputs_convert_hook(
@@ -558,7 +568,7 @@ class AutoQuantizationState(torch.nn.Module):
             pass
         return outputs
 
-    def set_needs_dtype_transform_on_outputs(self):
+    def _set_needs_dtype_transform_on_outputs(self):
         """
         Calculates whether a dtype transform on module outputs is needed
         and stores it. This is used to skip the outputs hook if it is not

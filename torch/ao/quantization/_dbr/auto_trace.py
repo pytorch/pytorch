@@ -18,7 +18,6 @@ from .model_utils import (
     pack_weights_for_functionals,
     attach_scale_zp_values_to_model,
     attach_op_convert_info_to_model,
-    attach_output_convert_info_to_model,
 )
 from . import auto_trace_rewriter
 
@@ -582,7 +581,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     pack_weights_for_functionals(module)
     attach_scale_zp_values_to_model(module)
     attach_op_convert_info_to_model(module)
-    attach_output_convert_info_to_model(module)
 
     # Since eager mode convert could have changed the IDs of some modules,
     # populate the FQN map again
