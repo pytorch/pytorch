@@ -16,6 +16,7 @@ import unittest
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
 from torch.testing._internal.common_device_type import ops, onlyCPU
+from torch.testing._internal.common_dtype import floating_types_and, integral_types
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from common_utils import (
@@ -32,6 +33,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
 from functorch import grad, vjp, vmap
 import torch.autograd.forward_ad as fwAD
 from functorch._src.eager_transforms import _as_tuple, jvp
+from functorch.compile import decomposition_table
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
 def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
@@ -753,8 +755,170 @@ class TestOperators(TestCase):
 
                 self.assertEqual(result_vjps, expected_vjps)
 
+class InplaceError(Exception):
+    def __repr__(self):
+        return "Decomposition Tensor with no elem was created (probably due to an in-place op)"
+
+class DecompositionTensor(torch.Tensor):
+    run_decompositions = set()
+    run_ops = set()
+
+    elem: torch.Tensor
+
+    __slots__ = ['elem']
+
+    @staticmethod
+    def __new__(cls, elem):
+        # The wrapping tensor (PythonTensor) is just a meta tensor, so it
+        # doesn't hold any memory (meta tensor is generally the preferred type
+        # of tensor you want to make a subclass from)...
+        r = torch.Tensor._make_wrapper_subclass(
+            cls, elem.size(),
+            strides=elem.stride(), storage_offset=elem.storage_offset(),
+            dtype=elem.dtype, layout=elem.layout,
+            device=elem.device, requires_grad=elem.requires_grad
+        )
+
+        # ...the real tensor is held as an element on the tensor.
+        r.elem = elem
+        return r
+
+    def __repr__(self):
+        return f"DecompositionTensor(elem={self.elem})"
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        if func in decomposition_table and func != torch.ops.aten.detach:
+            decomposition = decomposition_table[func]
+            DecompositionTensor.run_decompositions.add(func)
+            return decomposition(*args, **kwargs)
+        DecompositionTensor.run_ops.add(func)
+        def unwrap_tensor(e):
+            if isinstance(e, DecompositionTensor):
+                if not hasattr(e, 'elem'):
+                    raise InplaceError()
+                return e.elem
+            return e
+
+        real_out = func(*tree_map(unwrap_tensor, args), **tree_map(unwrap_tensor, kwargs))
+
+        def wrap_tensor(e):
+            if e is None:
+                return DecompositionTensor(torch.empty(()))
+            return DecompositionTensor(e) if type(e) == torch.Tensor else e
+        wrapped_out =  tree_map(wrap_tensor, real_out)
+        return wrapped_out
+
+
+class TestDecompositionOpInfo(TestCase):
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=[torch.float32, torch.float64, torch.float16, torch.bfloat16] + [*integral_types()] )
+    # entries in here need don't work and need to be fixed.
+    # Each one of these is a bug (or needs to be investigated)
+    @skipOps('TestDecompositionOpInfo', 'test_decomposition', {
+        skip('view_as_complex'),
+        xfail('linalg.cholesky'),
+        xfail('linalg.inv'),
+        xfail('linalg.matrix_power'),
+        xfail('to_sparse'),
+        skip('tensor_split'),
+        skip('nn.functional.ctc_loss'),
+        skip('mvlgamma'),
+        # Some weird matmul stuff with int64 matmuls
+        skip('__rmatmul__'),
+        skip('linalg.multi_dot'),
+        skip('matmul'),
+        # Can't be compared
+        skip('empty_like'),
+        skip('new_empty'),
+        # inplace op
+        skip('resize_'),
+        # ???
+        skip('nanmean'),
+    })
+    def test_decomposition(self, device, dtype, op):
+        if dtype not in op.supported_dtypes(dtype):
+            self.skipTest("Dtype not in op's supported dtypes")
+            return
+        if is_inplace(op, op.get_op()):
+            self.skipTest("op is inplace")
+            return
+        print(op.op)
+        _requires_grad = op.supports_autograd and dtype.is_floating_point
+        # print(dtype)
+
+        # print(_requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+        # Acquires variants to test
+        def wrap_tensor(x):
+            if type(x) == torch.Tensor:
+                return DecompositionTensor(x)
+            return x
+
+        def unwrap_tensor(x):
+            if type(x) == DecompositionTensor:
+                if not hasattr(x, 'elem'):
+                    raise InplaceError()
+                return x.elem
+            return x
+
+        def _assertEqual(a, b):
+            if dtype == torch.half:
+                self.assertEqual(a, b, rtol=0.001, atol=1e-04)
+            else:
+                self.assertEqual(a, b)
+
+        try:
+            func = op.get_op()
+            for sample_input in samples:
+                if _requires_grad:
+                    fn, primals = normalize_op_input_output(func, sample_input)
+                    result = fn(*primals)
+                    out, vjp_fn = ref_vjp(fn, *primals)
+                    cotangents = tree_map(lambda x: torch.randn_like(x), out)
+                    expected_grads = vjp_fn(cotangents)
+
+                    decomp_out, decomp_vjp_fn = ref_vjp(fn, *tree_map(wrap_tensor, primals))
+                    _assertEqual(out, tree_map(unwrap_tensor, decomp_out))
+
+                    decomp_grads = decomp_vjp_fn(cotangents)
+                    _assertEqual(expected_grads, tree_map(unwrap_tensor, decomp_grads))
+
+                else:
+                    args = [sample_input.input] + list(sample_input.args)
+                    kwargs = sample_input.kwargs
+                    orig_out = func(*args, **kwargs)
+
+                    args = tree_map(wrap_tensor, args)
+                    kwargs = tree_map(wrap_tensor, kwargs)
+                    decomp_out = func(*args, **kwargs)
+                    self.assertEqual(orig_out, tree_map(unwrap_tensor, decomp_out))
+
+
+        except InplaceError:
+            self.skipTest("op is inplace")
+            return
+        except RuntimeError as e:
+            if "not implemented for" in str(e):
+                self.skipTest(str(e))
+                return
+            if "Mismatch in shape: grad_output" in str(e):
+                self.skipTest("Some weird issue with autograd engine and tensor subclasses")
+            raise e
+        import gc; gc.collect()
+
+    def test_placeholder(self):
+        with open('op_analysis/run_ops.txt', 'w') as f:
+            def get_names(l):
+                return sorted([x.__name__ for x in l])
+            for op in get_names(DecompositionTensor.run_ops):
+                f.write(f'{op}\n')
+        with open('op_analysis/run_decompositions.txt', 'w') as f:
+            for op in get_names(DecompositionTensor.run_decompositions):
+                f.write(f'{op}\n')
+
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestOperators, globals(), only_for=only_for)
+instantiate_device_type_tests(TestDecompositionOpInfo, globals(), only_for=only_for)
 
 if __name__ == '__main__':
     run_tests()
