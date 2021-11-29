@@ -73,6 +73,10 @@ IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 's
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
 
+RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
+OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
+MAX_NUM_RETRIES = 3
+
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 
@@ -603,8 +607,20 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            exitcode = shell([sys.executable] + argv + [test_case_full_name])
+            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
+                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
+            string_cmd = " ".join(cmd)
+            exitcode = shell(cmd)
             if exitcode != 0:
+                # This is sort of hacky, but add on relevant env variables for distributed tests.
+                if 'TestDistBackendWithSpawn' in test_case_full_name:
+                    backend = os.environ.get("BACKEND", "")
+                    world_size = os.environ.get("WORLD_SIZE", "")
+                    env_prefix = f"BACKEND={backend} WORLD_SIZE={world_size}"
+                    string_cmd = env_prefix + " " + string_cmd
+                # Log the command to reproduce the failure.
+                print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
         assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
@@ -648,7 +664,7 @@ def is_avx512_vnni_supported():
         return False
     with open("/proc/cpuinfo", encoding="ascii") as f:
         lines = f.read()
-    return "avx512vnni" in lines
+    return "vnni" in lines
 
 IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
 
@@ -1450,11 +1466,52 @@ class TestCase(expecttest.TestCase):
     def wrap_with_cuda_memory_check(self, method):
         return self.wrap_method_with_policy(method, self.assertLeaksNoCudaTensors)
 
-    def run(self, result=None):
+    # Recursive function that incorporates retry logic when PYTORCH_RETRY_TEST_CASES=1 and enables early test
+    # termination. [DISCLAIMER: ONLY WORKS WITH UNITTEST]
+    # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
+    # show up red).
+    # Otherwise, the flaky test will show up green while its stats are captured by test reports.
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
+        if num_runs_left == 0:
+            return
+
+        using_unittest = isinstance(result, unittest.TestResult)
+
+        if using_unittest:
+            failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
+            errors_before = 0 if result is None else len(result.errors)  # num tests marked as errored before starting
+
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
             result.stop()
+
+        if not RETRY_TEST_CASES or not using_unittest:
+            return
+
+        err = sys.exc_info()
+        num_retries_left = num_runs_left - 1
+        if failures_before < len(result.failures):
+            print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.failures.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif errors_before < len(result.errors):
+            print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
+            if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
+                result.errors.pop(-1)
+                result.addExpectedFailure(self, err)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+        elif report_only and num_retries_left < MAX_NUM_RETRIES:
+            print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
+            result.addUnexpectedSuccess(self)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+
+
+    def run(self, result=None):
+        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
 
     def setUp(self):
         check_if_enable(self)
@@ -2277,22 +2334,23 @@ CONNECT_TIMEOUT = "connect() timed out."
 
 def retry_on_connect_failures(func=None, connect_errors=(ADDRESS_IN_USE)):
     """Reruns a test if the test returns a RuntimeError and the exception
-    matches exactly with one of the strings in connect_errors."""
+    contains one of the strings in connect_errors."""
     # This if block is executed when using this function as a decorator with arguments.
     if func is None:
         return partial(retry_on_connect_failures, connect_errors=connect_errors)
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        tries_remaining = 10
+        n_retries = 10
+        tries_remaining = n_retries
         while True:
             try:
                 return func(*args, **kwargs)
             except RuntimeError as error:
-                if str(error) in connect_errors:
+                if any(connect_error in str(error) for connect_error in connect_errors):
                     tries_remaining -= 1
                     if tries_remaining == 0:
-                        raise
+                        raise RuntimeError(f"Failing after {n_retries} retries with error: {str(error)}")
                     time.sleep(random.random())
                     continue
                 raise
