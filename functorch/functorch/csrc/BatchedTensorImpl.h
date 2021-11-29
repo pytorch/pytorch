@@ -74,7 +74,7 @@ struct BatchedTensorImpl : public c10::TensorImpl {
   bool has_storage() const override;
 #endif
 
-  void refreshSizesAndStrides();
+  void refreshTensorMetadata();
 
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
