@@ -636,7 +636,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
     return vjps
 
 
-def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
+def _check_inputs(tupled_inputs, check_sparse_nnz, check_backward_ad) -> bool:
     if not check_sparse_nnz and any(t.is_sparse for t in tupled_inputs if isinstance(t, torch.Tensor)):
         raise GradcheckError('gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False.')
     # Make sure that gradients are saved for at least one input
@@ -661,7 +661,7 @@ def _check_inputs(tupled_inputs, check_sparse_nnz) -> bool:
                         '.contiguous on the input before passing it to gradcheck.')
             any_input_requiring_grad = True
             inp.retain_grad()
-    if not any_input_requiring_grad:
+    if not any_input_requiring_grad and check_backward_ad:
         raise ValueError(
             'gradcheck expects at least one input tensor to require gradient, '
             'but none of the them have requires_grad=True.')
@@ -1339,7 +1339,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, check_sparse_nnz, nondet_to
                       check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
                       check_backward_ad, fast_mode):
     tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, check_sparse_nnz)
+    _check_inputs(tupled_inputs, check_sparse_nnz, check_backward_ad)
 
     func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
