@@ -73,7 +73,7 @@ def _precision_to_scale_tril(P):
     # L = torch.triangular_solve(torch.eye(P.shape[-1], dtype=P.dtype, device=P.device),
     #                           L_inv, upper=False)[0]
     # return L
-    return torch.linalg.cholesky(P.invese())
+    return torch.linalg.cholesky(P.inverse())
 
 
 class MultivariateNormal(Distribution):
