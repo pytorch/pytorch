@@ -1006,6 +1006,17 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
 
     return inputs
 
+def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked norm.
+    """
+    inputs: List[SampleInput] = []
+    for ord in [2.0, 1, float('inf'), float('-inf'), 0]:
+        for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
+            sample_input_args, sample_input_kwargs = (ord,) + sample_input.args, sample_input.kwargs.copy()
+            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
+
 
 # NOTE [Reductions]:
 #
@@ -13408,6 +13419,26 @@ op_db: List[OpInfo] = [
                          'TestReductions', 'test_reference_masked'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation
+    ),
+    ReductionOpInfo(
+        '_masked.norm',
+        identity=0,
+        method_variant=None,
+        nan_policy='propagate',
+        supports_out=False,
+        promotes_int_to_float=True,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # FIXME: sum reduces all dimensions when dim=[]
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # torch.jit.frontend.NotSupportedError: Compiled functions
+            # can't take variable number of arguments or use
+            # keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        sample_inputs_func=sample_inputs_masked_norm,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
