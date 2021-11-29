@@ -212,7 +212,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'lazy_ir_inc': [f'#include "{path}"' for path in [
                 "torch/csrc/lazy/core/hash.h",
                 "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/ts_backend/ts_node_lowering.h",
+                # "torch/csrc/lazy/ts_backend/ts_node_lowering.h",
                 "lazy_tensor_core/csrc/ops/scalar.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],

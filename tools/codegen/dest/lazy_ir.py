@@ -27,7 +27,7 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     else:
         if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
-            return f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})"
+            return f"std::vector<{arg.type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
         elif (isinstance(arg.type, OptionalCType) and
                 isinstance(arg.type.elem, VectorCType)):
             return f"torch::lazy::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
@@ -159,8 +159,8 @@ class GenLazyNativeFuncDefinition:
         scalar_types = schema.filtered_types(values=False, scalars=True)
         returns_length = len(schema.returns)
 
-        get_device_str = f"""auto device = bridge::GetBackendDevice(
-            {", ".join([f"{t.name}" for t in value_types])});"""
+        value_types_names = ", ".join([f"{t.name}" for t in value_types])
+        get_device_str = f"""auto device = bridge::GetBackendDevice({value_types_names});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
