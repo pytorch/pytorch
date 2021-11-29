@@ -33,9 +33,11 @@ LINUX_RUNNERS = {
 }
 
 MACOS_TEST_RUNNER_10_15 = "macos-10.15"
+MACOS_TEST_RUNNER_11 = "macos-11"
 
 MACOS_RUNNERS = {
     MACOS_TEST_RUNNER_10_15,
+    MACOS_TEST_RUNNER_11,
 }
 
 CUDA_RUNNERS = {
@@ -628,9 +630,9 @@ IOS_WORKFLOWS = [
 MACOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
-        build_environment="macos-10-15-py3-x86-64",
-        xcode_version="12",
-        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        build_environment="macos-11-py3-x86-64",
+        xcode_version="12.4",
+        test_runner_type=MACOS_TEST_RUNNER_11,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_MACOS},
         ),
