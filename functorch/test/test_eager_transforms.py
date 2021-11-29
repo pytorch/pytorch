@@ -30,6 +30,7 @@ from functorch._src.make_functional import (
 from functorch.experimental import (
     jvp, jacfwd, hessian,
 )
+from functorch._src.eager_transforms import _argnums_partial
 
 # NB: numpy is a testing dependency!
 import numpy as np
@@ -44,6 +45,136 @@ except ImportError:
                   "`--no-deps` to avoid overwriting the pytorch installation",
                   UserWarning)
 
+# TestCase for _argnums_partial, an important helper funciton
+class TestArgnumsPartial(TestCase):
+    def test_invalid_argnum_type(self):
+        x = torch.randn(3)
+        args = (x,)
+        with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
+            _argnums_partial(torch.sin, args, 0.0)
+        with self.assertRaisesRegex(RuntimeError, "int or Tuple"):
+            _argnums_partial(torch.sin, args, [0])
+        with self.assertRaisesRegex(RuntimeError, "must be int"):
+            _argnums_partial(torch.sin, args, (0.0,))
+
+        args = (0.1, 1.1, 2.1, 3.1, 4.1)
+        def f(a, b, c, d, e):
+            return a
+        with self.assertRaisesRegex(RuntimeError, "must be int"):
+            _argnums_partial(torch.sin, args, ((0, 1), 2))
+
+    def test_out_of_bounds_argnum_values(self):
+        x = torch.randn(3)
+        args = (x,)
+        with self.assertRaisesRegex(RuntimeError, "positional inputs"):
+            _argnums_partial(torch.sin, args, 1)
+        with self.assertRaisesRegex(RuntimeError, "positional inputs"):
+            _argnums_partial(torch.sin, args, -2)
+        with self.assertRaisesRegex(RuntimeError, "positional inputs"):
+            _argnums_partial(torch.sin, args, (-2,))
+
+    def test_not_enough_argnums(self):
+        x = torch.randn(3)
+        args = (x,)
+        with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
+            _argnums_partial(torch.sin, args, ())
+
+    def test_duplicate_argnums(self):
+        x = torch.randn(3)
+        args = (x, x)
+        with self.assertRaisesRegex(RuntimeError, "must be unique"):
+            _argnums_partial(torch.add, args, (0, 0))
+        with self.assertRaisesRegex(RuntimeError, "must be unique"):
+            _argnums_partial(torch.add, args, (0, -2))
+
+    def test_flat_args_with_positive_int_argnum(self):
+        args = (0.1, 1.1, 2.1, 3.1, 4.1)
+        def f(a, b, c, d, e):
+            return a
+
+        f_new, res = _argnums_partial(f, args, 0)
+        self.assertEqual(res, (0.1,))
+        self.assertEqual(f_new(*res), 0.1)
+
+        f_new, res = _argnums_partial(f, args, 4)
+        self.assertEqual(res, (4.1,))
+        self.assertEqual(f_new(*res), 0.1)
+
+    def test_flat_args_with_negative_int_argnum(self):
+        args = (0.1, 1.1, 2.1, 3.1, 4.1)
+        def f(a, b, c, d, e):
+            return a
+
+        expected = f(*args)
+        f_new, res = _argnums_partial(f, args, -1)
+        self.assertEqual(res, (4.1,))
+        self.assertEqual(f_new(*res), expected)
+
+        f_new, res = _argnums_partial(f, args, -5)
+        self.assertEqual(res, (0.1,))
+        self.assertEqual(f_new(*res), expected)
+
+    def test_flat_args_with_tuple_argnum(self):
+        args = (0.1, 1.1, 2.1, 3.1, 4.1)
+        def f(a, b, c, d, e):
+            return a
+
+        f_new, res = _argnums_partial(f, args, (0, 1, 2, 3, 4))
+        self.assertEqual(f_new(*res), 0.1)
+        self.assertEqual(res, args)
+
+        f_new, res = _argnums_partial(f, args, (0, -3))
+        self.assertEqual(f_new(*res), 0.1)
+        self.assertEqual(res, (0.1, 2.1))
+
+    def test_pytree_args(self):
+        args = ((0.1, 1.1), 2.0, [3.1])
+        def f(a, b, c):
+            return a[0] + a[1] + b + c[0]
+
+        expected = f(*args)
+
+        f_new, res = _argnums_partial(f, args, 0)
+        self.assertEqual(res, args[0:1])
+        self.assertEqual(f_new(*res), expected)
+
+        f_new, res = _argnums_partial(f, args, (0,))
+        self.assertEqual(res, args[0:1])
+        self.assertEqual(f_new(*res), expected)
+
+        f_new, res = _argnums_partial(f, args, -1)
+        self.assertEqual(res, args[-1:])
+        self.assertEqual(f_new(*res), expected)
+
+        f_new, res = _argnums_partial(f, args, (0, -2))
+        self.assertEqual(res, args[0:2])
+        self.assertEqual(f_new(*res), expected)
+
+    def test_argnums_reorders(self):
+        args = ((0.1, 1.1, 2.1), 3.1, 4.1)
+        def f(a, b, c):
+            return a[0] + a[1] + a[2] + b + c
+
+        expected = f(*args)
+        f_new, res = _argnums_partial(f, args, (1, 0))
+        self.assertEqual(res, (args[1], args[0]))
+        self.assertEqual(f_new(*res), expected)
+
+    def test_function_with_default_args(self):
+        args = ((0.1, 1.1, 2.1), 3.1)
+        def f(a, b, c=4.1):
+            return a[0] + a[1] + a[2] + b + c
+
+        expected = f(*args)
+        f_new, res = _argnums_partial(f, args, -2)
+        self.assertEqual(res, args[0:1])
+        self.assertEqual(f_new(*res), expected)
+
+        args = ((0.1, 1.1, 2.1), 3.1, 5.1)
+        expected = f(*args)
+        f_new, res = _argnums_partial(f, args, -1)
+        self.assertEqual(res, args[-1:])
+        self.assertEqual(f_new(*res), expected)
 
 class TestGradTransform(TestCase):
     def test_primitive(self, device):
@@ -304,13 +435,17 @@ class TestGradTransform(TestCase):
         x = torch.randn([])
         y = torch.randn([])
         with self.assertRaisesRegex(RuntimeError, 'but only'):
-            grad(torch.mul, argnums=-1)(x, y)
+            grad(torch.mul, argnums=-3)(x, y)
         with self.assertRaisesRegex(RuntimeError, 'but only'):
             grad(torch.mul, argnums=2)(x, y)
         with self.assertRaisesRegex(RuntimeError, 'int or Tuple'):
             grad(torch.mul, argnums=[0])(x, y)
         with self.assertRaisesRegex(RuntimeError, 'must be int'):
             grad(torch.mul, argnums=('0',))(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'must be unique'):
+            grad(torch.mul, argnums=(0, 0))(x, y)
+        with self.assertRaisesRegex(RuntimeError, 'must be unique'):
+            grad(torch.mul, argnums=(0, -2))(x, y)
 
     def test_argnums(self, device):
         x = torch.randn([])
@@ -327,6 +462,50 @@ class TestGradTransform(TestCase):
         gx, gy = grad(torch.mul, argnums=(0, 1))(x, y)
         self.assertEqual(gx, y)
         self.assertEqual(gy, x)
+
+    def test_out_of_order_argnums(self, device):
+        x = torch.randn([])
+        y = torch.randn([])
+        gy, gx = grad(torch.mul, argnums=(1, 0))(x, y)
+        self.assertEqual(gx, y)
+        self.assertEqual(gy, x)
+
+    def test_negative_argnums(self, device):
+        x = torch.randn([])
+        y = torch.randn([])
+        gx = grad(torch.mul, argnums=-2)(x, y)
+        self.assertEqual(gx, y)
+
+        gy = grad(torch.mul, argnums=-1)(x, y)
+        self.assertEqual(gy, x)
+
+        gx, = grad(torch.mul, argnums=(-2,))(x, y)
+        self.assertEqual(gx, y)
+
+        gx, gy = grad(torch.mul, argnums=(-2, -1))(x, y)
+        self.assertEqual(gx, y)
+        self.assertEqual(gy, x)
+
+    def test_grad_pytree_inputs(self, device):
+        x = torch.randn([], device=device)
+        def f(a, b):
+            x, y = a
+            return 1 * x + 2 * y + 3 * b['foo']
+
+        args = ((x, x), {'foo': x})
+
+        gx, gy = grad(f)(*args)
+        self.assertEqual(gx, torch.tensor(1., device=device))
+        self.assertEqual(gy, torch.tensor(2., device=device))
+
+        (gx, gy), = grad(f, argnums=(0,))(*args)
+        self.assertEqual(gx, torch.tensor(1., device=device))
+        self.assertEqual(gy, torch.tensor(2., device=device))
+
+        (gx, gy), gz = grad(f, argnums=(0, 1))(*args)
+        self.assertEqual(gx, torch.tensor(1., device=device))
+        self.assertEqual(gy, torch.tensor(2., device=device))
+        self.assertEqual(gz['foo'], torch.tensor(3., device=device))
 
     def test_zero_grad(self, device):
         def f(x):
@@ -871,29 +1050,14 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    @jacrev_and_jacfwd
-    def test_outputs_should_be_flat_tuple_of_tensors(self, device, jacapi):
-        def f(x):
-            return [2 * x, 3 * x]
-
-        def g(x):
-            return 2 * x, 1
-
-        x = torch.randn(3, device=device)
-        with self.assertRaisesRegex(RuntimeError, "Tensors"):
-            result = jacapi(f)(x)
-
-        with self.assertRaisesRegex(RuntimeError, "Tensors"):
-            result = jacapi(f)(x)
-
-    @unittest.expectedFailure
-    def test_multiple_outputs_pytree(self, device):
+    @FIXME_jacrev_only
+    def test_multiple_outputs_pytree(self, device, jacapi):
         def f(x, y):
             return {'left': 2 * x + 3 * y, 'right': 4 * x + 5 * y}
 
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
-        z = jacrev(f, argnums=(0, 1))(x, y)
+        z = jacapi(f, argnums=(0, 1))(x, y)
         expected_left_x = torch.diagflat(torch.full_like(x, 2))
         expected_left_y = torch.diagflat(torch.full_like(y, 3))
         expected_right_x = torch.diagflat(torch.full_like(x, 4))
@@ -903,9 +1067,82 @@ class TestJac(TestCase):
             'right': (expected_right_x, expected_right_y),
         }
         self.assertTrue(isinstance(z, dict))
-        self.assertTrue(isinstance(z['left'], dict))
-        self.assertTrue(isinstance(z['right'], dict))
+        self.assertTrue(isinstance(z['left'], tuple))
+        self.assertTrue(isinstance(z['right'], tuple))
         self.assertEqual(z, expected)
+
+    @FIXME_jacrev_only
+    def test_multiple_inputs_pytree(self, device, jacapi):
+        def f(a, b, c):
+            a0, a1 = a
+            return a0 + a1 * 2 + b * 3 + c * 4
+
+        x = torch.randn([], device=device)
+        args = ((x, x), x, x)
+
+        result = jacapi(f, argnums=(0, 1, 2))(*args)
+        expected = (
+            (torch.tensor(1., device=device), torch.tensor(2., device=device)),
+            torch.tensor(3., device=device),
+            torch.tensor(4., device=device),
+        )
+        self.assertEqual(result, expected)
+
+        result = jacapi(f, argnums=(0,))(*args)
+        expected = ((torch.tensor(1., device=device), torch.tensor(2., device=device)),)
+        self.assertEqual(result, expected)
+
+        result = jacapi(f )(*args)
+        expected = (torch.tensor(1., device=device), torch.tensor(2., device=device))
+        self.assertEqual(result, expected)
+
+    @FIXME_jacrev_only
+    def test_multiple_inputs_outputs_pytree(self, device, jacapi):
+        def f(a, b, c):
+            a0, a1 = a
+            return a0 + a1 * 2, {'foo': b * 3 + c * 4}
+
+        x = torch.randn([], device=device)
+        zero = torch.zeros([], device=device)
+        args = ((x, x), x, x)
+
+        result = jacapi(f)(*args)
+        expected = (
+            (torch.tensor(1., device=device), torch.tensor(2., device=device)),
+            {'foo': (zero, zero)},
+        )
+        self.assertEqual(result, expected)
+
+        result = jacapi(f, argnums=(0,))(*args)
+        expected = (
+            ((torch.tensor(1., device=device), torch.tensor(2., device=device)),),
+            {'foo': ((zero, zero),)},
+        )
+        self.assertEqual(result, expected)
+
+        result = jacapi(f, argnums=(0, 1))(*args)
+        expected = (
+            ((torch.tensor(1., device=device), torch.tensor(2., device=device)), zero),
+            {'foo': ((zero, zero), torch.tensor(3., device=device))},
+        )
+        self.assertEqual(result, expected)
+
+    @FIXME_jacrev_only
+    def test_multiple_inputs_outputs_pytree_multidim(self, device, jacapi):
+        def f(dct):
+            a = dct['a']
+            b = dct['b']
+            return {'c': a.sin(), 'd': b.cos()}
+
+        x = torch.randn(3, device=device)
+        args = ({'a': x, 'b': x},)
+
+        result = jacapi(f)(*args)
+        expected = {
+            'c': {'a': x.cos().diagflat(), 'b': x.new_zeros(3, 3)},
+            'd': {'a': x.new_zeros(3, 3), 'b': -x.sin().diagflat()},
+        }
+        self.assertEqual(result, expected)
 
     @jacrev_and_jacfwd
     def test_unrelated_input(self, device, jacapi):
@@ -934,6 +1171,16 @@ class TestJac(TestCase):
         result = jacapi(f)(x)
         expected = x.new_zeros(2, 3, 2, 3)
         self.assertEqual(result, expected)
+
+    @jacrev_and_jacfwd
+    def test_empty_output(self, device, jacapi):
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
+        def f(x, y):
+            return ()
+
+        with self.assertRaisesRegex(RuntimeError, 'xpected'):
+            jacapi(f)(x, y)
 
     @jacrev_and_jacfwd
     def test_argnums_tuple(self, device, jacapi):
@@ -990,7 +1237,7 @@ class TestJac(TestCase):
     def test_negative_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
-            z = jacapi(torch.sin, argnums=-1)(x)
+            z = jacapi(torch.sin, argnums=-2)(x)
 
     @jacrev_and_jacfwd
     def test_repeated_argnums(self, device, jacapi):
