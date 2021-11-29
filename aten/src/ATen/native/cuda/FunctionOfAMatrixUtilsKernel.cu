@@ -30,7 +30,12 @@ void _launch_kernel(int total_n_elems, const func_t& f) {
     total_n_elems >= 0 && total_n_elems <= std::numeric_limits<int32_t>::max()
   );
 
+#if defined(USE_ROCM)
   int n_threads = num_threads_dynamic();
+#else
+  constexpr int n_threads = num_threads();
+#endif
+
   constexpr int n_elems_per_thread = thread_work_size();
   dim3 block(n_threads);
   int total_work_block = n_threads * n_elems_per_thread;

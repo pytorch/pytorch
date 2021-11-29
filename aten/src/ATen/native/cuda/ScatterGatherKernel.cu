@@ -72,7 +72,12 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     return;
   }
 
+#if defined(USE_ROCM)
   int nt = num_threads_dynamic();
+#else
+  constexpr int nt = num_threads();
+#endif
+
   constexpr int vt = thread_work_size();
   const dim3 block(nt);
   const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
