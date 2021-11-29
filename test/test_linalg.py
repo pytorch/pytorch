@@ -5419,6 +5419,10 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_matrix
 
         def run_test(A, pivot, singular, fn):
+            print(A.shape)
+            print(pivot)
+            print(singular)
+            print(getattr(fn, "__name__", "torch.lu"))
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
             check_errors = (fn == torch.linalg.lu_factor)
