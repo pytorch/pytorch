@@ -11,6 +11,9 @@ from torch.ao.quantization.observer import (
     HistogramObserver,
     MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
+    FixedQParamsObserver,
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
     _with_args,
 )
 import re
@@ -211,45 +214,24 @@ class FakeQuantize(FakeQuantizeBase):
         super(FakeQuantize, self)._load_from_state_dict(state_dict, prefix, local_metadata, strict,
                                                         missing_keys, unexpected_keys, error_msgs)
 
-class FixedQParamsFakeQuantize(FakeQuantizeBase):
+
+class FixedQParamsFakeQuantize(FakeQuantize):
     """ Simulate quantize and dequantize with fixed quantization
     parameters in training time. Only per tensor quantization
     is supported.
-
-    Args:
-
-        `scale` (float): fixed scale for the fake quantize module
-        `zero_point` (int): fixed zero point for the fake quantize module
-        `dtype`, `qscheme`, `quant_min`, `quant_max`
     """
 
-    scale: torch.Tensor
-    zero_point: torch.Tensor
-
-    def __init__(self,
-                 scale,
-                 zero_point,
-                 dtype=torch.quint8,
-                 qscheme=torch.per_tensor_affine,
-                 quant_min=0,
-                 quant_max=255):
-        super().__init__()
-        assert quant_min <= quant_max, 'quant_min should be less than or equal to quant_max'
-        self.quant_min = quant_min
-        self.quant_max = quant_max
-        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
-        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.int))
-        self.dtype = dtype
-        self.qscheme = qscheme
+    def __init__(self, observer):
+        super().__init__(observer=observer)
+        assert type(self.activation_post_process) == FixedQParamsObserver,\
+            "%s's observer must be a %s" % (self.__class__.__name__, FixedQParamsObserver.__name__)
+        self._observer_ctr = observer
+        self.quant_min = self.activation_post_process.quant_min
+        self.quant_max = self.activation_post_process.quant_max
+        self.scale = self.activation_post_process.scale
+        self.zero_point = self.activation_post_process.zero_point
         assert _is_per_tensor(self.qscheme), 'Only per tensor quantization is supported' + \
             ' FixedQParamsFakeQuantize module, got qscheme:' + str(self.qscheme)
-
-    def forward(self, X):
-        if self.fake_quant_enabled[0] == 1:
-            X = torch.fake_quantize_per_tensor_affine(X, self.scale,
-                                                      self.zero_point, self.quant_min,
-                                                      self.quant_max)
-        return X
 
     @torch.jit.export
     def calculate_qparams(self):
@@ -262,6 +244,7 @@ class FixedQParamsFakeQuantize(FakeQuantizeBase):
                    self.fake_quant_enabled, self.observer_enabled,
                    self.scale, self.zero_point, self.dtype,
                    self.quant_min, self.quant_max, self.qscheme)
+
 
 class FusedMovingAvgObsFakeQuantize(FakeQuantize):
     r"""Fused module that is used to observe the input tensor (compute min/max), compute
@@ -353,12 +336,8 @@ default_dynamic_fake_quant = FakeQuantize.with_args(observer=MinMaxObserver, qua
 Default dynamic fake_quant for activations.
 """
 
-# TODO(future PR): remove these defaults and enforce activation functions
-# to explicitly specify their output range
-default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
-default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(
-    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+default_symmetric_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_symmetric_fixed_qparams_observer)
+default_affine_fixed_qparams_fake_quant = FixedQParamsFakeQuantize.with_args(observer=default_affine_fixed_qparams_observer)
 
 default_per_channel_weight_fake_quant = FakeQuantize.with_args(observer=MovingAveragePerChannelMinMaxObserver,
                                                                quant_min=-128,

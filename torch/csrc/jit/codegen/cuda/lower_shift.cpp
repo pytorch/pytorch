@@ -18,76 +18,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-namespace {
-
-// utility function
-kir::Bool* makeAndExpr(kir::Val* lhs, kir::Val* rhs) {
-  TORCH_INTERNAL_ASSERT(!(lhs == nullptr && rhs == nullptr));
-  if (lhs == nullptr) {
-    return rhs->as<kir::Bool>();
-  } else if (rhs == nullptr) {
-    return lhs->as<kir::Bool>();
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.andExpr(lhs, rhs)->as<kir::Bool>();
-  }
-}
-
-kir::Int* makeAddExpr(kir::Int* lhs, kir::Int::ScalarType rhs) {
-  kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  if (rhs == 0) {
-    return lhs;
-  } else if (lhs == nullptr) {
-    return ir_builder.create<kir::Int>(rhs);
-  } else if (lhs->isConst()) {
-    return ir_builder.create<kir::Int>(lhs->value().value() + rhs);
-  } else if (rhs > 0) {
-    return ir_builder.addExpr(lhs, ir_builder.create<kir::Int>(rhs))
-        ->as<kir::Int>();
-  } else {
-    return ir_builder.subExpr(lhs, ir_builder.create<kir::Int>(-rhs))
-        ->as<kir::Int>();
-  }
-}
-
-kir::Int* makeAddExpr(kir::Int* lhs, kir::Int* rhs) {
-  if (rhs == nullptr) {
-    return lhs;
-  } else if (lhs == nullptr) {
-    return rhs;
-  } else if (lhs->isConst()) {
-    return makeAddExpr(rhs, lhs->value().value());
-  } else if (rhs->isConst()) {
-    return makeAddExpr(lhs, rhs->value().value());
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.addExpr(lhs, rhs)->as<kir::Int>();
-  }
-}
-
-kir::Val* makeAddExpr(kir::Val* lhs, kir::Val* rhs) {
-  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
-  if (lhs == nullptr || lhs->isZeroInt()) {
-    return rhs;
-  } else if (rhs == nullptr || rhs->isZeroInt()) {
-    return lhs;
-  }
-  auto lhs_int = dynamic_cast<kir::Int*>(lhs);
-  auto rhs_int = dynamic_cast<kir::Int*>(rhs);
-  if (lhs_int != nullptr && rhs_int != nullptr) {
-    return makeAddExpr(lhs_int, rhs_int);
-  } else {
-    kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-    return ir_builder.addExpr(lhs, rhs);
-  }
-}
-
-} // namespace
-
 void ShiftPredicateInserter::insert(
     kir::Expr* expr,
     const std::vector<kir::ForLoop*>& loops,
-    kir::Bool* thread_pred) {
+    kir::Bool* thread_pred,
+    bool within_unswitch) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
@@ -111,13 +46,19 @@ void ShiftPredicateInserter::insert(
   //   }
   // }
 
-  kir::Predicate* shift_pred = ir_builder.create<kir::Predicate>(
-      PredicateType::Shift, expr, thread_pred);
+  kir::Predicate* thread_pred_expr = nullptr;
+  if (within_unswitch) {
+    thread_pred_expr = ir_builder.create<kir::Predicate>(thread_pred);
+  }
+
+  kir::Predicate* shift_pred = within_unswitch
+      ? thread_pred_expr
+      : ir_builder.create<kir::Predicate>(
+            PredicateType::Shift, expr, thread_pred);
 
   // If the expr involves a thread-block barrier, set the predicate of
-  // the expre with shift_pred. Since the expr is not shift, the
-  // padding should be safe to omit. In fact, padding is probably not
-  // necessary for all non-shift exprs (see #877)
+  // the expr with shift_pred. Since the expr is not shift, the
+  // padding is safe to omit.
   if (ir_utils::hasBlockSync(expr, gpu_lower->threadPredMap())) {
     expr->setPredicate(shift_pred);
     return;
@@ -136,6 +77,11 @@ void ShiftPredicateInserter::insert(
   // Place the expr inside the if statement
   shift_ite->thenBody().push_back(expr);
 
+  // No padding condition is required if this is within unswitch.
+  if (within_unswitch) {
+    return;
+  }
+
   // Padding by zero
   kir::Predicate* padding_pred = ir_builder.create<kir::Predicate>(
       PredicateType::Padding, expr, thread_pred);
@@ -148,212 +94,6 @@ void ShiftPredicateInserter::insert(
   shift_ite->elseBody().push_back(bounds_ite);
 }
 
-namespace {
-
-kir::Val* getShiftProducerIndex(
-    size_t consumer_root_axis,
-    kir::Val* consumer_index,
-    ShiftOp* shift_expr) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  const int shift_offset =
-      (shift_expr != nullptr) ? shift_expr->offset(consumer_root_axis) : 0;
-
-  if (shift_offset == 0) {
-    return consumer_index;
-  } else if (shift_offset > 0) {
-    return ir_builder.subExpr(
-        consumer_index, ir_builder.create<kir::Int>(shift_offset));
-  } else {
-    return ir_builder.addExpr(
-        consumer_index, ir_builder.create<kir::Int>(-shift_offset));
-  }
-}
-
-// Create a producer index by adjusting the corresponding consumer
-// index.
-kir::Val* getGatherProducerIndex(
-    size_t consumer_root_axis,
-    kir::Val* consumer_index,
-    GatherOp* gather_expr,
-    const std::vector<kir::Val*>& indices) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  if (gather_expr == nullptr ||
-      consumer_root_axis >= gather_expr->windowShape().size() ||
-      gather_expr->windowShape()[consumer_root_axis]->isOneInt()) {
-    return consumer_index;
-  }
-
-  // Relative to the consumer index, the producer index needs to
-  // account for:
-  // - window access
-  // - padding at offset 0
-  // This adjustment is basically the same as
-  // getProducerIndexWithGather in index_compute.cpp.
-  // TODO: Refactor shift/gather indexing and predication
-  const auto window_axis = gather_expr->gatherAxis(consumer_root_axis);
-  TORCH_INTERNAL_ASSERT(window_axis < (int)indices.size());
-  auto window_idx = indices[window_axis];
-  auto pad_size = gather_expr->padWidth()[consumer_root_axis][0];
-  auto producer_index = ir_builder.subExpr(
-      ir_builder.addExpr(consumer_index, window_idx),
-      ir_builder.create<kir::Int>(pad_size));
-  return producer_index;
-}
-
-} // namespace
-
-kir::Bool* ShiftPredicateInserter::getPredicate(
-    const kir::Expr* expr,
-    const std::vector<kir::ForLoop*>& loops,
-    kir::TensorView* out_tv,
-    kir::Bool* thread_pred,
-    bool isShiftPredicate) {
-  const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-
-  TensorView* out_fuser_tv = out_tv->fuserTv();
-
-  const bool needs_shift_predicate =
-      gpu_lower->haloInfo().needsShiftPredicate(out_fuser_tv->definition());
-  TORCH_INTERNAL_ASSERT(needs_shift_predicate);
-
-  const auto& root_domain = out_fuser_tv->getRootDomain();
-
-  auto shift_expr = dynamic_cast<ShiftOp*>(out_fuser_tv->definition());
-  auto gather_expr = dynamic_cast<GatherOp*>(out_fuser_tv->definition());
-
-  // Creates indices at the root domain.
-  // Set contiguity of all axes false as separate indices are needed for each
-  // root axis.
-  // Note: separate indices should be needed only for axes that
-  // require shift predication, so other axes could use the actual
-  // contiguity information. See a TODO item of issue #877.
-  const auto pred_contiguity = std::vector<bool>(root_domain.size(), false);
-  auto pred_indices =
-      Index::getConsumerRootPredIndices(out_tv, loops, pred_contiguity);
-  const auto& indices = pred_indices.first;
-  const bool buffer_init = pred_indices.second;
-
-  // No predication is needed when the expr is to initialize reduction
-  // buffer on local memory
-  if (out_tv->memoryType() == MemoryType::Local && buffer_init) {
-    return ir_builder.trueVal();
-  }
-
-  TORCH_INTERNAL_ASSERT(indices.size() == root_domain.size());
-
-  kir::Bool* predicate = nullptr;
-
-  for (size_t i = 0; i < root_domain.size(); ++i) {
-    auto root_id = root_domain[i];
-
-    if (root_id->isBroadcast() || (buffer_init && root_id->isReduction()) ||
-        gpu_lower->trivialReductionInfo().isDerived(root_id)) {
-      continue;
-    }
-
-    const auto halo_info = gpu_lower->haloInfo().getRootAxisInfo(root_id);
-
-    if (isShiftPredicate) {
-      // Below, "left" and "right" halo mean halo at offset zero and
-      // axis extent, respectively.
-      //
-      // The consumer axis looks like this:
-      //
-      // [0, left halo)[0, extent)[0, right halo)
-      //              ^         ^
-      //        left limit   right limit
-      //
-      // Accesses outside of the left and right limits are filled by
-      // zero. As illustrated above, left limit = left halo, and right
-      // limit = left halo + extent.
-
-      kir::Val* left_limit = halo_info.width(0);
-      kir::Val* right_limit = makeAddExpr(
-          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width(0));
-
-      kir::Val* consumer_index = indices[i];
-      kir::Val* producer_index = nullptr;
-
-      if (shift_expr != nullptr) {
-        producer_index = getShiftProducerIndex(i, consumer_index, shift_expr);
-      } else if (gather_expr != nullptr) {
-        producer_index =
-            getGatherProducerIndex(i, consumer_index, gather_expr, indices);
-      } else {
-        producer_index = indices[i];
-      }
-
-      // If the defining expr is ShiftOp and its offset is positive,
-      // consumer access at 0 to the offset corresponds to
-      // out-of-bound producer access unless the producer has halo as
-      // well. For now, always add predication assuming no halo on the
-      // producer. This should be reivisted for performance
-      // optimization (#877).
-      if (shift_expr && shift_expr->offset(i) > 0) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(producer_index, left_limit));
-      } else if (gather_expr) {
-        // Since it's unknown if producer_index < consumer_index, we need
-        // to predicate using both of the producer and consumer
-        // indices. This would be the case if dynamic shift offset is
-        // used, which is not yet supported. This can be a performance
-        // problem, but in a common case where the input tensor is
-        // cached at SMEM, it should be possible to remove the
-        // predicate for this expression entirely.
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(consumer_index, left_limit));
-        if (consumer_index != producer_index) {
-          predicate = makeAndExpr(
-              predicate, ir_builder.geExpr(producer_index, left_limit));
-        }
-      } else if (!left_limit->isZeroInt()) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.geExpr(consumer_index, left_limit));
-      }
-
-      // If the shift offset is negative, the maximum index is extent -
-      // abs(shift_offset). Instead of subtracting shift_offset from
-      // extent, which can result in wrap around, add the absolute value
-      // of the shift offset to the index
-      if (shift_expr && shift_expr->offset(i) < 0) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(producer_index, right_limit));
-      } else if (gather_expr) {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(consumer_index, right_limit));
-        if (consumer_index != producer_index) {
-          predicate = makeAndExpr(
-              predicate, ir_builder.ltExpr(producer_index, right_limit));
-        }
-      } else {
-        predicate = makeAndExpr(
-            predicate, ir_builder.ltExpr(consumer_index, right_limit));
-      }
-    } else {
-      auto padding_max_offset = makeAddExpr(
-          out_tv->domain()->rootDomain()[i]->extent(), halo_info.width());
-
-      predicate = makeAndExpr(
-          predicate, ir_builder.ltExpr(indices[i], padding_max_offset));
-    }
-  }
-
-  if (thread_pred->isConst()) {
-    if (!thread_pred->value().value()) {
-      predicate = ir_builder.create<kir::Bool>(false);
-    }
-  } else {
-    predicate = makeAndExpr(predicate, thread_pred);
-  }
-
-  return predicate;
-}
-
 AxisHaloInfo::AxisHaloInfo() {
   auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
@@ -363,8 +103,8 @@ AxisHaloInfo::AxisHaloInfo() {
 
 kir::Int* AxisHaloInfo::width() const {
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-  return makeAddExpr(width(0), width(1));
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
+  return ir_builder.addExpr(width(0), width(1))->as<kir::Int>();
 }
 
 kir::Int* AxisHaloInfo::width(int pos) const {
@@ -397,7 +137,7 @@ void AxisHaloInfo::merge(int pos, kir::Int* other) {
 }
 
 void AxisHaloInfo::merge(const AxisHaloInfo& other) {
-  for (size_t i = 0; i < widths_.size(); ++i) {
+  for (const auto i : c10::irange(widths_.size())) {
     merge(i, other.width(i));
   }
 }
@@ -414,11 +154,15 @@ std::string AxisHaloInfo::toString() const {
   return ss.str();
 }
 
+bool HaloInfo::hasRootAxisInfo(IterDomain* id) const {
+  return root_axis_map_.find(id) != root_axis_map_.end();
+}
+
+bool HaloInfo::hasRootAxisInfo(kir::IterDomain* id) const {
+  return kir_root_axis_map_.find(id) != kir_root_axis_map_.end();
+}
+
 const AxisHaloInfo& HaloInfo::getRootAxisInfo(IterDomain* id) const {
-  TORCH_INTERNAL_ASSERT(
-      id->definition() == nullptr || id->isRFactorProduct(),
-      "Invalid IterDomain: ",
-      id);
   auto it = root_axis_map_.find(id);
   TORCH_INTERNAL_ASSERT(
       it != root_axis_map_.end(), "Halo root axis info not found for ", id);
@@ -439,7 +183,9 @@ const AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) const {
       id);
   auto it = kir_root_axis_map_.find(id);
   TORCH_INTERNAL_ASSERT(
-      it != kir_root_axis_map_.end(), "Halo root axis info not found for ", id);
+      it != kir_root_axis_map_.end(),
+      "Halo root axis info not found for ",
+      kir::toString(id));
   return it->second;
 }
 
@@ -453,14 +199,12 @@ AxisHaloInfo& HaloInfo::getRootAxisInfo(kir::IterDomain* id) {
 void HaloInfo::setRootAxisInfo(
     IterDomain* id,
     const AxisHaloInfo& root_axis_info) {
-  TORCH_INTERNAL_ASSERT(
-      id->definition() == nullptr || id->isRFactorProduct(),
-      "Invalid IterDomain: ",
-      id);
   root_axis_map_[id] = root_axis_info;
   kir_root_axis_map_
       [GpuLower::current()->lowerValue(id)->as<kir::IterDomain>()] =
           root_axis_info;
+
+  initializeFromRootAxisInfo(id);
   return;
 }
 
@@ -497,6 +241,10 @@ void HaloInfo::build(Fusion* fusion) {
   // Propagates halo information from root axes down to leaf axes
   for (auto tv : tvs) {
     build(tv->domain());
+  }
+
+  if (isDebugDumpEnabled(DebugDumpOption::Halo)) {
+    std::cout << toString() << std::endl;
   }
 
   // Note that validation requires consumer halo info
@@ -536,9 +284,9 @@ void HaloInfo::propagateRootAxisInfo(
   const auto& c_root = consumer->getRootDomain();
 
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
-  for (size_t i = 0; i < c_root.size(); ++i) {
+  for (const auto i : c10::irange(c_root.size())) {
     auto c_id = c_root[i];
     auto it = c2p.find(c_id);
     if (it == c2p.end()) {
@@ -550,7 +298,10 @@ void HaloInfo::propagateRootAxisInfo(
 
     auto p_id = it->second;
 
-    auto p_info = getRootAxisInfo(p_id);
+    AxisHaloInfo p_info;
+    if (hasRootAxisInfo(p_id)) {
+      p_info = getRootAxisInfo(p_id);
+    }
     const auto c_info = getRootAxisInfo(c_id);
 
     // If the root axes are broadcast, no halo should be associated
@@ -576,7 +327,10 @@ void HaloInfo::propagateRootAxisInfo(
         p_info.merge(c_info);
       } else {
         int pos = (offset > 0) ? 0 : 1;
-        p_info.merge(pos, makeAddExpr(c_info.width(pos), std::abs(offset)));
+        p_info.merge(
+            pos,
+            ir_builder.addExpr(c_info.width(pos), std::abs(offset))
+                ->as<kir::Int>());
       }
     } else if (auto gather_op = dynamic_cast<GatherOp*>(expr)) {
       const auto window_dim =
@@ -587,15 +341,16 @@ void HaloInfo::propagateRootAxisInfo(
       }
       const auto& pad_dim = gather_op->padWidth()[i];
       const auto pad_dim0 = gpu_lower->lowerValue(pad_dim[0])->as<kir::Int>();
-      p_info.merge(0, makeAddExpr(c_info.width(0), pad_dim0));
+      p_info.merge(
+          0, ir_builder.addExpr(c_info.width(0), pad_dim0)->as<kir::Int>());
       // The right-side halo is propagated as:
       //   consumer_right_halo + (window_dim - 1 - left_padding)
       p_info.merge(
           1,
           ir_builder
               .subExpr(
-                  makeAddExpr(c_info.width(1), window_dim),
-                  makeAddExpr(pad_dim0, 1))
+                  ir_builder.addExpr(c_info.width(1), window_dim),
+                  ir_builder.addExpr(pad_dim0, 1))
               ->as<kir::Int>());
     } else {
       p_info.merge(c_info);
@@ -604,45 +359,59 @@ void HaloInfo::propagateRootAxisInfo(
   }
 }
 
+void HaloInfo::insertToInheritanceMap(
+    TensorDomain* td,
+    IterDomain* parent,
+    IterDomain* child) {
+  // Check each root domain to see if its set includes the parent. If
+  // so, adds the child to the same set.
+  bool inserted = false;
+  for (auto root_axis : td->getRootDomain()) {
+    auto it = inheritance_map_.find(root_axis);
+    if (it == inheritance_map_.end()) {
+      continue;
+    }
+    auto& id_set = it->second;
+    if (id_set.find(parent) != id_set.end()) {
+      id_set.insert(child);
+      inserted = true;
+    }
+  }
+  // No matching set found. This should not happen.
+  TORCH_INTERNAL_ASSERT(inserted);
+}
+
+void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
+  TORCH_INTERNAL_ASSERT(hasRootAxisInfo(id));
+
+  auto gpu_lower = GpuLower::current();
+  kir::IrBuilder ir_builder(gpu_lower->kernel());
+
+  const auto& halo_info = getRootAxisInfo(id);
+  auto halo_width = halo_info.width();
+
+  if (!halo_info.hasHalo()) {
+    halo_width_map_[id] = ir_builder.zeroVal();
+    return;
+  }
+
+  auto expanded_extent =
+      ir_builder.addExpr(gpu_lower->lowerValue(id->extent()), halo_width);
+  kir_extent_map_[gpu_lower->lowerValue(id)->as<kir::IterDomain>()] =
+      expanded_extent;
+  halo_width_map_[id] = halo_width;
+
+  inheritance_map_[id] = {id};
+}
+
 // Propagate extent information from root axes to descendants
 void HaloInfo::build(TensorDomain* td) {
   auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  for (auto root_axis : td->getRootDomain()) {
-    const auto& halo_info = getRootAxisInfo(root_axis);
-    auto halo_width = halo_info.width();
-
-    // There should be no existing mapping. Note that at one point it
-    // wasn't the case as root axes were reused when creating
-    // reference tensors.
-    // TODO: This is not the case actually. Root domains are reused
-    // when creating some TensorDomains, so a single IterDomain can
-    // show up multiple times. That itself should be fixed, but for
-    // now disable this assertion.
-    TORCH_INTERNAL_ASSERT(
-        halo_width_map_.find(root_axis) == halo_width_map_.end(),
-        "Invalid domain: ",
-        root_axis,
-        " of ",
-        td->getRootDomain());
-
-    if (!halo_info.hasHalo()) {
-      halo_width_map_.insert({root_axis, ir_builder.zeroVal()});
-      continue;
-    }
-
-    auto expanded_extent = ir_builder.addExpr(
-        gpu_lower->lowerValue(root_axis->extent()), halo_width);
-    kir_extent_map_.insert(
-        {gpu_lower->lowerValue(root_axis)->as<kir::IterDomain>(),
-         expanded_extent});
-    halo_width_map_.insert({root_axis, halo_width});
-  }
-
-  auto exprs = ExprSort::getExprs(
-      td->fusion(),
-      std::vector<Val*>(td->domain().begin(), td->domain().end()));
+  auto exprs = DependencyCheck::getAllExprsBetween(
+      {td->getMaybeRFactorDomain().begin(), td->getMaybeRFactorDomain().end()},
+      {td->domain().begin(), td->domain().end()});
 
   // Track IDs that are generated by merging halo-extended IDs
   std::unordered_set<IterDomain*> merged_shifted_ids;
@@ -685,11 +454,13 @@ void HaloInfo::build(TensorDomain* td) {
 
       auto in_id = split->in();
 
-      // There must be always a mapping for the input axis of a split
-      // expr. The only exception is when the input axis is an output
-      // of merge, but that's excluded by the assertion above.
       const auto& halo_width_it = halo_width_map_.find(in_id);
-      TORCH_INTERNAL_ASSERT(halo_width_it != halo_width_map_.end());
+
+      // If no halo info is found, nothing needs to be done. This ID
+      // must be an ancestor of a domain set by setRootAxisInfo.
+      if (halo_width_it == halo_width_map_.end()) {
+        continue;
+      }
 
       const auto halo_width = halo_width_it->second;
 
@@ -710,6 +481,8 @@ void HaloInfo::build(TensorDomain* td) {
 
       halo_width_map_.insert({split->outer(), ir_builder.zeroVal()});
       halo_width_map_.insert({split->inner(), halo_width});
+
+      insertToInheritanceMap(td, in_id, split->inner());
     } else if (auto merge = dynamic_cast<Merge*>(expr)) {
       // If either of the two inputs has halo extension, propagate it
       // to the merged output ID
@@ -718,9 +491,13 @@ void HaloInfo::build(TensorDomain* td) {
       if (inner_extent != nullptr || outer_extent != nullptr) {
         if (inner_extent == nullptr) {
           inner_extent = gpu_lower->lowerValue(merge->inner()->extent());
+        } else {
+          insertToInheritanceMap(td, merge->inner(), merge->out());
         }
         if (outer_extent == nullptr) {
           outer_extent = gpu_lower->lowerValue(merge->outer()->extent());
+        } else {
+          insertToInheritanceMap(td, merge->outer(), merge->out());
         }
         auto expanded_extent = ir_builder.mulExpr(outer_extent, inner_extent);
         kir_extent_map_.insert(
@@ -871,6 +648,32 @@ bool HaloInfo::hasHaloWidth(IterDomain* id) const {
   return halo_width_map_.find(id) != halo_width_map_.end();
 }
 
+const std::unordered_set<IterDomain*>& HaloInfo::getChildDomains(
+    IterDomain* root_id) const {
+  auto it = inheritance_map_.find(root_id);
+  TORCH_INTERNAL_ASSERT(
+      it != inheritance_map_.end(),
+      "Domain not found in the inheritance map: ",
+      root_id);
+  return it->second;
+}
+
+bool HaloInfo::isHaloInherited(IterDomain* root_id, IterDomain* id) const {
+  return getChildDomains(root_id).count(id) > 0;
+}
+
+std::unordered_set<IterDomain*> HaloInfo::getRootDomains(IterDomain* id) const {
+  std::unordered_set<IterDomain*> id_set;
+
+  for (const auto& kv : inheritance_map_) {
+    if (kv.second.count(id) > 0) {
+      id_set.insert(kv.first);
+    }
+  }
+
+  return id_set;
+}
+
 namespace {
 
 //! Prove if the comparison operator, cmp, is true with the extents of
@@ -970,7 +773,7 @@ bool HaloInfo::extentEqual(IterDomain* id1, IterDomain* id2) const {
          (x_def->isA<kir::BinaryOp>() && y_def->isA<kir::BinaryOp>() &&
           x_def->as<kir::BinaryOp>()->operation() ==
               y_def->as<kir::BinaryOp>()->operation()))) {
-      for (size_t i = 0; i < x_def->inputs().size(); ++i) {
+      for (const auto i : c10::irange(x_def->inputs().size())) {
         auto x_input = dynamic_cast<kir::Int*>(x_def->inputs()[i]);
         auto y_input = dynamic_cast<kir::Int*>(y_def->inputs()[i]);
         // Both must be kir::Int
@@ -1017,7 +820,7 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) const {
   auto consumer_td = ir_utils::getTVOutput(expr)->domain();
   auto shift_expr = dynamic_cast<ShiftOp*>(expr);
   auto gather_expr = dynamic_cast<GatherOp*>(expr);
-  for (size_t i = 0; i < consumer_td->getRootDomain().size(); ++i) {
+  for (const auto i : c10::irange(consumer_td->getRootDomain().size())) {
     auto consumer_id = consumer_td->getRootDomain()[i];
     const auto consumer_halo_info = getRootAxisInfo(consumer_id);
     if (consumer_halo_info.hasHalo() ||
