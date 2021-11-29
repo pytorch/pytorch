@@ -256,9 +256,9 @@ void testStaticRuntime(
       VLOG(2) << "enable_out_variant: " << enable_out_variant;
       VLOG(2) << "manage_output_tensors: " << manage_output_tensors;
       VLOG(2) << "args: " << args;
-      VLOG(2) << "args2: " << args;
+      VLOG(2) << "args2: " << args2;
       VLOG(2) << "expect: " << expect;
-      VLOG(2) << "actual: " << expect;
+      VLOG(2) << "actual: " << actual;
       compareResults(expect, actual, use_allclose, use_equalnan);
       VLOG(2) << "first run comparison done";
       if (manage_output_tensors) {
