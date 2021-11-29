@@ -1836,8 +1836,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
       int* infos_working_ptr = &infos_data[i];
       magmaLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
     }
-    // We can do non_blocking because magmaLuNoPiv synchronizes
-    pivots.copy_(pivots_cpu, /*non_blocking=*/true);
+    pivots.copy_(pivots_cpu);
   } else {
     for (decltype(batch_size) i = 0; i < batch_size; i++) {
       scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
@@ -1948,7 +1947,15 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
   }
 #endif // USE_CUSOLVER
   else {
-    lu_factor_batched_magma(input, pivots, infos, compute_pivots);
+    // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
+    // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+    magma_int_t major, minor, micro;
+    magma_version(&major, &minor, &micro);
+    if (major >= 2 && minor >= 5 && micro >= 2) {
+      lu_factor_batched_magma(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+    }
   }
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
   if (!compute_pivots) {
