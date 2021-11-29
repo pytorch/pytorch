@@ -1014,6 +1014,10 @@ class DistributedDataParallel(Module, Joinable):
                 return [type(obj)(*args) for args in zip(*map(to_map, obj))]
             if isinstance(obj, tuple) and len(obj) > 0:
                 return list(zip(*map(to_map, obj)))
+            if isinstance(obj, str):
+                # Needs to be checked, otherwise it's taken as a sequence infinitely.
+                # This is because the elements of a string are also strings, and so on.
+                return [obj]
             if isinstance(obj, collections.abc.Sequence) and len(obj) > 0:
                 try:
                     return [type(obj)(i) for i in zip(*map(to_map, obj))]
