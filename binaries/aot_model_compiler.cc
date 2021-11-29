@@ -5,12 +5,19 @@
 #include <torch/csrc/jit/backends/backend_detail.h>
 #include <torch/csrc/jit/backends/backend_preprocess.h>
 #include <torch/csrc/jit/mobile/nnc/aot_compiler.h>
+#include <torch/csrc/jit/passes/constant_propagation.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_graph_optimizations.h>
+#include <torch/csrc/jit/passes/peephole.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import.h>
+#include <torch/csrc/jit/tensorexpr/graph_opt.h>
+#include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/script.h>
-
 
 C10_DEFINE_string(model, "", "The torch script model to optimize.");
 C10_DEFINE_string(model_name, "", "The name of the model.");
@@ -21,6 +28,7 @@ C10_DEFINE_string(
     "For input float TensorCPUs, specify the dimension using comma "
     "separated numbers. If multiple inputs needed, use semicolon "
     "to separate the dimension of different tensors.");
+C10_DEFINE_string(method_name, "forward", "The name of the method.");
 C10_DEFINE_string(
     output_llvm,
     "",
@@ -66,29 +74,31 @@ c10::Dict<c10::IValue, c10::IValue> createCompileSpec() {
   c10::Dict<c10::IValue, c10::IValue> method_spec(
       c10::StringType::get(), c10::AnyType::get());
   auto input_shapes = parseInputShapes();
-  TORCH_CHECK(
-      input_shapes.size() == 1,
-      "Wrong # of input shapes: ",
-      input_shapes.size());
-  method_spec.insert("sizes", input_shapes[0]); // TODO: support multiple inputs
-  compile_spec.insert("forward", method_spec);
+  method_spec.insert("sizes", input_shapes);
+  compile_spec.insert(FLAGS_method_name, method_spec);
   return compile_spec;
 }
 
-std::vector<int64_t> getInputSizesForMethod(
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
-    const std::string& method_name) {
-  return method_compile_spec.at(method_name)
-      .toGenericDict()
-      .at("sizes")
-      .toIntVector();
+std::vector<std::vector<int64_t>> getInputSizes (
+    const c10::Dict<c10::IValue, c10::IValue>& compile_spec) {
+  auto input_shapes = compile_spec.at(FLAGS_method_name).toGenericDict().at("sizes").toList();
+  std::vector<std::vector<int64_t>> inputSizes;
+  for (const auto& input_shape : input_shapes) {
+    auto sizes = ((c10::IValue) input_shape).toIntVector();
+    inputSizes.emplace_back(sizes);
+  }
+  return inputSizes;
 }
 
-std::string getNncKernelId(const std::string& method_name) {
+std::string getNncKernelId() {
   // TODO: calculate the version_token.
   const std::string version_token = "VERTOKEN";
-  return FLAGS_model_name + ":" + FLAGS_model_version + ":" + method_name +
+  return FLAGS_model_name + ":" + FLAGS_model_version + ":" + FLAGS_method_name +
       ":" + version_token;
+}
+
+std::string getNncKernelFuncName(const std::string& method_name) {
+  return "nnc_" + FLAGS_model_name + "_" + FLAGS_model_version + "_" + method_name;
 }
 
 void writeOutputLlvmAssembly(const std::string& asm_code) {
@@ -100,23 +110,26 @@ void writeOutputLlvmAssembly(const std::string& asm_code) {
 
   std::ofstream output(output_llvm_file_name);
   output << asm_code;
+  std::cout << "The compiled llvm assembly code was saved to " << output_llvm_file_name
+            << std::endl;
 }
 
 c10::IValue preprocess(
     const torch::jit::Module& mod,
-    const c10::Dict<c10::IValue, c10::IValue>& method_compile_spec,
+    const c10::Dict<c10::IValue, c10::IValue>& compile_spec,
     const torch::jit::BackendDebugHandleGenerator& generate_debug_handles) {
-  const std::string& method_name = "forward";
-  auto method = mod.get_method(method_name);
-  auto graph = method.function().graph()->copy();
-  auto sizes = getInputSizesForMethod(method_compile_spec, method_name);
 
-  std::string llvm_asm_code;
-  auto compiled = torch::jit::mobile::nnc::aotCompile(method_name, graph, sizes);
+  auto method = mod.get_method(FLAGS_method_name);
+  auto graph = toGraphFunction(method.function()).graph()->copy();
+  auto sizes = getInputSizes(compile_spec);
+  auto kernel_func_name = getNncKernelFuncName(FLAGS_method_name);
+
+  auto compiled = torch::jit::mobile::nnc::aotCompile(
+      FLAGS_method_name, graph, sizes, kernel_func_name);
   writeOutputLlvmAssembly(compiled.second);
 
   auto func = std::move(compiled.first);
-  func->set_nnc_kernel_id(getNncKernelId(method_name));
+  func->set_nnc_kernel_id(getNncKernelId());
 
   torch::jit::mobile::nnc::CompilationUnit cu;
   cu.register_function(std::move(func));
@@ -134,7 +147,8 @@ int main(int argc, char** argv) {
       " --model=<model file>"
       " --model_name=<model name>"
       " --model_version=<model version>"
-      " --input_dims='1,3,224,224'"
+      " --input_dims=<input dimensions like '1,3,224,224;2,2'>"
+      " [--method_name=<method name>]"
       " [--output_llvm=<llvm assembly output file path>]"
       " [--output_model=<output model file path>]");
 
@@ -145,6 +159,9 @@ int main(int argc, char** argv) {
   }
 
   CAFFE_ENFORCE(!FLAGS_model.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_model_name.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_model_version.empty(), c10::UsageMessage());
+  CAFFE_ENFORCE(!FLAGS_input_dims.empty(), c10::UsageMessage());
 
   std::string output_model_name = FLAGS_output_model;
   if (output_model_name.empty()) {
@@ -155,8 +172,26 @@ int main(int argc, char** argv) {
   auto m = torch::jit::load(FLAGS_model);
   m.eval();
   auto frozen_m = torch::jit::freeze_module(m.clone());
-  auto graph = frozen_m.get_method("forward").graph();
+  auto graph = frozen_m.get_method(FLAGS_method_name).graph();
+  auto input_shapes = parseInputShapes();
+  std::vector<c10::optional<at::Tensor>> example_inputs;
+  example_inputs.reserve(input_shapes.size());
+  for (const auto& input_shape : input_shapes) {
+    example_inputs.emplace_back(at::rand(input_shape));
+  }
+
+  torch::jit::RemoveTensorMutation(graph);
+  torch::jit::EliminateDeadCode(graph->block());
+  graph = torch::jit::tensorexpr::removeUnusedSelfArgument(graph);
+
+  torch::jit::tensorexpr::annotateInputShapes(graph, example_inputs);
   torch::jit::OptimizeFrozenGraph(graph, true);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
+  torch::jit::PropagateShapesOnGraph(graph);
+  torch::jit::PeepholeOptimize(graph, false);
+  torch::jit::ConstantPropagation(graph);
 
   auto compile_spec = createCompileSpec();
   auto any_dict_ty =

@@ -10,7 +10,7 @@ class TestGELU(AccTestCase):
             def forward(self, x):
                 return nn.functional.gelu(x)
 
-        inputs = [torch.randn(1, 10)]
+        inputs = [torch.randn(3, 10, 20)]
         self.run_test(
             TestModule(),
             inputs,

@@ -345,6 +345,8 @@ class MinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
+                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -564,6 +566,8 @@ class PerChannelMinMaxObserver(_ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        memoryless: Boolean that controls whether observer removes old data when a new input is seen.
+                    This is most useful for simulating dynamic quantization, especially during QAT.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -1178,6 +1182,44 @@ class HistogramObserver(_ObserverBase):
         )
 
 
+class FixedQParamsObserver(ObserverBase):
+    r"""
+    Observer that simulates quantize and dequantize with fixed
+    quantization parameters in training time. Only per tensor
+    quantization is supported.
+
+    Args:
+        `scale` (float): fixed scale for the observer
+        `zero_point` (int): fixed zero point for the observer
+        `dtype`, `qscheme`, `quant_min`, `quant_max`
+    """
+
+    scale: torch.Tensor
+    zero_point: torch.Tensor
+
+    def __init__(self,
+                 scale,
+                 zero_point,
+                 dtype=torch.quint8,
+                 qscheme=torch.per_tensor_affine,
+                 quant_min=0,
+                 quant_max=255):
+        super(FixedQParamsObserver, self).__init__(dtype=dtype)
+        self.quant_min = quant_min
+        self.quant_max = quant_max
+        self.register_buffer('scale', torch.tensor([scale], dtype=torch.float))
+        self.register_buffer('zero_point', torch.tensor([zero_point], dtype=torch.int))
+        self.dtype = dtype
+        self.qscheme = qscheme
+
+    def forward(self, X):
+        return X
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        return self.scale, self.zero_point
+
+
 class PlaceholderObserver(ObserverBase):
     r"""
     Observer that doesn't do anything and just passes its configuration to the
@@ -1400,4 +1442,14 @@ default_float_qparams_observer_4bit = PerChannelMinMaxObserver.with_args(
 )
 """
 Default observer for a floating point zero-point and 4 bit activations.
+"""
+
+# TODO(future PR): remove these defaults and enforce activation functions
+# to explicitly specify their output range
+default_symmetric_fixed_qparams_observer = FixedQParamsObserver.with_args(
+    scale=2.0 / 256.0, zero_point=128, dtype=torch.quint8, quant_min=0, quant_max=255)
+default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
+    scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
+"""
+Default observers for fixed qparams operations.
 """

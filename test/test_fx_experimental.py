@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: fx"]
+
 import math
 import numbers
 import operator
@@ -1473,11 +1475,15 @@ class TestNormalizeOperators(JitTestCase):
             "mT",  # Implemented with a lambda
             "mH",  # Implemented with a lambda
             "gradient",
+            "histogramdd",
             "igamma",
             "igammac",
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.rrelu",  # Implemented with a lambda
+            "nonzero",
             "polygamma",
             "special.polygamma",
             "repeat",
@@ -1486,6 +1492,8 @@ class TestNormalizeOperators(JitTestCase):
             "resize_as_",
             "special.zeta",
             "to_sparse",
+            "unique",
+            "unique_consecutive",
             "view",
             "view_as",
             "unfold",
@@ -1506,6 +1514,12 @@ class TestNormalizeOperators(JitTestCase):
             'randn_like',
             'zeros_like',
             'full_like',
+            'rand_like',
+            'randint_like',
+            'new_ones',
+            'new_empty',
+            'new_zeros',
+            'new_full',
             "__getitem__",
             "__radd__",
             "__rsub__",
@@ -1517,10 +1531,16 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
         }
 
         # Unsupported input types
         if op.name in op_skip:
+            return
+
+        if op.name.startswith('_masked.'):
             return
 
         # These ops currently don't trace in FX for various reasons (i.e. they take a list of tensors)

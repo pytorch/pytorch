@@ -4,11 +4,10 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
+set -ex
+
 # shellcheck disable=SC2034
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
-# Get fully qualified path using realpath
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
 
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
@@ -24,6 +23,12 @@ if [[ -n "${TEST_CONFIG}" ]]; then
     BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
 fi
 
+# Get fully qualified path using realpath
+if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+fi
+
+
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -32,6 +37,10 @@ echo "Testing pytorch"
 export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
+
+if [[ $TEST_CONFIG == 'default' ]]; then
+  export CUDA_VISIBLE_DEVICES=0
+fi
 
 if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
@@ -69,6 +78,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo | grep -E 'Name:.*\sgfx|Marketing'
+
+  # Manually set NUM_TEST_SHARDS since Jenkins doesn't do it
+  export NUM_TEST_SHARDS=2
 fi
 
 # --user breaks ppc64le builds and these packages are already in ppc64le docker
@@ -141,31 +153,22 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-# if PR_NUMBER exist, use it to grab PR contents.
-DETERMINE_FROM=$(mktemp)
-if [ -n "$PR_NUMBER" ]; then
-  get_pr_change_files "$PR_NUMBER" "$DETERMINE_FROM"
-else
-  file_diff_from_base "$DETERMINE_FROM"
-fi
-
 test_python_legacy_jit() {
-  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
 }
 
-test_python_shard1() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 1 2 --verbose --determine-from="$DETERMINE_FROM"
-  assert_git_not_dirty
-}
-
-test_python_shard2() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard 2 2 --verbose --determine-from="$DETERMINE_FROM"
+test_python_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
   assert_git_not_dirty
 }
 
@@ -306,7 +309,7 @@ test_vulkan() {
 
 test_distributed() {
   echo "Testing distributed python tests"
-  time python test/run_test.py --distributed-tests --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --distributed-tests --verbose
   assert_git_not_dirty
 
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
@@ -415,7 +418,7 @@ test_xla() {
   assert_git_not_dirty
 }
 
-# Do NOT run this test before any other tests, like test_python_shard1, etc.
+# Do NOT run this test before any other tests, like test_python_shard, etc.
 # Because this function uninstalls the torch built from branch, and install
 # nightly version.
 test_backward_compatibility() {
@@ -465,7 +468,7 @@ test_benchmarks() {
 
 test_cpp_extensions() {
   # This is to test whether cpp extension build is compatible with current env. No need to test both ninja and no-ninja build
-  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose --determine-from="$DETERMINE_FROM"
+  time python test/run_test.py --include test_cpp_extensions_aot_ninja --verbose
   assert_git_not_dirty
 }
 
@@ -521,11 +524,11 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-test1 || "${JOB_BASE_NAME}" == *-test1 || ("
   fi
   test_without_numpy
   install_torchvision
-  test_python_shard1
+  test_python_shard 1
   test_aten
 elif [[ "${BUILD_ENVIRONMENT}" == *-test2 || "${JOB_BASE_NAME}" == *-test2 || ("${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1) ]]; then
   install_torchvision
-  test_python_shard2
+  test_python_shard 2
   test_libtorch
   test_aot_compilation
   test_custom_script_ops
@@ -535,7 +538,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
 elif [[ "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   test_bazel
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
   test_distributed
   test_rpc
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then

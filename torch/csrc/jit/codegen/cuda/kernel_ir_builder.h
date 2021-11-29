@@ -51,6 +51,8 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   // Unary operations
   Val* negExpr(Val* val);
+  Val* notExpr(Val* val);
+  Val* setExpr(Val* val);
   Val* setExprNamedScalar(const std::string& name, Val* val);
   Val* addressExprNamedScalar(const std::string& name, Val* val);
 
@@ -97,6 +99,29 @@ class TORCH_CUDA_CU_API IrBuilder {
 
   // Magic zero corresponds to runtime/helpers.cu magic_zero
   NamedScalar* magic_zero_ = nullptr;
+};
+
+//! A wrapper builder with static expression simplification
+//!
+//! Example:
+//! - addExpr(new Int(1), new Int(2)) -> Int(3)
+//! - addExpr(new Int(0), new NamedScalar("foo")) -> NamedScalar("foo")
+//!
+//! Designed to be used to simplify predicate and index expressions in
+//! generated code. Also, the shift validation may fail without
+//! this simplification.
+class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
+ public:
+  explicit SimplifyingIrBuilder(Kernel* kernel) : IrBuilder(kernel) {}
+
+  Val* negExpr(Val* val);
+  Val* notExpr(Val* val);
+
+  Val* addExpr(Int* lhs, Int::ScalarType rhs);
+  Val* addExpr(Int* lhs, Int* rhs);
+  Val* addExpr(Val* lhs, Val* rhs);
+  Val* subExpr(Val* lhs, Val* rhs);
+  Val* andExpr(Val* lhs, Val* rhs);
 };
 
 } // namespace kir
