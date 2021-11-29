@@ -6217,16 +6217,12 @@
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
-  dispatch:
-    CPU: lerp_cpu_scalar_
-    CUDA: lerp_cuda_scalar_
+  structured_delegate: lerp.Scalar_out
 
 - func: lerp_.Tensor(Tensor(a!) self, Tensor end, Tensor weight) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
-  dispatch:
-    CPU: lerp_cpu_tensor_
-    CUDA: lerp_cuda_tensor_
+  structured_delegate: lerp.Tensor_out
 
 - func: addbmm_(Tensor(a!) self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor(a!)
   variants: method
@@ -7168,29 +7164,27 @@
 
 - func: lerp.Scalar_out(Tensor self, Tensor end, Scalar weight, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: lerp_cpu_scalar_out
-    CUDA: lerp_cuda_scalar_out
+    CPU, CUDA: lerp_Scalar
 
 - func: lerp.Tensor_out(Tensor self, Tensor end, Tensor weight, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
   dispatch:
-    CPU: lerp_cpu_tensor_out
-    CUDA: lerp_cuda_tensor_out
+    CPU, CUDA: lerp_Tensor
 
 - func: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU: lerp_cpu_scalar
-    CUDA: lerp_cuda_scalar
+  structured_delegate: lerp.Scalar_out
 
 - func: lerp.Tensor(Tensor self, Tensor end, Tensor weight) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
-  dispatch:
-    CPU: lerp_cpu_tensor
-    CUDA: lerp_cuda_tensor
+  structured_delegate: lerp.Tensor_out
 
 - func: histc.out(Tensor self, int bins=100, Scalar min=0, Scalar max=0, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
