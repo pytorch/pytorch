@@ -196,7 +196,7 @@ const Tensor& resize__plumbing(
   // Update the sizes and strides of the wrapper
   auto* batched = maybeGetBatchedImpl(self);
   TORCH_INTERNAL_ASSERT(batched);
-  batched->refreshSizesAndStrides();
+  batched->refreshTensorMetadata();
 
   return self;
 }
