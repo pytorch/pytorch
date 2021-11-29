@@ -482,7 +482,7 @@ const std::vector<std::string> functions = {
         def _autocast_to_full_precision(self, cuda_enabled : bool, cpu_enabled : bool):
             self_dtype = self.dtype
             def backward(grad_output):
-                return grad_output.to(self_dtype)
+                return grad_output.to(self_dtype), None, None
 
             return torch._autocast_to_full_precision(self, cuda_enabled, cpu_enabled), backward
 
@@ -493,7 +493,7 @@ const std::vector<std::string> functions = {
                                           cpu_dtype : int):
             self_dtype = self.dtype
             def backward(grad_output):
-                return grad_output.to(self_dtype)
+                return grad_output.to(self_dtype), None, None, None, None
 
             return torch._autocast_to_reduced_precision(self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype), backward
 
@@ -1174,40 +1174,16 @@ const std::vector<std::string> functions = {
                 return grad_input, None, grad_weight, grad_bias, None, None
             return output, backward
 
-        def AD_fused_dropout_backward(grad,
-                                      mask,
-                                      p1m: float):
-            p1r = 1. / p1m
-            grad_input = grad * (mask.type_as(grad) * p1r)
-            return grad_input
-
         def dropout(input,
                     p: float,
                     train: bool):
-            use_cuda = input.is_cuda
-            # lowering is specialized for cuda because cuda fuser can efficiently fuse those operations
-            # for cpu backend, where fusions are disabled, a different lowering that is more efficient
-            # in the absence of fusion is used
-            p1m = 1. - p
-            if train:
-                if use_cuda:
-                    mask = torch.rand_like(input, memory_format=1) < p1m
-                    res = mask.type_as(input) * input * (1./p1m)
-                else:
-                    mask = torch.empty_like(input, memory_format=1)
-                    mask.bernoulli_(p1m)
-                    res = mask * input / p1m
-            else:
-                p1m = 1.
-                res = input
-                mask = torch.empty_like(input, memory_format=1)
+            # if `train == false` we need to set `p1m` to 0 so `scale == 1`
+            p1m = (1. - p) * float(train)
+            scale = 1. / (float(p1m == 0.) + p1m)
+            res,mask = torch.native_dropout(input, p, train)
 
             def backward(grad_output):
-                use_cuda = grad_output.is_cuda
-                if use_cuda:
-                    grad_input = AD_fused_dropout_backward(grad_output, mask, p1m)
-                else:
-                    grad_input = grad_output * mask / p1m
+                grad_input = torch.native_dropout_backward(grad_output, mask, scale)
                 return grad_input, None, None
             return res, backward
 

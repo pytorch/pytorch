@@ -509,7 +509,7 @@ class LinearLR(_LRScheduler):
         >>> # lr = 0.03125  if epoch == 1
         >>> # lr = 0.0375   if epoch == 2
         >>> # lr = 0.04375  if epoch == 3
-        >>> # lr = 0.005    if epoch >= 4
+        >>> # lr = 0.05    if epoch >= 4
         >>> scheduler = LinearLR(self.opt, start_factor=0.5, total_iters=4)
         >>> for epoch in range(100):
         >>>     train(...)
@@ -765,6 +765,7 @@ class ChainedScheduler(_LRScheduler):
                     "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
                 )
         self._schedulers = list(schedulers)
+        self.optimizer = schedulers[0].optimizer
 
     def step(self):
         for scheduler in self._schedulers:
