@@ -3696,9 +3696,9 @@ def sample_inputs_bilinear(self, device, dtype, requires_grad):
     return sample_inputs
 
 def sample_inputs_binary_cross_entropy(self, device, dtype, requires_grad):
-    sample_inputs = []
+    make_arg = partial(make_tensor, device=device, dtype=dtype)
 
-    shapes = [
+    shapes = (
         (0,),
         (1,),
         (0, 0),
@@ -3707,44 +3707,29 @@ def sample_inputs_binary_cross_entropy(self, device, dtype, requires_grad):
         (2, 3),
         (3, 2),
         (1, 2, 3),
-        (L, M, S)]
+        (L, M, S))
 
-    reductions = ['none', 'mean', 'sum']
+    reductions = ('none', 'mean', 'sum')
 
-    weights = [None]
+    weights = (True, False)
 
-    for shape in shapes:
-        input = make_tensor(
-            shape=shape,
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad)
+    def generate_samples():
+        for shape, reduction, weight in product(shapes, reductions, weights):
+            # For these tensors, values must be between 0 and 1.
+            input = make_arg(shape, requires_grad=requires_grad, low=0, high=1)
+            target = make_arg(shape, requires_grad=requires_grad, low=0, high=1)
 
-        target = make_tensor(
-            shape=shape,
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
-            low=0,
-            high=1)
+            args = (target,)
 
-        weight = make_tensor(
-            shape=shape,
-            device=device,
-            dtype=dtype,
-            requires_grad=requires_grad,
-            low=0,
-            high=1)
-        weights.append(weight)
+            kwargs = {'reduction': reduction}
+            if weight:
+                # 'requires_grad' must be 'False' for the weight tensor.
+                weight = make_arg(shape, requires_grad=False)
+                kwargs["weight"] = weight
 
-        for reduction in reductions:
-            for weight in weights:
-                args = (target,)
-                kwargs = {'reduction': reduction, 'weight': weight}
-                sample_inputs.append(
-                    SampleInput(input, args=args, kwargs=kwargs))
+            yield SampleInput(input, args=args, kwargs=kwargs)
 
-    return sample_inputs
+    return list(generate_samples())
 
 def sample_inputs_glu(self, device, dtype, requires_grad):
     features_options = [[2], [2, 4], [8, 8], [3, 6, 8], [1, 4, 6, 7]]
@@ -10298,7 +10283,16 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.binary_cross_entropy',
            aten_name='binary_cross_entropy',
            sample_inputs_func=sample_inputs_binary_cross_entropy,
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
+           dtypesIfCPU=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           skips=(
+               # FIXME: from derivatives.yaml:
+               # not_implemented("binary_cross_entropy_backward wrt `target`")
+               DecorateInfo(
+                   unittest.skip('Skipped!'), 'TestGradients',
+                   'test_fn_gradgrad'),
+           )),
     OpInfo('nn.functional.glu',
            aten_name='glu',
            supports_autograd=True,
