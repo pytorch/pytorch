@@ -3780,15 +3780,18 @@ def sample_inputs_interpolate(mode, self, device, dtype, requires_grad):
 
     return sample_inputs
 
-def sample_inputs_upsample_bilinear(self, device, dtype, requires_grad):
+def sample_inputs_upsample(mode, self, device, dtype, requires_grad):
     N, C = 2, 3
     D = 4
     S = 3
     L = 5
 
-    rank = 2
+    ranks_for_mode = {
+        'nearest': [1, 2, 3],
+        'bilinear': [2],
+    }
 
-    def shape(size, with_batch_channel=True):
+    def shape(size, rank, with_batch_channel=True):
         if with_batch_channel:
             return tuple([N, C] + ([size] * rank))
         return tuple([size] * rank)
@@ -3796,16 +3799,18 @@ def sample_inputs_upsample_bilinear(self, device, dtype, requires_grad):
     make_arg = partial(make_tensor, device=device, dtype=dtype,
                        requires_grad=requires_grad, low=-1, high=1)
 
-    sample_inputs = [
+    sample_inputs = []
+    for rank in ranks_for_mode[mode]:
+        sample_inputs.extend([
             SampleInput(make_arg(shape(D, rank)),
-                        args=(shape(S, False), None)),
+                        args=(shape(S, rank, False), None)),
             SampleInput(make_arg(shape(D, rank)),
-                        args=(shape(L, False), None)),
+                        args=(shape(L, rank, False), None)),
             SampleInput(make_arg(shape(D, rank)),
                         args=(None, 1.7)),
             SampleInput(make_arg(shape(D, rank)),
                         args=(None, 0.6)),
-    ]
+        ])
 
     return sample_inputs
 
@@ -10326,7 +10331,20 @@ op_db: List[OpInfo] = [
            dtypes=floating_types(),
            dtypesIfCUDA=floating_types_and(torch.half),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           sample_inputs_func=sample_inputs_upsample_bilinear,
+           sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
+           skips=(
+               # RuntimeError: false
+               # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
+               # please report a bug to PyTorch.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           supports_out=False),
+    OpInfo('nn.functional.upsample_nearest',
+           supports_autograd=True,
+           dtypes=floating_types_and(torch.uint8),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           sample_inputs_func=partial(sample_inputs_upsample, 'nearest'),
            skips=(
                # RuntimeError: false
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
