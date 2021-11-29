@@ -3173,8 +3173,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('fft.ihfftn'),
         xfail('fft.irfft2'),
         xfail('fft.rfft2'),
-        xfail('isinf'),
-        xfail('isreal'),
         xfail('allclose'),
         xfail('argwhere'),
         xfail('bfloat16', 'channels_last'),
