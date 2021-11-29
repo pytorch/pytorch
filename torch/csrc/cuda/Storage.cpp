@@ -4,9 +4,6 @@
 #include <structmember.h>
 #include <fmt/format.h>
 
-// See Note [TH abstraction violation]
-//    - Used to get at allocator from storage
-#include <TH/THTensor.hpp>
 #include <torch/csrc/cuda/THCP.h>
 
 #include <torch/csrc/cuda/override_macros.h>
