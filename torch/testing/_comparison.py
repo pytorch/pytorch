@@ -2,7 +2,6 @@ import abc
 import cmath
 import collections.abc
 from typing import NoReturn, Callable, Sequence, List, Union, Optional, Type, Tuple, Any
-import contextlib
 
 import torch
 
@@ -30,10 +29,14 @@ class ErrorMeta(Exception):
         self.msg = msg
         self.id = id
 
+    @staticmethod
+    def id_to_itemstr(id: Tuple[Any, ...]) -> str:
+        return "".join(str([item]) for item in id)
+
     def to_error(self) -> Exception:
         msg = self.msg
         if self.id:
-            msg += f"\n\nThe failure occurred for item {''.join(str([item]) for item in self.id)}"
+            msg += f"\n\nThe failure occurred for item {self.id_to_itemstr(self.id)}"
         return self.type(msg)
 
 
@@ -298,6 +301,23 @@ class Pair(abc.ABC):
     def compare(self) -> None:
         """Compares the inputs and returns an :class`ErrorMeta` in case they mismatch."""
 
+    def extra_repr(self) -> Sequence[Union[str, Tuple[str, Any]]]:
+        return []
+
+    def __repr__(self) -> str:
+        head = f"{type(self).__name__}("
+        tail = ")"
+        body = [
+            f"    {name}={value},"
+            for name, value in [
+                ("id", self.id),
+                ("actual", self.actual),
+                ("expected", self.expected),
+                *[(extra, getattr(self, extra)) if isinstance(extra, str) else extra for extra in self.extra_repr()],
+            ]
+        ]
+        return "\n".join((head, *body, *tail))
+
 
 class ObjectPair(Pair):
     """Pair for any type of inputs that will be compared with the `==` operator.
@@ -465,6 +485,14 @@ class NumberPair(Pair):
 
         raise self._make_error_meta(
             AssertionError, make_scalar_mismatch_msg(self.actual, self.expected, rtol=self.rtol, atol=self.atol)
+        )
+
+    def extra_repr(self) -> Sequence[str]:
+        return (
+            "rtol",
+            "atol",
+            "equal_nan",
+            "check_dtype",
         )
 
 
@@ -799,6 +827,18 @@ class TensorLikePair(Pair):
             dtype = torch.int64
         return actual.to(dtype), expected.to(dtype)
 
+    def extra_repr(self) -> Sequence[str]:
+        return (
+            "rtol",
+            "atol",
+            "equal_nan",
+            "check_device",
+            "check_dtype",
+            "check_layout",
+            "check_stride",
+            "check_is_coalesced",
+        )
+
 
 def originate_pairs(
     actual: Any,
@@ -875,8 +915,30 @@ def originate_pairs(
 
     else:
         for pair_type in pair_types:
-            with contextlib.suppress(UnsupportedInputs):
+            try:
                 return [pair_type(actual, expected, id=id, **options)]
+            # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
+            # inputs. Thus, we try the next pair type.
+            except UnsupportedInputs:
+                continue
+            # Raising an `ErrorMeta` during origination is the orderly way to abort and so we simply re-raise it. This
+            # is only in a separate branch, because the one below would also except it.
+            except ErrorMeta:
+                raise
+            # Raising any other exception during origination is unexpected and will give some extra information about
+            # what happened. If applicable, the exception should be expected in the future.
+            except Exception as error:
+                raise RuntimeError(
+                    f"Originating a {pair_type.__name__}() at item {ErrorMeta.id_to_itemstr(id)} with\n\n"
+                    f"{type(actual).__name__}(): {actual}\n\n"
+                    f"and\n\n"
+                    f"{type(expected).__name__}(): {expected}\n\n"
+                    f"resulted in the unexpected exception above. "
+                    f"If you are a user and see this message during normal operation "
+                    "please file an issue at https://github.com/pytorch/pytorch/issues. "
+                    "If you are a developer and working on the comparison functions, "
+                    "please except the previous error and raise an expressive `ErrorMeta` instead."
+                ) from error
         else:
             raise ErrorMeta(
                 TypeError,
@@ -906,7 +968,8 @@ def assert_equal(
     try:
         pairs = originate_pairs(actual, expected, pair_types=pair_types, **options)
     except ErrorMeta as error_meta:
-        raise error_meta.to_error() from error_meta
+        # Explicitly raising from None to hide the internal traceback
+        raise error_meta.to_error() from None
 
     error_metas: List[ErrorMeta] = []
     for pair in pairs:
@@ -914,6 +977,18 @@ def assert_equal(
             pair.compare()
         except ErrorMeta as error_meta:
             error_metas.append(error_meta)
+        # Raising any exception besides `ErrorMeta` while comparing is unexpected and will give some extra information
+        # about what happened. If applicable, the exception should be expected in the future.
+        except Exception as error:
+            raise RuntimeError(
+                f"Comparing\n\n"
+                f"{pair}\n\n"
+                f"resulted in the unexpected exception above. "
+                f"If you are a user and see this message during normal operation "
+                "please file an issue at https://github.com/pytorch/pytorch/issues. "
+                "If you are a developer and working on the comparison functions, "
+                "please except the previous error and raise an expressive `ErrorMeta` instead."
+            ) from error
 
     if not error_metas:
         return
