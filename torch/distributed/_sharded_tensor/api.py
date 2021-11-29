@@ -25,10 +25,17 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import kaiming_uniform_, normal_, sharded_embedding, sharded_linear, uniform_
+from .ops import (
+    kaiming_uniform_,
+    normal_,
+    sharded_embedding,
+    sharded_embedding_bag,
+    sharded_linear,
+    uniform_,
+)
 from .shard import Shard
 from .utils import (
-    _CURRENT_PROCESS_GROUP,
+    get_current_process_group,
     _flatten_tensor_size,
     _parse_and_validate_remote_device,
     _validate_output_tensor_for_gather,
@@ -107,6 +114,11 @@ class ShardedTensor(object):
             Need to initialize the RPC Framework if specified as ``True``.
             Default: ``False``.
     """
+
+    def __new__(cls, *args, **kwargs):
+        # Use __new__ for logging purposes.
+        torch._C._log_api_usage_once("torch.distributed.sharded_tensor")
+        return super(ShardedTensor, cls).__new__(cls)
 
     def __init__(
         self,
@@ -283,7 +295,7 @@ class ShardedTensor(object):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
                             metadata.shard_offsets[dim],
-                            metadata.shard_lengths[dim],
+                            metadata.shard_sizes[dim],
                         )
 
                     out_narrow_view.copy_(tensor)
@@ -315,24 +327,28 @@ class ShardedTensor(object):
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata
-        gathered_metadatas = [None for _ in range(world_size)]
+        gathered_metadatas: List[Optional[ShardedTensorMetadata]] = []
+        if world_size > 1:
+            gathered_metadatas = [None for _ in range(world_size)]
 
-        if local_shards_device.type == "cuda":
-            # with GPU/NCCL, we need to set a device for all_gather_object
-            # to use as we need to know which device we should put the
-            # serialized tensor on before the NCCL collective.
-            with torch.cuda.device(local_shards_device):
+            if local_shards_device.type == "cuda":
+                # with GPU/NCCL, we need to set a device for all_gather_object
+                # to use as we need to know which device we should put the
+                # serialized tensor on before the NCCL collective.
+                with torch.cuda.device(local_shards_device):
+                    dist.all_gather_object(
+                        gathered_metadatas,
+                        local_sharded_tensor_metadata,
+                        group=process_group
+                    )
+            else:
                 dist.all_gather_object(
                     gathered_metadatas,
                     local_sharded_tensor_metadata,
                     group=process_group
                 )
         else:
-            dist.all_gather_object(
-                gathered_metadatas,
-                local_sharded_tensor_metadata,
-                group=process_group
-            )
+            gathered_metadatas = [local_sharded_tensor_metadata]
 
         global_sharded_tensor_metadata = build_global_metadata(gathered_metadatas)
 
@@ -416,7 +432,7 @@ class ShardedTensor(object):
             if current_rank == rank:
                 # Initialize the local shard.
                 local_shard = _create_tensor_from_params(
-                    *shard_metadata.shard_lengths, local_device=local_device,
+                    *shard_metadata.shard_sizes, local_device=local_device,
                     tensor_init_params=tensor_init_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 
@@ -435,6 +451,8 @@ class ShardedTensor(object):
             return sharded_linear(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding:
             return sharded_embedding(types, args, kwargs, self._process_group)
+        if func == torch.nn.functional.embedding_bag:
+            return sharded_embedding_bag(types, args, kwargs, self._process_group)
         elif func == torch.nn.init.normal_:
             return normal_(types, args, kwargs)
         elif func == torch.nn.init.uniform_:
@@ -563,10 +581,7 @@ class ShardedTensor(object):
         self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
-        if _CURRENT_PROCESS_GROUP is None:
-            self._process_group = distributed_c10d._get_default_group()
-        else:
-            self._process_group = _CURRENT_PROCESS_GROUP
+        self._process_group = get_current_process_group()
 
         # Validate process group.
         local_rank = distributed_c10d.get_rank(self._process_group)
