@@ -35,7 +35,7 @@ from .ops import (
 )
 from .shard import Shard
 from .utils import (
-    _CURRENT_PROCESS_GROUP,
+    get_current_process_group,
     _flatten_tensor_size,
     _parse_and_validate_remote_device,
     _validate_output_tensor_for_gather,
@@ -114,6 +114,11 @@ class ShardedTensor(object):
             Need to initialize the RPC Framework if specified as ``True``.
             Default: ``False``.
     """
+
+    def __new__(cls, *args, **kwargs):
+        # Use __new__ for logging purposes.
+        torch._C._log_api_usage_once("torch.distributed.sharded_tensor")
+        return super(ShardedTensor, cls).__new__(cls)
 
     def __init__(
         self,
@@ -290,7 +295,7 @@ class ShardedTensor(object):
                         out_narrow_view = out_narrow_view.narrow(
                             dim,
                             metadata.shard_offsets[dim],
-                            metadata.shard_lengths[dim],
+                            metadata.shard_sizes[dim],
                         )
 
                     out_narrow_view.copy_(tensor)
@@ -427,7 +432,7 @@ class ShardedTensor(object):
             if current_rank == rank:
                 # Initialize the local shard.
                 local_shard = _create_tensor_from_params(
-                    *shard_metadata.shard_lengths, local_device=local_device,
+                    *shard_metadata.shard_sizes, local_device=local_device,
                     tensor_init_params=tensor_init_params)
                 self._local_shards.append(Shard(local_shard, shard_metadata))
 
@@ -576,10 +581,7 @@ class ShardedTensor(object):
         self._local_shards, self._metadata, pg_state, self._sharding_spec, self._init_rrefs = state
 
         # Setup process group
-        if _CURRENT_PROCESS_GROUP is None:
-            self._process_group = distributed_c10d._get_default_group()
-        else:
-            self._process_group = _CURRENT_PROCESS_GROUP
+        self._process_group = get_current_process_group()
 
         # Validate process group.
         local_rank = distributed_c10d.get_rank(self._process_group)
