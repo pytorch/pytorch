@@ -86,7 +86,7 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     _scatter_gather_elementwise_kernel<128, vt, func_t>
         <<<grid, block, 0, stream>>>(N, f);
   }
-#else 
+#else
   _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
 #endif
   C10_CUDA_KERNEL_LAUNCH_CHECK();
