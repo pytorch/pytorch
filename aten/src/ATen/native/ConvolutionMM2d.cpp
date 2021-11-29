@@ -44,8 +44,35 @@ static Tensor compute_columns2d(
     // Columns are just a view on the input for the 1x1 kernel special case.
     columns = input.view({batch_size, n_input_plane, output_height * output_width}).detach();
   } else {
-    std::vector<int64_t> dilation(2, 1);
-    columns = at::im2col(input, kernel_size, dilation, padding, stride);
+    columns = at::empty({batch_size, n_input_plane * kernel_height * kernel_width,
+        output_height * output_width}, input.options());
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "slow_conv2d_cpu", [&]{
+      auto input_a = input.accessor<scalar_t, 4>();
+      auto columns_a = columns.accessor<scalar_t, 3>();
+
+      at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
+        for (const auto t : c10::irange(start, end)) {
+          auto input_t = input_a[t];
+          auto columns_t = columns_a[t];
+          unfolded2d_copy_stub(
+              kCPU,
+              c10::CppTypeToScalarType<scalar_t>::value,
+              columns_t.data(),
+              input_t.data(),
+              kernel_height,
+              kernel_width,
+              stride_height,
+              stride_width,
+              pad_height,
+              pad_width,
+              n_input_plane,
+              input_height,
+              input_width,
+              output_height,
+              output_width);
+        }
+      });
+    });
   }
 
   return columns.contiguous();
