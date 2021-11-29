@@ -259,6 +259,9 @@ def vjp(f: Callable, *primals):
 
     return results, wrapper
 
+def _safe_zero_index(x):
+    assert len(x) == 1
+    return x[0]
 
 def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
     """
@@ -358,11 +361,11 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
         output, vjp_fn = vjp(f_wrapper, *primals)
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
-        if not isinstance(output, torch.Tensor) and not isinstance(output, tuple):
-            raise RuntimeError(
-                f'jacrev(f, ...)(*args): expected f to only return Tensors as '
-                f'outputs, got {type(output)}')
         flat_output, output_spec = tree_flatten(output)
+        if len(flat_output) == 0:
+            raise RuntimeError(
+                f'jacrev(f, ...)(*args): expected f to return at least one Tensor, '
+                f'got no Tensors.')
         for out in flat_output:
             if isinstance(out, torch.Tensor):
                 continue
@@ -377,34 +380,36 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
 
         results = vmap(vjp_fn)(basis)
 
+        flat_primals, primals_spec = tree_flatten(primals)
+        flat_results, results_spec = tree_flatten(results)
+
         # Step 2: The returned jacobian is one big tensor per input. In this step,
         # we split each Tensor by output.
-        results = [result.split(flat_output_numels, dim=0) for result in results]
-        results = [
-            tuple(split.view(*out.shape, *primal.shape)
+        flat_results = [result.split(flat_output_numels, dim=0) for result in flat_results]
+        flat_input_flat_output = [
+            tuple(split.view(out.shape + primal.shape)
                   for split, out in zip(splits, flat_output))
-            for splits, primal in zip(results, primals)
+            for splits, primal in zip(flat_results, flat_primals)
         ]
 
         # Step 3: Right now, `jacobian` is a List[List[Tensor]].
-        # The outer List corresponds to the number of inputs,
+        # The outer List corresponds to the number of primals,
         # the inner List corresponds to the number of outputs.
         # We need to:
-        # a. Remove the outer List if argnums is a single int
-        # b. Exchange the order of the outer List and inner List, if
-        #    they still exist at this point.
-        # c. tree_unflatten the outer List (which now refers to the outputs)
+        # a. Exchange the order of the outer List and inner List
+        # b. tree_unflatten the inner Lists (which correspond to the primals)
+        # c. handle the argnums=int case
+        # d. tree_unflatten the outer List (which corresponds to the outputs)
+        flat_output_flat_input = tuple(zip(*flat_input_flat_output))
+
+        flat_output_input = tuple(tree_unflatten(flat_input, primals_spec)
+                                  for flat_input in flat_output_flat_input)
+
         if isinstance(argnums, int):
-            assert len(results) == 1
-            if isinstance(output, torch.Tensor):
-                assert len(results[0]) == 1
-                return results[0][0]
-            return results[0]
-        results = tuple(zip(*results))
-        if isinstance(output, torch.Tensor):
-            assert len(results) == 1
-            return results[0]
-        return results
+            flat_output_input = tuple(_safe_zero_index(flat_input)
+                                      for flat_input in flat_output_input)
+        output_input = tree_unflatten(flat_output_input, output_spec)
+        return output_input
     return wrapper_fn
 
 # NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
@@ -477,6 +482,15 @@ def _construct_standard_basis_for(tensors, tensor_numels):
                    for chunk, tensor in zip(chunks, tensors))
     return chunks
 
+def _validate_and_wrap_argnum(argnum, num_args):
+    if not isinstance(argnum, int):
+        raise RuntimeError(f'argnum must be int, got: {type(argnum)}')
+    if argnum >= 0 and argnum < num_args:
+        return argnum
+    if argnum < 0 and argnum >= -num_args:
+        return argnum + num_args
+    raise RuntimeError(f'Got argnum={argnum}, but only {num_args} positional inputs')
+
 def _check_unique_non_empty(argnums):
     if isinstance(argnums, tuple):
         if len(argnums) == 0:
@@ -486,33 +500,36 @@ def _check_unique_non_empty(argnums):
 
 def _replace_args(old_args, new_args, argnums):
     if isinstance(argnums, int):
-        if len(new_args) == 1:
-            return tuple(new_args[0] if i == argnums else old_args[i] for i in range(len(old_args)))
-        else:
+        if len(new_args) != 1:
             raise RuntimeError(f'new_args should be of size 1, was of size {len(new_args)}')
+        return tuple(new_args[0] if i == argnums else old_args[i] for i in range(len(old_args)))
     if isinstance(argnums, tuple):
-        if len(new_args) == len(argnums):
-            get_right_elem = lambda i : new_args[argnums.index(i)] if i in argnums else old_args[i]
-            return tuple(get_right_elem(i) for i in range(len(old_args)))
-        else:
-            raise RuntimeError("new_args should have the same size as argnums. "
-            f"Argnums size {len(argnums)}, new_args size {len(new_args)}")
+        if len(new_args) != len(argnums):
+            raise RuntimeError(
+                "new_args should have the same size as argnums. "
+                f"Argnums size {len(argnums)}, new_args size {len(new_args)}")
+        get_right_elem = lambda i : new_args[argnums.index(i)] if i in argnums else old_args[i]
+        return tuple(get_right_elem(i) for i in range(len(old_args)))
     raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
 
-def _safe_index(args, argnum):
-    if not isinstance(argnum, int):
-        raise RuntimeError(f'argnum must be int, got: {type(argnum)}')
-    if argnum >= 0 and argnum < len(args):
-        return args[argnum]
-    raise RuntimeError(f'Got argnum={argnum}, but only {len(args)} positional inputs')
+def _validate_and_wrap_argnums(argnums, num_args):
+    if isinstance(argnums, int):
+        return _validate_and_wrap_argnum(argnums, num_args)
+    if isinstance(argnums, tuple):
+        return tuple(_validate_and_wrap_argnum(argnum, num_args) for argnum in argnums)
+    raise AssertionError("Should never get here")
 
-def _slice_argnums(args, argnums):
+def _slice_argnums(args, argnums, as_tuple=True):
+    if not isinstance(argnums, int) and not isinstance(argnums, tuple):
+        raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
+    argnums = _validate_and_wrap_argnums(argnums, len(args))
     _check_unique_non_empty(argnums)
     if isinstance(argnums, int):
-        return _safe_index(args, argnums)
-    if isinstance(argnums, tuple):
-        return tuple(_safe_index(args, i) for i in argnums)
-    raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
+        if as_tuple:
+            return (args[argnums],)
+        else:
+            return args[argnums]
+    return tuple(args[i] for i in argnums)
 
 def _argnums_partial(f, args, argnums):
     def f_wrapper(*wrapper_args):
@@ -673,7 +690,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
             with torch.enable_grad():
                 args = _wrap_all_tensors(args, level)
                 kwargs = _wrap_all_tensors(kwargs, level)
-                diff_args = _slice_argnums(args, argnums)
+                diff_args = _slice_argnums(args, argnums, as_tuple=False)
                 tree_map_(partial(_create_differentiable, level=level), diff_args)
 
                 output = func(*args, **kwargs)
