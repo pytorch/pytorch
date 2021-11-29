@@ -4,6 +4,7 @@
 #include <ATen/core/blob.h>
 #include <ATen/core/ivalue_to.h>
 #include <c10/util/C++17.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <typeindex>
@@ -1013,6 +1014,8 @@ struct TORCH_API IValue final {
     }
   }
 
+  friend MaybeOwnedTraits<IValue>;
+
   Payload payload;
   Tag tag;
   bool is_intrusive_ptr;
@@ -1225,9 +1228,22 @@ getCustomClassTypeMap();
 template <typename T>
 c10::ClassTypePtr getCustomClassTypeImpl() {
   auto& tmap = c10::getCustomClassTypeMap();
-  auto res = tmap.find(std::type_index(typeid(T)));
-  if (res == tmap.end()) {
-    throw c10::Error("Can't find class id in custom class type map", "");
+  auto tindex = std::type_index(typeid(T));
+  auto res = tmap.find(tindex);
+  if (C10_UNLIKELY(res == tmap.end())) {
+    // type_index is not guaranteed to be unique across shared libraries on some platforms
+    // For example see https://github.com/llvm-mirror/libcxx/blob/78d6a7767ed57b50122a161b91f59f19c9bd0d19/include/typeinfo#L133
+    // Also, this is not the case if RTLD_LOCAL option is used, see
+    // https://github.com/pybind/pybind11/blob/f791dc8648e1f6ec33f402d679b6b116a76d4e1b/include/pybind11/detail/internals.h#L101-L106
+    // Take a slow path of iterating over all registered types and compare their names
+    auto class_name = std::string(tindex.name());
+    for(const auto &it: tmap) {
+      if (class_name == it.first.name()) {
+          tmap[tindex] = it.second;
+          return it.second;
+      }
+    }
+    TORCH_CHECK(false, "Can't find class id in custom class type map for ", tindex.name());
   }
   return res->second;
 }
