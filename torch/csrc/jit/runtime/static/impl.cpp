@@ -845,47 +845,33 @@ StaticModule::StaticModule(
   // memory optimization pass (LivenessMap) is
   // aware of the new order!
 
-  // Fill constants first, so we have a std::vector<IValue> we can reference
-  // later
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() != prim::Constant) {
-      continue;
-    }
-    auto* v = node->output();
-    TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
-    constants_.emplace_back(toIValue(v).value());
-  }
   {
-    // construct SSA definition for constant nodes
-    int i = 0;
+    size_t nodes_size = 0, constants_size = 0;
     for (Node* node : graph_->nodes()) {
-      if (node->kind() != prim::Constant) {
-        continue;
-      }
-      auto* v = node->output();
-      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i++);
+      ++(node->kind() == prim::Constant ? constants_size : nodes_size);
     }
-  }
 
-  int nodes_size = 0;
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() == prim::Constant) {
-      continue;
-    }
-    ++nodes_size;
+    constants_.reserve(constants_size);
+    functions_.reserve(nodes_size);
+    nodes_.reserve(nodes_size);
   }
-  functions_.reserve(nodes_size);
-  nodes_.reserve(nodes_size);
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
+  // Construct constant and function nodes
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
+      auto* v = node->output();
+      TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
+      // construct SSA definition for constant nodes
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, constants_.size());
+      constants_.emplace_back(toIValue(v).value());
       continue;
     }
+
     // see [Check and correct bad schema alias info at runtime]
     bool check_outputs_for_overlap =
         !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
