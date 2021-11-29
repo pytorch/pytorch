@@ -1320,10 +1320,13 @@ Tensor binary_cross_entropy_target_backward(
   const Tensor& target,
   const c10::optional<Tensor>& weight,
   int64_t reduction) {
-  auto grad_target = (1. - self).log_().sub_(self.log()).mul_(grad);
+  // test_fn_grad_nn_functional_binary_cross_entropy_cpu_float64 fails if
+  // aten::mul_ is used here.
+  auto grad_target = (1. - self).log_().sub_(self.log());
+  grad_target = grad_target * grad;
 
   if (isDefined(weight)) {
-    grad_target.mul_(weight.value());
+    grad_target = grad_target * weight.value();
   }
 
   if (reduction == at::Reduction::Mean) {
