@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/macos_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: macos-10-15-py3-x86-64
+name: macos-11-py3-x86-64
 
 on:
   pull_request:
@@ -17,14 +17,14 @@ defaults:
   run:
     shell: bash -e -l {0}
 env:
-  BUILD_ENVIRONMENT: macos-10-15-py3-x86-64
-  COMPACT_JOB_NAME: macos-10-15-py3-x86-64
+  BUILD_ENVIRONMENT: macos-11-py3-x86-64
+  COMPACT_JOB_NAME: macos-11-py3-x86-64
   IN_CI: 1
   IS_GHA: 1
   PYTORCH_RETRY_TEST_CASES: 1
 
-  # Set xcode xcode version to 12
-  DEVELOPER_DIR: /Applications/Xcode_12.app/Contents/Developer
+  # Set xcode xcode version to 12.4
+  DEVELOPER_DIR: /Applications/Xcode_12.4.app/Contents/Developer
 
 jobs:
 
@@ -48,10 +48,10 @@ jobs:
         run: echo "${LABELS}"
 
   build-test:
-    runs-on: macos-10.15
+    runs-on: macos-11
     needs: [ciflow_should_run]
     env:
-      JOB_BASE_NAME: macos-10-15-py3-x86-64
+      JOB_BASE_NAME: macos-11-py3-x86-64
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -137,7 +137,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: macos-10-15-py3-x86-64-test
+          JOB_BASE_NAME: macos-11-py3-x86-64-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
@@ -150,5 +150,5 @@ jobs:
 
 
 concurrency:
-  group: macos-10-15-py3-x86-64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: macos-11-py3-x86-64-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
