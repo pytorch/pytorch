@@ -5473,7 +5473,8 @@ class TestLinalg(TestCase):
 
             # Reproducer of a magma bug,
             # see https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-            if dtype == torch.double and singular:
+            # This is also a bug in cuSOLVER < 11.3
+            if (dtype == torch.double and singular and torch.version.cuda.split('.') >= ["11", "3"]:
                 A = torch.ones(batch + ms, dtype=dtype, device=device)
                 run_test(A, pivot, singular, fn)
 
@@ -6904,7 +6905,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
-    @slowTest
+    @skipCUDAIf(torch.version.cuda.split(".") < ("11", "3"), "There's a bug in cuSOLVER < 11.3")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
