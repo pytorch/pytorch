@@ -12,10 +12,10 @@ namespace {
 void multilabel_margin_loss_shape_check(
   int64_t& nframe,
   int64_t& dim,
-  const int64_t& ndims,
   TensorArg& target_arg,
   const Tensor& input,
   const Tensor& target) {
+  const std::int64_t ndims = input.dim();
   bool valid_inputs = (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0;
   TORCH_CHECK(
               valid_inputs,
@@ -140,8 +140,7 @@ static void multilabel_margin_loss_forward_out_cpu_template(
   auto target_arg = TensorArg(target, "target", 2);
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t nframe, dim;
-  const int64_t ndims = input.dim();
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, target_arg, input, target);
 
   // special case target.dim() <= 1: produce scalar output for scalar inputs
   // even if reduction == Reduction::None
@@ -255,9 +254,8 @@ static void multilabel_margin_loss_backward_out_cpu_template(
   CheckedFrom c = "multilabel_margin_loss_backward_cpu_template";
   auto target_arg = TensorArg(target, "target", 3);
   auto is_target_arg = TensorArg(is_target, "is_target", 5);
-  const int64_t ndims = input.dim();
 
-  multilabel_margin_loss_shape_check(nframe, dim, ndims, target_arg, input, target);
+  multilabel_margin_loss_shape_check(nframe, dim, target_arg, input, target);
   checkSameSize(c, target_arg, is_target_arg);
 
   grad_input.resize_as_(input);
