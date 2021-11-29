@@ -1,4 +1,3 @@
-#include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/cuda/lower_loops.h>
 
 #include <torch/csrc/jit/codegen/cuda/arith.h>
@@ -34,28 +33,28 @@ LoopNestGenerator::LoopNestGenerator(const std::vector<Expr*>& exprs) {
 
 namespace {
 
-kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
+kir::ForLoop* openForHelper(kir::ForLoop* scope, kir::IterDomain* kir_id) {
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
-  const auto kir_id = gpu_lower->lowerValue(id)->as<kir::IterDomain>();
   auto extent_with_halo = gpu_lower->haloInfo().getExtent(kir_id);
   kir::ForLoop* new_scope = nullptr;
   if (extent_with_halo) {
     // When an axis is extended with halo, unrolling and vectorization
     // are assumed to not be used for now.
     TORCH_INTERNAL_ASSERT(
-        id->getParallelType() != ParallelType::Unroll &&
-        !isParallelTypeVectorize(id->getParallelType()));
+        kir_id->parallelType() != ParallelType::Unroll &&
+        !isParallelTypeVectorize(kir_id->parallelType()));
     // Use the extent that's extended by halo
     new_scope = ir_builder.create<kir::ForLoop>(
         kir_id,
-        id->isBroadcast() ? ir_builder.zeroVal()
-                          : ir_builder.create<kir::Int>(c10::nullopt),
+        kir_id->isBroadcast() ? ir_builder.zeroVal()
+                              : ir_builder.create<kir::Int>(c10::nullopt),
         nullptr,
         extent_with_halo,
         nullptr,
         false,
-        nullptr);
+        nullptr,
+        false);
   } else {
     new_scope = ir_builder.create<kir::ForLoop>(kir_id);
   }
@@ -67,13 +66,13 @@ kir::ForLoop* openForHelper(kir::ForLoop* scope, IterDomain* id) {
 
 } // namespace
 
-void LoopNestGenerator::openFor(IterDomain* iter_domain) {
+void LoopNestGenerator::openFor(kir::IterDomain* kir_iter_domain) {
   if (for_loops_.size() > 0) {
-    const auto new_scope = openForHelper(for_loops_.back(), iter_domain);
+    const auto new_scope = openForHelper(for_loops_.back(), kir_iter_domain);
     // for_loop_allocations_.insert({new_scope, 0});
     for_loops_.push_back(new_scope);
   } else {
-    for_loops_.push_back(openForHelper(nullptr, iter_domain));
+    for_loops_.push_back(openForHelper(nullptr, kir_iter_domain));
     lowered_exprs_.insert(lowered_exprs_.begin(), for_loops_.back());
   }
 }
@@ -123,116 +122,145 @@ void LoopNestGenerator::handle(Expr* expr) {
 
   TensorView* out_tv = expr->output(0)->as<TensorView>();
 
-  // Figure out what the entire loop structure should look like.
-  std::deque<IterDomain*> loop_structure;
-
-  // Fill the entire loop structure by Looking at each axis
-  // individually in out's domain
-  for (size_t out_i = 0; out_i < out_tv->nDims(); out_i++) {
-    // Note: It is not safe to skip trivial reduction axes as they could be
-    // inlined with other tensor views. This happens in
-    // NVFuserTest.FusionBNRepro_CUDA as of this commit on norm_hack_2_rebased
-    // branch
-
-    // Look up the concrete ID in the parallel map, not in the loop
-    // map, which also maps non-CA axes.
-    auto concrete_id =
-        gpu_lower->caParallelMap().getConcreteMappedID(out_tv->axis(out_i));
-    loop_structure.push_back(concrete_id);
-  }
-
-  auto loop_structure_it = loop_structure.begin();
-  auto for_loop_it = for_loops_.begin();
-  auto last_for_loop_matched = for_loops_.begin();
-
-  // Match the loop structure with the current for-loops. Reuse
-  // matching loops and close unmatched ones.
-  while (loop_structure_it != loop_structure.end() &&
-         for_loop_it != for_loops_.end()) {
-    auto lowered_out_id =
-        gpu_lower->lowerValue(*loop_structure_it)->as<kir::IterDomain>();
-    // Similar to the above, the parallel map is used rather than the
-    // loop map. Again, non-CA axes should not share loops, so the
-    // parallel map should be used.
-    if (gpu_lower->caParallelMap().areMapped(
-            lowered_out_id, (*for_loop_it)->iter_domain())) {
-      loop_structure_it++;
-      last_for_loop_matched = ++for_loop_it;
-    } else {
-      ++for_loop_it;
-    }
-  }
-
-  auto n_loops_to_close =
-      std::distance(last_for_loop_matched, for_loops_.end());
-
+  // Grab the loop structure
   TORCH_INTERNAL_ASSERT(
-      n_loops_to_close >= 0 &&
-          n_loops_to_close <= (std::ptrdiff_t)for_loops_.size(),
-      "Tried to close an invalid number of loops: ",
-      n_loops_to_close);
+      loop_structures_.find(out_tv) != loop_structures_.end(),
+      "Could not find loop structure of ",
+      out_tv);
 
-  if (max_close < n_loops_to_close && max_close > 0) {
-    // Figure out where the last for loop matches from out_tv, go until the
-    // max_close loop marked from previous tv's producer domain. Make sure
-    // none of these domains are actually present in current out_tv. If these
-    // loops map to current out_tv, it should be responsible for deciding if
-    // they stay or go, this could result from an invalid compute at topology
-    // on the DAG or bad expression sorting.
-    auto for_loops_it = for_loops_.end() - n_loops_to_close;
-    auto for_loops_it_end = for_loops_.end() - max_close;
+  // Figure out what the entire loop structure should look like.
+  std::vector<IterDomain*> loop_structure = loop_structures_.at(out_tv);
+  std::vector<kir::IterDomain*> kir_loop_structure;
 
-    for (; for_loops_it != for_loops_it_end; for_loops_it++) {
-      TORCH_INTERNAL_ASSERT(
-          std::none_of(
-              loop_structure_it,
-              loop_structure.end(),
-              [&gpu_lower, &for_loops_it](IterDomain* loop_structure_id) {
-                // Check loop structure doesn't map for_loops in for loop map
-                auto id0 = (*for_loops_it)->iter_domain();
-                auto id1 = gpu_lower->lowerValue(loop_structure_id)
-                               ->as<kir::IterDomain>();
-                return gpu_lower->caLoopMap().areMapped(id0, id1);
-              }),
-          "Invalid loop found to close.");
-    }
+  std::transform(
+      loop_structure.begin(),
+      loop_structure.end(),
+      std::back_inserter(kir_loop_structure),
+      [&gpu_lower](IterDomain* id) {
+        return gpu_lower->lowerValue(id)->as<kir::IterDomain>();
+      });
+  // Ordering of loop_structure is global, so simply close loops we don't need,
+  // and open the ones we do.
 
-    n_loops_to_close = std::min(n_loops_to_close, max_close);
-  }
-
-  for (int64_t i_loop_close = 0; i_loop_close < n_loops_to_close;
-       i_loop_close++) {
+  while (!for_loops_.empty() &&
+         std::find(
+             kir_loop_structure.begin(),
+             kir_loop_structure.end(),
+             for_loops_.back()->iter_domain()) == kir_loop_structure.end()) {
     closeFor();
   }
 
-  // Open the remaining needed loops
-  for (; loop_structure_it != loop_structure.end(); ++loop_structure_it) {
-    openFor(*loop_structure_it);
-  }
-
-  if (out_tv->getMaxProducerPosition() == 0) {
-    max_close = -1;
-  } else {
-    auto produce_at_id = loop_structure[out_tv->getMaxProducerPosition() - 1];
-    auto max_close_loop = std::find_if(
-        for_loops_.begin(),
-        for_loops_.end(),
-        [&produce_at_id, &gpu_lower](kir::ForLoop* fl) {
-          auto produce_at_lowered_it =
-              gpu_lower->lowerValue(produce_at_id)->as<kir::IterDomain>();
-          return gpu_lower->caParallelMap().areMapped(
-              produce_at_lowered_it, fl->iter_domain());
+  for (auto loop : kir_loop_structure) {
+    auto find_it = std::find_if(
+        for_loops_.begin(), for_loops_.end(), [loop](kir::ForLoop* fl) {
+          return fl->iter_domain() == loop;
         });
-
-    max_close = std::distance(max_close_loop, for_loops_.end());
-    max_close = max_close > 0 ? max_close - 1 : max_close;
+    if (find_it == for_loops_.end()) {
+      openFor(loop);
+    }
   }
+
   pushFront(gpu_lower->lowerExpr(expr));
 }
+
+namespace {
+// Copied verbatim from lower_expr_sort EXCEPT map is parallel map, not loop
+// map, and direction is reversed
+struct LocalDomainSorter {
+  LocalDomainSorter(
+      const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+          concrete_id_dependencies)
+      : concrete_id_dependencies_(concrete_id_dependencies) {}
+
+  // Return if id0 should be before id1
+  inline bool operator()(IterDomain* id0, IterDomain* id1) {
+    auto concrete_id_0 =
+        GpuLower::current()->caParallelMap().getConcreteMappedID(id0);
+    auto concrete_id_1 =
+        GpuLower::current()->caParallelMap().getConcreteMappedID(id1);
+
+    if (concrete_id_dependencies_.find(concrete_id_0) !=
+        concrete_id_dependencies_.end()) {
+      const auto& dependencies_0 = concrete_id_dependencies_.at(concrete_id_0);
+      // if id0 depends on id1 it means id1 is outside id0, so id1 < id0
+      return !dependencies_0.count(concrete_id_1);
+    }
+
+    if (concrete_id_dependencies_.find(concrete_id_1) !=
+        concrete_id_dependencies_.end()) {
+      const auto& dependencies_1 = concrete_id_dependencies_.at(concrete_id_1);
+      // if id1 depends on id0 it means id1 is inside id0, so id0 < id1
+      return dependencies_1.count(concrete_id_0);
+    }
+
+    return true;
+  }
+
+  const std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>&
+      concrete_id_dependencies_;
+};
+} // namespace
 
 // Generate the loop nest structure and place it in lowered_exprs_
 void LoopNestGenerator::generate(const std::vector<Expr*>& exprs) {
   TORCH_INTERNAL_ASSERT(lowered_exprs_.empty());
+
+  // Figure out loop structure of each expression. This can be a bit convoluted,
+  // for an example why see FusionAdvancedLowering6
+
+  // Grab iteration domain dependencies, similar to the logic in
+  // lower_expr_sort, EXCEPT it is based on parallel map not loop map, and
+  // dependencies are in opposite order, inner loops are dependant on outer
+  // loops.
+
+  const auto& parallel_map = GpuLower::current()->caParallelMap();
+
+  std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>
+      concrete_id_dependencies;
+  for (auto tv : ir_utils::allTvs(FusionGuard::getCurFusion())) {
+    std::unordered_set<IterDomain*> dependencies;
+
+    for (auto tv_id : tv->domain()->domain()) {
+      auto concrete_id = parallel_map.getConcreteMappedID(tv_id);
+
+      if (concrete_id_dependencies.find(concrete_id) ==
+          concrete_id_dependencies.end()) {
+        concrete_id_dependencies[concrete_id] = dependencies;
+      } else {
+        concrete_id_dependencies[concrete_id].insert(
+            dependencies.begin(), dependencies.end());
+      }
+
+      // Loops after tv_id are dependent on tv_id
+      dependencies.emplace(parallel_map.getConcreteMappedID(tv_id));
+    }
+  }
+
+  // Generate loop structure for each tensor view
+  for (auto tv : ir_utils::allTvs(FusionGuard::getCurFusion())) {
+    // Zero dim tensor support
+    if (tv->nDims() == 0) {
+      loop_structures_[tv] = std::vector<IterDomain*>();
+      continue;
+    }
+
+    auto last_id_concrete =
+        parallel_map.getConcreteMappedID(tv->axis((int)(tv->nDims() - 1)));
+    auto all_loops_it = concrete_id_dependencies.find(last_id_concrete);
+    TORCH_INTERNAL_ASSERT(
+        all_loops_it != concrete_id_dependencies.end(),
+        "Should have processed all id's in all tvs.");
+    std::vector<IterDomain*> loop_structure(
+        all_loops_it->second.begin(), all_loops_it->second.end());
+    // Dependencies of last domain doesn't include last domain, include it
+    // manually
+    loop_structure.emplace_back(last_id_concrete);
+    std::sort(
+        loop_structure.begin(),
+        loop_structure.end(),
+        LocalDomainSorter(concrete_id_dependencies));
+    loop_structures_[tv] = loop_structure;
+  }
 
   // Process the carefully ordered expressions
   for (auto it = exprs.rbegin(); it != exprs.rend(); ++it) {

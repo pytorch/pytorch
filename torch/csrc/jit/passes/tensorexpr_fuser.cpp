@@ -89,7 +89,7 @@ bool isSupported(Node* node) {
   };
   // clang-format on
 
-  if (get_tensorexpr_elementwise_set().contains(node->getOperator()) ||
+  if (get_tensorexpr_elementwise_set().contains(node) ||
       node->isMemberOf(supported_non_eltwise_set()) ||
       node->isMemberOf(supported_misc_set) ||
       (texpr_reductions_enabled && node->isMemberOf(supported_reduction_set))) {
