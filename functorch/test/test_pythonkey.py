@@ -23,11 +23,11 @@ from functools import partial, wraps
 import functorch
 from functorch import (
     grad, vjp, vmap, jacrev, grad_and_value,
-    make_fx, pythonkey_decompose
+    make_fx
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    partition_with_recompute_fwd_in_bwd
+    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, decomposition_table
 )
 
 from torch.testing._internal.common_device_type import ops, onlyCPU
@@ -204,9 +204,7 @@ class TestPythonKey(TestCase):
         self.assertEqual(grads, grads2)
 
 
-class TestPythonKeyOperatorsOpInfo(TestCase):
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestPythonKeyOperatorsOpInfo', 'test_make_fx_exhaustive', {
+make_fx_failures = {
     xfail('to_sparse'),
     xfail('allclose'),
     xfail('rsub', 'rsub_scalar'),
@@ -216,13 +214,16 @@ class TestPythonKeyOperatorsOpInfo(TestCase):
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.ctc_loss'),
-    xfail('empty_like'), # randomness
     xfail('randn_like'), # randomness
     xfail('rand_like'), # randomness
     xfail('randint_like'), # randomness
     skip('new_empty'), # nondeterministic
     skip('empty_like'), # nondeterministic
-    })
+}
+class TestPythonKeyOperatorsOpInfo(TestCase):
+    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestPythonKeyOperatorsOpInfo', 'test_make_fx_exhaustive', make_fx_failures
+    )
     def test_make_fx_exhaustive(self, device, dtype, op):
 
         def f(args, kwargs):
@@ -389,7 +390,6 @@ class TestEagerFusionOpInfo(TestCase):
             f(args, kwargs).sum().backward()
             orig_grad = get_grads(args)
             self.assertEqual(orig_grad, compiled_grad)
-
 
 class TestPartitioning(TestCase):
     def test_recompute_partitioning(self):
