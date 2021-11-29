@@ -328,9 +328,17 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
     return do_constant_folding
 
 
+def _signature(model) -> inspect.Signature:
+    # Either model.forward or model itself should be callable.
+    should_be_callable = getattr(model, "forward", model)
+    if callable(should_be_callable):
+        return inspect.signature(should_be_callable)
+    raise ValueError("model has no forward method and is not callable")
+
+
 def _decide_input_format(model, args):
     try:
-        sig = inspect.signature(model.forward)
+        sig = _signature(model)
         ordered_list_keys = list(sig.parameters.keys())
         if isinstance(args[-1], dict):
             args_dict = args[-1]
@@ -347,18 +355,16 @@ def _decide_input_format(model, args):
                     else:
                         args.append(param.default)
             args = tuple(args)
-        return args
-    # Cases of models without forward functions and dict inputs
-    except (AttributeError, ValueError):
-        warnings.warn("Model has no forward function")
-        return args
+    except ValueError as e:
+        warnings.warn("%s, skipping _decide_input_format" % e)
     # Cases of models with no input args
     except IndexError:
-        warnings.warn("No input args")
-        return args
+        warnings.warn("No input args, skipping _decide_input_format")
     except Exception as e:
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
+    finally:
         return args
+
 
 def _trace(func, args, operator_export_type, return_outs=False):
     # Special case for common case of passing a single Tensor
@@ -406,7 +412,7 @@ def _get_param_count_list(method_graph, args_params):
 
 
 def _resolve_and_flatten_graph_inputs(model, args_params):
-    sig = inspect.signature(model.forward)
+    sig = _signature(model)
     ordered_list_keys = list(sig.parameters.keys())
     resolved_args = []  # type: ignore[var-annotated]
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
