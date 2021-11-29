@@ -2,7 +2,6 @@
 #define THP_TYPES_INC
 
 #include <cstddef>
-#include <TH/TH.h>
 
 #ifndef INT64_MAX
 #include <cstdint>

@@ -149,7 +149,6 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("jit_core_sources" all_cpu_cpp)
   append_filelist("aten_cpu_source_non_codegen_list" all_cpu_cpp)
   append_filelist("aten_native_source_non_codegen_list" all_cpu_cpp)
-  list(APPEND all_cpu_cpp ${Aten_TH_AVX_extra_src})
 else()
   set(
     all_cpu_cpp ${base_cpp} ${ATen_CORE_SRCS} ${native_cpp}

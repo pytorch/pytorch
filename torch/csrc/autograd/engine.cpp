@@ -37,7 +37,6 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
-#include <TH/TH.h>
 
 namespace torch { namespace autograd {
 
