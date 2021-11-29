@@ -1646,6 +1646,21 @@ void parseArgs() {
                       "options are native and cudaMallocAsync");
           m_allocator_backend = kv[1];
           used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
+          if (used_cudaMallocAsync) {
+#if CUDA_VERSION > 11400
+            int version;
+            C10_CUDA_CHECK(cudaDriverGetVersion(&version));
+            TORCH_CHECK(version >= 11040,
+                        "backend::cudaMallocAsync requires CUDA runtime "
+                        "11.4 or newer, but cudaDriverGetVersion returned"
+                        version);
+#else
+            TORCH_CHECK(false,
+                        "backend:cudaMallocAsync requires Pytorch to be built with "
+                        "CUDA 11.4 or newer, but CUDA_VERSION is ",
+                        CUDA_VERSION);
+#endif
+          }
         } else {
           TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", kv[0]);
         }

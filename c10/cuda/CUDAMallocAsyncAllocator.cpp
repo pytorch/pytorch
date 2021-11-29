@@ -15,6 +15,7 @@ namespace cuda {
 namespace CUDACachingAllocator {
 namespace CudaMallocAsync {
 
+#if CUDA_VERSION > 11400
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 
@@ -589,6 +590,75 @@ void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
 void raw_delete(void* ptr) {
   free(ptr);
 }
+
+#else
+// CUDA_VERSION is < 11400
+
+#define NOT_AVAILABLE(name) \
+TORCH_CHECK(false, \
+            "Called CudaMallocAsync::" \
+            name \
+            " but Pytorch was built with cuda < 11.4."); \
+
+void* raw_alloc(size_t nbytes) {
+  NOT_AVAILABLE("raw_alloc")
+}
+void* raw_alloc_with_stream(size_t nbytes, cudaStream_t stream) {
+  NOT_AVAILABLE("raw_alloc_with_stream")
+}
+void raw_delete(void* ptr) {
+  NOT_AVAILABLE("raw_delete")
+}
+Allocator* get() {
+  NOT_AVAILABLE("get")
+}
+void init(int device_count) {
+  NOT_AVAILABLE("init")
+}
+void setMemoryFraction(double fraction, int device) {
+  NOT_AVAILABLE("setMemoryFraction")
+}
+void emptyCache() {
+  NOT_AVAILABLE("emptyCache")
+}
+void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+  NOT_AVAILABLE("cacheInfo")
+}
+void* getBaseAllocation(void* ptr, size_t* size) {
+  NOT_AVAILABLE("getBaseAllocation")
+}
+void recordStream(const DataPtr&, CUDAStream stream) {
+  NOT_AVAILABLE("recordStream")
+}
+DeviceStats getDeviceStats(int device) {
+  NOT_AVAILABLE("getDeviceStats")
+}
+void resetAccumulatedStats(int device) {
+  NOT_AVAILABLE("resetAccumulatedStats");
+}
+void resetPeakStats(int device) {
+  NOT_AVAILABLE("resetPeakStats")
+}
+std::vector<SegmentInfo> snapshot() {
+  NOT_AVAILABLE("snapshot")
+}
+void notifyCaptureBegin(int device, CaptureId_t graph_id, MempoolId_t mempool_id) {
+  NOT_AVAILABLE("notifyCaptureBegin")
+}
+void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
+  NOT_AVAILABLE("notifyCaptureAboutToEnd")
+}
+void notifyCaptureEnded(int device, CaptureId_t graph_id) {
+  NOT_AVAILABLE("notifyCaptureEnded")
+}
+void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
+  NOT_AVAILABLE("notifyCaptureDestroy")
+}
+std::mutex* getFreeMutex() {
+  NOT_AVAILABLE("getFreeMutex")
+}
+
+#endif
 
 } // namespace CudaMallocAsync
 } // namespace CUDACachingAllocator

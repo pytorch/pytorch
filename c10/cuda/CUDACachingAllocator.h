@@ -137,7 +137,7 @@ C10_CUDA_API DeviceStats getDeviceStats(int device); \
 C10_CUDA_API void resetAccumulatedStats(int device); \
 C10_CUDA_API void resetPeakStats(int device); \
 C10_CUDA_API std::vector<SegmentInfo> snapshot(); \
-C10_CUDA_API void notifyCaptureBegin( int device, CaptureId_t graph_id, MempoolId_t mempool_id); \
+C10_CUDA_API void notifyCaptureBegin(int device, CaptureId_t graph_id, MempoolId_t mempool_id); \
 C10_CUDA_API void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id); \
 C10_CUDA_API void notifyCaptureEnded(int device, CaptureId_t graph_id); \
 C10_CUDA_API void notifyCaptureDestroy(int device, MempoolId_t mempool_id); \
