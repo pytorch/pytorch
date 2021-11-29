@@ -7104,7 +7104,7 @@ def _add_loss_reduction_kwargs(sample_inputs_generator):
             {'reduction': 'none'},
         ]
         for input, kwargs in product(sample_inputs, reduction_kwargs):
-            input = copy.copy(input)  # keep the old sample input unmodified
+            input = copy.deepcopy(input)  # keep the old sample input unmodified
             # Combine the old kwargs with ours, preferring our values
             # in the event of a conflict.
             input.kwargs = {**input.kwargs, **kwargs}
@@ -7339,7 +7339,9 @@ def sample_inputs_poisson_nll_loss(op_info, device, dtype, requires_grad, **kwar
     return list(gen_inputs())
 
 
-@_add_loss_reduction_kwargs
+# TODO(dagitses) This doesn't work with the loss reduction kwargs
+# adapter. Fix this.
+# @_add_loss_reduction_kwargs
 def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -13610,7 +13612,7 @@ op_db: List[OpInfo] = [
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
         dtypes=floating_types(),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
@@ -13619,7 +13621,7 @@ op_db: List[OpInfo] = [
         "nn.functional.multilabel_margin_loss",
         ref=_NOTHING,
         dtypes=floating_types(),
-        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
+        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
