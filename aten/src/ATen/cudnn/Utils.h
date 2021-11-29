@@ -2,7 +2,6 @@
 
 #include <ATen/ATen.h>
 #include <ATen/cuda/Exceptions.h>
-#include <THC/THC.h>
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Handle.h>
 

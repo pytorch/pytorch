@@ -3,9 +3,7 @@
 
 #include <torch/csrc/python_headers.h>
 #include <TH/TH.h>
-#include <THC/THC.h>
 #include <TH/THHalf.h>
-#include <THC/THCTensor.hpp>
 
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/serialization.h>

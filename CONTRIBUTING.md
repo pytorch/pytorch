@@ -243,9 +243,6 @@ into the repo directory.
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
     * [TH](aten/src/TH)
-      [THC](aten/src/THC) - Legacy library code from the original
-      Torch. Try not to add things here; we're slowly porting these to
-      [native](aten/src/ATen/native).
       * generic - Contains actual implementations of operators,
         parametrized over `scalar_t`. Files here get compiled N times
         per supported scalar type in PyTorch.

@@ -388,27 +388,6 @@ filegroup(
 )
 
 filegroup(
-    name = "thc_srcs_cu",
-    srcs = [
-        "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSortUtils.cu.cc",
-        "aten/src/THC/THCTensor.cu.cc",
-        "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorScatterGather.cu.cc",
-        "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/generated/THCTensorSortByte.cu.cc",
-        "aten/src/THC/generated/THCTensorSortChar.cu.cc",
-        "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorSortFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorSortHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorSortInt.cu.cc",
-        "aten/src/THC/generated/THCTensorSortLong.cu.cc",
-        "aten/src/THC/generated/THCTensorSortShort.cu.cc",
-    ],
-)
-
-filegroup(
     name = "aten_srcs_cu",
     srcs = [
         "aten/src/ATen/cuda/cub.cu.cc",
@@ -547,9 +526,7 @@ cc_library(
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
         "aten/src/TH/**/*.cpp",
-        "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -689,7 +666,6 @@ cu_library(
     name = "aten_cuda",
     srcs = [
         ":aten_srcs_cu",
-        ":thc_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],

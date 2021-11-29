@@ -19,7 +19,7 @@ TORCH_CUDA_CPP_API c10::optional<int64_t> getDeviceIndexWithPrimaryContext();
 // The real implementation of CUDAHooksInterface
 struct CUDAHooks : public at::CUDAHooksInterface {
   CUDAHooks(at::CUDAHooksArgs) {}
-  std::unique_ptr<THCState, void(*)(THCState*)> initCUDA() const override;
+  void initCUDA() const override;
   Device getDeviceFromPtr(void* data) const override;
   bool isPinnedPtr(void* data) const override;
   const Generator& getDefaultCUDAGenerator(DeviceIndex device_index = -1) const override;
