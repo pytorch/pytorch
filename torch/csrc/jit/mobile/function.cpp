@@ -55,6 +55,7 @@ bool Function::append_operator(
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
+  code_->operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
   auto func = makeOperatorFunction(opname, num_specified_args, model_version);
   if (!func.has_value()) {
     return false;
@@ -224,18 +225,29 @@ Function& Function::registerFunc(
     const std::vector<c10::IValue> constants,
     const std::vector<c10::TypePtr> types,
     const google::int64 register_size) {
-  static Function func = Function(c10::QualifiedName(qualified_name));
-  for (auto const& inst : instructions) {
-    func.append_instruction(inst.op, inst.X, inst.N);
+  static std::unordered_map<c10::QualifiedName, Function>
+      upgrader_function_holder;
+  c10::QualifiedName name = c10::QualifiedName(qualified_name);
+  auto found = upgrader_function_holder.find(name);
+  // Register the function if it's not found in the map.
+  if (found == upgrader_function_holder.end()) {
+    auto name_function_pair =
+        upgrader_function_holder.emplace(name, Function(name));
+    auto& func = name_function_pair.first->second;
+    for (auto const& inst : instructions) {
+      func.append_instruction(inst.op, inst.X, inst.N);
+    }
+    for (auto const& constant : constants) {
+      func.append_constant(constant);
+    }
+    for (auto const& type : types) {
+      func.append_type(type);
+    }
+    func.set_register_size(register_size);
+    return func;
   }
-  for (auto const& constant : constants) {
-    func.append_constant(constant);
-  }
-  for (auto const& type : types) {
-    func.append_type(type);
-  }
-  func.set_register_size(register_size);
-  return func;
+  auto& upgrader_function_in_holder = found->second;
+  return upgrader_function_in_holder;
 }
 
 } // namespace mobile

@@ -12,8 +12,5 @@ IValue expect_field(
 std::string operator_str(
     const std::string& name,
     const std::string& overloadname);
-
-IValue to_tuple(std::vector<IValue> ivalues);
-
 } // namespace jit
 } // namespace torch
