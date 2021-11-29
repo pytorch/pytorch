@@ -152,7 +152,7 @@ Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
   batched->value().squeeze_(dim_physical);
 
   // Also need to change some metadata...
-  batched->refreshSizesAndStrides();
+  batched->refreshTensorMetadata();
   return self;
 }
 
@@ -168,7 +168,7 @@ Tensor& unsqueeze__batching_rule(Tensor& self, int64_t dim) {
   batched->value().unsqueeze_(dim_physical);
 
   // Also need to change some metadata...
-  batched->refreshSizesAndStrides();
+  batched->refreshTensorMetadata();
   return self;
 }
 

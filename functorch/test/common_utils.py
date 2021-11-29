@@ -26,6 +26,7 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
         outs.append(out)
+
     loop_out = []
     if isinstance(outs[0], torch.Tensor):
         loop_out = torch.stack(outs)
@@ -35,7 +36,9 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     return loop_out
 
 
-def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
+def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=(0, -1)):
+    assert bdims == (0,) or bdims == (0, -1)
+
     def add_batch_dim(arg, bdim, batch_size=3):
         assert bdim == 0 or bdim == -1
         if isinstance(arg, torch.Tensor):
@@ -49,8 +52,7 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
             assert False
         else:
             return (arg, None)
-
-    for bdim in [0, -1]:
+    for bdim in bdims:
         batch_choices = []
         def add_batch_choices(a):
             if isinstance(a, torch.Tensor):
@@ -72,10 +74,10 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3):
             yield pytree.tree_unflatten(batched_args, arg_spec), pytree.tree_unflatten(in_dims, arg_spec), kwarg_values
 
 
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True):
+def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_out=True, bdims=(0, -1)):
     out_dim = 0
     batch_size = 4
-    generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size)
+    generator = get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size, bdims=bdims)
     for batched_args, in_dims, kwarg_values in generator:
         if compute_loop_out:
             loop_out = loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values)

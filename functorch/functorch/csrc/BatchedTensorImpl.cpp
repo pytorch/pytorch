@@ -40,6 +40,7 @@ BatchedTensorImpl::BatchedTensorImpl(Tensor value, int64_t bdim, int64_t level)
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
+  storage_offset_= value_.storage_offset();
   refresh_numel();
   refresh_contiguous();
 }
@@ -58,10 +59,10 @@ BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64
   set_storage_access_should_throw();
   set_has_contiguity_policy(HasContiguityPolicy::CustomBehavior);
   checkInvariants();
-  refreshSizesAndStrides();
+  refreshTensorMetadata();
 }
 
-void BatchedTensorImpl::refreshSizesAndStrides() {
+void BatchedTensorImpl::refreshTensorMetadata() {
   const auto public_dims = value_.dim() - 1;
   const auto value_sizes = value_.sizes();
   const auto value_strides = value_.strides();
@@ -71,6 +72,7 @@ void BatchedTensorImpl::refreshSizesAndStrides() {
     sizes_and_strides_.size_at_unchecked(dim) = value_sizes.at(actual_dim);
     sizes_and_strides_.stride_at_unchecked(dim) = value_strides.at(actual_dim);
   }
+  storage_offset_= value_.storage_offset();
   refresh_numel();
   refresh_contiguous();
 }
