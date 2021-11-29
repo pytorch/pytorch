@@ -92,10 +92,6 @@ using caffe2::serialize::ReadAdapterInterface;
 
 OpCode parseOpCode(const char* str);
 
-IValue to_tuple(std::vector<IValue> ivalues) {
-  return c10::ivalue::Tuple::create(std::move(ivalues));
-}
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     std::shared_ptr<CompilationUnit> compilation_unit) {

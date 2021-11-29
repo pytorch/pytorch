@@ -119,7 +119,7 @@ void parseInstructions(
       std::string operator_name = function->get_code()->op_names_[X].name +
           (function->get_code()->op_names_[X].overload_name.empty()
                ? ""
-               : "_" + function->get_code()->op_names_[X].overload_name);
+               : "." + function->get_code()->op_names_[X].overload_name);
       auto it = kOperatorVersionMap.find(operator_name);
       // Find out if there is an upgrader for this operator
       if (it != kOperatorVersionMap.end()) {
