@@ -975,6 +975,32 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 v['node_output']['mq'][0]['ref_node_target_type'],
                 v['node_output']['mq'][0]['sqnr']])
 
+    def test_needs_dtype_transform_on_outputs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Sequential(
+                    nn.Sequential(
+                        torch.nn.Conv2d(1, 1, 1),
+                    )
+                )
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                return x1
+
+        m = M().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        self.assertTrue(
+            mp._auto_quant_state.needs_dtype_transform_on_outputs)
+        self.assertFalse(
+            mp.conv._auto_quant_state.needs_dtype_transform_on_outputs)
+        self.assertFalse(
+            mp.conv[0]._auto_quant_state.needs_dtype_transform_on_outputs)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
     @skip_if_no_torchvision
