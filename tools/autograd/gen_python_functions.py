@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._sparse or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -52,11 +52,11 @@ from tools.codegen.api.python import (PythonArgument, PythonSignature,
                                       dispatch_lambda_return_str,
                                       has_tensor_options,
                                       namedtuple_fieldnames, signature)
-from tools.codegen.gen import cpp_string, parse_native_yaml, FileManager
+from tools.codegen.gen import cpp_string, parse_native_yaml
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (Argument, BaseOperatorName, NativeFunction,
                                  Type, Variant)
-from tools.codegen.utils import split_name_params, YamlLoader
+from tools.codegen.utils import split_name_params, YamlLoader, FileManager
 
 from typing import Dict, Optional, List, Tuple, Set, Sequence, Callable
 
@@ -86,14 +86,16 @@ _SKIP_PYTHON_BINDINGS = [
     'item', '_local_scalar_dense', 'to',
     '_to_copy',
     'copy_sparse_to_sparse_', 'copy_',
-    'numpy_T',  # this needs to be an attribute in Python, not a function
+    'numpy_T', 'matrix_H', 'mT', 'mH',  # these need to be an attributes in Python, not functions
     'nonzero(_(out|numpy))?',
     'set_data',
     '.*_overrideable',  # overrideable functions for backend extension
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_new_zeros_with_same_feature_meta',  # used for forward AD internals
     '_reshape_alias',
+    'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
 
 SKIP_PYTHON_BINDINGS = list(map(lambda pattern: re.compile(rf'^{pattern}$'), _SKIP_PYTHON_BINDINGS))
@@ -146,6 +148,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
 
+def is_py_sparse_function(f: NativeFunction) -> bool:
+    return f.python_module == 'sparse'
+
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == 'special'
 
@@ -179,6 +184,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_sparse_function, 'torch.sparse', 'python_sparse_functions.cpp', method=False)
 
     create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
@@ -597,6 +605,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.sparse": "THPSparseVariableFunctionsModule",
         "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 

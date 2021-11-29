@@ -587,7 +587,13 @@ namespace c10 {
 
 template <typename T>
 C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
+#if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<complex<T>>(IMPL_NAMESPACE()::polar(r, theta));
+#else
+  // std::polar() requires r >= 0, so spell out the explicit implementation to
+  // avoid a branch.
+  return complex<T>(r * std::cos(theta), r * std::sin(theta));
+#endif
 }
 
 } // namespace c10
