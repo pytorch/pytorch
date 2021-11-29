@@ -621,6 +621,12 @@ class ParameterDict(Module):
         del self[key]
         return v
 
+    def popitem(self) -> Tuple[str, 'Parameter']:
+        """Remove and return the last inserted `(key, parameter)` pair
+        from the ParameterDict
+        """
+        return self._parameters.popitem()
+
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
         """
