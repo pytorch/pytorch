@@ -485,8 +485,7 @@ class _Symmetric(_Square):
         square_check = super().check(value)
         if not square_check.all():
             return square_check
-        # return value.eq(value.mT).all(-2).all(-1)
-        return torch.allclose(value, value.mT, atol=1e-6).all(-2).all(-1)
+        return value.eq(value.mT).all(-2).all(-1)
 
 
 class _PositiveDefinite(_Symmetric):
