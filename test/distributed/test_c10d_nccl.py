@@ -2066,7 +2066,6 @@ class DistributedDataParallelTest(
             x = checkpoint(self.l2, x)
             return x
 
-
     def _prepare_dummy_data(self):
         ddp_bs = 16
         bs = ddp_bs * self.world_size
