@@ -198,6 +198,9 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
+    # This test runs in double and complex double precision because
+    # NumPy does computation internally using double precision for many functions
+    # resulting in possible equality check failures.
     @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
