@@ -2174,23 +2174,29 @@ class DistributedDataParallelTest(
     # of find_unused_parameters, and non-static graph.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_twice(self):
+    def test_ddp_checkpointing_twice_non_static_graph(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
+            error_ctx = self.assertRaisesRegex(
                 RuntimeError,
                 "Expected to mark a variable ready only once.",
-            ):
+            )
+
+            with error_ctx:
                 model = self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
+                    static_graph=False,
                 )
+
+            with error_ctx:
                 model = self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
+                    static_graph=False,
                     find_unused_parameters=True,
                 )
 
