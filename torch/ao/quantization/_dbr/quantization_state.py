@@ -126,6 +126,10 @@ class AutoQuantizationState(torch.nn.Module):
         # detected to need arg dequants during tracing.
         self.any_child_needs_arg_dequants = False
 
+        # If this is True, at least one child of the parent module was
+        # detected to need op hooks during tracing.
+        self.any_child_needs_op_hooks = False
+
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
@@ -664,6 +668,7 @@ class AutoQuantizationState(torch.nn.Module):
                 obs = self.qconfig.weight() if arg_idx == weight_arg_idx else \
                     self.qconfig.activation()
                 self.tensor_id_to_observer[str(tensor_id)] = obs
+                self.any_child_needs_op_hooks = True
 
     def _first_call_op_prepare_before_hook_create_subgraphs(
         self,
@@ -758,6 +763,7 @@ class AutoQuantizationState(torch.nn.Module):
         if func_output_obs_type == FuncOutputObsType.NEW_OBS:
             self.tensor_id_to_observer[str(qtensor_id[0])] = \
                 self.qconfig.activation()
+            self.any_child_needs_op_hooks = True
         elif func_output_obs_type == FuncOutputObsType.REUSES_FIRST_INPUT_OBS:
             first_input_tensor_id = seen_op_info.input_tensor_infos[0].id
 
@@ -794,6 +800,7 @@ class AutoQuantizationState(torch.nn.Module):
                     first_input_obs = self.qconfig.activation()
 
             self.tensor_id_to_observer[str(qtensor_id[0])] = first_input_obs
+            self.any_child_needs_op_hooks = True
 
         # TODO(future PR): check if _qtensor_id needs to become an actual
         # attribute of Tensor

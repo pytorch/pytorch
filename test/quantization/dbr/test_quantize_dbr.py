@@ -1059,6 +1059,74 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(
             mp[0]._auto_quant_state.any_child_needs_arg_dequants)
 
+    def test_any_child_needs_op_hooks(self):
+        class FuncReLUWrapper(torch.nn.Module):
+            def forward(self, x):
+                x = F.relu(x)
+                return x
+
+        class FuncAddWrapper(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        # test on functions
+        class M0(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.r1 = FuncReLUWrapper()
+                self.r2 = FuncReLUWrapper()
+                self.add = FuncAddWrapper()
+
+            def forward(self, x):
+                x = self.r1(x)
+                x = self.r2(x)
+                x = self.add(x)
+                return x
+
+        m = M0().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        # the top level module does not have leaves, so no op hooks
+        self.assertFalse(
+            mp._auto_quant_state.any_child_needs_op_hooks)
+        # r1 needs a quant, hooks have to be executed
+        self.assertTrue(
+            mp.r1._auto_quant_state.any_child_needs_op_hooks)
+        # r2 does not need a quant or observation, hooks do not have be executed
+        self.assertFalse(
+            mp.r2._auto_quant_state.any_child_needs_op_hooks)
+        # add needs output observation, hooks have to be executed
+        self.assertTrue(
+            mp.add._auto_quant_state.any_child_needs_op_hooks)
+
+        # test on modules
+        class M1(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Sequential(nn.Conv2d(1, 1, 1))
+                self.conv2 = nn.Sequential(nn.Conv2d(1, 1, 1))
+
+            def forward(self, x):
+                x = self.conv1(x)
+                x = self.conv2(x)
+                return x
+
+        m = M1().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        # the top level module does not have leaves, so no op hooks
+        self.assertFalse(
+            mp._auto_quant_state.any_child_needs_op_hooks)
+        # conv1 needs a quant, hooks have to be executed
+        self.assertTrue(
+            mp.conv1._auto_quant_state.any_child_needs_op_hooks)
+        # conv2 does not need a quant or observation, hooks do not have be executed
+        self.assertFalse(
+            mp.conv2._auto_quant_state.any_child_needs_op_hooks)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
