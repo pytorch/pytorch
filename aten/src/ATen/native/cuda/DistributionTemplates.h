@@ -254,16 +254,16 @@ void distribution_binary_kernel(TensorIterator &iter, PhiloxCudaState philox_arg
   const input_t_1 *input_data_1 = static_cast<const input_t_1 *>(iter.data_ptr(1));
   const input_t_2 *input_data_2 = static_cast<const input_t_2 *>(iter.data_ptr(2));
 
-  int64_t grid = (numel + block_work_size() - 1) / block_work_size();
+  int64_t grid = (numel + block_work_size_dynamic() - 1) / block_work_size_dynamic();
   auto stream = at::cuda::getCurrentCUDAStream();
 
   if (iter.is_contiguous()) {
-    distribution_binary_elementwise_kernel<<<grid,num_threads(), 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid,num_threads_dynamic(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         TrivialOffsetCalculator<2>(), TrivialOffsetCalculator<1>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else {
-    distribution_binary_elementwise_kernel<<<grid, num_threads(), 0, stream>>>(
+    distribution_binary_elementwise_kernel<<<grid, num_threads_dynamic(), 0, stream>>>(
         numel, f, philox_args, output_data, input_data_1, input_data_2,
         make_input_offset_calculator<2>(iter), make_output_offset_calculator(iter));
     C10_CUDA_KERNEL_LAUNCH_CHECK();

@@ -72,12 +72,13 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     return;
   }
 
-  const int nt = at::cuda::warp_size() * 2;
-  constexpr  int vt = 4;
+  int nt = num_threads_dynamic();
+  constexpr int vt = thread_work_size();
   const dim3 block(nt);
-  const dim3 grid((N + nt * vt - 1) / (nt * vt));
+  const dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   const auto stream = at::cuda::getCurrentCUDAStream();
 
+#if defined(USE_ROCM)
   if (nt == 64) {
     _scatter_gather_elementwise_kernel<64, vt, func_t>
         <<<grid, block, 0, stream>>>(N, f);
@@ -85,7 +86,9 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
     _scatter_gather_elementwise_kernel<128, vt, func_t>
         <<<grid, block, 0, stream>>>(N, f);
   }
-
+#else 
+  _scatter_gather_elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
+#endif
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
@@ -130,7 +133,7 @@ struct _cuda_scatter_gather_internal_kernel {
 
     };
 
-    _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
+    _launch_scatter_gather_kernel(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 
@@ -294,7 +297,7 @@ struct _cuda_scatter_fill_internal_kernel {
 
     };
 
-    _launch_scatter_gather_kernel<num_threads(), thread_work_size()>(iter.numel(), loop);
+    _launch_scatter_gather_kernel(iter.numel(), loop);
   }
 }; // struct _cuda_scatter_fill_internal_kernel
 

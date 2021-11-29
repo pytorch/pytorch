@@ -5,6 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
 #include <c10/macros/Macros.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/SortingRadixSelect.cuh>
