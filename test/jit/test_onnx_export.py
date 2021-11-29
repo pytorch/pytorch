@@ -60,7 +60,7 @@ class TestONNXExport(JitTestCase):
 
         traced = torch.jit.trace(foo, (torch.rand([2])))
 
-        torch.onnx._export_to_pretty_string(traced, (torch.rand([2]),))
+        torch.onnx.export_to_pretty_string(traced, (torch.rand([2]),))
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
