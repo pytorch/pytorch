@@ -1,7 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
@@ -222,12 +222,10 @@ Tensor embedding_backward_cuda_kernel(
     // start position of each _segment_ in `partial_segment_offset`.
     // Unit: index in `partial_segment_offset`
     auto partials_per_segment_offset = at::empty({num_of_segments}, orig_indices.options());
-    cuda::cub::exclusive_scan(
-      partials_per_segment.data_ptr<index_t>(),
-      partials_per_segment_offset.data_ptr<index_t>(),
-      cub::Sum(),
-      index_t(0),
-      num_of_segments);
+    cuda::cub::exclusive_sum(
+        partials_per_segment.data_ptr<index_t>(),
+        partials_per_segment_offset.data_ptr<index_t>(),
+        num_of_segments);
 
     // The total number of partial-segments is the sum of `partials_per_segment_offset`
     const int num_of_partial_segments = partials_per_segment[num_of_segments-1].item<index_t>() +

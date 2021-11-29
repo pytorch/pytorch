@@ -131,6 +131,47 @@ For more information about TF32, see:
 .. _CUDA 11: https://devblogs.nvidia.com/cuda-11-features-revealed/
 .. _Ampere architecture: https://devblogs.nvidia.com/nvidia-ampere-architecture-in-depth/
 
+.. _fp16reducedprecision:
+
+Reduced Precision Reduction in FP16 GEMMs
+-----------------------------------------
+
+fp16 GEMMs are potentially done with some intermediate reduced precision reductions (e.g., in fp16 rather than fp32). These selective reductions in precision can allow for higher performance on certain workloads (particularly those with a large `k` dimension) and GPU architectures at the cost of numerical precision and potential for overflow.
+
+Some example benchmark data on V100:
+
+.. code::
+
+  [--------------------------- bench_gemm_transformer --------------------------]
+        [  m ,  k  ,  n  ]    |  allow_fp16_reduc=True  |  allow_fp16_reduc=False
+  1 threads: --------------------------------------------------------------------
+        [4096, 4048, 4096]    |           1634.6        |           1639.8
+        [4096, 4056, 4096]    |           1670.8        |           1661.9
+        [4096, 4080, 4096]    |           1664.2        |           1658.3
+        [4096, 4096, 4096]    |           1639.4        |           1651.0
+        [4096, 4104, 4096]    |           1677.4        |           1674.9
+        [4096, 4128, 4096]    |           1655.7        |           1646.0
+        [4096, 4144, 4096]    |           1796.8        |           2519.6
+        [4096, 5096, 4096]    |           2094.6        |           3190.0
+        [4096, 5104, 4096]    |           2144.0        |           2663.5
+        [4096, 5112, 4096]    |           2149.1        |           2766.9
+        [4096, 5120, 4096]    |           2142.8        |           2631.0
+        [4096, 9728, 4096]    |           3875.1        |           5779.8
+        [4096, 16384, 4096]   |           6182.9        |           9656.5
+  (times in microseconds).
+
+If full precision reductions are needed, users can disable reduced precision reductions in fp16 GEMMs with:
+
+.. code:: python
+
+  torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+
+To toggle the reduced precision reduction flags in C++, you can do
+
+.. code:: C++
+
+  at::globalContext().setAllowFP16ReductionCuBLAS(false);
+
 Asynchronous execution
 ----------------------
 
@@ -639,7 +680,7 @@ Violating any of these will likely cause a runtime error:
   :meth:`CUDAGraph.capture_end<torch.cuda.CUDAGraph.capture_end>` calls.
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
-* Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
+* Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
