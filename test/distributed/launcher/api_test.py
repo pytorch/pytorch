@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Owner(s): ["oncall: r2p"]
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -8,30 +9,32 @@
 import multiprocessing as mp
 import os
 import shutil
+import signal
 import sys
 import tempfile
 import time
 import unittest
 import uuid
 from contextlib import closing
-from typing import Optional, Any, Dict
+from typing import Any, Dict, Optional
 from unittest import mock
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import torch
 import torch.distributed as dist
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
+from torch.distributed.elastic.multiprocessing.api import SignalException
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.launcher.api import (
     LaunchConfig,
-    elastic_launch,
     _get_entrypoint_name,
+    elastic_launch,
+    launch_agent,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    TEST_WITH_TSAN,
     sandcastle_skip_if,
 )
 
@@ -49,6 +52,49 @@ def function_with_bug():
     raise RuntimeError("test error")
 
 
+def get_test_launch_config(
+    rdzv_endpoint: str,
+    min_nodes: int,
+    max_nodes: int,
+    nproc_per_node: int,
+    run_id: str = "",
+    rdzv_backend: str = "etcd",
+    config: Optional[Dict[str, Any]] = None,
+) -> LaunchConfig:
+    rdzv_configs = {}
+    if config:
+        rdzv_configs.update(config)
+    return LaunchConfig(
+        min_nodes=min_nodes,
+        max_nodes=max_nodes,
+        nproc_per_node=nproc_per_node,
+        run_id=run_id,
+        rdzv_endpoint=rdzv_endpoint,
+        monitor_interval=1,
+        rdzv_backend=rdzv_backend,
+        start_method="spawn",
+        max_restarts=0,
+        rdzv_configs=rdzv_configs,
+    )
+
+
+def elastic_launch_wrapper(
+    test_dir: str,
+    rdzv_endpoint: str,
+    min_nodes: int,
+    max_nodes: int,
+    nproc_per_node: int,
+    run_id: str,
+):
+    """A wrapper function for class `elastic_launch.` in order to make multiprocess returns correct exit code."""
+    elastic_launch(
+        get_test_launch_config(
+            rdzv_endpoint, min_nodes, max_nodes, nproc_per_node, run_id
+        ),
+        sys.executable,
+    )("-u", path("bin/test_script.py"), f"--touch_file_dir={test_dir}")
+
+
 def _dist_sum(wait=0):
     rank = int(os.environ["RANK"])
     dist.init_process_group(backend="gloo")
@@ -59,8 +105,19 @@ def _dist_sum(wait=0):
     return t.item()
 
 
+ELASTIC_AGENT_RUN = "torch.distributed.launcher.api.LocalElasticAgent.run"
+EVENTS_RECORD = "torch.distributed.launcher.api.events.record"
+GET_RDZV_HANDLER = (
+    "torch.distributed.elastic.rendezvous.registry.get_rendezvous_handler"
+)
+
+
 class MockException(Exception):
     pass
+
+
+def short_hash():
+    return str(uuid.uuid4()).split("-")[0]
 
 
 class ElasticLaunchTest(unittest.TestCase):
@@ -93,49 +150,18 @@ class ElasticLaunchTest(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.test_dir)
 
-    def get_test_launch_config(
-        self,
-        min_nodes: int,
-        max_nodes: int,
-        nproc_per_node: int,
-        run_id: str = "",
-        rdzv_backend: str = "etcd",
-        config: Optional[Dict[str, Any]] = None,
-        rdzv_endpoint: Optional[str] = None,
-    ) -> LaunchConfig:
-        rdzv_configs = {}
-        if config:
-            rdzv_configs.update(config)
-        endpoint = self._etcd_endpoint
-        if rdzv_endpoint:
-            endpoint = rdzv_endpoint
-        return LaunchConfig(
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
-            nproc_per_node=nproc_per_node,
-            run_id=run_id,
-            rdzv_endpoint=endpoint,
-            monitor_interval=1,
-            rdzv_backend=rdzv_backend,
-            start_method="spawn",
-            max_restarts=0,
-            rdzv_configs=rdzv_configs,
-        )
-
     def check_works_ran(self, world_size: int):
         self.assertSetEqual(
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python(self):
         nnodes = 1
         nproc_per_node = 4
 
         elastic_launch(
-            self.get_test_launch_config(nnodes, nnodes, nproc_per_node),
+            get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
         )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
 
@@ -144,15 +170,13 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
 
         elastic_launch(
-            self.get_test_launch_config(nnodes, nnodes, nproc_per_node),
+            get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
         )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
 
@@ -161,30 +185,26 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_bash(self):
         nnodes = 1
         nproc_per_node = 4
 
         elastic_launch(
-            self.get_test_launch_config(nnodes, nnodes, nproc_per_node),
+            get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             path("bin/test_script.sh"),
         )(f"{self.test_dir}")
 
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_function(self):
         nnodes = 1
         nproc_per_node = 4
 
         res = elastic_launch(
-            self.get_test_launch_config(nnodes, nnodes, nproc_per_node),
+            get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             simple_rank_scale,
         )()
 
@@ -192,9 +212,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
         nproc_per_node = 4
@@ -208,13 +226,13 @@ class ElasticLaunchTest(unittest.TestCase):
         }
 
         res = elastic_launch(
-            self.get_test_launch_config(
+            get_test_launch_config(
+                rdzv_endpoint,
                 nnodes,
                 nnodes,
                 nproc_per_node,
                 rdzv_backend="static",
                 config=rdzv_config,
-                rdzv_endpoint=rdzv_endpoint,
             ),
             _dist_sum,
         )()
@@ -223,14 +241,12 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         nproc_per_node = 4
 
         elastic_launch(
-            self.get_test_launch_config(1, 2, nproc_per_node),
+            get_test_launch_config(self._etcd_endpoint, 1, 2, nproc_per_node),
             sys.executable,
         )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
 
@@ -247,7 +263,7 @@ class ElasticLaunchTest(unittest.TestCase):
 
         with self.assertRaises(ChildFailedError):
             elastic_launch(
-                self.get_test_launch_config(1, 2, nproc_per_node),
+                get_test_launch_config(self._etcd_endpoint, 1, 2, nproc_per_node),
                 sys.executable,
             )("-u", path("bin/test_script.py"), "--fail")
 
@@ -265,12 +281,12 @@ class ElasticLaunchTest(unittest.TestCase):
         mock_agent_run.side_effect = MockException
         with self.assertRaises(MockException):
             elastic_launch(
-                self.get_test_launch_config(1, 2, 4),
+                get_test_launch_config(self._etcd_endpoint, 1, 2, 4),
                 sys.executable,
             )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
         record_mock.assert_called_once()
 
-    @unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_multiple_agents(self):
         min_nodes = 1
         max_nodes = 2
@@ -278,24 +294,31 @@ class ElasticLaunchTest(unittest.TestCase):
         nnodes = 2
         run_id = str(uuid.uuid4().int)
 
-        def elastic_launch_wrapper():
-            """We need a wrapper function for class `elastic_launch.` in order to make multiprocess returns correct exit code."""
-            elastic_launch(
-                self.get_test_launch_config(
-                    min_nodes, max_nodes, nproc_per_node, run_id
-                ),
-                sys.executable,
-            )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
-
         procs = []
+        ctx = mp.get_context("spawn")
         for _ in range(nnodes - 1):
-            p = mp.Process(
+            p = ctx.Process(
                 target=elastic_launch_wrapper,
+                args=(
+                    self.test_dir,
+                    self._etcd_endpoint,
+                    min_nodes,
+                    max_nodes,
+                    nproc_per_node,
+                    run_id,
+                ),
             )
             procs.append(p)
             p.start()
 
-        elastic_launch_wrapper()
+        elastic_launch_wrapper(
+            self.test_dir,
+            self._etcd_endpoint,
+            min_nodes,
+            max_nodes,
+            nproc_per_node,
+            run_id,
+        )
 
         for i in range(nnodes - 1):
             p = procs[i]
@@ -320,7 +343,7 @@ class ElasticLaunchTest(unittest.TestCase):
         ) as param_mock:
             param_mock.return_value = rdzv_handler_mock
             elastic_launch(
-                self.get_test_launch_config(1, 1, 4),
+                get_test_launch_config(self._etcd_endpoint, 1, 1, 4),
                 sys.executable,
             )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
 
@@ -337,3 +360,40 @@ class ElasticLaunchTest(unittest.TestCase):
             _get_entrypoint_name(sys.executable, ["-u", "test_script.py"]),
         )
         self.assertEqual("", _get_entrypoint_name(None, []))
+
+    @patch(ELASTIC_AGENT_RUN)
+    @patch(GET_RDZV_HANDLER)
+    def test_rdzv_handler_shutdown_on_agent_signal(self, mock_get_rdzv, mock_agent_run):
+        config = get_test_launch_config(
+            self._etcd_endpoint, min_nodes=1, max_nodes=1, nproc_per_node=1
+        )
+
+        for sigval in [signal.SIGTERM, signal.SIGINT]:
+            with patch(EVENTS_RECORD) as record_event_mock:
+                rdzv_handler_mock = MagicMock()
+                rdzv_handler_mock.get_run_id.return_value = short_hash()
+                mock_get_rdzv.return_value = rdzv_handler_mock
+
+                mock_agent_run.side_effect = SignalException("test", sigval)
+                with self.assertRaises(SignalException):
+                    launch_agent(config, simple_rank_scale, [])
+                rdzv_handler_mock.shutdown.assert_not_called()
+                record_event_mock.assert_called_once()
+
+    @patch(ELASTIC_AGENT_RUN)
+    @patch(GET_RDZV_HANDLER)
+    def test_rdzv_handler_shutdown_on_agent_error(self, mock_get_rdzv, mock_agent_run):
+        config = get_test_launch_config(
+            self._etcd_endpoint, min_nodes=1, max_nodes=1, nproc_per_node=1
+        )
+
+        with patch(EVENTS_RECORD) as record_event_mock:
+            rdzv_handler_mock = MagicMock()
+            rdzv_handler_mock.get_run_id.return_value = short_hash()
+            mock_get_rdzv.return_value = rdzv_handler_mock
+
+            mock_agent_run.side_effect = RuntimeError("any other exception")
+            with self.assertRaises(RuntimeError):
+                launch_agent(config, simple_rank_scale, [])
+            rdzv_handler_mock.shutdown.assert_called_once()
+            record_event_mock.assert_called_once()
