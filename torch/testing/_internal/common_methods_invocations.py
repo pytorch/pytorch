@@ -7006,7 +7006,6 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         for shape, kwargs in shapes_and_kwargs
     ]
 
-
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -7174,12 +7173,10 @@ def sample_inputs_multilabel_soft_margin_loss(op_info, device, dtype, requires_g
     ]
 
     for shape in shapes:
-        input = _make_tensor(shape)
-        target = _make_tensor(shape, requires_grad=False)
-        weight = _make_tensor(shape)
         # Produce one with weight and one without.
-        yield SampleInput(input, args=(target,), kwargs={})
-        # yield SampleInput(input, args=(target,), kwargs={'weight': weight})
+        yield SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),), kwargs={})
+        yield SampleInput(_make_tensor(shape), args=(_make_tensor(shape, requires_grad=False),),
+                          kwargs={'weight': _make_tensor(shape, requires_grad=False)})
 
 
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
@@ -13633,6 +13630,24 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
+        decorators=[
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ],
+        skips=[
+            # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 4096
+            # __main__.TestJitCUDA.test_variant_consistency_jit_nn_functional_multilabel_soft_margin_loss_cuda_float32
+            # leaked 4096 bytes CUDA memory on device 0
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ],
     ),
     OpInfo(
         "nn.functional.nll_loss",
