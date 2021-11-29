@@ -433,9 +433,21 @@ Tensor index_copy_decomp(
   return at::scatter(self, dim, index_, source);  ;
 }
 
+Tensor select_scatter_decomp(
+    const Tensor &self, const Tensor &source,
+    int64_t dim, int64_t index)
+{
+  // supports negative index
+  index = maybe_wrap_dim(index, self.size(dim));
+  auto index_ = at::scalar_tensor(index, self.options().dtype(kLong));
+
+  return at::scatter(self, dim, index_.expand_as(self), source.unsqueeze(dim).expand_as(self));
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
+  m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
   VMAP_SUPPORT("gather", gather_batch_rule);
