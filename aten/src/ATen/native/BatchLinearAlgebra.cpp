@@ -928,7 +928,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
     result = result.unsqueeze_(-1);
   }
 
-  // lu_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
+  // lu_factor_stub+lu_solve_stub perform calculations in-place and 'result' must be a copy of 'other_broadcasted'
   result.copy_(other_broadcasted);
 
   auto input_working_copy = cloneBatchedColumnMajor(input_broadcasted);
@@ -945,7 +945,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   auto pivots_shape = IntArrayRef(input_broadcasted.sizes().data(), input_broadcasted.dim() - 2).vec(); // input_broadcasted.shape[:-2]
   pivots_shape.push_back(std::min(input.size(-2), input.size(-1)));
   Tensor pivots = at::empty(pivots_shape, input.options().dtype(kInt));
-  lu_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
+  lu_factor_stub(input.device().type(), input_working_copy, pivots, infos, /*compute_pivots=*/true);
 
   // solve the linear system using the LU factorization
   lu_solve_stub(input.device().type(), result, input_working_copy, pivots);
@@ -1593,30 +1593,109 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ lu_factor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-DEFINE_DISPATCH(lu_stub);
+DEFINE_DISPATCH(lu_factor_stub);
 
-// TODO: remove check_errors argument
-// https://github.com/pytorch/pytorch/issues/64014
-std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool check_errors) {
-  TORCH_CHECK(self.dim() >= 2,
-           "expected tensor with 2 or more dimensions, got size: ", self.sizes(),
-           " instead");
-  auto m = self.size(-2);
-  auto n = self.size(-1);
-  auto req_size = self.sizes().vec();
+std::tuple<Tensor&, Tensor&, Tensor&> linalg_lu_factor_ex_out(const Tensor& A,
+                                                              bool pivot,
+                                                              bool check_errors,
+                                                              Tensor& LU,
+                                                              Tensor& pivots,
+                                                              Tensor& info) {
+  TORCH_CHECK(A.dim() >= 2,
+              "expected tensor with 2 or more dimensions, got size: ", A.sizes(), " instead");
+  auto req_size = A.sizes().vec();
+  const auto m = req_size.cend()[-2];
+  const auto n = req_size.cend()[-1];
+
+  // TODO reimplementation of resize_output with format F-contiguous
+  // We should make this a standalone function
+  if (resize_output_check(LU, req_size)) {
+    // Transpose size
+    std::iter_swap(req_size.end() - 1, req_size.end() - 2);
+    LU.resize_(req_size, MemoryFormat::Contiguous);
+    LU.transpose_(-2, -1);  // make 'LU' have Fortran contiguous memory
+  }
   req_size.pop_back();
   req_size.back() = std::min(m, n);
-  auto pivots_tensor = at::empty(req_size, self.options().dtype(kInt));
+  at::native::resize_output(pivots, req_size);
   req_size.pop_back();
-  auto infos_tensor = at::zeros(req_size, self.options().dtype(kInt));
+  at::native::resize_output(info, req_size);
 
-  // lu_stub (apply_lu) requires batched column major (Fortran-contiguous) tensors
-  // 'lu' tensor is modified in-place and must be a copy of 'self'
-  Tensor lu = cloneBatchedColumnMajor(self);
-  lu_stub(self.device().type(), lu, pivots_tensor, infos_tensor, compute_pivots);
-  return std::make_tuple(lu, pivots_tensor, infos_tensor);
+  const auto LU_f_contig = LU.transpose(-2, -1).is_contiguous() ;
+
+  if (LU_f_contig && !LU.is_same(A)) {
+    LU.copy_(A);
+  }
+  const auto LU_ = borrow_else_clone(LU_f_contig, LU, A, /*C-contig*/false);
+
+  const auto pivots_contig = pivots.is_contiguous();
+  const auto pivots_ = borrow_else_clone(pivots_contig, pivots, pivots, /*C-contig*/true);
+
+  const auto info_contig = info.is_contiguous();
+  const auto info_ = borrow_else_clone(info_contig, info, info, /*C-contig*/true);
+
+  lu_factor_stub(A.device().type(), *LU_, *pivots_, *info_, pivot);
+
+  if (!LU_f_contig) {
+    LU.copy_(*LU_);
+  }
+  if (!pivots_contig) {
+    pivots.copy_(*pivots_);
+  }
+  if (!info_contig) {
+    info.copy_(*info_);
+  }
+
+  if (check_errors) {
+    if (A.dim() > 2) {
+      batchCheckErrors(info, "torch.linalg.lu_factor_ex");
+    } else {
+      singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor_ex");
+    }
+  }
+
+  return std::tie(LU, pivots, info);
+}
+
+std::tuple<Tensor, Tensor, Tensor> linalg_lu_factor_ex(const Tensor& A, bool pivot, bool check_errors) {
+  auto LU = at::empty({0}, A.options());
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  at::native::linalg_lu_factor_ex_out(A, pivot, check_errors, LU, pivots, info);
+  return std::make_tuple(std::move(LU), std::move(pivots), std::move(info));
+}
+
+std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor & LU, Tensor & pivots) {
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
+  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*chech_errors=*/false);
+  if (A.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.lu_factor");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
+  }
+
+  return std::tie(LU, pivots);
+}
+
+std::tuple<Tensor, Tensor> linalg_lu_factor(const Tensor& A, bool pivot) {
+  Tensor LU, pivots, info;
+  std::tie(LU, pivots, info) = at::linalg_lu_factor_ex(A, pivot, /*check_errors=*/false);
+
+  if (A.dim() > 2) {
+    batchCheckErrors(info, "torch.linalg.lu_factor");
+  } else {
+    singleCheckErrors(info.item<int64_t>(), "torch.linalg.lu_factor");
+  }
+
+  return std::make_tuple(std::move(LU), std::move(pivots));
+}
+
+// TODO Deprecate this function in favour of linalg_lu_factor_ex
+std::tuple<Tensor, Tensor, Tensor> _lu_with_info(const Tensor& self, bool compute_pivots, bool) {
+  return at::linalg_lu_factor_ex(self, compute_pivots, false);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -3799,6 +3878,262 @@ Tensor _det_lu_based_helper_backward_helper(
     // multiply by p to restore the row order
     return at::matmul(p, d);
   }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+namespace {
+void checkIsMatrix(const Tensor& t,
+                   const char* const f_name,
+                   const char* const t_name) {
+  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
+                            " to be a tensor of at least 2 dimensions.");
+}
+
+void checkIsSquareMatrix(const Tensor& t,
+                         const char* const f_name,
+                         const char* const t_name) {
+  checkIsMatrix(t, f_name, t_name);
+  TORCH_CHECK(t.size(-1) == t.size(-2),
+              f_name, ": Expected ", t_name,
+              " to be a square matrix or batch of square matrices. "
+              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+}
+
+void checkInputsSolver(const Tensor& A,
+                       const Tensor& B,
+                       const Tensor& out,
+                       const bool left,
+                       const char* const f_name) {
+  checkIsSquareMatrix(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
+              f_name, ": Incompatible shapes of A and B for the equation ",
+              left ? "AX = B" : "XA = B",
+              " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
+}
+
+bool is_row_or_column_contiguous(const Tensor& t) {
+  // This could be made more general, similar to how it's checked in matmul, which would allow to
+  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // We choose to be conservative for simplicity
+  return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
+}
+
+TransposeType to_transpose_type(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {        return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {        return TransposeType::Transpose; }
+  }
+}
+} // end of anonymous namespace
+
+/*
+Solves the matrix equation AX = B for A triangular.
+'left' If true solves AX = B, if false solves XA = B
+'upper' controls the portion of input matrix to consider in computations,
+'unitriangular' if true then we assume diag(A) to be ones
+'out' The tensor with the result. If A == out, A will be modified in place
+*/
+Tensor& linalg_solve_triangular_out(
+    const Tensor& A,
+    const Tensor& B,
+    bool upper,
+    bool left,
+    bool unitriangular,
+    Tensor& out) {
+  checkInputsSolver(A, B, out, left, "linalg.solve_triangular");
+  Tensor A_, B_;
+  std::tie(B_, A_) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
+
+  // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
+  // We say that a matrix is F-ready if it's F-contig OR F-transpose
+  // At this point, A, B have been broadcasted but may or may not be F-ready
+
+  // The following algorithm minimises copies and allocations. In pseudocode:
+  // if out is wrong size:
+  //   resize_output(out)
+  // # Invariant: out is the right size
+  // Tensor out_f; # Tensor that we will pass to FORTRAN
+  // if out is F-ready:
+  //   out_f = out;
+  // else:
+  //   Allocate out_f F-ready
+  // if B != out_f:
+  //   copy B into out_f
+  // # Invariant: out_f F-ready and has B copied into it
+  // if out_f is F-transposed:
+  //   transpose equation
+  // if out_f is conj:
+  //   conjugate equation
+  // # Invariant: out_f is not conjugated and F-contig
+  // Tensor A_f; # Tensor that will be sent to FORTRAN
+  // if A is F-ready:
+  //   if A is conj and A is not transposed:
+  //     # We need to clone A in this case. See [Cloning A]
+  //     clone A F-contig into A_f
+  //   else:
+  //     A_f = A;
+  // else:
+  //   clone A F-contig into A_f
+  // # Invariant: out_f is F-contig and A_f is F-ready
+  // # We pass FORTRAN the flags indicating if A_f is transposed and or conjugated
+  //
+  // # Here we undo the conjugations / transposes on out_f if needed
+  //
+  // if out_f not same out:
+  //   copy out_f into out
+  // return out
+  //
+  // Note: The logic for the negative bit is the same as that for the conjugate bit
+  //
+  // Note: [Cloning A] If we are careful when allocating B when it needs to be allocated at the
+  // beginning of the algorithm, it is possible to always elide the copy of A here.
+  // Via this trick, the algorithm will copy at most one of A or B (never both) whenever A
+  // and B are F-ready and not A.is_neg() (which happens almost always in practice).
+  // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
+
+  const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
+  if (avoid_copy_A) {
+    // See Note: [Cloning A]
+    at::native::resize_output(out, B_.sizes());
+  }
+  else {
+    // poorman's reimplementation of resize_output with result F-contig
+    if (resize_output_check(out, B_.sizes())) {
+      out.resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+      out.transpose_(-2, -1);  // make 'out' have Fortran contiguous memory layout
+    }
+  }
+  // Invariant: out has the right size, so we'll be able to copy into it later on
+
+  Tensor out_f; // the out that will go into fortran
+  // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
+  if C10_LIKELY (is_row_or_column_contiguous(out)) {
+    out_f = out;
+    if C10_LIKELY (!out.is_same(B_)) {
+      out_f.copy_(B_);
+    }
+  } else {
+    if (avoid_copy_A) {
+      // See Note: [Cloning A]
+      out_f = B_.clone(at::MemoryFormat::Contiguous);
+    }
+    else {
+      out_f = cloneBatchedColumnMajor(B_);
+    }
+  }
+  // Invariant: out_f F-ready and has B copied into it
+
+  // out_f is F-transposed
+  bool transpose_A = false;
+  bool transpose_out_f = false;
+  if (out_f.stride(-1) == 1) {
+    left = !left;
+    transpose_A = true;
+    transpose_out_f = true;
+    out_f.transpose_(-2 ,-1);
+  }
+
+  // No need to conjugate anything if out_f is conj as AX = conj(B) <=> conj(A)conj(X) = B
+  // and X = B after the algortihm. We just anotate that A is conjugated later on
+  // The solution will be written into out_f, so it'll be conjugated already
+
+  Tensor A_f = A_;  // The A that will go into fortran
+
+  bool A_is_conj = A_f.is_conj() != out_f.is_conj();
+  bool A_is_neg = A_f.is_neg() != out_f.is_neg();
+  bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
+  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
+    // We first anotate with flags on A_f all the conj / transpose / neg coming from out
+    // and then we clone the resulting tensor to resolve all of them in memory
+    if (out_f.is_conj()) {
+      A_f = A_f.conj();
+    }
+    A_is_conj = false;
+
+    if (out_f.is_neg()) {
+      A_f = A_f._neg_view();
+    }
+    A_is_neg = false;
+
+    // This choice is to be consistent with how we flip `upper` later on
+    // Note that this is the same reasoning we apply for neg and conj below
+    // If B has neg or out or transpose, then we need to resolve it in memory
+    A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
+                      : cloneBatchedColumnMajor(A_f);
+    A_is_f_contig = true;
+  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
+    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
+      // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
+      // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
+      // -AX = B. We resolve the neg in memory
+      // AX = -B => -A -X = B. We resolve the neg in memory for A,
+      //                       Since X.is_same(B), we already have that X.is_neg() == true
+
+      // We do the neg with a view, as this will be resolved in the clone below
+      if (out_f.is_neg()) {
+        A_f = A_f._neg_view();
+      }
+      A_is_neg = false;
+    }
+    // We resolve the transpose if necessary and then leave A_f F-transposed,
+    // as BLAS can handle the case F-transposed and conjugated
+    A_f = at::clone(transpose_A ? A_f.mT() : A_f, at::MemoryFormat::Contiguous);
+    A_is_f_contig = false;
+    if (transpose_A) {
+      upper = !upper;
+    }
+    // As we've already resolved the conj of A in the clone
+    A_is_conj = out_f.is_conj();
+  } else if C10_UNLIKELY (A_is_neg) {
+    // We follow the same logic as above, only that in this case we need to perform the
+    // negation in memory
+    if (out_f.is_neg()) {
+      A_f = -A_f;
+    } else {
+      A_f = A_f.resolve_neg();
+    }
+    A_is_neg = false;
+    // As we've already resolved the conj of A in the negationa bove
+    A_is_conj = out_f.is_conj();
+  }
+  // Invariant: out_f is F-contig and A_f is F-ready
+  // neg has been resolved
+
+  // If we pass the matrix physically F-transposed, we need to change the parity of upper
+  if (A_f.stride(-1) == 1) {
+    upper = !upper;
+  }
+
+  triangular_solve_stub(
+    A_f.device().type(), A_f, out_f,
+    /*left=*/left,
+    /*upper=*/upper,
+    /*transpose*/to_transpose_type(A_is_f_contig, A_is_conj),
+    /*unitriangular=*/unitriangular);
+
+  if (transpose_out_f) {
+    out_f.transpose_(-2, -1);
+  }
+
+  if (!out_f.is_same(out)) {
+    out.copy_(out_f);
+  }
+  return out;
+}
+
+Tensor linalg_solve_triangular(
+    const Tensor& A,
+    const Tensor& B,
+    bool upper,
+    bool left,
+    bool unitriangular) {
+  Tensor out = at::empty({0}, A.options());
+  linalg_solve_triangular_out(A, B, upper, left, unitriangular, out);
+  return out;
 }
 
 }}  // namespace at::native
