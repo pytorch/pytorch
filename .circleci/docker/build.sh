@@ -305,8 +305,8 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
-#If we are trying to use nvidia cuda image make sure it exist, otherwise use IMAGE from ghcr.io
-#this logic currently only exists for ubuntu
+# If we are trying to use nvidia cuda image make sure it exists, otherwise use IMAGE from ghcr.io
+# this logic currently only exists for ubuntu
 if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
   if ! DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "${IMAGE_NAME}" >/dev/null 2>/dev/null; then
