@@ -274,6 +274,7 @@ struct VectorizedLoop2d {
 
     if (is_contiguous<traits>(strides)) {
       for (const auto i : c10::irange(size1)) {
+        (void)i;
         vectorized_loop(data.data(), size0, 0, op, vop);
         advance(data, outer_strides);
       }
@@ -282,11 +283,13 @@ struct VectorizedLoop2d {
       unroll_contiguous_scalar_checks<traits>(strides, Indices{}, [&](size_t idx) {
         if (idx) {
           for (const auto i : c10::irange(size1)) {
+            (void)i;
             vectorized_loop(data.data(), size0, idx, op, vop);
             advance(data, outer_strides);
           }
         } else {
           for (const auto i : c10::irange(size1)) {
+            (void)i;
             basic_loop(data.data(), strides, 0, size0, op);
             advance(data, outer_strides);
           }
