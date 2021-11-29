@@ -32,7 +32,7 @@ constexpr auto kInternalModule = "torch.distributed.rpc.internal";
 struct PythonTypeResolver : public jit::Resolver {
   std::shared_ptr<jit::SugaredValue> resolveValue(
       const std::string& /* unused */,
-      torch::jit::Function& /* unused */,
+      torch::jit::GraphFunction& /* unused */,
       const jit::SourceRange& /* unused */) override {
     TORCH_INTERNAL_ASSERT(
         false, "RPC Type resolver does not need to resolve value");
@@ -128,7 +128,6 @@ PythonRpcHandler& PythonRpcHandler::getInstance() {
   // release GIL to avoid this situation.
   TORCH_INTERNAL_ASSERT(!PyGILState_Check());
   // Leaky singleton to avoid module destructor race.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static PythonRpcHandler* handler = new PythonRpcHandler();
   handler->init();
   return *handler;

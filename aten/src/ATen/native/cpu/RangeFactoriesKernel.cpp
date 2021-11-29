@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <cmath>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
@@ -9,6 +10,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/cpu/Loops.h>
 
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 namespace {
@@ -16,7 +18,7 @@ namespace {
 using namespace vec;
 
 static void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
-  AT_DISPATCH_ALL_TYPES(iter.dtype(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.dtype(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto start = scalar_start.to<accscalar_t>();
     auto steps = scalar_steps.to<accscalar_t>();
@@ -77,9 +79,7 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
 }} // namespace at::native

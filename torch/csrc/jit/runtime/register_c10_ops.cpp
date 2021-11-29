@@ -12,7 +12,7 @@ namespace jit {
 namespace {
 
 Operator createOperatorFromC10(const c10::OperatorHandle& op) {
-  return Operator(op, [op](Stack* stack) { op.callBoxed(stack); });
+  return Operator(op, [op](Stack& stack) { op.callBoxed(stack); });
 }
 
 class RegistrationListener final : public c10::OpRegistrationListener {
@@ -54,8 +54,7 @@ Registerer& registerer() {
 }
 
 // global instance to run its constructor on startup
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-Registerer& dummy = registerer();
+C10_UNUSED Registerer& dummy = registerer();
 
 } // namespace
 

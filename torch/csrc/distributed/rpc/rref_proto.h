@@ -22,9 +22,6 @@ class TORCH_API RRefMessageBase : public RpcCommandBase {
 
   const RRefId& rrefId();
 
-  c10::intrusive_ptr<Message> toMessageImpl() && override;
-  static at::IValue fromMessage(const Message& message, MessageType type);
-
  protected:
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   const RRefId rrefId_;

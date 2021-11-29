@@ -30,20 +30,35 @@ class BaseCppType:
 
 # The set of all non-templated, valid, fully-qualified names of C++ types that are used in the codegen.
 # Templated types get their own dataclass, mainly to make namespace parsing easier.
-intT = BaseCppType('', 'int64_t')
+byteT = BaseCppType('', 'uint8_t')
+charT = BaseCppType('', 'int8_t')
+shortT = BaseCppType('', 'int16_t')
+# It would be more symmetric for this to be called intT, but it easy to mix
+# this up with JIT int (which is int64_t in C++), so we intentionally don't
+# define intT to make it obvious when you've stuffed it up
+int32T = BaseCppType('', 'int32_t')
+longT = BaseCppType('', 'int64_t')
+halfT = BaseCppType('at', 'Half')
 doubleT = BaseCppType('', 'double')
+floatT = BaseCppType('', 'float')
+complexHalfT = BaseCppType('c10', 'complex<c10::Half>')  # stuffing template param here is an abuse
+complexFloatT = BaseCppType('c10', 'complex<float>')
+complexDoubleT = BaseCppType('c10', 'complex<double>')
 boolT = BaseCppType('', 'bool')
+bfloat16T = BaseCppType('at', 'BFloat16')
 voidT = BaseCppType('', 'void')
 stringT = BaseCppType('c10', 'string_view')
 generatorT = BaseCppType('at', 'Generator')
 scalarTypeT = BaseCppType('at', 'ScalarType')
 tensorT = BaseCppType('at', 'Tensor')
+optionalTensorRefT = BaseCppType('at', 'OptionalTensorRef')
 tensorListT = BaseCppType('at', 'TensorList')
 dimnameT = BaseCppType('at', 'Dimname')
 dimnameListT = BaseCppType('at', 'DimnameList')
 layoutT = BaseCppType('at', 'Layout')
 deviceT = BaseCppType('at', 'Device')
 scalarT = BaseCppType('at', 'Scalar')
+optionalScalarRefT = BaseCppType('at', 'OptionalScalarRef')
 memoryFormatT = BaseCppType('at', 'MemoryFormat')
 qschemeT = BaseCppType('at', 'QScheme')
 storageT = BaseCppType('at', 'Storage')
@@ -54,7 +69,7 @@ typeAndSizeT = BaseCppType('torch::autograd::generated', 'TypeAndSize')
 tensorGeometryT = BaseCppType('at', 'TensorGeometry')
 
 BaseTypeToCppMapping: Dict[BaseTy, BaseCppType] = {
-    BaseTy.int: intT,
+    BaseTy.int: longT,
     BaseTy.float: doubleT,
     BaseTy.bool: boolT,
     BaseTy.str: stringT,
@@ -290,6 +305,14 @@ class Binding:
     def defn(self) -> str:
         return f"{self.type} {self.name}"
 
+    def with_name(self, name: str) -> 'Binding':
+        return Binding(
+            name=name,
+            nctype=self.nctype,
+            argument=self.argument,
+            default=self.default
+        )
+
 # An Expr is a C++ expression.  It has a C++ string representing its syntax,
 # as well as a CType saying what it provides.
 
@@ -499,6 +522,79 @@ class NativeSignature:
     def dispatcher_exprs(self) -> List[Expr]:
         return translate.translate(self.arguments(), dispatcher.arguments(self.func), method=False)
 
+@dataclass(frozen=True)
+class ViewInverseSignature:
+    # The NativeFunction this signature is derived from
+    f: NativeFunction
+
+    def name(self) -> str:
+        return functionalization.name(self.f, functional_op=self.f, is_reverse=True, include_namespace=False)
+
+    def decl(self) -> str:
+        return_type = functionalization.returns_type(self.f.func)
+        decls = [a.decl() for a in functionalization.inner_arguments(self.f.func, is_reverse=True)]
+        return f"static {return_type.cpp_type()} {self.name()}({', '.join(decls)});"
+
+    @staticmethod
+    def from_func(f: NativeFunction) -> 'ViewInverseSignature':
+        # Some assertions: lambdas are only used for view ops
+        assert f.is_view_op
+        assert not f.func.name.name.inplace  # only functional view ops need an inverse (e.g. not transpose_())
+        return ViewInverseSignature(f)
+
+@dataclass(frozen=True)
+class FunctionalizationLambda:
+    # The NativeFunction this signature is derived from
+    f: NativeFunction
+
+    # The corresponding out-of-place variant of the above NativeFunction
+    # This only really matters for inplace-view ops.
+    # e.g. transpose_() -> transpose().
+    functional_op: NativeFunction
+
+    # are we generating the forward lambda or the reverse lambda?
+    is_reverse: bool
+
+    def captures(self) -> List[Expr]:
+        # The lambda lives inside of a kernel following the dispatcher API, so its outer context is the dispatcher arguments
+        outer_ctx = dispatcher.arguments(self.f.func)
+        capture_bindings = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        # allow_expensive_conversions is set because we want to convert
+        # some reference types (IntArrayRef) to value types (vector<int64_t>).
+        capture_exprs = translate.translate(outer_ctx, capture_bindings, method=False, allow_expensive_conversions=True)
+        return capture_exprs
+
+    def decl(self) -> str:
+        return_type = functionalization.returns_type(self.f.func)
+        capture_str = ', '.join(f'{val.type.name} = {val.expr}' for val in self.captures())
+        decls = [a.decl() for a in functionalization.outer_arguments(is_reverse=self.is_reverse)]
+        return f"[{capture_str}]({', '.join(decls)}) -> {return_type.cpp_type()}"
+
+    def inner_call(self) -> str:
+        inner_call_name = functionalization.name(
+            self.f, functional_op=self.functional_op, is_reverse=self.is_reverse, include_namespace=True)
+
+        arg_ctx = functionalization.outer_arguments(is_reverse=self.is_reverse)
+        capture_ctx = functionalization.capture_arguments(self.f.func, is_reverse=self.is_reverse)
+        full_ctx = arg_ctx + capture_ctx
+
+        call_bindings = functionalization.inner_arguments(self.f.func, is_reverse=self.is_reverse)
+        maybe_index = functionalization.inner_call_index(self.f.func)
+        call_exprs = [e.expr for e in translate.translate(full_ctx, call_bindings, method=False)]
+        if not self.is_reverse and maybe_index is not None:
+            return f'{inner_call_name}({", ".join(call_exprs)})[{maybe_index.name}];'
+        else:
+            return f'{inner_call_name}({", ".join(call_exprs)});'
+
+    @staticmethod
+    def from_func(f: NativeFunction, *, functional_op: NativeFunction, is_reverse: bool) -> 'FunctionalizationLambda':
+        # Some assertions: lambdas are only used for view ops
+        assert f.is_view_op
+        assert functional_op.is_view_op
+        # functional_op corresponds to the functional-variant of f, and is only actually used if f itself is an inplace_view op.
+        assert f.func.signature() == functional_op.func.signature()
+        return FunctionalizationLambda(f, functional_op, is_reverse)
+
 
 # Helper functions
 
@@ -519,4 +615,4 @@ def kernel_signature(
         return NativeSignature(f.func, prefix)
 
 # Functions only, no types
-from tools.codegen.api import cpp, dispatcher, native, translate
+from tools.codegen.api import cpp, dispatcher, native, translate, functionalization

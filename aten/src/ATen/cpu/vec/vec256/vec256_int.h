@@ -3,9 +3,11 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/irange.h>
+#include <iostream>
 
 namespace at {
 namespace vec {
@@ -55,7 +57,7 @@ public:
   }
   template <int64_t mask>
   static Vectorized<int64_t> blend(Vectorized<int64_t> a, Vectorized<int64_t> b) {
-    __at_align32__ int64_t tmp_values[size()];
+    __at_align__ int64_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi64(b.values, 0);
@@ -93,11 +95,11 @@ public:
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int64_t> loadu(const void* ptr, int64_t count) {
-    __at_align32__ int64_t tmp_values[size()];
+    __at_align__ int64_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int64_t));
@@ -109,7 +111,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int64_t tmp_values[size()];
+      __at_align__ int64_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
     }
@@ -216,11 +218,11 @@ public:
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int32_t> loadu(const void* ptr, int32_t count) {
-    __at_align32__ int32_t tmp_values[size()];
+    __at_align__ int32_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int32_t));
@@ -232,16 +234,10 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int32_t tmp_values[size()];
+      __at_align__ int32_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
-  }
-  void dump() const {
-      for (size_t i = 0; i < size(); ++i) {
-          std::cout << (int)((value_type*)&values)[i] << " ";
-      }
-      std::cout << std::endl;
   }
   const int32_t& operator[](int idx) const  = delete;
   int32_t& operator[](int idx)  = delete;
@@ -346,7 +342,7 @@ public:
   }
   template <int64_t mask>
   static Vectorized<int16_t> blend(Vectorized<int16_t> a, Vectorized<int16_t> b) {
-    __at_align32__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi16(b.values, 0);
@@ -436,11 +432,11 @@ public:
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int16_t> loadu(const void* ptr, int16_t count) {
-    __at_align32__ int16_t tmp_values[size()];
+    __at_align__ int16_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (auto i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int16_t));
@@ -452,7 +448,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int16_t tmp_values[size()];
+      __at_align__ int16_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
@@ -527,7 +523,7 @@ public:
   }
   template <int64_t mask>
   static Vectorized<int8_t> blend(Vectorized<int8_t> a, Vectorized<int8_t> b) {
-    __at_align32__ int8_t tmp_values[size()];
+    __at_align__ int8_t tmp_values[size()];
     a.store(tmp_values);
     if (mask & 0x01)
       tmp_values[0] = _mm256_extract_epi8(b.values, 0);
@@ -685,11 +681,11 @@ public:
     return _mm256_loadu_si256(reinterpret_cast<const __m256i*>(ptr));
   }
   static Vectorized<int8_t> loadu(const void* ptr, int8_t count) {
-    __at_align32__ int8_t tmp_values[size()];
+    __at_align__ int8_t tmp_values[size()];
     // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
     // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
     // instructions while a loop would be compiled to one instruction.
-    for (size_t i = 0; i < size(); ++i) {
+    for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0;
     }
     std::memcpy(tmp_values, ptr, count * sizeof(int8_t));
@@ -701,7 +697,7 @@ public:
       // https://software.intel.com/content/www/us/en/develop/documentation/cpp-compiler-developer-guide-and-reference/top/compiler-reference/intrinsics/intrinsics-for-intel-advanced-vector-extensions/intrinsics-for-load-and-store-operations-1/mm256-storeu-si256.html
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(ptr), values);
     } else if (count > 0) {
-      __at_align32__ int8_t tmp_values[size()];
+      __at_align__ int8_t tmp_values[size()];
       _mm256_storeu_si256(reinterpret_cast<__m256i*>(tmp_values), values);
       std::memcpy(ptr, tmp_values, count * sizeof(int8_t));
     }

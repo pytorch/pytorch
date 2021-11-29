@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/optim_baseline.h>
@@ -36,7 +37,7 @@ bool test_optimizer_xor(Options options) {
   while (running_loss > 0.1) {
     auto inputs = torch::empty({kBatchSize, 2});
     auto labels = torch::empty({kBatchSize});
-    for (size_t i = 0; i < kBatchSize; i++) {
+    for (const auto i : c10::irange(kBatchSize)) {
       inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].item<int64_t>() ^ inputs[i][1].item<int64_t>();
     }
@@ -112,7 +113,7 @@ void check_exact_values(
   torch::Tensor input =
       torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64).reshape({3, 2});
 
-  for (size_t i = 0; i < kIterations; ++i) {
+  for (const auto i : c10::irange(kIterations)) {
     optimizer.zero_grad();
     auto output = model->forward(input);
     auto loss = output.sum();
@@ -124,7 +125,7 @@ void check_exact_values(
     if (i % kSampleEvery == 0) {
       ASSERT_TRUE(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
-      for (size_t p = 0; p < parameters.size(); ++p) {
+      for (const auto p : c10::irange(parameters.size())) {
         ASSERT_TRUE(parameters[p]->defined());
         // Always compare using double dtype, regardless of the original dtype of the tensors
         auto computed = parameters[p]->flatten().to(torch::kFloat64);
@@ -140,11 +141,11 @@ void check_exact_values(
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, OptimizerAccessors) {
   auto options = AdagradOptions(1.0);
   std::vector<torch::Tensor> params;
-  for (size_t i = 0; i < 3; i++) {
+  for (const auto i : c10::irange(3)) {
+    (void)i; // Suppress unused variable warning
     params.push_back(torch::randn(10));
   }
   auto optimizer = Adagrad(params, options);
@@ -156,7 +157,7 @@ TEST(OptimTest, OptimizerAccessors) {
   // NOLINTNEXTLINE(modernize-use-emplace)
   params_groups.push_back(OptimizerParamGroup(params));
   auto& params_1 = params_groups[1].params();
-  for (size_t i = 0; i < params_1.size(); i++) {
+  for (const auto i : c10::irange(params_1.size())) {
     torch::equal(params[i], params_1[i]);
   }
 
@@ -192,7 +193,6 @@ struct MyOptimizerOptions : public OptimizerCloneableOptions<MyOptimizerOptions>
   TORCH_ARG(double, lr) = 1.0;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, OldInterface) {
   struct MyOptimizer : Optimizer {
     using Optimizer::Optimizer;
@@ -227,7 +227,7 @@ TEST(OptimTest, OldInterface) {
 
     std::vector<torch::Tensor> params_;
     OLD_INTERFACE_WARNING_CHECK(params_ = optimizer.parameters());
-    for (size_t p = 0; p < size; ++p) {
+    for (const auto p : c10::irange(size)) {
       ASSERT_TRUE(params_[p].allclose(parameters[p]));
     }
   }
@@ -242,136 +242,114 @@ TEST(OptimTest, OldInterface) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_SGD) {
   ASSERT_TRUE(test_optimizer_xor<SGD>(
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_LBFGS) {
   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0)));
   ASSERT_TRUE(test_optimizer_xor<LBFGS>(LBFGSOptions(1.0).line_search_fn("strong_wolfe")));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_Adagrad) {
   ASSERT_TRUE(test_optimizer_xor<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_RMSprop) {
   ASSERT_TRUE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_RMSpropWithMomentum) {
   ASSERT_TRUE(test_optimizer_xor<RMSprop>(
       RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_Adam) {
   ASSERT_TRUE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_AdamWithAmsgrad) {
   ASSERT_TRUE(test_optimizer_xor<Adam>(
       AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_Adam) {
   check_exact_values<Adam>(AdamOptions(1.0), expected_parameters::Adam());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecay) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-2),
       expected_parameters::Adam_with_weight_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdamWithWeightDecayAndAMSGrad) {
   check_exact_values<Adam>(
       AdamOptions(1.0).weight_decay(1e-6).amsgrad(true),
       expected_parameters::Adam_with_weight_decay_and_amsgrad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_AdamW) {
   ASSERT_TRUE(test_optimizer_xor<AdamW>(AdamWOptions(0.1)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, XORConvergence_AdamWWithAmsgrad) {
   ASSERT_TRUE(test_optimizer_xor<AdamW>(
       AdamWOptions(0.1).amsgrad(true)));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdamW) {
   check_exact_values<AdamW>(AdamWOptions(1.0), expected_parameters::AdamW());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdamWWithoutWeightDecay) {
   check_exact_values<AdamW>(
       AdamWOptions(1.0).weight_decay(0),
       expected_parameters::AdamW_without_weight_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdamWWithAMSGrad) {
   check_exact_values<AdamW>(
       AdamWOptions(1.0).amsgrad(true),
       expected_parameters::AdamW_with_amsgrad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_Adagrad) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0), expected_parameters::Adagrad());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-2),
       expected_parameters::Adagrad_with_weight_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_AdagradWithWeightDecayAndLRDecay) {
   check_exact_values<Adagrad>(
       AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
       expected_parameters::Adagrad_with_weight_decay_and_lr_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_RMSprop) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1), expected_parameters::RMSprop());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecay) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-2),
       expected_parameters::RMSprop_with_weight_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_RMSpropWithWeightDecayAndCentered) {
   check_exact_values<RMSprop>(
       RMSpropOptions(0.1).weight_decay(1e-6).centered(true),
       expected_parameters::RMSprop_with_weight_decay_and_centered());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(
     OptimTest,
     ProducesPyTorchValues_RMSpropWithWeightDecayAndCenteredAndMomentum) {
@@ -381,47 +359,40 @@ TEST(
           RMSprop_with_weight_decay_and_centered_and_momentum());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_SGD) {
   check_exact_values<SGD>(SGDOptions(0.1), expected_parameters::SGD());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecay) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2),
       expected_parameters::SGD_with_weight_decay());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-2).momentum(0.9),
       expected_parameters::SGD_with_weight_decay_and_momentum());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_SGDWithWeightDecayAndNesterovMomentum) {
   check_exact_values<SGD>(
       SGDOptions(0.1).weight_decay(1e-6).momentum(0.9).nesterov(true),
       expected_parameters::SGD_with_weight_decay_and_nesterov_momentum());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_LBFGS) {
   check_exact_values<LBFGS>(
       LBFGSOptions(1.0),
       expected_parameters::LBFGS());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ProducesPyTorchValues_LBFGS_with_line_search) {
   check_exact_values<LBFGS>(
       LBFGSOptions(1.0).line_search_fn("strong_wolfe"),
       expected_parameters::LBFGS_with_line_search());
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ZeroGrad) {
   torch::manual_seed(0);
 
@@ -449,7 +420,6 @@ TEST(OptimTest, ZeroGrad) {
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, ExternalVectorOfParameters) {
   torch::manual_seed(0);
 
@@ -472,7 +442,6 @@ TEST(OptimTest, ExternalVectorOfParameters) {
   ASSERT_TRUE(parameters[2].allclose(original_parameters[2] - 1.0));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, AddParameter_LBFGS) {
   torch::manual_seed(0);
 
@@ -522,7 +491,6 @@ void check_lr_change(
 
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(OptimTest, CheckLRChange_StepLR_Adam) {
 
   torch::Tensor parameters = torch::zeros({1});

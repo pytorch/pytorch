@@ -46,7 +46,6 @@ std::string func(c10::variant<testns::enumtype::Enum1, testns::enumtype::Enum2, 
   }
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(VariantTest, Basic) {
   ASSERT_EQ(func(testns::kEnum1), "Enum1");
   ASSERT_EQ(func(testns::kEnum2), "Enum2");

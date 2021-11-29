@@ -177,7 +177,7 @@ std::unique_ptr<RpcCommandBase> deserializeResponse(
 
       // Need to reverse the device map for the backward pass of distributed
       // autograd.
-      std::unordered_map<c10::Device, c10::Device> reverseDeviceMap;
+      DeviceMap reverseDeviceMap;
       for (const auto& mapEntry : rpcWithAutograd.deviceMap()) {
         reverseDeviceMap.insert({mapEntry.second, mapEntry.first});
       }
@@ -316,9 +316,7 @@ parseWireSections(const void* data, size_t data_size) {
   return out;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kMeta = "meta";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static const char* kPayload = "payload";
 }; // namespace
 
@@ -519,7 +517,7 @@ std::vector<at::IValue> readWrappedPayload(
       additionalPayloadSize,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       tensorTable);
-  std::vector<at::IValue> tupleElements = tuple.toTuple()->elements();
+  std::vector<at::IValue> tupleElements = tuple.toTupleRef().elements().vec();
   payload.resize(payload.size() - additionalPayloadSize);
   return tupleElements;
 }

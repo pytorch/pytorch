@@ -12,6 +12,10 @@
 #include <ATen/core/DistributionsHelper.h>
 
 #include <c10/util/irange.h>
+#if AT_MKLDNN_ENABLED()
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
+#include <ATen/native/mkldnn/Utils.h>
+#endif
 
 namespace at {
 namespace meta {
@@ -178,47 +182,26 @@ namespace native {
 static const double SELU_ALPHA = 1.6732632423543772848170429916717;
 static const double SELU_SCALE = 1.0507009873554804934193349852946;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(elu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softplus_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_cpu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(log_sigmoid_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(threshold_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardtanh_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardsigmoid_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardswish_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(hardshrink_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(softshrink_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(shrink_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(leaky_relu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(silu_backward_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mish_backward_stub);
 
 TORCH_IMPL_FUNC(elu_out) (
@@ -326,16 +309,55 @@ TORCH_IMPL_FUNC(softshrink_backward_out) (
   shrink_backward_stub(device_type(), *this, lambd);
 }
 
+bool use_mkldnn(const Tensor& input) {
+#if AT_MKLDNN_ENABLED()
+  if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (!input.is_contiguous() || input.numel() == 1) {
+    return false;
+  }
+  return (input.is_mkldnn()) || // input is mkldnn Tensor
+    (input.device().is_cpu() &&
+    (((input.scalar_type() == kBFloat16) && mkldnn_bf16_device_check()) ||
+    (input.scalar_type() == kFloat))); // input is dense layout and bfloat16/float32
+#endif
+  return false;
+}
+
 TORCH_IMPL_FUNC(gelu_out_cpu) (
   const Tensor& self, const Tensor& result
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor y = itensor_from_tensor(result);
+    ideep::eltwise_forward::compute(
+      x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
+  } else {
+    GeluKernel(kCPU, *this);
+  }
+#else
   GeluKernel(kCPU, *this);
+#endif
 }
 
 TORCH_IMPL_FUNC(gelu_backward_out_cpu) (
   const Tensor& grad, const Tensor& self, const Tensor& grad_input
 ) {
+#if AT_MKLDNN_ENABLED()
+  if (use_mkldnn(self)) {
+    const ideep::tensor& x = itensor_from_tensor(self);
+    ideep::tensor grady = itensor_from_tensor(grad);
+    ideep::tensor gradx = itensor_from_tensor(grad_input);
+    ideep::eltwise_backward::compute(x, grady, gradx,
+      ideep::algorithm::eltwise_gelu_erf, /*alpha*/ 0.0);
+  } else {
+    GeluBackwardKernel(kCPU, *this);
+  }
+#else
   GeluBackwardKernel(kCPU, *this);
+#endif
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
@@ -478,7 +500,7 @@ inline void _rrelu_with_noise_train(
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
-  for (int64_t i = 0; i < input.numel(); i++) {
+  for (const auto i : c10::irange(input.numel())) {
     if (input_data[i] <= 0) {
       at::uniform_real_distribution<double> uniform(lower, upper);
       const scalar_t r = (scalar_t)uniform(gen);
@@ -502,7 +524,7 @@ Tensor& rrelu_with_noise_out_cpu(const Tensor& self,
     c10::optional<Generator> generator,
     Tensor& output) {
   if (training) {
-    AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "rrelu_with_noise_out_cpu", [&] {
       _rrelu_with_noise_train<scalar_t>(output, self.contiguous(), noise, lower, upper, generator);
     });
     return output;
@@ -588,7 +610,7 @@ void inline prelu_cpu_kernel_share_weights(
   auto weight_val = weight.data_ptr<scalar_t>()[0];
 
   at::parallel_for(0, input_numel, 1000, [&](int64_t start, int64_t end) {
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       scalar_t input_data_val = input_data[i];
       // to allow for compiler optimization, here splitting into two lines:
       scalar_t r = (input_data_val > 0) ? scalar_t(1) : weight_val;
@@ -703,7 +725,7 @@ void inline prelu_cpu_backward_kernel_share_weights(
   scalar_t sum = at::parallel_reduce(0, input_numel, 1000, scalar_t(0),
       [&](int64_t start, int64_t end, scalar_t ident) -> scalar_t {
     scalar_t partial_sum = ident;
-    for (auto i = start; i < end; i++) {
+    for (const auto i : c10::irange(start, end)) {
       scalar_t input_data_val = input_data[i];
       scalar_t grad_out_data_val = grad_out_data[i];
       // to allow for compiler optimization, here splitting into two lines:
@@ -817,7 +839,9 @@ std::tuple<Tensor, Tensor> prelu_backward_cpu(const Tensor& grad_out_, const Ten
     std::vector<int64_t> reduce_dims;
     reduce_dims.push_back(0);
     if (dims > 2) {
-      for(int64_t i = 2; i < dims; i++) reduce_dims.push_back(i);
+      for (const auto i : c10::irange(2, dims)) {
+        reduce_dims.push_back(i);
+      }
     }
     weight_grad = weight_grad_collector.sum(reduce_dims);
   }
@@ -911,9 +935,7 @@ Tensor& log_sigmoid_backward_cpu_out(const Tensor& grad_output,
   return grad_input;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluKernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(GeluBackwardKernel);
 
 }}  // namespace at::native

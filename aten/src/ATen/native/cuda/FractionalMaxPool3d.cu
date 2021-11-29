@@ -1,16 +1,16 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/NumericUtils.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <c10/util/Exception.h>
-#include <THC/THCAtomics.cuh>
-#include <THC/THCNumerics.cuh>
 
 #include <algorithm>
 #include <cfloat>
@@ -80,7 +80,7 @@ __global__ void fractional_max_pool3d_out_frame(
             for (int64_t w = poolW; w < poolW + poolSizeW; ++w) {
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+              if (val > maxVal || at::_isnan(val)) {
                 maxIndex = t * input.size(3) *
                   input.size(4) + h * input.size(4) + w;
                 maxVal = val;
@@ -91,7 +91,7 @@ __global__ void fractional_max_pool3d_out_frame(
               int64_t w = i + poolW;
               scalar_t val = input[batch][plane][t][h][w];
               // for consistency with THNN, favor the first max
-              if (val > maxVal || THCNumerics<scalar_t>::isnan(val)) {
+              if (val > maxVal || at::_isnan(val)) {
                 maxIndex = t * input.size(3) * input.size(4) +
                   h * input.size(4) + w;
                 maxVal = val;
@@ -167,10 +167,15 @@ void fractional_max_pool3d_out_cuda_template(
 
     int64_t ndims = input.ndimension();
     TORCH_CHECK(
-      input.numel() != 0 && (ndims == 4 || ndims == 5),
-      "fractional_max_pool3d_out_cuda_template(): ",
-      "non-empty 4D or 5D (batch mode) tensor expected for input, but got: ",
-      ndims);
+                ndims == 4 || ndims == 5,
+                "fractional_max_pool3d_out_cuda_template(): ",
+                "Expected 4D or 5D tensor, but got: ", input.sizes());
+    for (int64_t i = 1; i < ndims; ++i) {
+      TORCH_CHECK(input.size(i) > 0,
+        "fractional_max_pool3d_out_cuda_template(): ",
+        "Expected input to have non-zero size for non-batch dimensions, but got",
+        input.sizes(), " with dimension ", i, " being empty.");
+    }
 
     if (ndims == 5) {
       numBatch = input.size(0);
@@ -221,6 +226,9 @@ void fractional_max_pool3d_out_cuda_template(
       output_ = output_.reshape({1, numPlanes, outputT, outputH, outputW});
       indices_ = indices_.reshape({1, numPlanes, outputT, outputH, outputW});
       input_ = input_.reshape({1, numPlanes, inputT, inputH, inputW});
+    }
+    if (output_.numel() == 0) {
+      return;
     }
 
     // block is limited to 4 warps
@@ -308,6 +316,10 @@ void fractional_max_pool3d_backward_out_cuda_template(
                                          outputH, outputW});
       indices_ = indices_.reshape({1, indices.size(0), outputT, outputH,
                                    outputW});
+    }
+
+    if (gradInput.numel() == 0) {
+      return;
     }
 
     /* backprop */

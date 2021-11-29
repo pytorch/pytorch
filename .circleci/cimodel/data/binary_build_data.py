@@ -63,7 +63,8 @@ CONFIG_TREE_DATA = OrderedDict(
         ],
     )),
     windows=(
-        [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS],
+        # Stop building Win+CU102, see https://github.com/pytorch/pytorch/issues/65648
+        [v for v in dimensions.GPU_VERSIONS if v not in dimensions.ROCM_VERSION_LABELS and v != "cuda102"],
         OrderedDict(
             wheel=dimensions.STANDARD_PYTHON_VERSIONS,
             conda=dimensions.STANDARD_PYTHON_VERSIONS,
@@ -126,9 +127,6 @@ class PackageFormatConfigNode(ConfigNode):
         self.props["python_versions"] = python_versions
         self.props["package_format"] = package_format
 
-        # XXX Disabling conda for 11.3 as there's currently no appropriate cudatoolkit available
-        if package_format == "conda":
-            self.props["gpu_versions"] = filter(lambda x: x != "cuda113", self.find_prop("gpu_versions"))
 
     def get_children(self):
         if self.find_prop("os_name") == "linux":

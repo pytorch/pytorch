@@ -26,6 +26,8 @@ def update_submodules() -> None:
 def gen_compile_commands() -> None:
     os.environ["USE_NCCL"] = "0"
     os.environ["USE_DEPLOY"] = "1"
+    os.environ["CC"] = "clang"
+    os.environ["CXX"] = "clang++"
     run_timed_cmd([sys.executable, "setup.py", "--cmake-only", "build"])
 
 
@@ -46,8 +48,6 @@ def run_autogen() -> None:
         [
             sys.executable,
             "tools/setup_helpers/generate_code.py",
-            "--declarations-path",
-            "build/aten/src/ATen/Declarations.yaml",
             "--native-functions-path",
             "aten/src/ATen/native/native_functions.yaml",
             "--nn-path",
@@ -60,3 +60,7 @@ def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
+
+
+if __name__ == "__main__":
+    generate_build_files()

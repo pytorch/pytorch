@@ -34,13 +34,11 @@
 #include <torch/csrc/jit/passes/update_differentiable_graph_requires_grad.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_enable_new_executor,
     true,
     "If this flag is set to false TorchScript will be using the legacy/original executor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(
     torch_jit_disable_warning_prints,
     false,
@@ -49,12 +47,10 @@ C10_DEFINE_bool(
 constexpr size_t kDefaultNumProfiledRuns = 1;
 constexpr size_t kDefaultBailoutDepth = 20;
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_num_profiled_runs,
     kDefaultNumProfiledRuns,
     "Number of profiling runs");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_int64(
     torch_jit_bailout_depth,
     kDefaultBailoutDepth,
@@ -64,20 +60,14 @@ namespace torch {
 namespace jit {
 
 #if defined(C10_MOBILE)
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{false};
 #else
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> executor_mode{true};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> profiling_mode{true};
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> num_profiled_runs{kDefaultNumProfiledRuns};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> bailout_depth{kDefaultBailoutDepth};
 
 std::atomic<bool>& getProfilingMode() {
@@ -138,7 +128,7 @@ static bool needsGradientInProfilingMode(Block* b) {
 // differentiable graph. Autodiff will inspect these properties and prune
 // off gradients that aren't required
 // `requires_grad` properties from `dnode->outputs()` will also be transferred
-static void setRequiresGradOnDiffGraph(Node* dnode) {
+static C10_UNUSED void setRequiresGradOnDiffGraph(Node* dnode) {
   auto gi = dnode->g(attr::Subgraph)->inputs();
   for (size_t i = 0; i < dnode->inputs().size(); i++) {
     if (auto ty = dnode->input(i)->type()->cast<TensorType>()) {
@@ -167,7 +157,7 @@ static void setRequiresGradOnDiffGraph(Node* dnode) {
     return false;
   };
 
-  for (size_t i = 0; i < go.size(); i++) {
+  for (const auto i : c10::irange(go.size())) {
     auto ty = go[i]->type()->cast<TensorType>();
     if (ty) {
       auto n = go[i]->node();
@@ -678,6 +668,13 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     // before any other pass that could insert `prim::iprofile_value` node on
     // `aten::_grad_sum_to_size` input.
     InsertProfileNodesForSpecializeAutogradZero(pr_.get());
+    // `InsertProfileNodesForCUDAFuser` inserts profile node for non-tensor
+    // value
+#ifndef C10_MOBILE
+    if (RegisterCudaFuseGraph::isRegistered()) {
+      torch::jit::fuser::cuda::InsertProfileNodesForCUDAFuser(pr_.get());
+    }
+#endif
     GRAPH_DUMP("Profiled Graph: ", pr_->graph());
     profiling_plan_ = ExecutionPlan(pr_->graph(), function_name_);
     // fall-through
@@ -724,7 +721,7 @@ GraphExecutorState ProfilingGraphExecutorImpl::getDebugState() {
 
 Node* insertFallbackFunctionCall(
     Graph* graph,
-    Function* func,
+    GraphFunction* func,
     ArrayRef<Value*> inputs) {
   auto tuple_type = func->graph()->return_node()->input(0)->type();
   Value* fn_constant = graph->insertNode(graph->create(prim::Constant))
@@ -743,7 +740,7 @@ Node* insertFallbackFunctionCall(
   return fun_unpack_tuple;
 }
 
-Function* createFallbackPathFunction(
+GraphFunction* createFallbackPathFunction(
     Block* b,
     const std::string& function_name) {
   auto value_map = [](Value* v) { return v; };

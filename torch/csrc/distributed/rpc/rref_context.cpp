@@ -9,9 +9,7 @@ namespace distributed {
 namespace rpc {
 
 thread_local std::vector<std::shared_ptr<RRefContext::PendingUserState>>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     RRefContext::userTable_;
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local bool RRefContext::recording_ = false;
 
 namespace callback {
@@ -84,7 +82,6 @@ const std::string kNumForks = "num_forks";
 
 RRefContext& RRefContext::getInstance() {
   // Leaky singleton to avoid module destructor races.
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
   static RRefContext* context = new RRefContext(RpcAgent::getCurrentRpcAgent());
   return *context;
 }
@@ -351,9 +348,9 @@ c10::intrusive_ptr<OwnerRRef> RRefContext::getOrCreateOwnerRRef(
     // since Tensor can only get specialized with a previous run of local
     // JIT function, and we shouldn't preserve the specialized SubTensorType
     // information on other workers because it's only information only.
-    if (type->isSubtypeOf(TensorType::get())) {
+    if (type->isSubtypeOf(*TensorType::get())) {
       TORCH_INTERNAL_ASSERT(
-          ownerRRef->type()->isSubtypeOf(TensorType::get()),
+          ownerRRef->type()->isSubtypeOf(*TensorType::get()),
           "Expect OwnerRRef to be a sub-type of TensorType, but got ",
           ownerRRef->type()->repr_str());
     } else {

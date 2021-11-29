@@ -4,7 +4,7 @@ The most important things to know:
 compiled multiple times for different instruction sets.**  Yes,
 this folder is named `cpu`, but that doesn't mean put any old
 CPU kernel it.  Only put CPU kernels which need to be compiled
-multiple times to take advantage of AVX/SSE instructions, but
+multiple times to take advantage of AVX512/AVX2/SSE instructions, but
 only on processors that support them.
 
 **Ensure that all implementations in this folder are put in an
@@ -52,14 +52,14 @@ All of the `*.cpp` files in this folder will be compiled under all compiler
 flags specified by `CPU_CAPABILITY_FLAGS` in `aten/src/ATen/CMakeLists.txt`.
 
 The purpose of this is to allow the compilation with various compiler
-flags to enable features such as AVX instructions, while using runtime
-dispatch, which makes sure only valid instructions will be used on any
+flags to enable features such as AVX2 or AVX512 instructions, while using
+runtime dispatch, which makes sure only valid instructions will be used on any
 given platform.
 
-Vectorized.h provides a generic implementation of a vec type that allows
+vec.h provides a generic implementation of vec type that allows
 the programmer to write code packing various primitives (such as floats)
-within 256bit registers. vec defines various operators such as + and *
-and provides functions to allow operations such as max, min, etc.
+within 256bit & 512bits registers. vec defines various operators such as
++ and * and provides functions to allow operations such as max, min, etc.
 
 As an example `ReduceOpsKernel.cpp` implements a generic `kernel_` that reduces
 an entire array using a given associative binary operation such as +.
@@ -74,5 +74,5 @@ generic code, which will be compiled under multipled compilation settings.
 `../ReduceOps.cpp` now includes the header `ReduceOpsKernel.h`, which contains
 a generic definition of `sumImplAll`. This function allows the user to reduce
 over a dimension or all dimensions. The appropiate capability is chosen at
-runtime using cpuinfo. If the current platform has AVX, `sumImpl` will be set
-to `sumImplAll<CPUCapability::AVX>`.
+runtime using cpuinfo. If the current platform has AVX2, `sumImpl` will be set
+to `sumImplAll<CPUCapability::AVX2>`.

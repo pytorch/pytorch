@@ -8,6 +8,7 @@
 #include <ATen/native/Sorting.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
+#include <c10/util/irange.h>
 
 #include <utility>
 
@@ -41,9 +42,7 @@ using namespace native;
 
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(sort_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(topk_stub);
 
 namespace {
@@ -317,7 +316,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "kthvalue_cpu", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         TensorAccessor<scalar_t, 1> tmp_values(
             reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
             &sizes[dim], &tmp_values_stride);
@@ -327,7 +326,7 @@ std::tuple<Tensor&, Tensor&> kthvalue_out_impl_cpu(
         auto mode_value = reinterpret_cast<scalar_t*>(data[2] + i * strides[2]);
         auto mode_index = reinterpret_cast<int64_t*>(data[3] + i * strides[3]);
 
-        for (int64_t j = 0; j < tmp_indices.size(0); j++) {
+        for (const auto j : c10::irange(tmp_indices.size(0))) {
           tmp_indices[j] = j;
         }
 
@@ -413,7 +412,7 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, in.scalar_type(), "median_out", [&] {
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-      for (int64_t i = 0; i < n; ++i) {
+      for (const auto i : c10::irange(n)) {
         auto valp = reinterpret_cast<scalar_t*>(data[0] + i * strides[0]);
         auto indp = reinterpret_cast<int64_t*>(data[1] + i * strides[1]);
         auto ip = reinterpret_cast<const scalar_t*>(data[2] + i * strides[2]);
@@ -468,11 +467,16 @@ std::tuple<Tensor&, Tensor&> median_with_indices_impl(
 // Computes the median of all values in the input
 Tensor median_impl(const Tensor& self, bool ignore_nan) {
   NoNamesGuard guard;
+  const int64_t size = self.numel();
+
+  // Return nan for empty tensors
+  if (size <= 0) {
+    return at::full({}, std::numeric_limits<float>::quiet_NaN()).to(self.options());
+  }
 
   // Clone the input tensor so we can partition it around the median value
   Tensor in = self.clone();
   Tensor out = at::empty({}, self.options());
-  const int64_t size = self.numel();
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::BFloat16, in.scalar_type(), "median_cpu", [&] {
     scalar_t* op = out.data_ptr<scalar_t>();

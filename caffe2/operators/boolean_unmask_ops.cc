@@ -53,10 +53,8 @@ bool BooleanUnmaskOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(BooleanUnmask, BooleanUnmaskOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(BooleanUnmask)
     .NumInputs([](int n) { return n > 0 && n % 2 == 0; })
     .NumOutputs(1)
@@ -154,6 +152,5 @@ unmasked_data: [1 2 3 4 5 6]
     .Input(1,"mask","(*Tensor`<bool>`*): 1D boolean mask tensor(s)")
     .Output(0, "unmasked_data", "(*Tensor*): 1D tensor of same type as `data` input that contains the unmasked input tensor");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(BooleanUnmask)
 }

@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static const auto classSrcs1 = R"JIT(
+static constexpr c10::string_view classSrcs1 = R"JIT(
 class FooNestedTest:
     def __init__(self, y):
         self.y = y
@@ -26,7 +26,7 @@ class FooTest:
         self.x = self.class_attr.y + self.class_attr2.y
 )JIT";
 
-static const auto classSrcs2 = R"JIT(
+static constexpr c10::string_view classSrcs2 = R"JIT(
 class FooTest:
     def __init__(self, x):
       self.dx = x
@@ -45,7 +45,6 @@ static void import_libs(
   si.loadType(QualifiedName(class_name));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, Basic) {
   auto cu1 = std::make_shared<CompilationUnit>();
   auto cu2 = std::make_shared<CompilationUnit>();
@@ -81,7 +80,6 @@ TEST(ClassImportTest, Basic) {
   ASSERT_FALSE(c);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, ScriptObject) {
   Module m1("m1");
   Module m2("m2");
@@ -117,7 +115,6 @@ def __init__(self, x):
     return x
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, ClassDerive) {
   auto cu = std::make_shared<CompilationUnit>();
   auto cls = ClassType::create("foo.bar", cu);
@@ -137,7 +134,7 @@ TEST(ClassImportTest, ClassDerive) {
   ASSERT_TRUE(newCls2->findMethod(method->name()));
 }
 
-static const auto torchbindSrc = R"JIT(
+static constexpr c10::string_view torchbindSrc = R"JIT(
 class FooBar1234(Module):
   __parameters__ = []
   f : __torch__.torch.classes._TorchScriptTesting._StackString
@@ -146,7 +143,6 @@ class FooBar1234(Module):
     return (self.f).top()
 )JIT";
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(ClassImportTest, CustomClass) {
   auto cu1 = std::make_shared<CompilationUnit>();
   std::vector<at::IValue> constantTable;

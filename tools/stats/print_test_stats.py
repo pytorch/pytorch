@@ -16,12 +16,11 @@ from typing import (Any, DefaultDict, Dict, Iterable, Iterator, List, Optional,
                     Set, Tuple, cast)
 from xml.dom import minidom
 
-import requests
 from typing_extensions import TypedDict
 from tools.stats.s3_stat_parser import (newify_case, get_S3_object_from_bucket, get_test_stats_summaries_for_job,
                                         Report, Status, Commit, HAVE_BOTO3, Version2Case, VersionedReport,
                                         Version1Report, Version2Report, ReportMetaMeta)
-
+from tools.stats.scribe import send_to_scribe, rds_write, register_rds_schema, schema_from_sample
 
 
 SimplerSuite = Dict[str, Version2Case]
@@ -571,10 +570,34 @@ class TestCase:
         self.class_name = str(dom.attributes['classname'].value)
         self.name = str(dom.attributes['name'].value)
         self.time = float(dom.attributes['time'].value)
-        self.errored = len(dom.getElementsByTagName('error')) > 0
+        error_elements = dom.getElementsByTagName('error')
+        # DISCLAIMER: unexpected successes and expected failures are currently not reported in assemble_s3_object
+        self.expected_failure = False
+        self.skipped = False
+        self.errored = False
+        self.unexpected_success = False
+        if len(error_elements) > 0:
+            # We are only expecting 1 element here
+            error_element = error_elements[0]
+            self.unexpected_success = (error_element.hasAttribute('type') and
+                                       error_element.attributes['type'].value == 'UnexpectedSuccess')
+            self.errored = not self.unexpected_success
+        skipped_elements = dom.getElementsByTagName('skipped')
+        if len(skipped_elements) > 0:
+            # We are only expecting 1 element here
+            skipped_element = skipped_elements[0]
+            self.expected_failure = (skipped_element.hasAttribute('type') and
+                                     skipped_element.attributes['type'].value == 'XFAIL')
+            self.skipped = not self.expected_failure
         self.failed = len(dom.getElementsByTagName('failure')) > 0
-        self.skipped = len(dom.getElementsByTagName('skipped')) > 0
 
+    def __repr__(self) -> str:
+        return self.__str__()
+
+    def __str__(self) -> str:
+        return f'[TestCase name: {self.name} | class_name: {self.class_name} | time: {self.time} | ' \
+            f'expected_failure: {self.expected_failure} | skipped: {self.skipped} | errored: {self.errored} | ' \
+            f'unexpected_success: {self.unexpected_success} | failed: {self.failed}]'
 
 class TestSuite:
     def __init__(self, name: str) -> None:
@@ -584,6 +607,9 @@ class TestSuite:
         self.skipped_count = 0
         self.errored_count = 0
         self.total_time = 0.0
+        # The below are currently not included in test reports
+        self.unexpected_success_count = 0
+        self.expected_failure_count = 0
 
     def __repr__(self) -> str:
         rc = f'{self.name} run_time: {self.total_time:.2f} tests: {len(self.test_cases)}'
@@ -597,20 +623,28 @@ class TestSuite:
         self.failed_count += 1 if test_case.failed else 0
         self.skipped_count += 1 if test_case.skipped else 0
         self.errored_count += 1 if test_case.errored else 0
+        self.unexpected_success_count += 1 if test_case.unexpected_success else 0
+        self.expected_failure_count += 1 if test_case.expected_failure else 0
 
     def update(self, test_case: TestCase) -> None:
         name = test_case.name
         assert name in self.test_cases, f'Error: attempting to replace nonexistent test case {name}'
+        # Note that time for unexpected successes and expected failures are reported as 0s
         self.test_cases[name].time += test_case.time
         self.test_cases[name].failed |= test_case.failed
         self.test_cases[name].errored |= test_case.errored
         self.test_cases[name].skipped |= test_case.skipped
+        self.test_cases[name].unexpected_success |= test_case.unexpected_success
+        self.test_cases[name].expected_failure |= test_case.expected_failure
 
     def print_report(self, num_longest: int = 3) -> None:
         sorted_tests = sorted(self.test_cases.values(), key=lambda x: x.time)
         test_count = len(sorted_tests)
         print(f"class {self.name}:")
-        print(f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} errored: {self.errored_count}")
+        print(
+            f"    tests: {test_count} failed: {self.failed_count} skipped: {self.skipped_count} "
+            f"errored: {self.errored_count} unexpected_success: {self.unexpected_success_count} "
+            f"expected_failure: {self.expected_failure_count}")
         print(f"    run_time: {self.total_time:.2f} seconds")
         print(f"    avg_time: {self.total_time/test_count:.2f} seconds")
         if test_count >= 2:
@@ -621,6 +655,7 @@ class TestSuite:
             print(f"        {test.name} time: {test.time:.2f} seconds")
         print("")
 
+DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
 
 class TestFile:
     def __init__(self, name: str) -> None:
@@ -628,9 +663,8 @@ class TestFile:
         self.total_time = 0.0
         self.test_suites: Dict[str, TestSuite] = dict()
 
-    def append(self, test_case: TestCase, test_type: str) -> None:
+    def append(self, test_case: TestCase, test_type: str, duplicated_tests_dict: DuplicatedDict) -> None:
         is_multi_test = self.name == 'test_cpp_extensions_aot' or \
-            self.name == 'distributed/test_distributed_fork' or \
             self.name == 'distributed/test_distributed_spawn' or \
             self.name == 'distributed/test_c10d_gloo' or \
             self.name == 'cpp'  # The caffe2 cpp tests spawn duplicate test cases as well.
@@ -645,7 +679,12 @@ class TestFile:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
             else:
-                raise RuntimeWarning(f'Duplicate test case {test_case.name} in suite {suite_name} called from {self.name}')
+                # Gather up duplicated test cases
+                if suite_name not in duplicated_tests_dict:
+                    duplicated_tests_dict[suite_name] = dict()
+                if test_case.name not in duplicated_tests_dict[suite_name]:
+                    duplicated_tests_dict[suite_name][test_case.name] = [self.test_suites[suite_name].test_cases[test_case.name]]
+                duplicated_tests_dict[suite_name][test_case.name].append(test_case)
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -675,8 +714,9 @@ def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
                 yield os.path.join(root, fname)
 
 
-def parse_reports(folder: str) -> Dict[str, TestFile]:
+def parse_reports(folder: str) -> Tuple[Dict[str, TestFile], Dict[str, DuplicatedDict]]:
     tests_by_file = dict()
+    duplicated_tests_by_file : Dict[str, DuplicatedDict] = dict()
     for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename
@@ -684,22 +724,82 @@ def parse_reports(folder: str) -> Dict[str, TestFile]:
         # test type is the parent directory (only applies to dist-*)
         # See: CUSTOM_HANDLERS in test/run_test.py
         test_type = report_path.parent.parent.name
+        if test_filename not in duplicated_tests_by_file:
+            duplicated_tests_by_file[test_filename] = dict()
         if test_filename not in tests_by_file:
             tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            tests_by_file[test_filename].append(test_case, test_type)
-    return tests_by_file
+            tests_by_file[test_filename].append(test_case, test_type, duplicated_tests_by_file[test_filename])
+    return tests_by_file, duplicated_tests_by_file
+
+
+def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
+    num_fail = 0
+    num_expected_fail = 0
+    num_pass = 0
+    num_unexpected_success = 0
+    num_errored = 0
+    num_skipped = 0
+    for test_run in runs:
+        if test_run.failed:
+            num_fail += 1
+        elif test_run.expected_failure:
+            num_expected_fail += 1
+        elif test_run.unexpected_success:
+            num_unexpected_success += 1
+        elif test_run.errored:
+            num_errored += 1
+        elif test_run.skipped:
+            num_skipped += 1
+        else:
+            num_pass += 1
+    err_msg = f'Warning: unintentional test case duplicates found for {test_run.name} in suite  {test_run.class_name}.'
+    report_only = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') != '1'
+    if report_only and num_fail + num_errored + num_unexpected_success < 1 or not report_only and num_expected_fail < 1:
+        raise RuntimeWarning(f'{err_msg} Intentional reruns are only triggered when the first run fails or errors, but'
+                             ' we found no failures nor errors.')
+    if num_unexpected_success + num_expected_fail < 1:
+        raise RuntimeWarning(f'{err_msg} Intentional reruns should raise at least one unexpected success or expected '
+                             'failure, but none have been found.')
+    if report_only and num_pass != num_unexpected_success:
+        raise RuntimeWarning(f'{err_msg} Every success in an intentional rerun is shadowed by one unexpected success.'
+                             f'However, successes = {num_pass} and unexpected successes = {num_unexpected_success}')
+    if not report_only and num_pass > 1:
+        raise RuntimeWarning(f'{err_msg} There should be at most 1 successful run in an intentional rerun that stops at'
+                             f' first success. The number of successful runs = {num_pass}')
+    if num_skipped > 0:
+        raise RuntimeWarning(f'{err_msg} No skips should occur in intentional reruns, but skips = {num_skipped}')
+    return max(num_unexpected_success, num_pass), num_fail + num_expected_fail + num_errored
+
+
+def assemble_flaky_test_stats(duplicated_tests_by_file: Dict[str, DuplicatedDict]) -> Any:
+    flaky_tests = []
+    for file_name, suite_to_dict in duplicated_tests_by_file.items():
+        for suite_name, testcase_to_runs in suite_to_dict.items():
+            for testcase_name, list_of_runs in testcase_to_runs.items():
+                num_green, num_red = process_intentional_test_runs(list_of_runs)
+                if num_green > 0:   # Otherwise, it's likely just a failing test
+                    flaky_tests.append({
+                        "name": testcase_name,
+                        "suite": suite_name,
+                        "file": file_name,
+                        "num_green": num_green,
+                        "num_red": num_red
+                    })
+    if len(flaky_tests) > 0:
+        register_rds_schema("flaky_tests", schema_from_sample(flaky_tests[0]))
+        rds_write("flaky_tests", flaky_tests, only_on_master=False)
 
 
 def build_info() -> ReportMetaMeta:
     return {
-        "build_pr": os.environ.get("CIRCLE_PR_NUMBER", ""),
-        "build_tag": os.environ.get("CIRCLE_TAG", ""),
-        "build_sha1": os.environ.get("CIRCLE_SHA1", ""),
-        "build_base_commit": get_base_commit(os.environ.get("CIRCLE_SHA1", "HEAD")),
-        "build_branch": os.environ.get("CIRCLE_BRANCH", ""),
-        "build_job": os.environ.get("JOB_BASE_NAME", ""),
-        "build_workflow_id": os.environ.get("CIRCLE_WORKFLOW_ID", ""),
+        "build_pr": os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", "")),
+        "build_tag": os.environ.get("TAG", os.environ.get("CIRCLE_TAG", "")),
+        "build_sha1": os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "")),
+        "build_base_commit": get_base_commit(os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "HEAD"))),
+        "build_branch": os.environ.get("BRANCH", os.environ.get("CIRCLE_BRANCH", "")),
+        "build_job": os.environ.get("JOB_BASE_NAME", os.environ.get("CIRCLE_JOB", "")),
+        "build_workflow_id": os.environ.get("WORKFLOW_ID", os.environ.get("CIRCLE_WORKFLOW_ID", "")),
         "build_start_time_epoch": str(int(os.path.getmtime(os.path.realpath(__file__)))),
     }
 
@@ -729,33 +829,21 @@ def build_message(
 
 
 def send_report_to_scribe(reports: Dict[str, TestFile]) -> None:
-    access_token = os.environ.get("SCRIBE_GRAPHQL_ACCESS_TOKEN")
-
-    if not access_token:
-        print("No scribe access token provided, skip sending report!")
-        return
-    print("Scribe access token provided, sending report...")
-    url = "https://graph.facebook.com/scribe_logs"
     meta_info = build_info()
-    r = requests.post(
-        url,
-        data={
-            "access_token": access_token,
-            "logs": json.dumps(
-                [
-                    {
-                        "category": "perfpipe_pytorch_test_times",
-                        "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
-                        "line_escape": False,
-                    }
-                    for test_file in reports.values()
-                    for test_suite in test_file.test_suites.values()
-                    for test_case in test_suite.test_cases.values()
-                ]
-            ),
-        },
+    logs = json.dumps(
+        [
+            {
+                "category": "perfpipe_pytorch_test_times",
+                "message": json.dumps(build_message(test_file, test_suite, test_case, meta_info)),
+                "line_escape": False,
+            }
+            for test_file in reports.values()
+            for test_suite in test_file.test_suites.values()
+            for test_case in test_suite.test_cases.values()
+        ]
     )
-    r.raise_for_status()
+    # no need to print send result as exceptions will be captured and print later.
+    send_to_scribe(logs)
 
 
 def assemble_s3_object(
@@ -767,7 +855,7 @@ def assemble_s3_object(
         **build_info(),  # type: ignore[misc]
         'total_seconds': total_seconds,
         'format_version': 2,
-        'files' : {
+        'files': {
             name: {
                 'total_seconds': test_file.total_time,
                 'suites': {
@@ -792,15 +880,22 @@ def assemble_s3_object(
 
 
 def send_report_to_s3(head_report: Version2Report) -> None:
-    job = os.environ.get('JOB_BASE_NAME')
-    sha1 = os.environ.get('CIRCLE_SHA1')
-    branch = os.environ.get('CIRCLE_BRANCH', '')
+    job = os.getenv('JOB_BASE_NAME', os.environ.get('CIRCLE_JOB'))
+    sha1 = os.environ.get('SHA1', os.environ.get('CIRCLE_SHA1', ''))
+    branch = os.environ.get('BRANCH', os.environ.get('CIRCLE_BRANCH', ''))
     now = datetime.datetime.utcnow().isoformat()
+
+    # SHARD_NUMBER and TEST_CONFIG are specific to GHA, as these details would be included in CIRCLE_JOB already
+    shard = os.environ.get('SHARD_NUMBER', '')
+    test_config = os.environ.get('TEST_CONFIG')
+
+    job_report_dirname = f'{job}{f"-{test_config}" if test_config is not None else ""}{shard}'
+
     if branch not in ['master', 'nightly'] and not branch.startswith("release/"):
-        pr = os.environ.get('CIRCLE_PR_NUMBER', 'unknown')
-        key = f'pr_test_time/{pr}/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+        pr = os.environ.get('PR_NUMBER', os.environ.get('CIRCLE_PR_NUMBER', 'unknown'))
+        key = f'pr_test_time/{pr}/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     else:
-        key = f'test_time/{sha1}/{job}/{now}Z.json.bz2'  # Z meaning UTC
+        key = f'test_time/{sha1}/{job_report_dirname}/{now}Z.json.bz2'  # Z meaning UTC
     obj = get_S3_object_from_bucket('ossci-metrics', key)
     # use bz2 because the results are smaller than gzip, and the
     # compression time penalty we pay is only about half a second for
@@ -810,8 +905,32 @@ def send_report_to_s3(head_report: Version2Report) -> None:
     obj.put(Body=bz2.compress(json.dumps(head_report).encode()))
 
 
+def upload_failures_to_rds(reports: Dict[str, TestFile]) -> None:
+    """
+    We have 40k+ tests, so saving every test for every commit is not very
+    feasible for PyTorch. Most of these are things we don't care about anyways,
+    so this code filters out failures and saves only those to the DB.
+    """
+    # Gather all failures across the entire report
+    failures = []
+    for file in reports.values():
+        for suite in file.test_suites.values():
+            for case in suite.test_cases.values():
+                if case.errored or case.failed:
+                    failures.append({
+                        "name": case.name,
+                        "suite": suite.name,
+                        "file": file.name,
+                        "status": "failure" if case.failed else "error"
+                    })
+
+    if len(failures) > 0:
+        register_rds_schema("test_failures", schema_from_sample(failures[0]))
+        rds_write("test_failures", failures, only_on_master=False)
+
+
 def print_regressions(head_report: Report, *, num_prev_commits: int) -> None:
-    sha1 = os.environ.get("CIRCLE_SHA1", "HEAD")
+    sha1 = os.environ.get("SHA1", os.environ.get("CIRCLE_SHA1", "HEAD"))
 
     base = get_base_commit(sha1)
 
@@ -880,6 +999,7 @@ def reports_has_no_tests(reports: Dict[str, TestFile]) -> bool:
                 return False
     return True
 
+
 if __name__ == '__main__':
     import argparse
     import sys
@@ -937,7 +1057,10 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    reports_by_file = parse_reports(args.folder)
+    reports_by_file, duplicated_tests_by_file = parse_reports(args.folder)
+    assemble_flaky_test_stats(duplicated_tests_by_file)
+
+    upload_failures_to_rds(reports_by_file)
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")
         sys.exit(0)
@@ -948,7 +1071,7 @@ if __name__ == '__main__':
         print(f"ERROR ENCOUNTERED WHEN UPLOADING TO SCRIBE: {e}")
 
     # longest_tests can contain duplicates as the same tests can be spawned from different files
-    longest_tests : List[TestCase] = []
+    longest_tests: List[TestCase] = []
     total_time = 0.0
     for filename, test_filename in reports_by_file.items():
         for suite_name, test_suite in test_filename.test_suites.items():

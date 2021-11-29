@@ -103,7 +103,7 @@ neural network on the MNIST dataset:
   }
 
 To see more complete examples of using the PyTorch C++ frontend, see `the example repository
-<https://github.com/goldsborough/examples/tree/cpp/cpp>`_.
+<https://github.com/pytorch/examples/tree/master/cpp>`_.
 
 Philosophy
 ----------

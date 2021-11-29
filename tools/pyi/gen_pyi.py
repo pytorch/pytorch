@@ -6,7 +6,8 @@ import argparse
 from tools.codegen.model import Variant
 from tools.codegen.api.python import (PythonSignatureGroup,
                                       PythonSignatureNativeFunctionPair)
-from tools.codegen.gen import FileManager, parse_native_yaml
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.utils import FileManager
 from typing import Sequence, List, Dict
 
 from ..autograd.gen_python_functions import should_generate_py_binding, load_signatures, group_overloads
@@ -282,7 +283,13 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     unsorted_function_hints.update({
         'set_flush_denormal': ['def set_flush_denormal(mode: _bool) -> _bool: ...'],
         'get_default_dtype': ['def get_default_dtype() -> _dtype: ...'],
+        'asarray': ['def asarray(obj: Any, *, dtype: Optional[_dtype]=None, '
+                    'device: Union[_device, str, None]=None, copy: Optional[_bool]=None, '
+                    'requires_grad: _bool=False) -> Tensor: ...'],
         'from_numpy': ['def from_numpy(ndarray) -> Tensor: ...'],
+        'frombuffer': ['def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, '
+                       'offset: int=0, device: Union[_device, str, None]=None, '
+                       'requires_grad: _bool=False) -> Tensor: ...'],
         'numel': ['def numel(self: Tensor) -> _int: ...'],
         'as_tensor': ["def as_tensor(data: Any, dtype: _dtype=None, device: Optional[_device]=None) -> Tensor: ..."],
         'get_num_threads': ['def get_num_threads() -> _int: ...'],
@@ -450,7 +457,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'apply_': ['def apply_(self, callable: Callable) -> Tensor: ...'],
         'map_': ['def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ...'],
         'map2_': ['def map2_(self, x: Tensor, y: Tensor, callable: Callable) -> Tensor: ...'],
-        'storage': ['def storage(self) -> Storage: ...'],
+        'storage': ['def _storage(self) -> Storage: ...'],
         'storage_type': ['def storage_type(self) -> Storage: ...'],
         'type': ['def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...',
                  'def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...',
@@ -466,6 +473,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'is_sparse_csr' : ['is_sparse_csr: _bool'],
         'is_quantized': ['is_quantized: _bool'],
         'is_meta': ['is_meta: _bool'],
+        'is_ort': ['is_ort: _bool'],
         'is_mkldnn': ['is_mkldnn: _bool'],
         'is_vulkan': ['is_vulkan: _bool'],
         'storage_offset': ['def storage_offset(self) -> _int: ...'],
@@ -476,8 +484,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                ],
         'item': ["def item(self) -> Number: ..."],
         'copy_': ["def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."],
-        'set_': ['def set_(self, storage: Storage, offset: _int, size: _size, stride: _size) -> Tensor: ...',
-                 'def set_(self, storage: Storage) -> Tensor: ...'],
+        'set_': ['def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...',
+                 'def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...'],
         'split': ['def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...',
                   'def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...'],
         'div': ['def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ...'],
@@ -551,7 +559,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
     dt = ('Double', 'Float', 'Long', 'Int',
           'Short', 'Char', 'Byte', 'Bool',
           'Half', 'BFloat16', 'ComplexDouble',
-          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2')
+          'ComplexFloat', 'QUInt8', 'QInt8', 'QInt32', 'QUInt4x2', 'QUInt2x4')
     for c in dt:
         legacy_storage_base_hints.append('class {}StorageBase(object): ...'.format(c))
     for c in dt:
@@ -572,7 +580,7 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                          ['float32', 'float', 'float64', 'double', 'float16', 'bfloat16', 'half',
                           'uint8', 'int8', 'int16', 'short', 'int32', 'int', 'int64', 'long',
                           'complex32', 'complex64', 'cfloat', 'complex128', 'cdouble',
-                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2']]
+                          'quint8', 'qint8', 'qint32', 'bool', 'quint4x2', 'quint2x4']]
 
     # Generate __all__ directive
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

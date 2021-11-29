@@ -3,8 +3,9 @@
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
-#include <ATen/cpu/vec/vec256/intrinsics.h>
-#include <ATen/cpu/vec/vec256/vec256_base.h>
+#include <ATen/cpu/vec/intrinsics.h>
+#include <ATen/cpu/vec/vec_base.h>
+#include <c10/util/irange.h>
 // Sleef offers vectorized versions of some transcedentals
 // such as sin, cos, tan etc..
 // However for now opting for STL, since we are not building
@@ -220,8 +221,8 @@ public:
       return res;
     }
     else {
-      __at_align32__ float tmp_values[size()];
-      for (auto i = 0; i < size(); ++i) {
+      __at_align__ float tmp_values[size()];
+      for (const auto i : c10::irange(size())) {
         tmp_values[i] = 0.0;
       }
       std::memcpy(
@@ -261,19 +262,19 @@ public:
   // Once we specialize that implementation for ARM
   // this should be removed. TODO (kimishpatel)
   float operator[](int idx) const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     return tmp[idx];
   }
   float operator[](int idx) {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     return tmp[idx];
   }
   // For boolean version where we want to if any 1/all zero
   // etc. can be done faster in a different way.
   int zero_mask() const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
     int mask = 0;
     for (int i = 0; i < size(); ++ i) {
@@ -284,10 +285,10 @@ public:
     return mask;
   }
   Vectorized<float> isnan() const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float res[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float res[size()];
     store(tmp);
-    for (int i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       if (_isnan(tmp[i])) {
         std::memset(static_cast<void*>(&res[i]), 0xFF, sizeof(float));
       } else {
@@ -297,9 +298,9 @@ public:
     return loadu(res);
   };
   Vectorized<float> map(float (*const f)(float)) const {
-    __at_align32__ float tmp[size()];
+    __at_align__ float tmp[size()];
     store(tmp);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = f(tmp[i]);
     }
     return loadu(tmp);
@@ -332,18 +333,18 @@ public:
     return map(std::atan);
   }
   Vectorized<float> atan2(const Vectorized<float> &exp) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_exp[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_exp[size()];
     store(tmp);
     exp.store(tmp_exp);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = std::atan2(tmp[i], tmp_exp[i]);
     }
     return loadu(tmp);
   }
   Vectorized<float> copysign(const Vectorized<float> &sign) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_sign[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_sign[size()];
     store(tmp);
     sign.store(tmp_sign);
     for (size_type i = 0; i < size(); i++) {
@@ -367,21 +368,21 @@ public:
     return map(std::expm1);
   }
   Vectorized<float> fmod(const Vectorized<float>& q) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_q[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_q[size()];
     store(tmp);
     q.store(tmp_q);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = std::fmod(tmp[i], tmp_q[i]);
     }
     return loadu(tmp);
   }
   Vectorized<float> hypot(const Vectorized<float> &b) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_b[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_b[size()];
     store(tmp);
     b.store(tmp_b);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = std::hypot(tmp[i], tmp_b[i]);
     }
     return loadu(tmp);
@@ -393,21 +394,21 @@ public:
     return map(calc_i0e);
   }
   Vectorized<float> igamma(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igamma(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
   }
   Vectorized<float> igammac(const Vectorized<float> &x) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_x[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_x[size()];
     store(tmp);
     x.store(tmp_x);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = calc_igammac(tmp[i], tmp_x[i]);
     }
     return loadu(tmp);
@@ -425,11 +426,11 @@ public:
     return map(std::log2);
   }
   Vectorized<float> nextafter(const Vectorized<float> &b) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_b[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_b[size()];
     store(tmp);
     b.store(tmp_b);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = std::nextafter(tmp[i], tmp_b[i]);
     }
     return loadu(tmp);
@@ -490,11 +491,11 @@ public:
     return this->sqrt().reciprocal();
   }
   Vectorized<float> pow(const Vectorized<float> &exp) const {
-    __at_align32__ float tmp[size()];
-    __at_align32__ float tmp_exp[size()];
+    __at_align__ float tmp[size()];
+    __at_align__ float tmp_exp[size()];
     store(tmp);
     exp.store(tmp_exp);
-    for (int64_t i = 0; i < size(); i++) {
+    for (const auto i : c10::irange(size())) {
       tmp[i] = std::pow(tmp[i], tmp_exp[i]);
     }
     return loadu(tmp);

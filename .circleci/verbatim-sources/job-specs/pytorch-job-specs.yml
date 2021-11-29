@@ -47,7 +47,7 @@ jobs:
             # The xla build uses the same docker image as
             # pytorch_linux_bionic_py3_6_clang9_build. In the push step, we have to
             # distinguish between them so the test can pick up the correct image.
-            output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+            output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
             if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
               export COMMIT_DOCKER_IMAGE=$output_image-xla
             elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -81,7 +81,7 @@ jobs:
             cd /pytorch && export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
             python3 -mpip install requests && \
             SCRIBE_GRAPHQL_ACCESS_TOKEN=${SCRIBE_GRAPHQL_ACCESS_TOKEN} \
-            python3 tools/stats/upload_binary_size_to_scuba.py || exit 0
+            python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
     - store_artifacts:
         path: /home/circleci/project/dist
 
@@ -105,7 +105,7 @@ jobs:
             export DOCKER_TAG="f3d89a32912f62815e4feaeed47e564e887dffd6"
           fi
           # See Note [Special build images]
-          output_image=${DOCKER_IMAGE}:${DOCKER_TAG}-${CIRCLE_SHA1}
+          output_image=${DOCKER_IMAGE}:build-${DOCKER_TAG}-${CIRCLE_SHA1}
           if [[ ${BUILD_ENVIRONMENT} == *"xla"* ]]; then
             export COMMIT_DOCKER_IMAGE=$output_image-xla
           elif [[ ${BUILD_ENVIRONMENT} == *"libtorch"* ]]; then
@@ -158,13 +158,14 @@ jobs:
           }
 
           if is_vanilla_build; then
-            echo "apt-get update && apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
+            echo "apt-get update || apt-get install libgnutls30" | docker exec -u root -i "$id" bash
+            echo "apt-get install -y qemu-user gdb" | docker exec -u root -i "$id" bash
             echo "cd workspace/build; qemu-x86_64 -g 2345 -cpu Broadwell -E ATEN_CPU_CAPABILITY=default ./bin/basic --gtest_filter=BasicTest.BasicTestCPU & gdb ./bin/basic -ex 'set pagination off' -ex 'target remote :2345' -ex 'continue' -ex 'bt' -ex='set confirm off' -ex 'quit \$_isvoid(\$_exitcode)'" | docker exec -u jenkins -i "$id" bash
           else
             echo "Skipping for ${BUILD_ENVIRONMENT}"
           fi
     - run:
-        name: Run tests
+        name: Test
         no_output_timeout: "90m"
         command: |
           set -e
@@ -174,14 +175,21 @@ jobs:
           set -ex
           export SCRIBE_GRAPHQL_ACCESS_TOKEN="${SCRIBE_GRAPHQL_ACCESS_TOKEN}"
           export JOB_BASE_NAME="$CIRCLE_JOB"
+          # temporary fix for https://github.com/pytorch/pytorch/issues/60746
+          if [ -z "$CIRCLE_PR_NUMBER" ]; then
+            if [[ $CIRCLE_BRANCH =~ .*pull.* ]]; then
+              export PR_NUMBER="$(echo $CIRCLE_BRANCH | sed 's/[^0-9]//g')"
+              export CIRCLE_PR_NUMBER="$PR_NUMBER"
+            fi
+          else
+            export PR_NUMBER="$CIRCLE_PR_NUMBER"
+          fi
           ${PARALLEL_FLAGS}
           cd workspace
           EOL
           if [[ ${BUILD_ENVIRONMENT} == *"multigpu"* ]]; then
             echo ".jenkins/pytorch/multigpu-test.sh" >> docker_commands.sh
           elif [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
-            echo "pip install click mock tabulate networkx==2.0" >> docker_commands.sh
-            echo "pip -q install --user \"file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx\"" >> docker_commands.sh
             echo ".jenkins/caffe2/test.sh" >> docker_commands.sh
           else
             echo ".jenkins/pytorch/test.sh" >> docker_commands.sh
@@ -189,17 +197,6 @@ jobs:
           echo "(cat docker_commands.sh | docker exec -u jenkins -i "$id" bash) 2>&1" > command.sh
           unbuffer bash command.sh | ts
 
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* ]]; then
-              echo "Retrieving C++ coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/build/coverage.info ./test
-          fi
-          if [[ ${BUILD_ENVIRONMENT} == *"coverage"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-              echo "Retrieving Python coverage report"
-              docker cp $id:/var/lib/jenkins/workspace/test/.coverage ./test
-              docker cp $id:/var/lib/jenkins/workspace/test/coverage.xml ./test
-              python3 -mpip install codecov
-              python3 -mcodecov
-          fi
     - run:
         name: Report results
         no_output_timeout: "5m"
@@ -230,161 +227,3 @@ jobs:
         when: always
     - store_test_results:
         path: test-reports
-    - store_artifacts:
-        path: test/.coverage
-    - store_artifacts:
-        path: test/coverage.xml
-
-  pytorch_windows_build:
-    <<: *pytorch_windows_params
-    parameters:
-      executor:
-        type: string
-        default: "windows-xlarge-cpu-with-nvidia-cuda"
-      build_environment:
-        type: string
-        default: ""
-      test_name:
-        type: string
-        default: ""
-      cuda_version:
-        type: string
-        default: "10.1"
-      python_version:
-        type: string
-        default: "3.8"
-      vs_version:
-        type: string
-        default: "16.8.6"
-      vc_version:
-        type: string
-        default: "14.16"
-      vc_year:
-        type: string
-        default: "2019"
-      vc_product:
-        type: string
-        default: "BuildTools"
-      use_cuda:
-        type: string
-        default: ""
-    executor: <<parameters.executor>>
-    steps:
-      - checkout
-      - run:
-          name: Install VS2019 toolchain
-          no_output_timeout: 10m
-          command: |
-              powershell .circleci/scripts/vs_install.ps1
-      - run:
-          name: Install Cuda
-          no_output_timeout: 30m
-          command: |
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              .circleci/scripts/windows_cuda_install.sh
-            fi
-      - run:
-          name: Install Cudnn
-          command : |
-            if [[ "${USE_CUDA}" == "1" ]]; then
-              .circleci/scripts/windows_cudnn_install.sh
-            fi
-      - run:
-          name: Build
-          no_output_timeout: "90m"
-          command: |
-            set -e
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
-            set -x
-            .jenkins/pytorch/win-build.sh
-      - persist_to_workspace:
-          root: "C:/w"
-          paths: build-results
-      - store_artifacts:
-          path: C:/w/build-results
-
-  pytorch_windows_test:
-    <<: *pytorch_windows_params
-    parameters:
-      executor:
-        type: string
-        default: "windows-medium-cpu-with-nvidia-cuda"
-      build_environment:
-        type: string
-        default: ""
-      test_name:
-        type: string
-        default: ""
-      cuda_version:
-        type: string
-        default: "10.1"
-      python_version:
-        type: string
-        default: "3.8"
-      vs_version:
-        type: string
-        default: "16.8.6"
-      vc_version:
-        type: string
-        default: "14.16"
-      vc_year:
-        type: string
-        default: "2019"
-      vc_product:
-        type: string
-        default: "BuildTools"
-      use_cuda:
-        type: string
-        default: ""
-    executor: <<parameters.executor>>
-    steps:
-      - checkout
-      - attach_workspace:
-          at: c:/users/circleci/workspace
-      - run:
-          name: Install VS2019 toolchain
-          no_output_timeout: 10m
-          command: |
-              powershell .circleci/scripts/vs_install.ps1
-      - run:
-          name: Install Cuda
-          no_output_timeout: 30m
-          command: |
-            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              if [[ "${CUDA_VERSION}" != "10" || "${JOB_EXECUTOR}" != "windows-with-nvidia-gpu" ]]; then
-                .circleci/scripts/windows_cuda_install.sh
-              fi
-            fi
-      - run:
-          name: Install Cudnn
-          command : |
-            if [[ "${CUDA_VERSION}" != "cpu" ]]; then
-              .circleci/scripts/windows_cudnn_install.sh
-            fi
-      - run:
-          name: Test
-          no_output_timeout: "30m"
-          command: |
-            set -e
-            export IN_CI=1
-            set +x
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
-            set -x
-            .jenkins/pytorch/win-test.sh
-      - run:
-          name: Report results
-          no_output_timeout: "5m"
-          command: |
-            set -ex
-            export AWS_ACCESS_KEY_ID=${CIRCLECI_AWS_ACCESS_KEY_FOR_WIN_BUILD_V1}
-            export AWS_SECRET_ACCESS_KEY=${CIRCLECI_AWS_SECRET_KEY_FOR_WIN_BUILD_V1}
-            pip install typing_extensions boto3
-            python -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-          when: always
-      - store_test_results:
-          path: test/test-reports
-      - store_artifacts:
-          path: test/coverage.xml

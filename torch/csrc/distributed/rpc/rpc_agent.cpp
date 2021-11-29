@@ -226,7 +226,6 @@ const WorkerInfo& RpcAgent::getWorkerInfo() const {
   return workerInfo_;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::shared_ptr<RpcAgent> RpcAgent::currentRpcAgent_ = nullptr;
 
 bool RpcAgent::isCurrentRpcAgentSet() {
@@ -235,7 +234,10 @@ bool RpcAgent::isCurrentRpcAgentSet() {
 
 std::shared_ptr<RpcAgent> RpcAgent::getCurrentRpcAgent() {
   std::shared_ptr<RpcAgent> agent = std::atomic_load(&currentRpcAgent_);
-  TORCH_INTERNAL_ASSERT(agent, "Current RPC agent is not set!");
+  TORCH_CHECK(
+      agent,
+      "Current RPC agent is not set! Did you initialize the RPC "
+      "framework (e.g. by calling `rpc.init_rpc`)?");
   return agent;
 }
 

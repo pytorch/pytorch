@@ -1,3 +1,5 @@
+# Owner(s): ["module: tests"]
+
 import torch
 import numpy as np
 
@@ -11,15 +13,18 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, make_tensor, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS)
+    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS, gradcheck)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyOnCPUAndCUDA,
+    instantiate_device_type_tests, ops, dtypes, onlyCPU, onlyNativeDeviceTypes,
     onlyCUDA, dtypesIfCUDA, precisionOverride, skipCUDAIfRocm, dtypesIfCPU,
     OpDTypes)
-from torch.testing import (
-    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and)
+from torch.testing import make_tensor
+from torch.testing._internal.common_dtype import (
+    floating_types_and, all_types_and_complex_and, floating_and_complex_types_and, get_all_dtypes, get_all_math_dtypes,
+    get_all_int_dtypes, get_all_fp_dtypes, get_all_complex_dtypes
+)
 
 if TEST_SCIPY:
     import scipy
@@ -65,10 +70,21 @@ _medium_length = 812
 _large_size = (1029, 917)
 
 
+# Replace values satisfying condition with a safe value. This is used to block
+# out values the could cause singularity like tan(pi/2)
+def replace_values_in_tensor(tensor, condition, safe_value):
+    mask = condition(tensor)
+    tensor.masked_fill_(mask, safe_value)
+
+
 # Returns generator of tensors of different sizes filled with values in domain
 # and with intested region filled with `vals`. This will help test different code
 # paths for the given vals
-def generate_tensors_from_vals(vals, device, dtype, domain):
+# `filter_` can be either None or a tuple of (condition, safe_value). When not None
+# values satisfying `condition`` will be replaced with `safe_value` in the generated
+# tensor. This is useful to avoid singularities when generating inputs for tests, such
+# as tan(pi/2)
+def generate_tensors_from_vals(vals, device, dtype, domain, filter_):
     offset = 63
 
     assert _large_size[1] > (_medium_length + offset)  # large tensor should be large enough
@@ -84,14 +100,23 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
         if domain[1] is not None:
             vals = list(filter(lambda x: x < domain[1], vals))
 
+    if filter_ is not None:
+        condition, safe_value = filter_
+
     # Constructs the large tensor containing vals
     large_tensor = make_tensor(_large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
 
     # Inserts the vals at an odd place
     large_tensor[57][offset:offset + len(vals)] = torch.tensor(vals, device=device, dtype=dtype)
 
+    if filter_ is not None:
+        replace_values_in_tensor(large_tensor, condition, safe_value)
+
     # Takes a medium sized copy of the large tensor containing vals
     medium_tensor = large_tensor[57][offset:offset + _medium_length]
+
+    if filter_ is not None:
+        replace_values_in_tensor(medium_tensor, condition, safe_value)
 
     # Constructs scalar tensors
     scalar_tensors = (t.squeeze() for t in torch.split(medium_tensor, 1))
@@ -124,7 +149,8 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
 # The randomly generated values can be restricted by the domain
 #   argument.
 def generate_numeric_tensors(device, dtype, *,
-                             domain=(None, None)):
+                             domain=(None, None),
+                             filter_=None):
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (torch.empty(0, device=device, dtype=torch.bool),
@@ -148,11 +174,12 @@ def generate_numeric_tensors(device, dtype, *,
         assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
         vals = _int_vals
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 def generate_numeric_tensors_hard(device, dtype, *,
-                                  domain=(None, None)):
+                                  domain=(None, None),
+                                  filter_=None):
     is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
     if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
         return ()
@@ -170,11 +197,12 @@ def generate_numeric_tensors_hard(device, dtype, *,
     else:
         vals = _large_int_vals
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 def generate_numeric_tensors_extremal(device, dtype, *,
-                                      domain=(None, None)):
+                                      domain=(None, None),
+                                      filter_=None):
     if not (dtype.is_floating_point or dtype.is_complex):
         return ()
 
@@ -186,7 +214,7 @@ def generate_numeric_tensors_extremal(device, dtype, *,
                                                      product(_float_vals, _float_extremals),
                                                      product(_float_extremals, _float_vals)))
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 # TODO: port test_unary_out_op_mem_overlap
@@ -195,17 +223,6 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 # TODO: add test for inplace variants erroring on broadcasted inputs
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
-
-    # Tests bool tensor negation raises the correct error
-    def test_neg_error_message(self, device):
-        msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
-               " If you are trying to invert a mask, use the `\\~` or"
-               " `logical_not\\(\\)` operator instead.")
-
-        t = torch.tensor((False, True), device=device)
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.neg(t)
 
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
@@ -332,7 +349,8 @@ class TestUnaryUfuncs(TestCase):
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
-                                           domain=op.domain)
+                                           domain=op.domain,
+                                           filter_=op.reference_numerics_filter)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
@@ -359,10 +377,7 @@ class TestUnaryUfuncs(TestCase):
         tensors = generate_numeric_tensors_extremal(device, dtype,
                                                     domain=op.domain)
 
-        # https://github.com/pytorch/pytorch/issues/50749
-        equal_nan = "relaxed" if device.startswith('cuda') else True
-
-        self._test_reference_numerics(dtype, op, tensors, equal_nan)
+        self._test_reference_numerics(dtype, op, tensors)
 
     # Tests for testing (non)contiguity consistency
 
@@ -505,8 +520,8 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(input, dtype=out_dtype)
             self._test_out_arg(op, input, out, expected, **torch_kwargs)
 
-    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool] +
-              torch.testing.get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*(get_all_int_dtypes() + [torch.bool] +
+              get_all_fp_dtypes(include_bfloat16=False)))
     def test_nan_to_num(self, device, dtype):
         for contiguous in [False, True]:
             x = make_tensor((64, 64), low=0., high=100., dtype=dtype, device=device)
@@ -584,7 +599,7 @@ class TestUnaryUfuncs(TestCase):
         self.compare_with_numpy(torch.digamma, scipy.special.digamma, tensor)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    @dtypes(*get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp(self, device, dtype):
         input = make_tensor((50, 50), device, dtype)
         mantissa, exponent = torch.frexp(input)
@@ -598,7 +613,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(torch_to_numpy_dtype_dict[exponent.dtype] == np_exponent.dtype)
 
     @skipCUDAIfRocm
-    @dtypes(*torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False))
+    @dtypes(*get_all_fp_dtypes(include_half=True, include_bfloat16=False))
     def test_frexp_out(self, device, dtype):
         input = make_tensor((50, 50), device, dtype)
         outputs = (
@@ -625,20 +640,18 @@ class TestUnaryUfuncs(TestCase):
 
     @skipCUDAIfRocm
     def test_frexp_assert_raises(self, device):
-        invalid_input_dtypes = torch.testing.get_all_int_dtypes() + \
-            torch.testing.get_all_complex_dtypes() + \
+        invalid_input_dtypes = get_all_int_dtypes() + \
+            get_all_complex_dtypes() + \
             [torch.bool]
         for dtype in invalid_input_dtypes:
             input = make_tensor((50, 50), device, dtype)
             with self.assertRaisesRegex(RuntimeError, r"torch\.frexp\(\) only supports floating-point dtypes"):
                 torch.frexp(input)
 
-        for dtype in torch.testing.get_all_fp_dtypes(include_half=True, include_bfloat16=False):
+        for dtype in get_all_fp_dtypes(include_half=True, include_bfloat16=False):
             input = make_tensor((50, 50), device, dtype)
 
-            dtypes = list(torch.testing.all_types_and_complex_and(torch.bool,
-                                                                  torch.half,
-                                                                  torch.bfloat16))
+            dtypes = list(all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
             dtypes.remove(dtype)
             for mantissa_dtype in dtypes:
                 mantissa = torch.empty_like(input, dtype=mantissa_dtype)
@@ -1018,6 +1031,21 @@ class TestUnaryUfuncs(TestCase):
             input_noncontig, inplace=True), expected_output_noncontig,
             atol=atol, rtol=rtol)
 
+    # It is not obvious how to merge this into OpInfo becuase these inputs
+    # succeed for gradcheck but are expected to fail for gradgradcheck
+    @dtypes(torch.double)
+    def test_sinc(self, device, dtype):
+        # The derivative of sinc(x) at x=0 has to be special cased.
+        # A naive computation will result in 0/0 -> NaN.
+        # We also need to be careful when we are very close to 0, as the
+        # derivative's denominator is squared, and there are some floats
+        # that are positive and whose squares are zero.
+        a = torch.tensor([0.0, torch.finfo(torch.double).tiny, 1.0],
+                         dtype=dtype,
+                         requires_grad=True,
+                         device=device)
+        gradcheck(torch.sinc, a)
+
     @skipIfNoSciPy
     @dtypes(torch.float, torch.double)
     def test_mish(self, device, dtype):
@@ -1049,7 +1077,7 @@ class TestUnaryUfuncs(TestCase):
 
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
-    @dtypes(*torch.testing.get_all_math_dtypes('cpu'))
+    @dtypes(*get_all_math_dtypes('cpu'))
     def test_threshold(self, device, dtype):
         if dtype != torch.uint8 and dtype != torch.float16 and not dtype.is_complex:
             # 100 is wide enough to use AVX2 instructions for all types
@@ -1086,7 +1114,7 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igamma_common(self, device, dtype):
         # test igamma for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1097,7 +1125,7 @@ class TestUnaryUfuncs(TestCase):
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igammac_common(self, device, dtype):
         # test igammac for reasonable range of values
         loglo = -4  # approx 0.018
@@ -1107,7 +1135,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igamma_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1136,7 +1164,7 @@ class TestUnaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.float16, torch.bfloat16, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     def test_igammac_edge_cases(self, device, dtype):
         tkwargs = {"dtype": dtype, "device": device}
         infs = torch.zeros((3,), **tkwargs) + float("inf")
@@ -1183,7 +1211,7 @@ class TestUnaryUfuncs(TestCase):
             t = torch.rand(1000, device=device).to(dtype) * r
             self._i0_helper(t)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range1(self, device, dtype):
@@ -1191,7 +1219,7 @@ class TestUnaryUfuncs(TestCase):
         # The domain is (-13.25, 13.25)
         self._i0_range_helper(13.25, device, dtype)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_range2(self, device, dtype):
@@ -1206,7 +1234,7 @@ class TestUnaryUfuncs(TestCase):
         # The domain is (-709.75, 709.75)
         self._i0_range_helper(709.75, device, dtype)
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_i0_special(self, device, dtype):
@@ -1216,7 +1244,7 @@ class TestUnaryUfuncs(TestCase):
         t = torch.tensor([inf, -inf, nan], device=device, dtype=dtype)
         self.assertTrue(torch.i0(t).isnan().all())
 
-    @dtypesIfCUDA(*torch.testing.get_all_fp_dtypes())
+    @dtypesIfCUDA(*get_all_fp_dtypes())
     @dtypes(torch.bfloat16, torch.float32, torch.float64)
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     def test_special_i0_i1_vs_scipy(self, device, dtype):
@@ -1308,76 +1336,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @dtypes(*torch.testing.get_all_fp_dtypes())
-    def test_isfinite_isinf_isnan(self, device, dtype):
-        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
-    def test_isfinite_isinf_isnan_int(self, device, dtype):
-        vals = (-1, 0, 1)
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(*(torch.testing.get_all_fp_dtypes()))
-    def test_isposinf_isneginf_float(self, device, dtype):
-        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
-        vals = (-float('inf'), float('inf'), float('nan'), -1, 0, 1)
-
-        for torch_op, numpy_op in ops:
-            if torch_op == torch.isposinf:
-                target_vals = (0, 1, 0, 0, 0, 0)
-            else:
-                target_vals = (1, 0, 0, 0, 0, 0)
-
-            t = torch.tensor(vals, device=device, dtype=dtype)
-            # Manual check here as numpy does not support bfloat16
-            if dtype == torch.bfloat16:
-                self.assertEqual(torch_op(t),
-                                 torch.tensor(target_vals, device=device, dtype=torch.bool))
-            else:
-                self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
-
-            # test the boolean tensor as the `out=` parameter
-            out = torch.empty_like(t, dtype=torch.bool)
-            t_target = torch.tensor(target_vals, device=device, dtype=torch.bool)
-            torch_op(t, out=out)
-            self.assertEqual(out, t_target)
-
-    @dtypes(*(torch.testing.get_all_int_dtypes() + [torch.bool]))
-    def test_isposinf_isneginf_int_and_bool(self, device, dtype):
-        ops = ((torch.isposinf, np.isposinf), (torch.isneginf, np.isneginf))
-        vals = (-1, 0, 1)
-
-        for torch_op, numpy_op in ops:
-            self.compare_with_numpy(torch_op, numpy_op, vals, device, dtype)
-
-            # test the boolean tensor as the `out=` parameter
-            t = torch.tensor(vals, device=device, dtype=dtype)
-            out = torch.empty_like(t, dtype=torch.bool)
-            t_target = torch.zeros_like(t, dtype=torch.bool)
-            torch_op(t, out=out)
-            self.assertEqual(out, t_target)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isposinf_isneginf_complex(self, device, dtype):
-        torch_ops = (torch.isposinf, torch.isneginf)
-        vals = (complex(0, float('inf')), complex(1, -float('inf')))
-        t = torch.tensor(vals, device=device, dtype=dtype)
-        out = torch.empty_like(t)
-
-        for torch_op in torch_ops:
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
-                torch_op(t)
-            with self.assertRaisesRegex(RuntimeError, 'does not support complex inputs'):
-                torch_op(t, out=out)
-
-    @dtypes(*(torch.testing.get_all_dtypes(include_bool=False)))
+    @dtypes(*(get_all_dtypes(include_bool=False)))
     def test_isposinf_isneginf_non_boolean_output(self, device, dtype):
         # test non-boolean tensors as the `out=` parameters
         # boolean outputs are tested in the above testcases
@@ -1387,58 +1346,6 @@ class TestUnaryUfuncs(TestCase):
             out = torch.empty_like(t, dtype=dtype)
             with self.assertRaisesRegex(RuntimeError, 'does not support non-boolean outputs'):
                 torch_op(t, out=out)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isfinite_isinf_isnan_complex(self, device, dtype):
-        vals = (
-            complex(-float('inf'), float('inf')),
-            complex(-float('inf'), 0),
-            complex(0, float('inf')),
-            complex(float('inf'), float('nan')),
-            complex(float('nan'), 0),
-            complex(-1, 0),
-            complex(0, 1)
-        )
-
-        self.compare_with_numpy(torch.isfinite, np.isfinite, vals, device, dtype)
-        self.compare_with_numpy(torch.isinf, np.isinf, vals, device, dtype)
-        self.compare_with_numpy(torch.isnan, np.isnan, vals, device, dtype)
-
-    @dtypes(torch.complex64, torch.complex128)
-    def test_isreal_complex(self, device, dtype):
-        vals = (1, 1 + 1j, 2 + 0j, 3j, 2 - 1j, 2 - 0j)
-        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
-
-    @dtypes(*torch.testing.get_all_dtypes())
-    def test_isreal_noncomplex(self, device, dtype):
-        vals = (1, 2, 3)
-        # Manual check here since numpy doesn't support bfloat16
-        result = torch.isreal(torch.tensor(vals, dtype=dtype))
-        expected = torch.ones(result.size(), dtype=torch.bool, device=device)
-        self.assertEqual(result, expected)
-
-    @dtypes(torch.complex64)
-    def test_isreal_nan_inf(self, device, dtype):
-        vals = (
-            complex(-float('inf'), float('inf')),
-            complex(-float('inf'), 0),
-            complex(0, float('inf')),
-            complex(float('inf'), float('nan')),
-            complex(float('nan'), 0),
-            complex(-1, 0),
-            complex(0, 1)
-        )
-        self.compare_with_numpy(torch.isreal, np.isreal, vals, device, dtype)
-
-    @onlyCPU
-    def test_isfinite_type(self, device):
-        with self.assertRaises(TypeError):
-            torch.isfinite(1)  # Parameter must be a tensor
-
-    @onlyCPU
-    def test_isinf_type(self, device):
-        with self.assertRaises(TypeError):
-            torch.isinf(1)  # Parameter must be a tensor
 
     def test_nonzero_empty(self, device):
         def assert_tuple_empty(tup, dim):
@@ -1470,7 +1377,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @dtypes(*torch.testing.get_all_dtypes())
+    @dtypes(*get_all_dtypes())
     def test_nonzero_noncontiguous(self, device, dtype):
         x = make_tensor((10, 10, 10), dtype=dtype, device=device,
                         low=1, noncontiguous=False)
@@ -1499,10 +1406,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(nondense.nonzero(), expect)
 
     # TODO: rationalize with exp OpInfo
-    @dtypes(*(torch.testing.get_all_fp_dtypes(include_half=False) +
-              torch.testing.get_all_complex_dtypes()))
-    @dtypesIfCUDA(*(torch.testing.get_all_fp_dtypes(include_half=True) +
-                    torch.testing.get_all_complex_dtypes()))
+    @dtypes(*(get_all_fp_dtypes(include_half=False) +
+              get_all_complex_dtypes()))
+    @dtypesIfCUDA(*(get_all_fp_dtypes(include_half=True) +
+                    get_all_complex_dtypes()))
     def test_exp(self, device, dtype):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             a = torch.tensor(v, dtype=dtype, device=device) * torch.arange(18, device=device) / 3 * math.pi

@@ -61,9 +61,7 @@ const FusedKernelConstructor& getConstructor(at::Device::Type backend_type) {
 
 // Counter for number of kernels compiled, used for debugging and
 // creating arbitrary kernel names.
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<size_t> next_kernel_id{0};
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static int debug_fusion{-1};
 
 size_t nCompiledKernels() {
@@ -125,7 +123,7 @@ static std::vector<int64_t> getInputDependencies(const Value* output) {
     // This needs to be revisited when you start allowing
     // other things e.g. nonconstant scalars.
     if (producer->kind() == prim::Param &&
-        val->type()->isSubtypeOf(TensorType::get())) {
+        val->type()->isSubtypeOf(*TensorType::get())) {
       inputs.insert(val);
       continue;
     }
@@ -232,10 +230,10 @@ std::shared_ptr<FusedKernel> compileKernel(
   {
     size_t input_index = 0;
     for (const auto& p : graph->inputs()) {
-      if (p->type()->isSubtypeOf(FloatType::get())) {
+      if (p->type()->isSubtypeOf(*FloatType::get())) {
         flat_inputs.emplace_back(p, c10::nullopt);
       }
-      if (!p->type()->isSubtypeOf(TensorType::get())) {
+      if (!p->type()->isSubtypeOf(*TensorType::get())) {
         continue;
       }
       if (const Node* chunk = usedInFusedChunk(p)) {

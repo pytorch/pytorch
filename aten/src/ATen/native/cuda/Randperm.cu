@@ -1,8 +1,7 @@
 #include <ATen/ATen.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/native/cuda/Randperm.cuh>
 
 #include <limits>
@@ -47,8 +46,6 @@ template <int N> struct alignas(N) OpaqueType { char data[N]; };
 
 Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
-  TORCH_CHECK(n <= std::numeric_limits<int>::max(),
-    "randperm of tensors larger than INT_MAX is not supported yet in pytorch");
 
   check_supported_max_int_with_precision(n, result);
 
@@ -90,7 +87,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
       dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
-      at::cuda::cub::sort_pairs<int, dtype>(
+      at::cuda::cub::radix_sort_pairs<int, dtype>(
         keys.data_ptr<int>(), keys_out,
         range_data, shuffled_data_,
         n, false, 0, bits);
@@ -106,7 +103,7 @@ Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor&
       using dtype = OpaqueType<sizeof(scalar_t)>;
       auto shuffled_data_ = reinterpret_cast<dtype*>(shuffled_data);
       dtype* range_data = reinterpret_cast<dtype*>(range.data_ptr());
-      at::cuda::cub::sort_pairs<int64_t, dtype>(
+      at::cuda::cub::radix_sort_pairs<int64_t, dtype>(
         keys.data_ptr<int64_t>(), keys_out,
         range_data, shuffled_data_,
         n, false, 0, bits);

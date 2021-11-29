@@ -61,8 +61,8 @@ class MaxPool1d(_MaxPoolNd):
                    ensures that every element in the input tensor is covered by a sliding window.
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} + 2 \times \text{padding} - \text{dilation}
@@ -84,7 +84,7 @@ class MaxPool1d(_MaxPoolNd):
     padding: _size_1_t
     dilation: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -129,8 +129,8 @@ class MaxPool2d(_MaxPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
@@ -158,7 +158,7 @@ class MaxPool2d(_MaxPoolNd):
     padding: _size_2_t
     dilation: _size_2_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -203,8 +203,8 @@ class MaxPool3d(_MaxPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0] \times
@@ -236,7 +236,7 @@ class MaxPool3d(_MaxPoolNd):
     padding: _size_3_t
     dilation: _size_3_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -277,8 +277,8 @@ class MaxUnpool1d(_MaxUnpoolNd):
         - `output_size` (optional): the targeted output size
 
     Shape:
-        - Input: :math:`(N, C, H_{in})`
-        - Output: :math:`(N, C, H_{out})`, where
+        - Input: :math:`(N, C, H_{in})` or :math:`(C, H_{in})`.
+        - Output: :math:`(N, C, H_{out})` or :math:`(C, H_{out})`, where
 
           .. math::
               H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0] + \text{kernel\_size}[0]
@@ -346,8 +346,8 @@ class MaxUnpool2d(_MaxUnpoolNd):
         - `output_size` (optional): the targeted output size
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
             H_{out} = (H_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
@@ -422,8 +422,8 @@ class MaxUnpool3d(_MaxUnpoolNd):
         - `output_size` (optional): the targeted output size
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
               D_{out} = (D_{in} - 1) \times \text{stride[0]} - 2 \times \text{padding[0]} + \text{kernel\_size[0]}
@@ -502,8 +502,8 @@ class AvgPool1d(_AvgPoolNd):
         count_include_pad: when True, will include the zero-padding in the averaging calculation
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in}`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor \frac{L_{in} +
@@ -570,11 +570,12 @@ class AvgPool2d(_AvgPoolNd):
         padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
         count_include_pad: when True, will include the zero-padding in the averaging calculation
-        divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
+        divisor_override: if specified, it will be used as divisor, otherwise size of the pooling region will be used.
+
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] -
@@ -654,8 +655,9 @@ class AvgPool3d(_AvgPoolNd):
         divisor_override: if specified, it will be used as divisor, otherwise :attr:`kernel_size` will be used
 
     Shape:
-        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
-        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
               D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] -
@@ -726,6 +728,12 @@ class FractionalMaxPool2d(Module):
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+          :math:`(H_{out}, W_{out})=\text{output\_size}` or
+          :math:`(H_{out}, W_{out})=\text{output\_ratio} \times (H_{in}, W_{in})`.
+
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
         >>> m = nn.FractionalMaxPool2d(3, output_size=(13, 12))
@@ -764,7 +772,7 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -827,7 +835,7 @@ class FractionalMaxPool3d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -874,8 +882,8 @@ class LPPool1d(_LPPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C, L_{out})`, where
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
 
           .. math::
               L_{out} = \left\lfloor\frac{L_{in} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
@@ -969,13 +977,18 @@ class _AdaptiveMaxPoolNd(Module):
 class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     r"""Applies a 1D adaptive max pooling over an input signal composed of several input planes.
 
-    The output size is H, for any input size.
+    The output size is :math:`L_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size H
+        output_size: the target output size :math:`L_{out}`.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool1d. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
+        - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
+          :math:`L_{out}=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5
@@ -994,16 +1007,22 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     r"""Applies a 2D adaptive max pooling over an input signal composed of several input planes.
 
-    The output is of size H x W, for any input size.
+    The output is of size :math:`H_{out} \times W_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size of the image of the form H x W.
-                     Can be a tuple (H, W) or a single H for a square image H x H.
-                     H and W can be either a ``int``, or ``None`` which means the size will
-                     be the same as that of the input.
+        output_size: the target output size of the image of the form :math:`H_{out} \times W_{out}`.
+                     Can be a tuple :math:`(H_{out}, W_{out})` or a single :math:`H_{out}` for a
+                     square image :math:`H_{out} \times H_{out}`. :math:`H_{out}` and :math:`W_{out}`
+                     can be either a ``int``, or ``None`` which means the size will be the same as that
+                     of the input.
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool2d. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
+          :math:`(H_{out}, W_{out})=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7
@@ -1023,24 +1042,30 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     output_size: _size_2_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
 class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
     r"""Applies a 3D adaptive max pooling over an input signal composed of several input planes.
 
-    The output is of size D x H x W, for any input size.
+    The output is of size :math:`D_{out} \times H_{out} \times W_{out}`, for any input size.
     The number of output features is equal to the number of input planes.
 
     Args:
-        output_size: the target output size of the image of the form D x H x W.
-                     Can be a tuple (D, H, W) or a single D for a cube D x D x D.
-                     D, H and W can be either a ``int``, or ``None`` which means the size will
-                     be the same as that of the input.
+        output_size: the target output size of the image of the form :math:`D_{out} \times H_{out} \times W_{out}`.
+                     Can be a tuple :math:`(D_{out}, H_{out}, W_{out})` or a single
+                     :math:`D_{out}` for a cube :math:`D_{out} \times D_{out} \times D_{out}`.
+                     :math:`D_{out}`, :math:`H_{out}` and :math:`W_{out}` can be either a
+                     ``int``, or ``None`` which means the size will be the same as that of the input.
 
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to nn.MaxUnpool3d. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or :math:`(C, D_{out}, H_{out}, W_{out})`,
+          where :math:`(D_{out}, H_{out}, W_{out})=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7x9
@@ -1060,7 +1085,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     output_size: _size_3_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 
@@ -1115,6 +1140,11 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
                      H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
 
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1})` or :math:`(C, S_{0}, S_{1})`, where
+          :math:`S=\text{output\_size}`.
+
     Examples:
         >>> # target output size of 5x7
         >>> m = nn.AdaptiveAvgPool2d((5,7))
@@ -1148,6 +1178,11 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
                      Can be a tuple (D, H, W) or a single number D for a cube D x D x D.
                      D, H and W can be either a ``int``, or ``None`` which means the size will
                      be the same as that of the input.
+
+    Shape:
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, S_{0}, S_{1}, S_{2})` or :math:`(C, S_{0}, S_{1}, S_{2})`,
+          where :math:`S=\text{output\_size}`.
 
     Examples:
         >>> # target output size of 5x7x9

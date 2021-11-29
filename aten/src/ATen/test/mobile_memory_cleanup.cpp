@@ -7,7 +7,6 @@ using namespace torch::jit;
 
 #ifdef USE_XNNPACK
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   Module m("m");
   m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
@@ -23,7 +22,6 @@ TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   EXPECT_NO_THROW(m_optimized.save(ss));
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 TEST(MemoryCleanUp, UnpackError) {
   at::globalContext().setReleaseWeightsWhenPrepacking(true);
   Module m("m");

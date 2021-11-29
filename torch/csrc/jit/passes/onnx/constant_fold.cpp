@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include <algorithm>
 
 namespace torch {
@@ -29,7 +30,6 @@ enum OnnxType : int {
   ONNX_UINT32,
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 std::unordered_map<int, at::ScalarType> onnxTypeToScalarTypeMap = {
     // Only conversion of ONNX numeric types is included here.
     // Unsigned ONNX types are mapped to the next higher signed
@@ -89,7 +89,7 @@ c10::optional<at::Tensor> runTorchSlice_opset9(
     std::iota(axesAttr.begin(), axesAttr.end(), 0);
   }
   auto updated_val = inputTensorValues[0];
-  for (size_t i = 0; i < axesAttr.size(); ++i) {
+  for (const auto i : c10::irange(axesAttr.size())) {
     // ONNX slice accepts negative starts and ends values.
     int64_t axis = axesAttr[i], start = startsAttr[i], end = endsAttr[i];
     // ONNX slice accepts negative axis, fix this for aten op
@@ -148,8 +148,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
     auto axes_a = inputTensorValues[3].accessor<int64_t, 1>();
     axes.reserve(inputTensorValues[3].sizes()[0]);
     // ONNX slice accepts negative axis, fix this for aten op
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t i = 0; i < inputTensorValues[3].sizes()[0]; ++i) {
+    for (const auto i : c10::irange(inputTensorValues[3].sizes()[0])) {
       axes[i] = axes_a[i] < 0 ? axes_a[i] + inputTensorValues[0].sizes().size()
                               : axes_a[i];
     }
@@ -173,8 +172,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
       return c10::nullopt;
     }
     auto steps_a = inputTensorValues[4].accessor<int64_t, 1>();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (size_t i = 0; i < inputTensorValues[4].sizes()[0]; ++i) {
+    for (const auto i : c10::irange(inputTensorValues[4].sizes()[0])) {
       // Only steps == 1 are supported for constant-folding.
       if (steps_a[i] != 1) {
         std::cerr
@@ -187,8 +185,7 @@ c10::optional<at::Tensor> runTorchSlice_opset10(
   auto starts_a = inputTensorValues[1].accessor<int64_t, 1>();
   auto ends_a = inputTensorValues[2].accessor<int64_t, 1>();
   auto updated_val = inputTensorValues[0];
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-  for (size_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
+  for (const auto i : c10::irange(inputTensorValues[1].sizes()[0])) {
     // ONNX slice accepts negative starts and ends values.
     int64_t start = starts_a[i], end = ends_a[i], axis = axes[i];
     handleNegativeStartEndIndex(start, end, axis, updated_val.sizes());
@@ -269,9 +266,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
   if (node->kind() == onnx::Slice) {
     if (opset_version == ONNX_OPSET_9) {
       return runTorchSlice_opset9(node, inputTensorValues);
-    } else if (
-        opset_version == ONNX_OPSET_10 || opset_version == ONNX_OPSET_11 ||
-        opset_version == ONNX_OPSET_12 || opset_version == ONNX_OPSET_13) {
+    } else if (opset_version >= ONNX_OPSET_10) {
       return runTorchSlice_opset10(node, inputTensorValues);
     } else {
       std::cerr << "Warning: Constant folding - unsupported opset version. "
@@ -354,7 +349,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     }
   } else if (node->kind() == onnx::Squeeze) {
     assert(inputTensorValues.size() == 2 || inputTensorValues.size() == 1);
-    if (opset_version == ONNX_OPSET_13) {
+    if (opset_version >= ONNX_OPSET_13) {
       // Squeeze version 13 input axes is optional, inputTensorValues.size() ==
       // 1 means axes equal to None
       updated_val = inputTensorValues[0];
@@ -418,13 +413,18 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     std::vector<int64_t> shape(inputTensorValues[1].sizes()[0], 0);
     auto shape_a = inputTensorValues[1].accessor<int64_t, 1>();
     assert(inputTensorValues[1].sizes()[0] >= 0);
+    // Set value of allowzero
+    int64_t allowzero = 0;
+    if (node->hasAttributeS("allowzero")) {
+      allowzero = node->i(attr::allowzero);
+    }
     for (size_t i = 0; i < (size_t)(inputTensorValues[1].sizes()[0]); ++i) {
       // All shape dim values should be >= -1
       // onnx::Reshape supports a shape dim value to be zero, in
       // which case the actual dim value remains unchanged. However,
       // at::reshape does not support shape dim value to be zero
       assert(shape_a[i] >= -1);
-      if (shape_a[i] == 0) {
+      if (shape_a[i] == 0 && !allowzero) {
         if (i >= inputTensorValues[0].sizes().size()) {
           throw std::runtime_error(
               "Dimension with value 0 exceeds the input size dimensions.");
@@ -476,7 +476,7 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     // If rank of indices is 0, rank of output tensor should be
     // rank_of_input - 1.
     if (q < 1) {
-      updated_val = updated_val.squeeze();
+      updated_val = updated_val.squeeze(axis);
     }
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Range) {
@@ -488,6 +488,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Equal) {
     updated_val = at::eq(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Greater) {
+    updated_val = at::greater(inputTensorValues[0], inputTensorValues[1]);
+    return c10::optional<at::Tensor>(updated_val);
+  } else if (node->kind() == onnx::Less) {
+    updated_val = at::less(inputTensorValues[0], inputTensorValues[1]);
     return c10::optional<at::Tensor>(updated_val);
   } else if (node->kind() == onnx::Neg) {
     updated_val = at::neg(inputTensorValues[0]);

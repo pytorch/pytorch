@@ -7,7 +7,6 @@
 
 #include <c10/core/thread_pool.h>
 #include <c10d/PrefixStore.hpp>
-#include <c10d/ProcessGroup.hpp>
 #include <c10d/Store.hpp>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 
@@ -67,7 +66,6 @@ struct TORCH_API TransportRegistration {
   std::string address;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeTransportRegistry, TransportRegistration);
 
 struct TORCH_API ChannelRegistration {
@@ -75,7 +73,6 @@ struct TORCH_API ChannelRegistration {
   int64_t priority;
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
 constexpr auto kDefaultNumWorkerThreads = 16;
@@ -169,7 +166,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       std::string selfName,
       worker_id_t selfId,
       int worldSize,
-      c10::intrusive_ptr<::c10d::ProcessGroup> processGroup,
       TensorPipeRpcBackendOptions opts,
       std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
       std::vector<c10::Device> devices,
@@ -187,7 +183,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
   void join(bool shutdown = false) override;
-  void sync() override;
+  void sync() override{};
   void startImpl() override;
   void shutdownImpl() override;
 
@@ -220,6 +216,17 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   size_t numPendingResponses();
   size_t messageIdToTimeoutMapSize();
 
+ protected:
+  // TensorPipe write function that could be used to write response
+  // messages by server, and write request messages by client. This
+  // is a protected method since it is overwritten by FaultyTensorPipeAgent
+  virtual void pipeWrite(
+      const std::shared_ptr<tensorpipe::Pipe>&,
+      c10::intrusive_ptr<Message> message,
+      std::vector<c10::Device>&& devices,
+      std::vector<c10::Stream> streams,
+      std::function<void(const tensorpipe::Error&)>) noexcept;
+
  private:
   // Removes the given messageId with the given expirationTime from the
   // timeoutMap_.
@@ -238,15 +245,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
           std::vector<c10::Stream>)>) noexcept;
-
-  // TensorPipe write function that could be used to write response
-  // messages by server, and write request messages by client.
-  void pipeWrite(
-      const std::shared_ptr<tensorpipe::Pipe>&,
-      c10::intrusive_ptr<Message> message,
-      std::vector<c10::Device>&& devices,
-      std::vector<c10::Stream> streams,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(
@@ -330,12 +328,10 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   ::c10d::PrefixStore rankToNameStore_;
   ::c10d::PrefixStore nameToAddressStore_;
+  // Store keys that will used to count joined processes and active calls during
+  // the shutdown process
+  ::c10d::PrefixStore shutdownStore_;
   const int worldSize_;
-
-  // The join method is required to behave like a barrier and perform collective
-  // operations. For simplicity and reliability, we offload this to a process
-  // group, but probably one day we might want to re-implement them using RPCs.
-  const c10::intrusive_ptr<::c10d::ProcessGroup> processGroup_;
 
   std::atomic<uint64_t> nextMessageID_{0};
 

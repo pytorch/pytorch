@@ -20,7 +20,7 @@ c10::IValue preprocess(
   c10::Dict<IValue, IValue> compiled(StringType::get(), StringType::get());
 
   for (const auto& method : mod.get_methods()) {
-    auto graph = method.function().graph()->copy();
+    auto graph = toGraphFunction(method.function()).graph()->copy();
     // Must inline the graph for debug info map.
     Inline(*graph);
     // This is here because to test module hierarchy we will have
@@ -69,7 +69,6 @@ c10::IValue preprocess(
 }
 
 constexpr auto backend_name = "backend_with_compiler_demo";
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static auto pre_reg = backend_preprocess_register(backend_name, preprocess);
 } // namespace
 

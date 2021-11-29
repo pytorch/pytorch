@@ -686,8 +686,7 @@ class ScatterAssignOp : public Operator<Context> {
     const auto dataType = TypeMetaToDataType(data.dtype());
     const auto slicesType = TypeMetaToDataType(slices.dtype());
     const auto indicesType = TypeMetaToDataType(indices.dtype());
-    // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-    auto* output = Output(0);
+    C10_UNUSED auto* output = Output(0);
 
     auto runner = GetRunner(dataType, slicesType, indicesType);
     (this->*runner)();
@@ -770,7 +769,7 @@ class ScatterOp : public Operator<CPUContext> {
       : Operator<CPUContext>(std::forward<Args>(args)...),
         OP_SINGLE_ARG(int, "axis", axis_, 1) {}
 
-  virtual ~ScatterOp() noexcept override {}
+   ~ScatterOp() noexcept override {}
 
   bool RunOnDevice() override {
     TORCH_CHECK(

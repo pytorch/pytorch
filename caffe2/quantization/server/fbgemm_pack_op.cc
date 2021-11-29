@@ -6,13 +6,9 @@
 #include "caffe2_dnnlowp_utils.h"
 #include <fbgemm/FbgemmConvert.h>
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_nbits_in_non_outlier);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_double(caffe2_dnnlowp_acc16_density_threshold);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_acc16_n_threshold);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DECLARE_int32(caffe2_dnnlowp_acc16_k_threshold);
 
 namespace caffe2 {
@@ -702,9 +698,8 @@ TypeIdentifier Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetTypeMetaId() {
 
 TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
-      reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
+  // const Int8FCDNNLowPPackedWeightBlob* int8_tensor =
+  //     reinterpret_cast<const Int8FCDNNLowPPackedWeightBlob*>(c);
   // We forced the output type to be uint8_t since we know it always is.
   // If it is going to be implemented elsewhere, we might need to change here.
   // return (int8_tensor->original_tensor).dtype();
@@ -713,9 +708,8 @@ TypeMeta Int8FCDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
 
 TypeMeta Int8ConvDNNLowpPackedWeightBlobShapeFunctions::GetExternalTensorType(
     const void* c) {
-  // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-  const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
-      reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
+  // const Int8ConvDNNLowPPackedWeightBlob* int8_tensor =
+  //     reinterpret_cast<const Int8ConvDNNLowPPackedWeightBlob*>(c);
   // return (int8_tensor->original_tensor).dtype();
   return TypeMeta::Make<uint8_t>();
 }
@@ -876,37 +870,30 @@ CAFFE_KNOWN_TYPE(Int8FCDNNLowPPackedWeightBlob);
 CAFFE_KNOWN_TYPE(Int8ConvDNNLowPPackedWeightBlob);
 
 // Register DNNLOWP Type in caffe2 core
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<Int8FCDNNLowPPackedWeightBlob>()),
     Int8FCDNNLowpPackedWeightBlobShapeFunctions);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
     (TypeMeta::Id<Int8ConvDNNLowPPackedWeightBlob>()),
     Int8ConvDNNLowpPackedWeightBlobShapeFunctions);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(Int8FCPackWeight, FullyConnectedDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
     DNNLOWP,
     FullyConnectedDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
     DNNLOWP_ACC16,
     FullyConnectedDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8FCPackWeight,
     DNNLOWP_ROWWISE,
     FullyConnectedDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8FCPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
@@ -946,19 +933,16 @@ OPERATOR_SCHEMA(Int8FCPackWeight)
         "Only meaningful when bias is provided "
         "(NOTE: this is not the scale of weight");
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
     DNNLOWP,
     ConvDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(
     Int8ConvPackWeight,
     DNNLOWP_ACC16,
     ConvDNNLowPPackWeightOp);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(Int8ConvPackWeight)
     .NumInputs(1, 2)
     .NumOutputs(1)

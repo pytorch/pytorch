@@ -6,10 +6,10 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/core/DimVector.h>
 #include <ATen/native/Copy.h>
-#include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TypeProperties.h>
+#include <ATen/native/TensorShape.h>
 #include <ATen/native/cpu/CatKernel.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/NativeFunctions.h>
@@ -29,9 +29,7 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(cat_serial_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(stack_serial_stub);
 
 Tensor _reshape_from_tensor(const Tensor& self, const Tensor& shape_tensor) {
@@ -94,25 +92,6 @@ Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
   return expand_outplace(tensors);
-}
-
-// Check to see if the shape of tensors is compatible
-// for being concatenated along a given dimension.
-static inline void check_cat_shape_except_dim(const Tensor & first, const Tensor & second, int64_t dimension, int64_t index) {
-  int64_t first_dims = first.dim();
-  int64_t second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims, "torch.cat(): Tensors must have same number of dimensions: got ",
-              first_dims, " and ", second_dims);
-  for (int64_t dim = 0; dim < first_dims; dim++) {
-    if (dim == dimension) {
-      continue;
-    }
-    int64_t first_dim_size = first.sizes()[dim];
-    int64_t second_dim_size = second.sizes()[dim];
-    TORCH_CHECK(first_dim_size == second_dim_size, "torch.cat(): Sizes of tensors must match except in dimension ",
-                dimension, ". Got ", first_dim_size, " and ", second_dim_size, " in dimension ", dim,
-                " (The offending index is ", index, ")");
-  }
 }
 
 static bool should_skip(const Tensor& t) {
@@ -195,6 +174,12 @@ Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
   result_size[dim] = cat_dim_size;
 
   // skip resizing if size of result is same as expected
+  // raise a warning while resizing if output has one or more elements
+  // See https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+  // for understanding why at::native::resize_output is not called directly.
+  // if (at::native::resize_output_check(result, result_size)) {
+  // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
   if (result.sizes() != result_size) {
     result.resize_(result_size, first_tensor_mem_format);
   }
@@ -301,6 +286,23 @@ Tensor& cat_out(TensorList tensors, Dimname dim, Tensor& result) {
 Tensor cat(TensorList tensors, Dimname dim) {
   TORCH_CHECK(!tensors.empty(), "expected a non-empty list of Tensors");
   return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+// torch.concat, alias for torch.cat
+Tensor& concat_out(TensorList tensors, Dimname dim, Tensor& result) {
+  return at::cat_out(result, tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor concat(TensorList tensors, Dimname dim) {
+  return at::cat(tensors, dimname_to_position(tensors[0], dim));
+}
+
+Tensor & concat_out(TensorList tensors, int64_t dim, Tensor & result) {
+  return at::cat_out(result, tensors, dim);
+}
+
+Tensor concat(TensorList tensors, int64_t dim) {
+  return at::cat(tensors, dim);
 }
 
 static bool sizes_match_except(IntArrayRef s1, IntArrayRef s2, int64_t dim_except /* should already be wrapped */) {
@@ -611,7 +613,13 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     return self.tensor_split(sections, dim);
   } else {
     auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
-    std::vector<int64_t> indices(indices_data, indices_data + tensor_indices_or_sections.numel());
+    auto stride = tensor_indices_or_sections.stride(0);
+    auto numel = tensor_indices_or_sections.numel();
+    std::vector<int64_t> indices(numel);
+    for (const auto offset : c10::irange(numel)) {
+      // indices tensor could be non-contiguous
+      indices[offset] = *(indices_data + offset * stride);
+    }
     return self.tensor_split(indices, dim);
   }
 }
@@ -1040,19 +1048,41 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     return at::_mkldnn_reshape(self, shape);
   }
 
-  auto stride =
-      at::detail::computeStride(self.sizes(), self.strides(), shape);
-    // `computeStride` returns the proper strides to use if this
-    // `reshape` can be just a view.
-    //
-    // NB: Even though we have viewable geometry and the target strides here,
-    //     we do not just call `as_strided` on `self` because the backward
-    //     for `as_strided` is not as efficient as that of `view` (since the
-    //     former is meant to handle general cases).
+  // `computeStride` returns the proper strides to use if this
+  // `reshape` can be just a view.
+  auto stride = at::detail::computeStride(self.sizes(), self.strides(), shape);
+
+  // NB: Even though we have viewable geometry and the target strides here,
+  //     we do not just call `as_strided` on `self` because the backward
+  //     for `as_strided` is not as efficient as that of `view` (since the
+  //     former is meant to handle general cases).
+  //
+  //     Similarly we don't call `view` because it duplicates some of the work
+  //     we've already done, and instead call our internal/private operator
+  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
-    return self.view(shape);
+    // Temporary check to revert to the old behavior/view in cases where the
+    // device is not supported (e.g. for XLA the operation is not supported
+    // so we use `view` instead).
+    //
+    // We need to do the checks here instead of in `native_functions.yaml`
+    // to preserve backwards compatibility.
+    if (!self.is_xla() && !self.is_lazy()) {
+      return self._reshape_alias(shape, stride.value());
+    } else {
+      return self.view(shape);
+    }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
+}
+
+Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+  // This is only used by `reshape` in cases where it would otherwise have dispatched
+  // to `view`. This removes the overhead of calling `view` which duplicates some of
+  // the work that's already been done (`infer_size_dv` and `computeStride`).
+
+  return alias_with_sizes_and_strides(self, sizes, strides);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -1183,12 +1213,15 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
 
   if (dim < sparse_dim) {
 
-    auto dim_indices = indices[dim];
+    auto cpu_dim_indices = indices[dim].to(c10::kCPU).contiguous();
+    int64_t* cpu_dim_indices_ptr = cpu_dim_indices.data_ptr<int64_t>();
+    auto cpu_index = index.to(c10::kCPU).contiguous();
+    int64_t* cpu_index_ptr = cpu_index.data_ptr<int64_t>();
     std::vector<int64_t> zindices;
     std::vector<int64_t> iindices;
     int64_t new_nnz = 0;
-    for (const auto i : c10::irange(new_sizes[dim])) {
-      auto idx = index[i].item<int64_t>();
+    for (int64_t i = 0; i < new_sizes[dim]; i++) {
+      int64_t idx = cpu_index_ptr[i];
       if (idx < -size || idx >= size) {
         TORCH_CHECK_INDEX(false, "index_select(): index contains ", idx, " that is out of range for tensor of size ",
                    self.sizes(), " at dimension ", dim);
@@ -1196,8 +1229,8 @@ Tensor index_select_sparse(const Tensor& self, int64_t dim, const Tensor& index)
       if (idx < 0) {
         idx += size;
       }
-      for (const auto j : c10::irange(nnz)) {
-        auto jdx = dim_indices[j].item<int64_t>();
+      for (int64_t j = 0; j < nnz; j++) {
+        int64_t jdx = cpu_dim_indices_ptr[j];
         if (idx == jdx) {
           new_nnz++;
           iindices.push_back(i);
@@ -1388,7 +1421,7 @@ static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t d
   std::vector<Tensor> inputs(tensors.size());
   at::IntArrayRef entry_shape = tensors[0].sizes();
   inputs[0] = tensors[0].unsqueeze(dim);
-  for (size_t i = 1; i < tensors.size(); ++i) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     TORCH_CHECK(tensors[i].sizes() == entry_shape,
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
@@ -1416,7 +1449,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
   if (result.dtype() != firstTensor.dtype()) return false;
 
   // Inputs cannot alias the output tensor
-  for (size_t i = 0; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(tensors.size())) {
     auto lap = at::get_overlap_status(result, tensors[i]);
     TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
         lap != at::MemOverlapStatus::FULL, 0,
@@ -1438,7 +1471,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
 
   // check remainder of inputs
   auto const &first_tensor_shape = firstTensor.sizes();
-  for (size_t i = 1; i < tensors.size(); i++) {
+  for (const auto i : c10::irange(1, tensors.size())) {
     auto const &tensor = tensors[i];
     TORCH_CHECK(tensors[i].sizes() == firstTensor.sizes(),
       "stack expects each tensor to be equal size, but got ", first_tensor_shape,
@@ -1468,9 +1501,14 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
     result_sizes.insert(result_sizes.begin() + dim, tensors.size());
 
     // skip resizing if size of result is same as expected
+    // raise a warning while resizing if output has one or more elements
+    // at::native::resize_output(result, result_sizes);
+    // TODO: restore the above, see https://github.com/pytorch/pytorch/issues/64709
+
     if (result.sizes() != result_sizes) {
       result.resize_(result_sizes);
     }
+
     stack_serial_stub(kCPU, result, tensors, dim);
     return true;
   }
@@ -2013,6 +2051,8 @@ Tensor flatten(const Tensor& self, Dimname start_dim, Dimname end_dim, Dimname o
 
 Tensor flatten(const Tensor& self, DimnameList dims, Dimname out_dim) {
   auto positions = dimnames_to_positions(self, dims);
+  TORCH_CHECK(positions.size() > 0,
+      "flatten(tensor, dims, out_dim): dims cannot be empty");
   for (const auto i : c10::irange(positions.size() - 1)) {
     if (positions[i] + 1 == positions[i + 1]) continue;
     TORCH_CHECK(positions[i] + 1 == positions[i + 1],
@@ -2113,30 +2153,85 @@ std::vector<Tensor> unbind(const Tensor& self, Dimname dim) {
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
+  TORCH_WARN_ONCE("torch.meshgrid: in an upcoming release, it will be required to pass the "
+                  "indexing argument.");
+  return native::meshgrid(tensors, /*indexing=*/"ij");
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors,
+                             c10::string_view indexing) {
   int64_t size = tensors.size();
   TORCH_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+
+  for(const auto i: c10::irange(size - 1)){
+    TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
+    TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+  }
+
+  // Input tensors is of type TensorList, which is an alias to a
+  // constant array slice, which doesn't allow for mutations. We may
+  // need to swap our first two elements if indexing is "ij", so we
+  // unconditionally create a vector that we can reorder to keep the
+  // implementation simple.
+  //
+  // We are not concerned with the performance of this relative to
+  // constructor a grid for each input.
+  std::vector<std::reference_wrapper<const Tensor>> tensor_refs(tensors.begin(),
+                                                                tensors.end());
+
+  // Whether or not to swap the first two tensors.
+  //
+  // We only swap if there are at least two* input tensors (obviously)
+  // and if indexing is "xy".
+  //
+  // A reminder about "xy" semantics: "xy" semantics implies that the
+  // output grids are in the cartesian coordinate system. Thus the
+  // first dimension is the "x" axis (corresponding to column) and the
+  // second dimension is the "y" axis (corresponding to row). Tensors,
+  // however, generally consider the first axis to be the row and the
+  // second axis to be the columns. Thus we flip the two dimensions in
+  // contrast to "ij" indexing.
+  //
+  // It turns out that it's easiest to implement this by just swapping
+  // the first two inputs. However, the order of the outputs still
+  // must correspond to the order of the inputs. Thus we also must
+  // swap the outputs if we swapped the inputs.
+  //
+  // * Why do we even support this function for exactly one input?
+  bool swap_first_and_second_tensors;
+
+  if (indexing == "xy") {
+    // We can only swap if there are multiple tensors.
+    swap_first_and_second_tensors = size >= 2;
+    if (swap_first_and_second_tensors) {
+      std::swap(tensor_refs[0], tensor_refs[1]);
+    }
+  } else {
+    // Only "xy" and "ij" are supported, and we already checked for
+    // "xy" above. Only "ij" remains as a valid mode.
+    TORCH_CHECK(indexing == "ij",
+                "torch.meshgrid: indexing must be one of \"xy\" or \"ij\", "
+                "but received: ", indexing);
+    swap_first_and_second_tensors = false;
+  }
+
   std::vector<int64_t> shape(size);
   for(const auto i: c10::irange(size)){
-    switch (tensors[i].dim()) {
-    case 0:
-      shape[i] = 1;
-      break;
-    case 1:
-      shape[i] = tensors[i].size(0);
-      break;
-    default:
-      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
-    }
-  }
-  for(const auto i: c10::irange(size - 1)){
-      TORCH_CHECK(tensors[i].dtype() == tensors[i+1].dtype(), "meshgrid expects all tensors to have the same dtype");
-      TORCH_CHECK(tensors[i].device() == tensors[i+1].device(), "meshgrid expects all tensors to have the same device");
+    TORCH_CHECK(tensor_refs[i].get().dim() <= 1,
+                "torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: ", tensor_refs[i]);
+    shape[i] = tensor_refs[i].get().numel();  // treat 0D tensors as if they were a 1D tensor
   }
   std::vector<Tensor> grids;
+  std::vector<int64_t> view_shape(size, 1);
   for(const auto i: c10::irange(size)){
-    std::vector<int64_t> view_shape(size, 1);
-    view_shape[i] = -1;
-    grids.push_back(tensors[i].view(view_shape).expand(shape));
+    view_shape[i] = -1;  // select this dimension to infer
+    grids.push_back(tensor_refs[i].get().view(view_shape).expand(shape));
+    view_shape[i] = 1;  // restore to previous value
+  }
+
+  // Remember we need to also swap the outputs if we swapped the inputs.
+  if (swap_first_and_second_tensors) {
+    std::swap(grids[0], grids[1]);
   }
   return grids;
 }
@@ -2144,7 +2239,14 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
 // Numpy-style `a.T`: returns the tensor
 // with dims reversed
 Tensor numpy_T(const Tensor &self) {
-  int64_t n = self.dim();
+  const auto n = self.dim();
+  if (n != 2 && n != 0) {
+    TORCH_WARN_ONCE(
+        "The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated ",
+        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices",
+        "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
+    );
+  }
   DimVector transpose_dims;
   for (int64_t i = n - 1; i >= 0; --i) {
     transpose_dims.push_back(i);
@@ -2152,11 +2254,50 @@ Tensor numpy_T(const Tensor &self) {
   return self.permute(transpose_dims);
 }
 
-Tensor view(const Tensor& self, IntArrayRef size) {
+Tensor matrix_H(const Tensor &self) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == 2 || ndim == 0,
+      "tensor.H is only supported on matrices (2-D tensors). Got ", ndim, "-D tensor.",
+      ndim > 2 ? " For batches of matrices, consider using tensor.mH" : "");
+  if (self.is_complex()) {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  } else {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  }
+}
+
+namespace {
+Tensor _adjoint(const Tensor &self, const bool transpose, const char* const name) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim != 1,
+      "tensor.", name, " is only supported on matrices or batches of matrices. Got 1-D tensor.");
+  if (transpose || !self.is_complex()) {
+    return ndim == 0 ? self : self.transpose(-2, -1);
+  } else {
+    return ndim == 0 ? self.conj() : self.transpose(-2, -1).conj();
+  }
+}
+} // anonymous namespace
+
+Tensor mT(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/true, "mT");
+}
+
+Tensor mH(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "mH");
+}
+
+Tensor adjoint(const Tensor &self) {
+  return _adjoint(self, /*transpose=*/false, "adjoint()");
+}
+
+Tensor view(const Tensor& self,
+            IntArrayRef size) {
+
   at::DimVector inferred_size = at::infer_size_dv(size, self.numel());
   auto stride = at::detail::computeStride(self.sizes(),
-                                          self.strides(),
-                                          inferred_size);
+                                        self.strides(),
+                                        inferred_size);
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
@@ -2270,10 +2411,7 @@ Tensor diag_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t diagon
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(input_sizes, grad.options());
-  auto diag = grad_input.diagonal(diagonal);
-  diag.copy_(grad);
-  return grad_input;
+  return at::diagonal_backward(grad, input_sizes, diagonal, 0, 1);
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntArrayRef input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
@@ -2423,4 +2561,27 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    auto output = self.clone();
+    auto slice = output.slice(dim, start, end, step);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+    auto output = self.clone();
+    auto slice = output.select(dim, index);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64_t offset, int64_t dim1, int64_t dim2) {
+    auto output = self.clone();
+    auto slice = output.diagonal(offset, dim1, dim2);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+
+} // namespace native
+} // namespace at

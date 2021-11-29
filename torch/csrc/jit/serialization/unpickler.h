@@ -108,6 +108,7 @@ class TORCH_API Unpickler {
       const std::string& module_name,
       const std::string& class_name);
   void rebuildTensor(bool quantized);
+  void rebuildSparseTensor();
 #ifdef USE_DISTRIBUTED
   void rebuildRRef();
 #endif

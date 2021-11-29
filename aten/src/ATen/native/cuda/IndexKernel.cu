@@ -6,9 +6,10 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/core/Array.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <ATen/core/Tensor.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/ExpandUtils.h>
@@ -16,7 +17,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/KernelUtils.cuh>
 #include <c10/util/MaybeOwned.h>
-#include <THC/THCTensorInfo.cuh>
 
 namespace at { namespace native {
 
@@ -69,9 +69,9 @@ void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     return;
   }
 
-  auto sizes = at::detail::Array<int64_t, 25>(0);
-  auto strides = at::detail::Array<int64_t, 25>(0);
-  auto index_ptrs = at::detail::Array<char*, 25>(nullptr);
+  auto sizes = at::detail::Array<int64_t, MAX_DIMS>(0);
+  auto strides = at::detail::Array<int64_t, MAX_DIMS>(0);
+  auto index_ptrs = at::detail::Array<char*, MAX_DIMS>(nullptr);
   for (int i = 0; i < num_indices; i++) {
     sizes[i] = index_size[i];
     strides[i] = index_stride[i];
@@ -330,7 +330,7 @@ void put_kernel(TensorIterator& iter, const Tensor& output, const bool accumulat
     // Cannot use `OpaqueType`, as we need the actual type for `fastSpecializedgpuAtomicAdd`
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(output) ? ScalarType::Int : ScalarType::Long,
         "put_cuda_index", [&] {
-           auto* __restrict__ indexed_ptr = output.template data<scalar_t>();
+           auto* __restrict__ indexed_ptr = output.template data_ptr<scalar_t>();
            if (accumulate) {
              index_t numel = output.numel();
              cuda_take_put_kernel<scalar_t, index_t>(iter, output,
@@ -355,7 +355,7 @@ void take_kernel(
     // Cannot use `OpaqueType`, as Tensor::data_ptr<OpaqueType<N>> is not implemented
     AT_DISPATCH_INDEX_TYPES(cuda::detail::canUse32BitIndexMath(input) ? ScalarType::Int : ScalarType::Long,
       "take_cuda_index", [&] {
-         const auto* __restrict__ indexed_ptr = input.template data<scalar_t>();
+         const auto* __restrict__ indexed_ptr = input.template data_ptr<scalar_t>();
          cuda_take_put_kernel<scalar_t, index_t>(iter, input,
             [indexed_ptr] __device__(scalar_t& iterated, const index_t offset) {
                iterated = indexed_ptr[offset];
@@ -366,8 +366,11 @@ void take_kernel(
 
 namespace {
 
-__global__ void masked_scatter_size_check(int64_t *totalElements, int64_t srcSize) {
-  CUDA_KERNEL_ASSERT(*totalElements <= srcSize);
+template <typename mask_t>
+__global__ void masked_scatter_size_check(int64_t *mask_exclusive_sum, mask_t *mask, int64_t srcSize) {
+  // Convert exclusive sum to inclusive sum
+  auto totalElements = *mask_exclusive_sum + *mask;
+  CUDA_KERNEL_ASSERT(totalElements <= srcSize);
 }
 
 template <typename mask_t>
@@ -379,22 +382,20 @@ void masked_scatter_cuda_impl(Tensor& self, const Tensor& mask, const Tensor& so
   }
 
   auto mask_cont = mask.contiguous();
+  auto mask_numel = mask.numel();
 
   // Use a prefix sum to determine the output locations of the masked elements
   auto maskPrefixSum = at::empty_like(mask_cont, mask.options().dtype(kLong));
+  auto maskPrefixSum_data = maskPrefixSum.data_ptr<int64_t>();
+  auto mask_data = mask_cont.data_ptr<mask_t>();
 
-  at::cuda::cub::exclusive_scan(
-    mask_cont.data_ptr<mask_t>(), maskPrefixSum.data_ptr<int64_t>(),
-    []__device__(int64_t a, int64_t b) { return a + b; }, int64_t(0),
-    mask_cont.numel());
-
-  // Determine our output size
-  auto totalElements = (at::_unsafe_view(maskPrefixSum, -1)[-1] + at::_unsafe_view(mask_cont, -1)[-1]);
+  at::cuda::cub::exclusive_sum_in_common_type(
+      mask_data, maskPrefixSum_data, mask_numel);
 
   // Asynchronously check that the number of `1` elements present in the mask
   // must be <= the number of elements available in `src`.
   masked_scatter_size_check<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-      totalElements.data_ptr<int64_t>(), srcSize);
+      &maskPrefixSum_data[mask_numel - 1], &mask_data[mask_numel - 1], srcSize);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   // We are getting elements from `src` based on an offset from

@@ -1,7 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <THC/THCAtomics.cuh>
+#include <ATen/cuda/Atomic.cuh>
 
 #include <math.h>
 
@@ -94,11 +93,16 @@ __host__ __forceinline__ static accscalar_t area_pixel_compute_scale(
     int output_size,
     bool align_corners,
     const c10::optional<double> scale) {
-  if (output_size > 1) {
-    return align_corners ? (accscalar_t)(input_size - 1) / (output_size - 1)
-                         :  compute_scales_value<accscalar_t>(scale, input_size, output_size);
-  } else {
-    return static_cast<accscalar_t>(0);
+  if(align_corners) {
+    if(output_size > 1) {
+      return (accscalar_t)(input_size - 1) / (output_size - 1);
+    }
+    else {
+      return static_cast<accscalar_t>(0);
+    }
+  }
+  else{
+    return compute_scales_value<accscalar_t>(scale, input_size, output_size);
   }
 }
 
@@ -125,8 +129,25 @@ __device__ __forceinline__ static int nearest_neighbor_compute_source_index(
     const float scale,
     int dst_index,
     int input_size) {
+  // index_f32 = (output_index) * scale
+  // input_index = round(index_f32)
+  // Same as a buggy OpenCV INTER_NEAREST
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_neighbor_exact_compute_source_index as replacement
   const int src_index =
-      min(static_cast<int>(floorf(dst_index * scale)), input_size - 1);
+      min(static_cast<int>(floorf((dst_index) * scale)), input_size - 1);
+  return src_index;
+}
+
+__device__ __forceinline__ static int nearest_neighbor_exact_compute_source_index(
+    const float scale,
+    int dst_index,
+    int input_size) {
+  // index_f32 = (output_index + 0.5) * scale - 0.5
+  // input_index = round(index_f32)
+  // Same as Pillow and Scikit-Image/Scipy ndi.zoom
+  const int src_index =
+      min(static_cast<int>(floorf((dst_index + 0.5) * scale)), input_size - 1);
   return src_index;
 }
 
@@ -135,8 +156,22 @@ __device__ __forceinline__ static int nearest_neighbor_bw_compute_source_index(
     const float scale,
     int dst_index,
     int output_size) {
+  // Equivalent to buggy OpenCV INTER_NEAREST
+  // We keep this method for BC and consider as deprecated.
+  // See nearest_neighbor_exact_bw_compute_source_index as replacement
   const int src_index =
       min(static_cast<int>(ceilf(dst_index * scale)), output_size);
+  return src_index;
+}
+
+// see NOTE [ Nearest neighbor upsampling kernel implementation ]
+__device__ __forceinline__ static int nearest_neighbor_exact_bw_compute_source_index(
+    const float scale,
+    int dst_index,
+    int output_size) {
+  // Equivalent to Pillow and Scikit-Image/Scipy ndi.zoom
+  const int src_index =
+      min(static_cast<int>(ceilf(dst_index * scale - 0.5)), output_size);
   return src_index;
 }
 

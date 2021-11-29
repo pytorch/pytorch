@@ -1,10 +1,16 @@
+# Generates ADInplaceOrViewType.h/cpp
+#
+# NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
+# if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
+# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+
 from tools.codegen.api import cpp
 from tools.codegen.api.autograd import (
     NativeFunctionWithDifferentiabilityInfo, gen_differentiable_outputs,
     dispatch_strategy,
 )
 from tools.codegen.api.types import (Binding, DispatcherSignature, CppSignatureGroup, CType,
-                                     BaseCType, OptionalCType, intT, boolT, intArrayRefT)
+                                     BaseCType, OptionalCType, longT, boolT, intArrayRefT)
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
 from tools.codegen.model import (
@@ -12,13 +18,11 @@ from tools.codegen.model import (
     SchemaKind, is_foreach_op,
 )
 from typing import List, Optional, Sequence, Tuple
-from tools.codegen.gen import FileManager
-from tools.codegen.utils import mapMaybe
+from tools.codegen.utils import mapMaybe, FileManager
 from .context import with_native_function_with_differentiability_info
 from .gen_trace_type import (
     MANUAL_AUTOGRAD, type_wrapper_name, tie_return_values, get_return_value
 )
-
 
 # See NOTE [ Autograd View Variables ] in variable.h for details.
 # If you update list VIEW_FUNCTIONS or RETURNS_VIEWS_OF_INPUT,
@@ -28,7 +32,12 @@ from .gen_trace_type import (
 #
 # A map: function name => name of the argument that all outputs are view of
 
-VIEW_FUNCTIONS_WITH_METADATA_CHANGE = ['view_as_complex', 'view_as_real', '_conj', '_neg_view']
+VIEW_FUNCTIONS_WITH_METADATA_CHANGE = [
+    'view_as_complex',
+    'view_as_real',
+    '_conj',
+    '_neg_view'
+]
 
 VIEW_FUNCTIONS = {
     'numpy_T': 'self',
@@ -53,11 +62,14 @@ VIEW_FUNCTIONS = {
     '_values': 'self',
     'indices': 'self',
     'values': 'self',
+    'crow_indices': 'self',
+    'col_indices': 'self',
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
     # FIXME: clone indices on construction.
     'sparse_coo_tensor_with_dims_and_tensors': 'values',
+    '_reshape_alias': 'self',
 }
 
 for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
@@ -71,7 +83,7 @@ for key in VIEW_FUNCTIONS_WITH_METADATA_CHANGE:
 RETURNS_VIEWS_OF_INPUT = set(VIEW_FUNCTIONS.keys()).union({
     'chunk', 'detach', 'contiguous', 'reshape', 'reshape_as',
     'expand_as', 'view_as', 'real', 'imag', 'narrow', 'movedim',
-    'tensor_split', 'swapdims', 'swapaxes'
+    'tensor_split', 'swapdims', 'swapaxes', 'mT', 'mH', 'adjoint', 'matrix_H'
 })
 
 # These are the functions we consider views for the purposes of validating
@@ -121,6 +133,10 @@ WRAPPER_REGISTRATION = CodeTemplate("""\
 m.impl("${unqual_operator_name_with_overload}",
        TORCH_FN(${class_type}::${type_wrapper_name})
 );
+""")
+
+AUTOGRAD_NOT_IMPLEMENTED_REGISTRATION = CodeTemplate("""\
+m.impl("${unqual_operator_name_with_overload}", torch::autograd::autogradNotImplementedFallback());
 """)
 
 INPLACE_REDISPATCH = CodeTemplate("""\
@@ -203,8 +219,7 @@ def unpack_args(f: NativeFunction) -> Tuple[List[str], List[Binding]]:
 def get_base_name(f: NativeFunction) -> str:
     return f.func.name.name.base  # TODO: should be str(f.func.name.name)?
 
-def get_view_info(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
-    f = fn.func
+def get_view_info(f: NativeFunction) -> Optional[str]:
     base_name = get_base_name(f)
     view_info = VIEW_FUNCTIONS.get(base_name, None)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
@@ -237,8 +252,8 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
     replay_view_func = ''
     updated_unpacked_args: List[str] = []
     known_view_arg_simple_types: List[CType] = [
-        BaseCType(intT),
-        OptionalCType(BaseCType(intT)),
+        BaseCType(longT),
+        OptionalCType(BaseCType(longT)),
         BaseCType(boolT),
         BaseCType(intArrayRefT)]
     for unpacked_binding in unpacked_bindings:
@@ -259,7 +274,7 @@ def emit_view_lambda(f: NativeFunction, unpacked_bindings: List[Binding]) -> str
             arg_vec = arg + '_vec'
             replay_view_func += ARRAYREF_TO_VEC.substitute(arg=arg, vec=arg_vec)
             updated_unpacked_args.append(arg_vec)
-        elif arg_type == OptionalCType(BaseCType(intT)):
+        elif arg_type == OptionalCType(BaseCType(longT)):
             # Materialize int64_t? to int64_t
             arg_value = arg + '_val'
             replay_view_func += OPTIONAL_TO_VAL.substitute(arg=arg, val=arg_value, default='0')
@@ -282,7 +297,7 @@ def emit_view_body(fn: NativeFunctionWithDifferentiabilityInfo, var: str) -> Tup
     # See NOTE [ Autograd View Variables ] in variable.h for details.
     f = fn.func
     base_name = get_base_name(f)
-    view_info = get_view_info(fn)
+    view_info = get_view_info(f)
     call = ''
     differentiable_outputs = gen_differentiable_outputs(fn)
     differentiable_output_vars = {r.name for r in differentiable_outputs}
@@ -357,7 +372,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         for r in cpp.return_names(f):
             inplace_view_body.append(f'increment_version({r});')
     else:
-        assert(get_view_info(fn) is not None)
+        assert(get_view_info(f) is not None)
         inplace_view_body.append(VIEW_REDISPATCH.substitute(
             assign_return_values='auto ' + TMP_VAR + ' = ',
             api_name=api_name,
@@ -385,7 +400,7 @@ def gen_formals(f: NativeFunction) -> str:
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return METHOD_DEFINITION.substitute(
         return_type=cpp.returns_type(f.func.returns).cpp_type(),
@@ -397,7 +412,7 @@ def inplace_or_view_method_definition(fn: NativeFunctionWithDifferentiabilityInf
 @with_native_function_with_differentiability_info
 def inplace_or_view_method_registration(fn: NativeFunctionWithDifferentiabilityInfo) -> Optional[str]:
     f = fn.func
-    if get_view_info(fn) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
+    if get_view_info(f) is None and (not modifies_arguments(f) or is_foreach_op(str(f.func.name))):
         return None
     return WRAPPER_REGISTRATION.substitute(
         unqual_operator_name_with_overload=f.func.name,

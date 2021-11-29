@@ -5,16 +5,22 @@ checking quantization api and properties of resulting modules.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.intrinsic.quantized.dynamic as nniqd
 import torch.nn.quantized as nnq
 import torch.nn.quantized.dynamic as nnqd
 from torch.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 
 from torch.testing._internal.common_utils import TestCase
+from torch.ao.quantization import (
+    QuantType,
+    default_dynamic_qat_qconfig,
+    default_embedding_qat_qconfig,
+)
 from torch.quantization import QuantWrapper, QuantStub, DeQuantStub, \
     default_qconfig, default_dynamic_qconfig, default_per_channel_qconfig, QConfig, default_observer, default_weight_observer, \
     propagate_qconfig_, convert, get_default_qconfig, quantize_dynamic_jit, quantize_jit, float_qparams_weight_only_qconfig, \
-    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, QuantType, quantize
+    get_default_qat_qconfig, PerChannelMinMaxObserver, default_dynamic_quant_observer, QConfigDynamic, quantize
 from torch.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qconfig_propagation_list,
@@ -32,7 +38,7 @@ try:
         prepare_qat_fx,
         convert_fx,
     )
-    from torch.quantization.ns.ns_types import NSSingleResultValuesType, NSSubgraph
+    from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
     from torch.fx import GraphModule
     HAS_FX = True
@@ -48,7 +54,7 @@ import os
 import unittest
 import numpy as np
 from torch.testing import FileCheck
-from typing import Callable, Tuple, Dict, Any, Union, Type
+from typing import Callable, Tuple, Dict, Any, Union, Type, Optional
 
 class NodeSpec:
     ''' Used for checking GraphModule Node
@@ -105,6 +111,7 @@ def test_only_train_fn(model, train_data, loss_fn=_default_loss_fn):
     train_loss, correct, total = 0, 0, 0
     for i in range(10):
         model.train()
+
         for data, target in train_data:
             optimizer.zero_grad()
             output = model(data)
@@ -422,6 +429,13 @@ class QuantizationTestCase(TestCase):
         self.assertEqual(type(mod), nnqd.Linear)
         self.assertEqual(mod._packed_params.dtype, dtype)
 
+    def checkDynamicQuantizedLinearRelu(self, mod, dtype):
+        r"""Checks that mod has been swapped for an nnqd.Linear
+            module, the bias is float.
+        """
+        self.assertEqual(type(mod), nniqd.LinearReLU)
+        self.assertEqual(mod._packed_params.dtype, dtype)
+
     def check_eager_serialization(self, ref_model, loaded_model, x):
         # Check state dict serialization and torch.save APIs
         model_dict = ref_model.state_dict()
@@ -732,6 +746,13 @@ class QuantizationTestCase(TestCase):
                                         values_0.shape == values_1.shape,
                                         f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
                                         f"have a shape mismatch at idx {idx}.")
+                                elif isinstance(values_0, list):
+                                    values_0 = values_0[0]
+                                    values_1 = values_1[0]
+                                    self.assertTrue(
+                                        values_0.shape == values_1.shape,
+                                        f"Layer {layer_name}, {model_name_0} and {model_name_1} " +
+                                        f"have a shape mismatch at idx {idx}.")
                                 else:
                                     assert isinstance(values_0, tuple), \
                                         f"unhandled type {type(values_0)}"
@@ -753,17 +774,22 @@ class QuantizationTestCase(TestCase):
                             self.assertTrue(ref_node_name_0 != prev_node_name_0)
                             self.assertTrue(ref_node_name_1 != prev_node_name_1)
 
-        def checkGraphModeFxOp(self, model, inputs, quant_type,
-                               expected_node=None,
-                               expected_node_occurrence=None,
-                               expected_node_list=None,
-                               is_reference=False,
-                               print_debug_info=False,
-                               custom_qconfig_dict=None,
-                               prepare_expected_node=None,
-                               prepare_expected_node_occurrence=None,
-                               prepare_expected_node_list=None,
-                               prepare_custom_config_dict=None):
+        def checkGraphModeFxOp(
+                self,
+                model,
+                inputs,
+                quant_type,
+                expected_node=None,
+                expected_node_occurrence=None,
+                expected_node_list=None,
+                is_reference=False,
+                print_debug_info=False,
+                custom_qconfig_dict=None,
+                prepare_expected_node=None,
+                prepare_expected_node_occurrence=None,
+                prepare_expected_node_list=None,
+                prepare_custom_config_dict=None,
+                backend_config_dict=None):
             """ Quantizes model with graph mode quantization on fx and check if the
                 quantized model contains the quantized_node
 
@@ -790,6 +816,17 @@ class QuantizationTestCase(TestCase):
                         expected_node_occurrence, but for prepare
                     prepare_expected_node_list: same as expected_node_list, but
                         for prepare
+
+                Returns:
+                    A dictionary with the following structure:
+                   {
+                       "prepared": ...,  # the prepared model
+                       "quantized": ...,  # the quantized non-reference model
+                       "quantized_reference": ...,  # the quantized reference model
+                       "result": ...,  # the result for either quantized or
+                                       # quantized_reference model depending on the
+                                       # is_reference arguemnt
+                   }
             """
             # TODO: make img_data a single example instead of a list
             if type(inputs) == list:
@@ -816,7 +853,8 @@ class QuantizationTestCase(TestCase):
                 qconfig_dict = custom_qconfig_dict
             prepared = prepare(
                 model, qconfig_dict,
-                prepare_custom_config_dict=prepare_custom_config_dict)
+                prepare_custom_config_dict=prepare_custom_config_dict,
+                backend_config_dict=backend_config_dict)
             if not quant_type == QuantType.DYNAMIC:
                 prepared(*inputs)
 
@@ -832,10 +870,13 @@ class QuantizationTestCase(TestCase):
                 prepare_expected_node_occurrence, prepare_expected_node_list)
 
             prepared_copy = copy.deepcopy(prepared)
+            result_prepared = copy.deepcopy(prepared)
             qgraph = convert_fx(prepared)
             qgraph_reference = convert_fx(prepared_copy, is_reference=True)
             result = qgraph(*inputs)
+            result_quantized = copy.deepcopy(qgraph)
             result_reference = qgraph_reference(*inputs)
+            result_quantized_reference = copy.deepcopy(qgraph_reference)
 
             qgraph_to_check = qgraph_reference if is_reference else qgraph
             if print_debug_info:
@@ -845,7 +886,10 @@ class QuantizationTestCase(TestCase):
                 print()
             self.checkGraphModuleNodes(
                 qgraph_to_check, expected_node, expected_node_occurrence, expected_node_list)
-            return result
+            return {"prepared": result_prepared,
+                    "quantized": result_quantized,
+                    "quantized_reference": result_quantized_reference,
+                    "result": result}
 
 
     def checkEmbeddingSerialization(self, qemb, num_embeddings, embedding_dim, indices, offsets,
@@ -947,12 +991,12 @@ class QuantizationLiteTestCase(QuantizationTestCase):
 
                     mobile_module_result = mobile_module(input)
 
-                    torch.testing.assert_allclose(script_module_result, mobile_module_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_result)
                     mobile_module_forward_result = mobile_module.forward(input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_forward_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_forward_result)
 
                     mobile_module_run_method_result = mobile_module.run_method("forward", input)
-                    torch.testing.assert_allclose(script_module_result, mobile_module_run_method_result)
+                    torch.testing.assert_close(script_module_result, mobile_module_run_method_result)
                 except AssertionError as e:
                     if retry == max_retry:
                         raise e
@@ -1605,6 +1649,20 @@ class ManualLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualLinearDynamicQATModel(torch.nn.Module):
+    r"""A Module that uses a dynamic QAT by default.
+    """
+    def __init__(self, qconfig=None):
+        super().__init__()
+        self.qconfig = qconfig or default_dynamic_qat_qconfig
+        self.fc1 = torch.nn.Linear(5, 1).to(dtype=torch.float)
+        self.fc2 = torch.nn.Linear(1, 10).to(dtype=torch.float)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.fc2(x)
+        return x
+
 class ManualConvLinearQATModel(torch.nn.Module):
     r"""A module with manually inserted `QuantStub` and `DeQuantStub`
     and contains both linear and conv modules
@@ -1626,6 +1684,45 @@ class ManualConvLinearQATModel(torch.nn.Module):
         x = self.fc2(x)
         return self.dequant(x)
 
+class ManualEmbeddingBagLinear(nn.Module):
+    def __init__(self):
+        super(ManualEmbeddingBagLinear, self).__init__()
+        self.emb = nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
+
+    def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
+                per_sample_weights: Optional[torch.Tensor] = None):
+        x = self.emb(input, offsets, per_sample_weights)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
+
+class DeFusedEmbeddingBagLinear(nn.Module):
+    r"""A module to simulate QAT embedding bag with a linear layer,
+    this module uses a separate embedding and bagging op, similar
+    to that which is described in the EmbeddingBag documentation.
+
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.bagging_op = torch.sum
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = self.bagging_op(self.emb(input), dim=1)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
 
 class SubModelForFusion(nn.Module):
     def __init__(self):
@@ -1901,16 +1998,23 @@ class EmbeddingModule(torch.nn.Module):
     def forward(self, indices):
         return self.emb(indices)
 
-class EmbeddingWithLinear(torch.nn.Module):
+class EmbeddingWithStaticLinear(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
-        self.fc = torch.nn.Linear(5, 5)
+        self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12)
+        self.fc = torch.nn.Linear(4, 2)
         self.emb.qconfig = float_qparams_weight_only_qconfig
         self.qconfig = default_qconfig
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
 
-    def forward(self, indices, linear_in):
-        return self.emb(indices), self.fc(linear_in)
+    def forward(self, indices, offsets, linear_in):
+        emb = self.emb(indices, offsets)
+        q_x = self.quant(linear_in)
+        fc = self.fc(q_x)
+        fc = self.dequant(fc)
+        features = torch.cat([fc] + [emb], dim=1)
+        return features
 
 class DenseTopMLP(nn.Module):
 

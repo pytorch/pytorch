@@ -9,6 +9,7 @@
 
 import os
 import shutil
+import signal
 import tempfile
 from typing import Any, Dict, Optional, Tuple
 
@@ -20,9 +21,10 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerState,
 )
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import start_processes, PContext
+from torch.distributed.elastic.multiprocessing import PContext, start_processes
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
+
 
 log = get_logger()
 
@@ -183,9 +185,9 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _shutdown(self) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
         if self._pcontext:
-            self._pcontext.close()
+            self._pcontext.close(death_sig)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.

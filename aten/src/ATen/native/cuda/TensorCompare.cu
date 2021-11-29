@@ -1,10 +1,10 @@
-#include <ATen/NativeFunctions.h>
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/NumericUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
+#include <c10/core/Scalar.h>
 
 
 namespace at { namespace native {
@@ -60,7 +60,7 @@ void clamp_kernel_impl(TensorIterator& iter) {
   });
 }
 
-void clamp_scalar_kernel_impl(TensorIterator& iter, Scalar min, Scalar max) {
+void clamp_scalar_kernel_impl(TensorIteratorBase& iter, const Scalar& min, const Scalar& max) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     const auto lower = min.to<scalar_t>();
     const auto upper = max.to<scalar_t>();
@@ -129,15 +129,6 @@ void clamp_max_scalar_kernel_impl(TensorIterator& iter, Scalar max) {
   });
 }
 
-// Composite op implementation for simplicity. This materializes the cross product of elements and test elements,
-// so it is not very memory efficient, but it is fast on CUDA.
-void isin_default_kernel_gpu(const Tensor& elements, const Tensor& test_elements, bool invert, const Tensor& out) {
-  std::vector<int64_t> bc_shape(elements.dim(), 1);
-  bc_shape.push_back(-1);
-  out.copy_(invert ? elements.unsqueeze(-1).ne(test_elements.view(bc_shape)).all(-1)
-    : elements.unsqueeze(-1).eq(test_elements.view(bc_shape)).any(-1));
-}
-
 } // anonymous namespace
 
 
@@ -150,7 +141,6 @@ REGISTER_DISPATCH(clamp_max_stub, &clamp_max_kernel_impl);
 REGISTER_DISPATCH(clamp_scalar_stub, &clamp_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
-REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_gpu);
 
 template <typename scalar_t>
 __global__ void _assert_async_cuda_kernel(scalar_t* input) {
@@ -164,7 +154,8 @@ __global__ void _assert_async_cuda_kernel(c10::complex<double>* input) {
   CUDA_KERNEL_ASSERT(input[0] != c10::complex<double>(0, 0));
 }
 
-void _assert_async_cuda(const Tensor& self) {
+void _assert_async_cuda(const Tensor& self_tensor) {
+  const TensorBase &self = get_tensor_base(self_tensor);
   auto n = self.numel();
   TORCH_CHECK(n != 0, "Boolean value of Tensor with no values is ambiguous");
   TORCH_CHECK(n < 2, "Boolean value of Tensor with more than one value is ambiguous");

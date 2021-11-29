@@ -25,9 +25,7 @@ void polar_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(complex_stub, &complex_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_DISPATCH(polar_stub, &polar_kernel);
 
 } // namespace native

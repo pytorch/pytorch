@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/Config.h>
+#include <ATen/CPUFunctions.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/native/sparse/ParamUtils.h>
 #include <ATen/NativeFunctions.h>
@@ -122,12 +123,12 @@ std::vector<std::vector<int64_t>> get_pools(const Tensor& indices, const IntArra
     int64_t pool_index = 0;
     for (int64_t j=0; j < ndim; j++) {
       if (j != dim) {
-        auto indices_row = indices_accessor[j];
-        auto stride = strides[j];
+        const auto indices_row = indices_accessor[j];
+        const auto stride = strides[j];
         pool_index += stride * indices_row[i];
       }
     }
-    if(pools.size() <= pool_index){
+    if(static_cast<int64_t>(pools.size()) <= pool_index){
       pools.resize(pool_index + 1);
     }
     pools.at(pool_index).push_back(i);
@@ -288,10 +289,11 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 
   if (dim >= sparse_dim) {
     if (LogSoftMax) {
-      auto new_values = log_softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values =
+          at::cpu::_log_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     } else {
-      auto new_values = softmax_cpu(values, dim - sparse_dim + 1, false);
+      auto new_values = at::cpu::_softmax(values, dim - sparse_dim + 1, false);
       out_values.set_(new_values);
     }
     return;
@@ -370,7 +372,7 @@ void cpu_sparse_coo_softmax(Tensor output, const Tensor& input, const int64_t di
 }
 
 template <typename scalar_t, bool LogSoftMax>
-void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim) {
+void cpu_sparse_coo_softmax_backward(const Tensor& grad_input, const Tensor& grad, const Tensor& output, const int64_t dim, ScalarType input_dtype) {
   /*
 
     If LogSoftMax == false, then
@@ -409,13 +411,13 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
   auto grad_offsets = get_offsets(grad_indices, sizes, -1);
 
   if (dim >= sparse_dim) {
-    Tensor unused;
     if (out_offsets == grad_offsets) {
       if (LogSoftMax) {
-        auto r = log_softmax_backward_cpu(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cpu::_log_softmax_backward_data(
+            grad_values, out_values, dim - sparse_dim + 1, input_dtype);
         values.set_(r);
       } else {
-        auto r = softmax_backward_cpu(grad_values, out_values, dim - sparse_dim + 1, unused);
+        auto r = at::cpu::_softmax_backward_data(grad_values, out_values, dim - sparse_dim + 1, input_dtype);
         values.set_(r);
       }
     } else {
@@ -424,10 +426,11 @@ void cpu_sparse_coo_softmax_backward(Tensor& grad_input, const Tensor& grad, con
         auto j = low - grad_offsets.begin();
         if (j < grad_nnz && out_offsets[i] == grad_offsets[j]) {
           if (LogSoftMax) {
-            auto r = log_softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cpu::_log_softmax_backward_data(
+                grad_values[j], out_values[i], dim - sparse_dim, input_dtype);
             values[i].copy_(r);
           } else {
-            auto r = softmax_backward_cpu(grad_values[j], out_values[i], dim - sparse_dim, unused);
+            auto r = at::cpu::_softmax_backward_data(grad_values[j], out_values[i], dim - sparse_dim, input_dtype);
             values[i].copy_(r);
           }
         }
@@ -558,7 +561,7 @@ Tensor softmax_backward_sparse_cpu(
   }
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "softmax_backward", [&] {
     cpu_sparse_coo_softmax_backward<scalar_t, false>(
-        grad_input, grad, output, dim_);
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }
@@ -577,7 +580,7 @@ Tensor log_softmax_backward_sparse_cpu(
   }
   AT_DISPATCH_FLOATING_TYPES(grad.scalar_type(), "log_softmax_backward", [&] {
     cpu_sparse_coo_softmax_backward<scalar_t, true>(
-        grad_input, grad, output, dim_);
+        grad_input, grad, output, dim_, input_.scalar_type());
   });
   return grad_input;
 }

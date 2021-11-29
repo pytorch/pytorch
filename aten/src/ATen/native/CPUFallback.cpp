@@ -19,7 +19,7 @@ std::vector<at::Tensor> to_cpu(const at::TensorList& tensors) {
     std::vector<at::Tensor> cpu_tensors(tensors.size());
     std::vector<at::Tensor> valid_tensors;
     std::vector<bool> to_translate(tensors.size());
-    for (size_t i = 0; i < tensors.size(); ++i) {
+    for (const auto i : c10::irange(tensors.size())) {
         const at::Tensor& tensor = tensors[i];
         // Explicitly handling undefined tensors here instead of letting `at::_to_cpu` handle it.
         // Otherwise, we'd need to require all backends with their own implementation of _to_cpu
@@ -72,7 +72,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
 
   // Step 1: Convert all non-CPU tensor inputs into CPU tensors
   // and put them on the stack at the correct indices.
-  for (int64_t idx = 0; idx < arguments.size(); ++idx) {
+  for (const auto idx : c10::irange(arguments.size())) {
     const auto& ivalue = arguments[idx];
     if (ivalue.isTensor()) {
       tensor_args.push_back(ivalue.toTensor());
@@ -89,7 +89,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
   auto cpu_tensors = to_cpu(tensor_args);
 
-  for (auto i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto idx = tensor_args_indices[i];
     (*stack)[arguments_begin + idx] = c10::IValue(cpu_tensors[i]);
   }
@@ -100,10 +100,10 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to
   // directly copy the updated data on the CPU tensors back to the original inputs.
-  for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto tensor_idx = tensor_args_indices[i];
-    const auto& alias_info = schema_args[tensor_idx].alias_info();
-    if (alias_info.has_value() && alias_info.value().isWrite()) {
+    const AliasInfo* alias_info = schema_args[tensor_idx].alias_info();
+    if (alias_info != nullptr && alias_info->isWrite()) {
       at::_copy_from_and_resize(cpu_tensors[i], tensor_args[i]);
     }
   }
@@ -131,22 +131,24 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  for (int64_t idx = 0; idx < returns.size(); ++idx) {
+  for (const auto idx : c10::irange(returns.size())) {
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
-        const auto& alias_info = schema_returns[idx].alias_info();
-        if (alias_info.has_value() && alias_info.value().isWrite()) {
+        const AliasInfo* alias_info = schema_returns[idx].alias_info();
+        if (alias_info != nullptr && alias_info->isWrite()) {
           // Case (1): mutable alias case. Move the input ivalue directly onto the stack
           // in place of the existing cpu output tensor.
           bool found_alias = false;
           // We could store some extra metadata on the function schema to avoid the loop here
           // if we need to improve perf.
-          for (int64_t i = 0; i < tensor_args_indices.size(); ++i) {
+          for (const auto i : c10::irange(tensor_args_indices.size())) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = cpu_tensors[i];
-            const auto& input_alias_info = schema_args[input_tensor_idx].alias_info();
-            if (input_tensor.defined() && alias_info == input_alias_info) {
+            const AliasInfo* input_alias_info = schema_args[input_tensor_idx].alias_info();
+            // Checked above; adding assert to guard against breakage of the below condition due to changing the above if test.
+            TORCH_INTERNAL_ASSERT_DEBUG_ONLY(alias_info != nullptr);
+            if (input_tensor.defined() && (alias_info == input_alias_info || (input_alias_info != nullptr && *alias_info == *input_alias_info))) {
               // We've found the original input tensor that aliases with the current output.
               // Wrap it in an IValue and put it directly on the stack.
               (*stack)[returns_begin + idx] = c10::IValue(tensor_args[i]);
@@ -158,7 +160,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
                       "Found a return tensor argument with a mismatched mutable alias: ", schema_returns[idx]);
         } else {
           c10::optional<c10::Device> tgt_device = compute_target_device(tensor_args, tensorlist_args);
-          if (alias_info.has_value() && !alias_info.value().isWrite()) {
+          if (alias_info != nullptr && !alias_info->isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and not creating a view.
             //If this operator is needed, the backend should provide a kernel for it.
             // See Note [CPU Fallback Does Not Handle View Operators]

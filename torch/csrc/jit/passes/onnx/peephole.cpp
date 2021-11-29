@@ -320,6 +320,7 @@ void pushPackingPastRnn(Block* b) {
         Node* shape = b->owningGraph()->create(onnx::Shape);
         shape->insertAfter(rnn_input->node());
         shape->addInput(rnn_input);
+        shape->copyMetadata(n);
         batch_sizes->replaceFirstUseWith(shape->output());
         user->inputs().at(1)->node()->t_(
             attr::value, at::native::ones_like(const_val_t));
@@ -340,7 +341,9 @@ void pushPackingPastRnn(Block* b) {
 
     // and insert new PackPadded after the RNN
     Node* newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
+    newPackPadded->copyMetadata(n);
     newPackPadded->insertAfter(next);
+    newPackPadded->copyMetadata(next);
 
     // make things consume from the new PackPadded
     next->outputs().at(0)->replaceAllUsesWith(newPackPadded->outputs().at(0));
@@ -456,14 +459,17 @@ void fixDefaultRNNState(
   }
 
   Node* shape_of_input = graph->create(onnx::Shape, 1);
+  shape_of_input->copyMetadata(n);
   shape_of_input->insertBefore(n);
   shape_of_input->addInput(n->inputs()[0]);
 
   Node* gather_indices = graph->create(onnx::Constant, 1);
+  gather_indices->copyMetadata(n);
   gather_indices->insertBefore(n);
   gather_indices->t_(attr::value, at::scalar_to_tensor(at::Scalar(1)));
 
   Node* batch_size = graph->create(onnx::Gather, 1);
+  batch_size->copyMetadata(n);
   batch_size->insertBefore(n);
   batch_size->addInput(shape_of_input->outputs()[0]);
   batch_size->addInput(gather_indices->outputs()[0]);
@@ -472,6 +478,7 @@ void fixDefaultRNNState(
       createONNXUnsqueeze(graph, n, batch_size->outputs()[0], 0, opset_version);
 
   Node* hidden_size = graph->create(onnx::Constant, 1);
+  hidden_size->copyMetadata(n);
   hidden_size->insertBefore(n);
   hidden_size->t_(
       attr::value,
@@ -481,6 +488,7 @@ void fixDefaultRNNState(
           at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node* num_directions = graph->create(onnx::Constant, 1);
+  num_directions->copyMetadata(n);
   num_directions->insertBefore(n);
   num_directions->t_(
       attr::value,
@@ -494,6 +502,7 @@ void fixDefaultRNNState(
       graph, n, num_directions->outputs()[0], 0, opset_version);
 
   Node* concated_dims = graph->create(onnx::Concat, 1);
+  concated_dims->copyMetadata(n);
   concated_dims->insertBefore(n);
   concated_dims->i_(attr::axis, 0);
   concated_dims->addInput(unsqueezed_num_directions->outputs()[0]);
@@ -501,6 +510,7 @@ void fixDefaultRNNState(
   concated_dims->addInput(hidden_size->outputs()[0]);
 
   Node* fixed_init_state = graph->create(onnx::Expand, 1);
+  fixed_init_state->copyMetadata(n);
   fixed_init_state->insertBefore(n);
   fixed_init_state->addInput(initial_state);
   fixed_init_state->addInput(concated_dims->outputs()[0]);
@@ -627,29 +637,15 @@ static void eraseListConstruct(Node* n, int opset_version) {
       auto* lc_node = input->node();
       TypePtr elem =
           lc_node->output()->type()->castRaw<ListType>()->getElementType();
-      if (elem->cast<IntType>()) {
-        // ListConstruct Int[] output case, we need to transform to ONNX
-        // Concat to ensure the output is a single tensor(dynamic) type in
-        // order to be consumed as inputs
-        std::vector<Value*> unsqueezed;
-        Graph* g = block->owningGraph();
-        for (auto* input : lc_node->inputs()) {
-          Node* unsqueezed_node =
-              createONNXUnsqueeze(g, lc_node, input, 0, opset_version);
-          unsqueezed.emplace_back(unsqueezed_node->output());
-        }
-        Node* concat_node = g->create(onnx::Concat, 1);
-        concat_node->i_(attr::axis, 0);
-        for (auto v : unsqueezed) {
-          concat_node->addInput(v);
-        }
-        concat_node->insertBefore(lc_node);
-
+      if (elem->cast<IntType>() &&
+          isValidToTransformToONNXConcatNode(lc_node)) {
+        auto concat_node = transformToONNXConcatNode(
+            block->owningGraph(), input->node(), false, opset_version);
+        concat_node->copyMetadata(n);
         // make concat node output as new input, then ListConstruct should
         // become dead
         replacements.emplace_back(
             i, std::vector<Value*>({concat_node->output()}));
-
       } else {
         if (opset_version >= OPSET_VERSION_11) {
           c10::Symbol seq_node_kind = lc_node->inputs().size() > 0
@@ -657,8 +653,10 @@ static void eraseListConstruct(Node* n, int opset_version) {
               : onnx::SequenceEmpty;
           Node* seq_node = block->owningGraph()->create(
               seq_node_kind, {lc_node->inputs()}, 1);
+          seq_node->copyMetadata(n);
           seq_node->insertBefore(lc_node);
           seq_node->output()->copyMetadata(lc_node->output());
+          seq_node->copyMetadata(lc_node);
           lc_node->replaceAllUsesWith(seq_node);
         }
       }
@@ -711,6 +709,7 @@ static void eraseListUnpack(Node* n, int opset_version) {
       seq_at_n->addInput(seq_idx_n->output());
       seq_at_n->output()->setType(n->output(i)->type());
       seq_at_n->insertBefore(n);
+      seq_at_n->copyMetadata(n);
       n->output(i)->replaceAllUsesWith(seq_at_n->output());
     }
   }
@@ -887,6 +886,7 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
         cast_node->addInput(origLogSoftmaxNode->inputs().at(0));
         cast_node->i_(attr::to, onnx_type);
         cast_node->insertBefore(origLogSoftmaxNode);
+        cast_node->copyMetadata(castNode);
         origLogSoftmaxNode->replaceInputWith(
             origLogSoftmaxNode->inputs().at(0), cast_node->output());
       }
@@ -896,10 +896,12 @@ static void fuseLogSoftmaxNllLoss(Block* b) {
       for (size_t i = 0; i < softmaxCrossEntropyNode->outputs().size(); ++i) {
         softmaxCrossEntropyNode->outputs()[i]->copyMetadata(it->outputs()[i]);
       }
+      softmaxCrossEntropyNode->copyMetadata(origNllLossNode);
       softmaxCrossEntropyNode->copyAttributes(*origNllLossNode);
       softmaxCrossEntropyNode->insertBefore(origNllLossNode);
       softmaxCrossEntropyNode->addInput(origLogSoftmaxNode->inputs().at(0));
       softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(1));
+      softmaxCrossEntropyNode->copyMetadata(origNllLossNode);
       // optional weight input is provided
       if (origNllLossNode->inputs().size() == 3) {
         softmaxCrossEntropyNode->addInput(origNllLossNode->inputs().at(2));

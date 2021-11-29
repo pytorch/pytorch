@@ -3,13 +3,12 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NumericUtils.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_stub);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(_segment_reduce_backward_stub);
 
 namespace {
@@ -43,8 +42,8 @@ void _segment_reduce_cpu_kernel1(
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         int64_t lengths_cum_sum = 0;
-        for (int64_t i = 0; i < segment_count; ++i) {
-          for (int64_t l = 0; l < stride_count; ++l) {
+        for (const auto i : c10::irange(segment_count)) {
+          for (const auto l : c10::irange(stride_count)) {
             // ===== step1: initialize starting value
             scalar_t initial_value;
             if (initial.has_value()) {
@@ -109,7 +108,7 @@ Tensor _segment_reduce_cpu_kernel(
   output_shape[axis] = segment_count;
   auto output = at::empty(output_shape, data.options());
 
-  AT_DISPATCH_INDEX_TYPES(lengths.type(), "_segment_reduce_cpu_kernel1", [&]() {
+  AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_cpu_kernel1", [&]() {
     const auto* lengths_data = lengths.data_ptr<index_t>();
     _segment_reduce_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count);
@@ -143,12 +142,12 @@ void _segment_reduce_cpu_backward_kernel1(
         const auto* values_data = data_contig.data_ptr<scalar_t>();
 
         int64_t lengths_cum_sum = 0;
-        for (int64_t i = 0; i < segment_count; ++i) {
+        for (const auto i : c10::irange(segment_count)) {
           if (lengths_data[i] == 0) {
             continue;
           }
 
-          for (int64_t l = 0; l < stride_count; ++l) {
+          for (const auto l : c10::irange(stride_count)) {
             int64_t output_index = (i * stride_count) + l;
 
             if (reduction == SegmentReductionType::MAX ||
@@ -211,7 +210,7 @@ Tensor _segment_reduce_cpu_backward_kernel(
   auto grad_input = at::zeros({data_contig.sizes()}, grad_contig.options());
 
   AT_DISPATCH_INDEX_TYPES(
-      lengths_contig.type(), "_segment_reduce_cpu_backward_kernel1", [&]() {
+      lengths_contig.scalar_type(), "_segment_reduce_cpu_backward_kernel1", [&] {
         const auto* lengths_data = lengths_contig.data_ptr<index_t>();
         _segment_reduce_cpu_backward_kernel1(
             grad_contig,
@@ -271,14 +270,10 @@ Tensor segment_reduce_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_stub,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_AVX512_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 REGISTER_VSX_DISPATCH(_segment_reduce_stub, &_segment_reduce_cpu_kernel);
 
 // Currently some computation is being duplicated across forward and backward.
@@ -315,14 +310,11 @@ Tensor _segment_reduce_backward_kernel(
 
 REGISTER_ARCH_DISPATCH(
     _segment_reduce_backward_stub,
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
     DEFAULT,
     &_segment_reduce_cpu_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-REGISTER_AVX_DISPATCH(
+REGISTER_AVX512_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_AVX2_DISPATCH(
     _segment_reduce_backward_stub,
     &_segment_reduce_cpu_backward_kernel);

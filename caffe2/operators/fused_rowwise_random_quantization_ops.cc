@@ -122,11 +122,9 @@ bool FusedRandRowwiseQuantizedToFloatOp<Context>::RunOnDevice() {
 
 #undef IS_LITTLE_ENDIAN
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FloatToFusedRandRowwiseQuantized,
     FloatToFusedRandRowwiseQuantizedOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FloatToFusedRandRowwiseQuantized)
     .NumInputs(1)
     .NumOutputs(1)
@@ -176,14 +174,11 @@ In Advances in Neural Information Processing Systems, pp. 1508-1518. 2017.
     .Output(0, "output", "Fused bitwidth, tail, min, max and quantized data")
     .Arg("bitwidth", "How many bits to quantize per data (defaults to 8).")
     .Arg("random", "random or not (True). False is set up for unittest.");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FloatToFusedRandRowwiseQuantized);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(
     FusedRandRowwiseQuantizedToFloat,
     FusedRandRowwiseQuantizedToFloatOp<CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(FusedRandRowwiseQuantizedToFloat)
     .NumInputs(1)
     .NumOutputs(1)
@@ -207,6 +202,5 @@ Refer FloatToFusedRandRowwiseQuantized operator for details.
         "quantized_input",
         "Fused bitwidth, tail, min, max and quantized data")
     .Output(0, "float_input", "Float32 data");
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 NO_GRADIENT(FusedRandRowwiseQuantizedToFloat);
 } // namespace caffe2

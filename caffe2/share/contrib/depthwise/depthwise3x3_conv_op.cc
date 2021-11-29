@@ -9,7 +9,6 @@
 #include <arm_neon.h>
 #endif
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 C10_DEFINE_bool(caffe2_profile_depthwise, false, "");
 
 namespace caffe2 {
@@ -168,9 +167,8 @@ void runDepthwise3x3Conv(
       // fast-path, all accesses in-bounds
       if (C10_LIKELY(
               ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
-                  iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols
-              )) {
+              iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
+              2 * otw + 1 < args.out_cols)) {
         float32x4x4_t input_tile;
         for (int row = 0; row < 4; ++row) {
           input_tile.val[row] =
@@ -548,7 +546,6 @@ class Depthwise3x3ConvOp final : public ConvPoolOpBase<CPUContext> {
   Tensor bias_{CPU};
 };
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR_WITH_ENGINE(Conv, DEPTHWISE_3x3, Depthwise3x3ConvOp);
 } // namespace
 } // namespace caffe2

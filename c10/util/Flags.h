@@ -158,7 +158,6 @@ namespace c10 {
 
 class C10_API C10FlagParser {
  public:
-  C10FlagParser() {}
   bool success() {
     return success_;
   }
@@ -166,7 +165,7 @@ class C10_API C10FlagParser {
  protected:
   template <typename T>
   bool Parse(const std::string& content, T* value);
-  bool success_;
+  bool success_{false};
 };
 
 C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);

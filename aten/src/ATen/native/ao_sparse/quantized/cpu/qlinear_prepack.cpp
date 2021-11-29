@@ -13,7 +13,7 @@
 namespace ao {
 namespace sparse {
 
-torch::class_<LinearPackedParamsBase> register_linear_params();
+int register_linear_params();
 
 #ifdef USE_FBGEMM
 namespace {
@@ -28,10 +28,8 @@ void calc_col_offsets_transpose(
     int32_t* B_zero_point,
     int32_t* col_offsets,
     c10::QScheme qtype) {
-  // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
   for (const auto i : c10::irange(N)) {
     int32_t sum = 0;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (const auto j : c10::irange(K)) {
       sum += Bint8[i * K + j];
     }

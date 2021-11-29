@@ -328,16 +328,21 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   }
 
   int roi_counts = 0;
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     roi_counts += im_boxes[i].rows();
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-  const int roi_col_count = box_dim + 1;
-  auto* out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
-  auto* out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  const int64_t roi_col_count = box_dim + 1;
+  auto *const out_rois = Output(0, {roi_counts, roi_col_count}, at::dtype<float>());
+  auto *const out_rois_probs = Output(1, {roi_counts}, at::dtype<float>());
+
+  if(roi_counts == 0){
+    return true;
+  }
+
   float* out_rois_ptr = out_rois->template mutable_data<float>();
   float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
-  for (int i = 0; i < num_images; i++) {
+  for (int64_t i = 0; i < num_images; i++) {
     const ERArrXXf& im_i_boxes = im_boxes[i];
     const EArrXf& im_i_probs = im_probs[i];
     int csz = im_i_boxes.rows();
@@ -357,13 +362,10 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   return true;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GenerateProposals, GenerateProposalsOp<CPUContext>);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(GenerateProposalsCPP, GenerateProposalsOp<CPUContext>);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GenerateProposals)
     .NumInputs(4)
     .NumOutputs(2)
@@ -414,13 +416,10 @@ non-maximum suppression is applied to generate the final bounding boxes.
         "format (image_index, x1, y1, x2, y2)")
     .Output(1, "rois_probs", "scores of proposals, size (n)");
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(GenerateProposalsCPP).NumInputs(4).NumOutputs(2);
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GenerateProposals);
 // For backward compatibility
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 SHOULD_NOT_DO_GRADIENT(GenerateProposalsCPP);
 
 } // namespace caffe2

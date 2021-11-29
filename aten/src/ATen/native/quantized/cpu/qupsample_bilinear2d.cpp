@@ -30,6 +30,9 @@ static void upsample_bilinear2d_out_frame(
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
+  if (channels == 0 || output_height == 0 || output_width == 0) {
+    return;
+  }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
@@ -50,6 +53,9 @@ static void upsample_bilinear2d_out_frame(
       area_pixel_compute_scale<float>(input_width, output_width, align_corners, scales_w);
   // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   float output_scale = output.q_scale() / input.q_scale();
+
+  const int64_t input_q_zero_point = input.q_zero_point();
+  const int64_t output_q_zero_point = output.q_zero_point();
 
   for (int64_t h2 = 0; h2 < output_height; ++h2) {
     const auto h1r = area_pixel_compute_source_index<float>(
@@ -77,10 +83,10 @@ static void upsample_bilinear2d_out_frame(
         float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
             h1lambda *
                 (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input.q_zero_point();
+                 w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
         // requantization
         pos2[0] = at::native::quantize_val<scalar_t>(
-                      output_scale, output.q_zero_point(), result)
+                      output_scale, output_q_zero_point, result)
                       .val_;
         pos1 += input_width * input_height;
         pos2 += output_width * output_height;
@@ -179,7 +185,6 @@ Tensor upsample_bilinear2d_quantized_cpu(
   return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);
 } // namespace native
 } // namespace at

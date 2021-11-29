@@ -1,18 +1,22 @@
+# Owner(s): ["high priority"]
+
 from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
+import unittest
 
 import torch
 
-from torch.testing import \
-    (FileCheck, floating_and_complex_types_and, get_all_dtypes)
+from torch.testing import FileCheck, make_tensor
+from torch.testing._internal.common_dtype import floating_and_complex_types_and, get_all_dtypes
 from torch.testing._internal.common_utils import \
-    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper, make_tensor,
-     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings)
+    (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
+     gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
+     TEST_WITH_ASAN, IS_WINDOWS)
 from torch.testing._internal.common_methods_invocations import \
-    (op_db, _NOTHING, UnaryUfuncInfo, SpectralFuncInfo)
+    (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -27,8 +31,8 @@ _variant_ops = partial(ops, dtypes=OpDTypes.supported,
 # Get names of all the operators which have ref in their entry in OpInfo (testing infra)
 #   except for Unary Ufuncs (separately implemented in test/test_unary_ufuncs.py)
 #   and Spectral Functions (separately implemented for only 1D as of now, in test/test_spectral_ops.py)
-_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, SpectralFuncInfo)) and
-                     op.ref is not None and op.ref is not _NOTHING, op_db))
+_ref_test_ops = list(filter(lambda op: not isinstance(op, (UnaryUfuncInfo, ReductionOpInfo,
+                     SpectralFuncInfo)) and op.ref is not None and op.ref is not _NOTHING, op_db))
 
 
 # Tests that apply to all operators and aren't related to any particular
@@ -54,8 +58,9 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    @skipMeta
     @skipCUDAIfRocm
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # dtypes to try to backward in
@@ -193,13 +198,79 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_errors(self, device, op):
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                op(si.input, *si.args, **si.kwargs)
+
+    # Tests that the function produces the same result when called with
+    #   noncontiguous tensors.
+    # TODO: get working with Windows by addressing failing operators
+    # TODO: get working with ASAN by addressing failing operators
+    @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @onlyNativeDeviceTypes
+    @suppress_warnings
+    @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
+    def test_noncontiguous_samples(self, device, dtype, op):
+        test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=test_grad)
+        for sample_input in sample_inputs:
+            t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
+            n_inp, n_args, n_kwargs = sample_input.noncontiguous()
+
+            # Verifies sample input tensors should have no grad or history
+            sample_tensor = t_inp if isinstance(t_inp, torch.Tensor) else t_inp[0]
+            assert sample_tensor.grad is None
+            assert sample_tensor.grad_fn is None
+
+            # validates forward
+            expected = op(t_inp, *t_args, **t_kwargs)
+            actual = op(n_inp, *n_args, **n_kwargs)
+
+            self.assertEqual(actual, expected)
+
+            # validates backward
+            # NOTE: only handles single tensor outputs and the first tensor
+            #   of ops that output a sequence
+
+            # Short-circuits if the op doesn't support grad in this device x dtype
+            if not test_grad:
+                continue
+
+            if isinstance(expected, torch.Tensor):
+                expected_backward_tensor = expected
+                actual_backward_tensor = actual
+            elif isinstance(expected, Sequence) and isinstance(expected[0], torch.Tensor):
+                expected_backward_tensor = expected[0]
+                actual_backward_tensor = actual[0]
+            else:
+                continue
+
+            grad_for_expected = torch.randn_like(expected_backward_tensor)
+            grad_for_actual = noncontiguous_like(grad_for_expected)
+            expected_backward_tensor.backward(grad_for_expected)
+            actual_backward_tensor.backward(grad_for_actual)
+
+            # Acquires grad (which may be on the first element in a list)
+            expected_grad = t_inp.grad if isinstance(t_inp, torch.Tensor) else t_inp[0].grad
+            actual_grad = n_inp.grad if isinstance(n_inp, torch.Tensor) else n_inp[0].grad
+
+            # TODO: FIXME: only validates grad on first tensor input
+            self.assertEqual(actual_grad, expected_grad)
 
     # Validates ops implement the correct out= behavior
     # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
@@ -514,7 +585,9 @@ class TestGradients(TestCase):
 
         return _fn
 
-    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False):
+    def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
+                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+        # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
         if not op.supports_dtype(dtype, torch.device(device).type):
@@ -552,12 +625,17 @@ class TestGradients(TestCase):
             gradcheck_args += sample.args
 
             if check == 'gradcheck':
+                if check_batched_grad is None:
+                    check_batched_grad = op.check_batched_grad
                 self.assertTrue(gradcheck(fn, gradcheck_args,
-                                          check_batched_grad=op.check_batched_grad,
+                                          check_batched_grad=check_batched_grad,
                                           check_grad_dtypes=True,
                                           nondet_tol=op.gradcheck_nondet_tol,
                                           fast_mode=op.gradcheck_fast_mode,
-                                          check_forward_ad=check_forward_ad))
+                                          check_forward_ad=check_forward_ad,
+                                          check_backward_ad=check_backward_ad,
+                                          check_undefined_grad=check_undefined_grad,
+                                          check_batched_forward_grad=check_batched_forward_grad))
             elif check == 'gradgradcheck':
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
@@ -575,14 +653,18 @@ class TestGradients(TestCase):
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
-    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False):
-        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad)
+    def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
+                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+        return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
+                                  check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
+                                  check_batched_grad=check_batched_grad,
+                                  check_batched_forward_grad=check_batched_forward_grad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, device, dtype):
-        if not op.supports_autograd:
+        if not op.supports_autograd and not op.supports_forward_ad:
             self.skipTest("Skipped! autograd not supported.")
         if not op.supports_complex_autograd(torch.device(device).type) and dtype.is_complex:
             self.skipTest("Skipped! Complex autograd not supported.")
@@ -640,18 +722,50 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    @_gradcheck_ops(op_db)
-    def test_forward_mode_AD(self, device, dtype, op):
-        self._skip_helper(op, device, dtype)
-
+    def _forward_grad_helper(self, device, dtype, op, variant):
+        # TODO: clean up how attributes are passed to gradcheck from OpInfos
+        def call_grad_test_helper():
+            self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
+                                   check_undefined_grad=False, check_batched_grad=False,
+                                   check_batched_forward_grad=op.check_batched_forward_grad)
         if op.supports_forward_ad:
-            self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+            call_grad_test_helper()
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                self._grad_test_helper(device, dtype, op, op.get_op(), check_forward_ad=True)
+                call_grad_test_helper()
+
+    @_gradcheck_ops(op_db)
+    def test_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        self._forward_grad_helper(device, dtype, op, op.get_op())
+
+    @_gradcheck_ops(op_db)
+    def test_inplace_forward_mode_AD(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if not op.inplace_variant or not op.supports_inplace_autograd:
+            self.skipTest("Skipped! Operation does not support inplace autograd.")
+
+        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+
+    # Functions that do not support autograd should not fail in forward mode
+    # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped
+    # Test only when supports_autograd=False and for double dtype
+    @ops(filter(lambda op: not op.supports_autograd, op_db), dtypes=OpDTypes.supported, allowed_dtypes=(torch.double,))
+    def test_nondifferentiable(self, device, dtype, op):
+        # Expecting no errors
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        sample = samples[0]
+        result = op(sample.input, *sample.args, **sample.kwargs)
+
+# types.LambdaType gave false positives
+def is_lambda(lamb):
+    LAMBDA = lambda: 0  # noqa: E731
+    return isinstance(lamb, type(LAMBDA)) and lamb.__name__ == LAMBDA.__name__
 
 
 # Tests operators for consistency between JIT and eager, also checks
@@ -674,19 +788,38 @@ class TestJit(JitCommonTestCase):
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
 
-        for sample in samples:
-            # Acquires variants to test
-            func = op.get_op()
-            method = op.get_method()
-            variants = {
-                # TODO: inplace tests currently fail, fix and add inplace variant
-                'function': func, 'method': method,
-            }
+        # Acquires variants to test
+        func = op.get_op()
+        method = op.get_method()
+        variants = {
+            # TODO: inplace tests currently fail, fix and add inplace variant
+            'function': func, 'method': method,
+        }
 
+        # TODO: find better way to standardize on op registration itself..
+        has_fake_function = op.name in ["resize_", 'resize_as_']
+
+        if has_fake_function:
+            variants = {'method': getattr(torch.Tensor, op.name)}
+            samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        support_script = op.supports_scripting
+
+        tested = False
+        for sample in samples:
             # Test traced and scripted consistency
             for func_type, variant in variants.items():
                 if variant is None:
                     continue
+
+                # scripting and check_alias_analysis do not work with lambdas
+                # lambdas are typically used as a way to simulate methods without
+                # functional variants, so rely on the other variant for testing
+                # for now
+                if is_lambda(variant):
+                    continue
+
+                tested = True
 
                 # Create accessor for script function variant
                 name = op.name + '_' if func_type == 'inplace' else op.name
@@ -696,7 +829,8 @@ class TestJit(JitCommonTestCase):
                 #   DifferentiableGraph nodes if they are present
                 with disable_autodiff_subgraph_inlining():
                     # Check scripted forward, grad, and grad grad
-                    script_fn = create_script_fn(self, name, func_type)
+                    if support_script:
+                        script_fn = create_script_fn(self, name, func_type)
 
                     def out_fn(output):
                         # Processes the output for autograd
@@ -704,31 +838,62 @@ class TestJit(JitCommonTestCase):
                             return sample.output_process_fn_grad(output)
                         return output
 
-                    check_against_reference(self,
-                                            script_fn,
-                                            func,
-                                            out_fn,
-                                            (sample.input,) + sample.args,
-                                            sample.kwargs,
-                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
+                    def get_sample():
+                        return clone_input_helper(sample.input) if op.name[-1] == '_' else sample.input
+
+                    if support_script:
+                        check_against_reference(self,
+                                                script_fn,
+                                                func,
+                                                out_fn,
+                                                (get_sample(),) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check traced forward, grad, and grad grad
-                    traced_fn = create_traced_fn(self, variant)
-                    check_against_reference(self,
-                                            traced_fn,
-                                            func,
-                                            out_fn,
-                                            (sample.input,) + sample.args,
-                                            sample.kwargs,
-                                            no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
+                    # TODO: fix tracing here
+                    supports_tracing = not has_fake_function
+                    if op.assert_jit_shape_analysis:
+                        self.assertTrue(supports_tracing)
+
+                    if supports_tracing:
+                        traced_fn = create_traced_fn(self, variant)
+                        check_against_reference(self,
+                                                traced_fn,
+                                                func,
+                                                out_fn,
+                                                (get_sample(),) + sample.args,
+                                                sample.kwargs,
+                                                no_grad=not _requires_grad, no_gradgrad=not op.supports_gradgrad)
 
                     # Check alias annotation schema for correctness (make
                     #   sure inputs that aren't supposed to be modified aren't)
-                    # Note: only runs in float32 and int64 because schema isn't affected by dtype,
+                    # Note: only runs in float32 because schema isn't affected by dtype,
                     #   so running it on all dtypes is would be excessive
-                    if dtype in [torch.float32, torch.int32]:
-                        check_alias_annotation(name, (sample.input,) + sample.args, sample.kwargs,
-                                               func_type=func_type, aten_name=op.aten_name)
+                    if dtype == torch.float32:
+                        # TODO: no reason why we cant run this with tracing graph
+                        if support_script and op.name != "rsub":
+                            check_alias_annotation(name, (get_sample(),) + sample.args, sample.kwargs,
+                                                   func_type=func_type, aten_name=op.aten_name)
+
+                        # TODO: use script graph as well
+                        checked_shape_analysis = False
+                        if supports_tracing:
+                            out = variant(get_sample(), *sample.args, **sample.kwargs)
+
+                            # right now, tuple of outputs and tensor output supported
+                            # TODO: list of tensor outputs
+                            tuple_of_tensors = isinstance(out, tuple) and all([isinstance(elem, torch.Tensor) for elem in out])
+
+                            if isinstance(out, torch.Tensor) or tuple_of_tensors:
+                                if tuple_of_tensors:
+                                    sizes = [elem.size() for elem in out]
+                                else:
+                                    sizes = out.size()
+                                self.checkShapeAnalysis(sizes, traced_fn.graph, op.assert_jit_shape_analysis)
+                                checked_shape_analysis = True
+                        if op.assert_jit_shape_analysis:
+                            self.assertTrue(checked_shape_analysis)
 
                     # Check autodifferentiation of nodes for traced and scripted graphs, only need to check once per sample
                     if dtype is torch.float32:
@@ -741,8 +906,11 @@ class TestJit(JitCommonTestCase):
                             nonfusible_nodes = op.autodiff_nonfusible_nodes
                             fusible_nodes = op.autodiff_fusible_nodes
 
-                        self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
-                        self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        if supports_tracing:
+                            self.assertAutodiffNode(traced_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+                        if support_script:
+                            self.assertAutodiffNode(script_fn.last_graph, op.assert_autodiffed, nonfusible_nodes, fusible_nodes)
+        assert tested, "JIT Test does not execute any logic"
 
     # alias testing is only done with torch.float for the same reason
     _alias_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -960,10 +1128,13 @@ class TestMathBits(TestCase):
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
-        math_op_physical = torch.neg
+
+        # The view op here is an identity, but math_op_physical's output is
+        # modified inplace, so we must at least clone
+        math_op_physical = torch.clone
 
         def math_op_view(x):
-            return torch.conj(x * 1j).imag
+            return torch.conj(x * -1j).imag
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_neg
         self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,

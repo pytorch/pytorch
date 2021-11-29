@@ -96,6 +96,11 @@ struct C10_API Device final {
     return type_ == DeviceType::XPU;
   }
 
+  /// Return true if the device is of HPU type.
+  bool is_hpu() const noexcept {
+    return type_ == DeviceType::HPU;
+  }
+
   /// Return true if the device is of CPU type.
   bool is_cpu() const noexcept {
     return type_ == DeviceType::CPU;
@@ -103,7 +108,7 @@ struct C10_API Device final {
 
   /// Return true if the device supports arbirtary strides.
   bool supports_as_strided() const noexcept {
-    return type_ != DeviceType::XLA;
+    return type_ != DeviceType::XLA && type_ != DeviceType::Lazy;
   }
 
   /// Same string as returned from operator<<.

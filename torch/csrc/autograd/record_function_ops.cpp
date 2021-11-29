@@ -16,9 +16,17 @@ namespace profiler {
 
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
-at::Tensor record_function_enter(const std::string& name) {
+at::Tensor record_function_enter(
+    const std::string& name,
+    const c10::optional<std::string>& args) {
   auto rec = std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
-  rec->before(name);
+  if (rec->isActive()) {
+    if (rec->needsInputs() && args.has_value()) {
+      rec->before(name, std::vector<c10::IValue>{c10::IValue{args.value()}});
+    } else {
+      rec->before(name);
+    }
+  }
   return at::cpp_custom_type_hack::create(std::move(rec), at::TensorOptions());
 }
 
@@ -67,7 +75,7 @@ c10::intrusive_ptr<c10::ivalue::Future> _call_end_callbacks_on_fut(
 
 // Internal only, do not use directly, use Python's record_function()
 TORCH_LIBRARY_FRAGMENT(profiler, m) {
-    m.def("_record_function_enter", &record_function_enter);
+    m.def("_record_function_enter(str name, str? args=None) -> Tensor", &record_function_enter);
     m.def("_record_function_exit", &record_function_exit);
 }
 
@@ -76,11 +84,10 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
   return c10::AliasAnalysisKind::FROM_SCHEMA;
 }
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 jit::RegisterOperators reg_fut_ops({
     jit::Operator(
         "profiler::_call_end_callbacks_on_jit_fut(Tensor x, Future(t) y) -> Future(t)",
-        [](jit::Stack* stack) {
+        [](jit::Stack& stack) {
           // Pop inputs, which should be a future and a tensor
           auto fut = jit::pop(stack).toFuture();
           auto tensor = jit::pop(stack).toTensor();

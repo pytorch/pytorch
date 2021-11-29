@@ -12,17 +12,21 @@ constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
         DispatchKey::CPU,
         DispatchKey::CUDA,
         DispatchKey::XLA,
+        DispatchKey::Lazy,
         DispatchKey::XPU,
         DispatchKey::PrivateUse1,
         DispatchKey::PrivateUse2,
         DispatchKey::PrivateUse3,
         DispatchKey::MLC,
         DispatchKey::HPU,
+        DispatchKey::ORT,
         DispatchKey::Meta,
     });
 
 bool isBackendDispatchKey(DispatchKey t) {
-  return t != DispatchKey::Undefined && backend_dispatch_keyset.has(t);
+  return t != DispatchKey::Undefined
+      // See Note [No Alias Keys in DispatchKeySet]
+      && !isAliasDispatchKey(t) && backend_dispatch_keyset.has(t);
 }
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
@@ -45,6 +49,20 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   }
 }
 
+bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k) {
+  TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
+  switch (t) {
+    case DispatchKey::Autograd:
+      return autograd_dispatch_keyset.has(k);
+    case DispatchKey::CompositeImplicitAutograd:
+      return math_dispatch_keyset.has(k);
+    case DispatchKey::CompositeExplicitAutograd:
+      return backend_dispatch_keyset.has(k);
+    default:
+      return t == k;
+  }
+}
+
 // for a given autograd key, return the (guaranteed nonempty) set of associated
 // backend keys. for a non-autograd key, return the empty keyset.
 DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
@@ -55,6 +73,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::CUDA);
     case DispatchKey::AutogradXLA:
       return DispatchKeySet(DispatchKey::XLA);
+    case DispatchKey::AutogradLazy:
+      return DispatchKeySet(DispatchKey::Lazy);
     case DispatchKey::AutogradMLC:
       return DispatchKeySet(DispatchKey::MLC);
     case DispatchKey::AutogradHPU:
@@ -81,6 +101,7 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
     case DispatchKey::CPU:
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
+    case DispatchKey::XLA:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();
@@ -93,7 +114,7 @@ DispatchKeySet getAutogradRelatedKeySetFromBackend(DispatchKey t) {
 }
 
 bool isIncludedInAlias(DispatchKey k, DispatchKey alias) {
-  return k != DispatchKey::Undefined && getRuntimeDispatchKeySet(alias).has(k);
+  return k != DispatchKey::Undefined && runtimeDispatchKeySetHas(alias, k);
 }
 
 std::string toString(DispatchKeySet ts) {

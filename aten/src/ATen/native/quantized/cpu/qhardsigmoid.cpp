@@ -12,7 +12,6 @@
 namespace at {
 namespace native {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(qhardsigmoid_stub);
 
 namespace {
@@ -86,6 +85,16 @@ Tensor hardsigmoid_quantized_cpu(const Tensor& qx) {
   Tensor qy;
   qhardsigmoid_stub(qx.device().type(), qx, qy);
   return qy;
+}
+
+Tensor& hardsigmoid_out_quantized_cpu(const Tensor& qx, Tensor& result) {
+  // Note: we create a new temporary tensor because the output of hardsigmoid
+  // usually has different quantization parameters from the input, and
+  // quantization are currently only supported per entire tensor or per entire
+  // channel of a tensor.
+  Tensor qy = hardsigmoid_quantized_cpu(qx);
+  result.copy_(qy);
+  return result;
 }
 
 }}  // namespace at::native

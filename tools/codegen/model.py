@@ -1,15 +1,11 @@
 import re
 
+from tools.codegen.utils import assert_never
+
 from dataclasses import dataclass
-from typing import List, Dict, Optional, Iterator, Tuple, Set, NoReturn, Sequence, Callable, Union
+from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
 from enum import Enum, auto
 import itertools
-
-# A little trick from https://github.com/python/mypy/issues/6366
-# for getting mypy to do exhaustiveness checking
-# TODO: put this somewhere else, maybe
-def assert_never(x: NoReturn) -> NoReturn:
-    raise AssertionError("Unhandled type: {}".format(type(x).__name__))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -56,8 +52,9 @@ class DispatchKey(Enum):
     CUDA = auto()
     HIP = auto()
     FPGA = auto()
-    MSNPU = auto()
+    ORT = auto()
     XLA = auto()
+    Lazy = auto()
     Vulkan = auto()
     Metal = auto()
     XPU = auto()
@@ -89,6 +86,7 @@ class DispatchKey(Enum):
     AutogradCPU = auto()
     AutogradCUDA = auto()
     AutogradXLA = auto()
+    AutogradLazy = auto()
     AutogradNestedTensor = auto()
     AutogradXPU = auto()
     AutogradPrivateUse1 = auto()
@@ -151,6 +149,19 @@ def is_structured_dispatch_key(dk: DispatchKey) -> bool:
 class DeviceCheckType(Enum):
     NoCheck = 0
     ExactSame = 1
+
+class Tag(Enum):
+    inplace_view = 0
+
+    def __str__(self) -> str:
+        return self.name
+
+    @staticmethod
+    def parse(value: str) -> 'Tag':
+        for k, v in Tag.__members__.items():
+            if k == value:
+                return v
+        raise AssertionError(f'unknown tag {value}')
 
 # The basic input to the code generation is native_functions.yaml.
 # The name "native", BTW, comes from the distinction between native
@@ -227,6 +238,14 @@ class NativeFunction:
     # changes the semantics of set_output to call the parent class.
     structured_inherits: Optional[str]
 
+    # Structured kernels can declare elements as "precomputed". These elements
+    # are returned by the meta function in one struct and passed to the impl
+    # function in lieu of certain kernel arguments that these precomputed
+    # elements supersede. Information about the names and types of these
+    # precomputed elements and how they correspond to kernel arguments is stored
+    # in this member, if applicable.
+    precomputed: Optional['Precompute']
+
     # Argument names whose default  should be excluded from the C++ interface.
     # Intended for resolving overload ambiguities between signatures.
     cpp_no_default_args: Set[str]
@@ -244,6 +263,11 @@ class NativeFunction:
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
     has_composite_explicit_autograd_kernel: bool
+
+    # Tags are used to describe semantic information about (groups of) operators,
+    # That aren't easily inferrable directly from the operator's schema.
+    # For now operators have at most one tag.
+    tag: Optional['Tag']
 
     # NB: The benefit of defining a dataclass is that we automatically get
     # a constructor defined for all the fields we specify.  No need
@@ -318,6 +342,14 @@ class NativeFunction:
         category_override = e.pop('category_override', None)
         assert category_override is None or isinstance(category_override, str), f'not a str: {category_override}'
 
+        precomputed_dict = e.pop('precomputed', None)
+        assert precomputed_dict is None or structured is True
+        precomputed = Precompute.parse(precomputed_dict) if precomputed_dict else None
+
+        tag_str = e.pop('tags', None)
+        assert tag_str is None or isinstance(tag_str, str), f'not a str: {tag_str}'
+        tag = Tag.parse(tag_str) if tag_str else None
+
         from tools.codegen.api import cpp
 
         raw_dispatch = e.pop('dispatch', None)
@@ -387,6 +419,7 @@ class NativeFunction:
             structured=structured,
             structured_delegate=structured_delegate,
             structured_inherits=structured_inherits,
+            precomputed=precomputed,
             manual_kernel_registration=manual_kernel_registration,
             manual_cpp_binding=manual_cpp_binding,
             python_module=python_module,
@@ -398,6 +431,7 @@ class NativeFunction:
             is_abstract=is_abstract,
             has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
             has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+            tag=tag,
         ), backend_metadata
 
 
@@ -448,6 +482,15 @@ class NativeFunction:
     @property
     def has_composite_kernel(self) -> bool:
         return self.has_composite_implicit_autograd_kernel or self.has_composite_explicit_autograd_kernel
+
+    @property
+    def is_view_op(self) -> bool:
+        rets = self.func.returns
+        is_non_mutating_view = len(rets) > 0 and any(r.annotation is not None and not r.annotation.is_write for r in rets)
+        is_inplace_view = self.tag is not None and self.tag is Tag.inplace_view
+        is_wildcard_view = any(inp.annotation is not None and
+                               inp.annotation.alias_set_after != "" for inp in self.func.schema_order_arguments())
+        return is_non_mutating_view or is_inplace_view or is_wildcard_view
 
 SchemaKind = Enum('SchemaKind', ('functional', 'inplace', 'out'))
 
@@ -724,7 +767,9 @@ class FunctionSchema:
     def parse(func: str) -> 'FunctionSchema':
         # We should probably get a proper parser here
         assert ' -> ' in func, "function schema missing return type (spaces are mandatory)"
-        func_decl, return_decl = [x.strip() for x in func.split(' -> ')]
+        last_index = func.rfind(" -> ")
+        func_decl = func[:last_index]
+        return_decl = func[last_index + len(" -> "):]
         ops, args = func_decl.split('(', 1)
         assert args[-1] == ")", "Expecting closing )"
         args = args[:-1]
@@ -868,19 +913,30 @@ class Annotation:
     # we can conveniently assume it is canonically ordered
     alias_set: Tuple[str, ...]
     is_write: bool
+    alias_set_after: str
 
     @staticmethod
     def parse(ann: str) -> 'Annotation':
-        m = re.match(r'^([a-z])(!?)(!?)$', ann)
+        # Only handling afterSet == Wildcard for now
+        becomes_wildcard_index = ann.find(" -> *")
+        if becomes_wildcard_index != -1:
+            after_set = "*"
+            # TODO: im not good enough with regexes to ignore -> *
+            m = re.match(r'^([a-z])(!?)(!?)$', ann[:becomes_wildcard_index] + ann[becomes_wildcard_index + len(" -> *"):])
+        else:
+            after_set = ""
+            m = re.match(r'^([a-z])(!?)(!?)$', ann)
         assert m is not None, f'unrecognized alias annotation {ann}'
         alias_set = (m.group(1),)
         is_write = m.group(2) == '!'
-        r = Annotation(alias_set=alias_set, is_write=is_write)
+        r = Annotation(alias_set=alias_set, is_write=is_write, alias_set_after=after_set)
         assert str(r) == ann, f'{r} != {ann}'
         return r
 
     def __str__(self) -> str:
         alias_set = '|'.join(self.alias_set)
+        if self.alias_set_after:
+            alias_set = f'{alias_set}{" -> "}{self.alias_set_after}'
         is_write = '!' if self.is_write else ''
         return f'{alias_set}{is_write}'
 
@@ -1202,6 +1258,14 @@ class Arguments:
         return ret
 
     @property
+    def flat_all(self) -> Sequence[Argument]:
+        ret: List[Argument] = []
+        ret.extend(self.flat_positional)
+        ret.extend(self.flat_kwarg_only)
+        ret.extend(self.out)
+        return ret
+
+    @property
     def non_out(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
         ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
         ret.extend(self.positional)
@@ -1224,6 +1288,14 @@ class Arguments:
         if self.tensor_options is not None:
             ret.append(self.tensor_options)
         ret.extend(self.post_tensor_options_kwarg_only)
+        return ret
+
+    @property
+    def all(self) -> Sequence[Union[Argument, SelfArgument, TensorOptionsArguments]]:
+        ret: List[Union[Argument, SelfArgument, TensorOptionsArguments]] = []
+        ret.extend(self.positional)
+        ret.extend(self.kwarg_only)
+        ret.extend(self.out)
         return ret
 
     def signature(self, *, strip_default: bool = False) -> 'Arguments':
@@ -1476,6 +1548,12 @@ class OperatorName:
         else:
             return f"{self.name}"
 
+    def remove_inplace(self) -> 'OperatorName':
+        return OperatorName(
+            name=BaseOperatorName(base=self.name.base, inplace=False, dunder_method=self.name.dunder_method),
+            overload_name=self.overload_name
+        )
+
 
 def gets_generated_out_inplace_wrapper(f: NativeFunction, g: NativeFunctionsGroup, b: BackendIndex) -> bool:
     return f.func.kind() is not SchemaKind.functional and \
@@ -1494,3 +1572,42 @@ def parse_returns(return_decl: str) -> Tuple[Return, ...]:
     if return_decl[0] == '(' and return_decl[-1] == ')':
         return_decl = return_decl[1:-1]
     return tuple(Return.parse(arg) for arg in return_decl.split(', '))
+
+
+# A Precompute instance consists of a map from kernel argument name
+# to the list of Argument instances that should replace that
+# kernel argument in the impl function.
+@dataclass(frozen=True)
+class Precompute:
+    # A map from kernel argument name -> a list of precomputed
+    # elements that replaces/supersedes it.
+    replace: Dict[str, List[Argument]]
+
+    @staticmethod
+    def parse(src: object) -> 'Precompute':
+        assert isinstance(src, list)
+
+        # src is a list of strings of the format:
+        #   {kernel param name} -> {replacement decl}[, {replacement decl}, ...]
+        # Parse this list to get the names of which precomputed elements
+        # should replace which kernel arguments.
+        replace = {}
+        for raw_replace_item in src:
+            assert isinstance(raw_replace_item, str)
+
+            arg, with_list_raw = raw_replace_item.split(' -> ')
+            with_list = with_list_raw.split(',')
+            with_list_args = [Argument.parse(name.strip()) for name in with_list]
+            replace[arg] = with_list_args
+
+        r = Precompute(replace=replace)
+        assert r.to_list() == src, 'r.to_list() != src'
+        return r
+
+    def to_list(self) -> List[str]:
+        replace_list = []
+        for kernel_param, replacement_params in self.replace.items():
+            replacements = ', '.join(str(param) for param in replacement_params)
+            replace_list.append(f'{kernel_param} -> {replacements}')
+
+        return replace_list

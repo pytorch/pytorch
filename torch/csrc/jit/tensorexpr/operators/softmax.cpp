@@ -6,7 +6,7 @@ namespace tensorexpr {
 
 using namespace torch::jit::tensorexpr;
 
-Tensor* computeSoftmax(
+Tensor computeSoftmax(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     bool log_softmax) {
@@ -93,7 +93,9 @@ Tensor* computeSoftmax(
     return new_indices;
   };
 
-  c10::optional<Dtype> dtype = ToDtype(ScalarType::Undefined);
+  auto inp_buf = c10::get<BufHandle>(inputs[0]);
+
+  auto dtype = inp_buf.dtype();
   if (auto d = c10::get_if<int64_t>(&inputs[2])) {
     dtype = ToDtype(static_cast<ScalarType>(*d));
   }
@@ -101,7 +103,7 @@ Tensor* computeSoftmax(
   auto max = Reduce(
       "aten_softmax_max",
       non_softmax_dims,
-      Maximum(dtype.value()),
+      Maximum(dtype),
       [&](ParameterList& indices) {
         return tensorOrConstant(
             inputs[0], move_softmax_dim_index_to_pos(indices));
@@ -111,48 +113,43 @@ Tensor* computeSoftmax(
       Compute("aten_softmax_exp", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             inputs[0], convert_indices_to_expr_handle(indices));
-        return exp(inp - max->load(remove_softmax_dim_index(indices)));
+        return exp(inp - max.load(remove_softmax_dim_index(indices)));
       });
   auto sum = Reduce(
       "aten_softmax_sum",
       non_softmax_dims,
       Sum(),
       [&](ParameterList& indices) {
-        return e->load(move_softmax_dim_index_to_pos(indices));
+        return e.load(move_softmax_dim_index_to_pos(indices));
       },
       {output_dims[softmax_dim]});
   if (!log_softmax) {
     auto result =
         Compute("aten_softmax", output_dims, [&](ParameterList& indices) {
-          return e->load(indices) /
-              sum->load(remove_softmax_dim_index(indices));
+          return e.load(indices) / sum.load(remove_softmax_dim_index(indices));
         });
-    return new Tensor(
-        result->buf(),
-        new tensorexpr::Block(
-            {max->stmt(), e->stmt(), sum->stmt(), result->stmt()}));
+    return Tensor(
+        result.buf(),
+        alloc<tensorexpr::Block>(std::vector<StmtPtr>(
+            {max.stmt(), e.stmt(), sum.stmt(), result.stmt()})));
   }
 
   auto log_sum = Compute(
       "aten_softmax_log_sum", non_softmax_dims, [&](ParameterList& indices) {
-        return log(sum->load(indices));
+        return log(sum.load(indices));
       });
   auto result =
       Compute("aten_log_softmax", output_dims, [&](ParameterList& indices) {
         auto inp = tensorOrConstant(
             inputs[0], convert_indices_to_expr_handle(indices));
         auto non_softmax_indices = remove_softmax_dim_index(indices);
-        return inp - max->load(non_softmax_indices) -
-            log_sum->load(non_softmax_indices);
+        return inp - max.load(non_softmax_indices) -
+            log_sum.load(non_softmax_indices);
       });
-  return new Tensor(
-      result->buf(),
-      new tensorexpr::Block(
-          {max->stmt(),
-           e->stmt(),
-           sum->stmt(),
-           log_sum->stmt(),
-           result->stmt()}));
+  return Tensor(
+      result.buf(),
+      alloc<tensorexpr::Block>(std::vector<StmtPtr>(
+          {max.stmt(), e.stmt(), sum.stmt(), log_sum.stmt(), result.stmt()})));
 }
 
 } // namespace tensorexpr

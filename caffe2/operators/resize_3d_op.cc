@@ -160,22 +160,18 @@ bool ResizeNearest3DGradientOp<float, CPUContext>::RunOnDevice() {
       CAFFE_THROW("Unknown Storage order: ", order_);
   }
 }
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_OPERATOR(ResizeNearest3D, ResizeNearest3DOp<float, CPUContext>);
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CPU_GRADIENT_OPERATOR(
     ResizeNearest3DGradient,
     ResizeNearest3DGradientOp<float, CPUContext>);
 
 #ifdef CAFFE2_USE_MKLDNN
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_IDEEP_OPERATOR(
     ResizeNearest3D,
     IDEEPFallbackOp<ResizeNearest3DOp<float, CPUContext>>);
 #endif
 
 // Input: X, output: Y
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 OPERATOR_SCHEMA(ResizeNearest3D)
     .NumInputs(1)
     .NumOutputs(1)
@@ -196,7 +192,6 @@ Assumptions:
     .Output(0, "Y", "Output tensor");
 
 // Input: dY, output: dX
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 GRADIENT_OPERATOR_SCHEMA(ResizeNearest3DGradient)
     .NumInputs(2)
     .NumOutputs(1)
@@ -214,7 +209,6 @@ class GetResizeNearest3DGradient : public GradientMakerBase {
         vector<string>{GI(0)});
   }
 };
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_GRADIENT(ResizeNearest3D, GetResizeNearest3DGradient);
 
 } // namespace caffe2
