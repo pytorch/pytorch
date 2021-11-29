@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
 
+if(CMAKE_GENERATOR STREQUAL "Ninja" AND CMAKE_VERSION VERSION_LESS 3.13)
+  message(FATAL_ERROR "Using the Ninja generator requires CMake version 3.13 or greater")
+endif()
+
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
 # Not setting this sometimes makes XCode C compiler gets detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
@@ -663,7 +667,7 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
-if((CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
+if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
   # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
   # one call, so instead CMake calls nvcc twice with && in between.
   # However, on windows cmd.exe has a 8191 character limit for commands which we

@@ -1,7 +1,7 @@
 # Generates Python bindings for ATen functions
 #
 # The bindings are generated as methods on python_variable or functions on the
-# torch._C._nn. torch._C._fft, torch._C._linalg or torch._C._special objects.
+# torch._C._nn. torch._C._fft, torch._C._linalg, torch._C._sparse or torch._C._special objects.
 #
 
 # Code tries to stick to the following rules:
@@ -93,6 +93,7 @@ _SKIP_PYTHON_BINDINGS = [
     'data', 'is_leaf', 'output_nr', '_version', 'requires_grad_', 'retains_grad', 'set_',
     '_fw_primal', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask',
+    '_new_zeros_with_same_feature_meta',  # used for forward AD internals
     '_reshape_alias',
     'replace_',  # only used by the functionalization pass, doesn't need to be exposed to python
 ]
@@ -147,6 +148,9 @@ def is_py_fft_function(f: NativeFunction) -> bool:
 def is_py_linalg_function(f: NativeFunction) -> bool:
     return f.python_module == 'linalg'
 
+def is_py_sparse_function(f: NativeFunction) -> bool:
+    return f.python_module == 'sparse'
+
 def is_py_special_function(f: NativeFunction) -> bool:
     return f.python_module == 'special'
 
@@ -180,6 +184,9 @@ def gen(out: str, native_yaml_path: str, deprecated_yaml_path: str, template_pat
 
     create_python_bindings(
         fm, functions, is_py_linalg_function, 'torch.linalg', 'python_linalg_functions.cpp', method=False)
+
+    create_python_bindings(
+        fm, functions, is_py_sparse_function, 'torch.sparse', 'python_sparse_functions.cpp', method=False)
 
     create_python_bindings(
         fm, functions, is_py_special_function, 'torch.special', 'python_special_functions.cpp', method=False)
@@ -598,6 +605,7 @@ if(check_has_torch_function(self_)) {{
         "torch.nn": "THPNNVariableFunctionsModule",
         "torch.fft": "THPFFTVariableFunctionsModule",
         "torch.linalg": "THPLinalgVariableFunctionsModule",
+        "torch.sparse": "THPSparseVariableFunctionsModule",
         "torch.special": "THPSpecialVariableFunctionsModule",
     }[module] if module else "THPVariableClass"
 
