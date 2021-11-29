@@ -1172,6 +1172,22 @@ class {test_classname}(torch.nn.Module):
             t = torch.randn(2, 2)
             self.assertEqual(module.Foo()(t), mod(t))
 
+    def test_op_to_folder(self):
+        import torch.nn as nn
+        model = nn.Sequential(
+            nn.Conv2d(3, 16, (1, 1)),
+        )
+        mod = symbolic_trace(model)
+        module_name = "Foo"
+        import tempfile
+        from pathlib import Path
+        import ast
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_dir = Path(tmp_dir)
+            mod.to_folder(tmp_dir, module_name)
+            ast.parse((tmp_dir / "module.py").read_text())
+
     def test_fetch(self):
         attrs_for_lowering: Dict[str, List[str]] = {
             "torch.nn.modules.conv.Conv2d": [
