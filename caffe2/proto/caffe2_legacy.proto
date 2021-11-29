@@ -14,11 +14,11 @@ message CaffeDatum {
   // Optionally, the datum could also hold float data.
   repeated float float_data = 6;
   // If true data contains an encoded image that need to be decoded
-  optional bool encoded = 7 [default = false];
+  optional bool encoded = 7 [ default = false ];
 }
 
 enum LegacyPadding {
-  NOTSET = 0;  // Do not use old-stype padding strategies.
+  NOTSET = 0; // Do not use old-stype padding strategies.
 
   // VALID and SAME are two strategies adopted in Google DistBelief: it forces
   // the input shape as follows. For SAME, the output is:
