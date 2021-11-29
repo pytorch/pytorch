@@ -339,6 +339,136 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+    def test_selective_intern(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he._selective_intern(
+                "package_d",
+                [
+                    "package_d.test_selective_intern",
+                    "package_d.selective_intern_package",
+                ],
+            )
+            he.save_source_string(
+                "foo",
+                "import package_d; \
+            import package_d.test_selective_intern as test_selective_intern; \
+            import package_d.test_extern as test_extern; \
+            import package_d.extern_package as extern_package; \
+            import package_d.selective_intern_package as selective_intern_package",
+            )
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        foo = hi.import_module("foo")
+
+        import package_d.extern_package
+        import package_d.selective_intern_package
+        import package_d.test_extern
+
+        # number is not getting overwritten
+        import package_d.test_selective_intern
+
+        # test access
+        self.assertEqual(foo.test_extern.test_number, package_d.test_extern.test_number)
+        self.assertEqual(
+            foo.test_selective_intern.test_number,
+            package_d.test_selective_intern.test_number,
+        )
+        self.assertEqual(
+            foo.extern_package.test_number, package_d.extern_package.test_number
+        )
+        self.assertEqual(
+            foo.selective_intern_package.test_number,
+            package_d.selective_intern_package.test_number,
+        )
+
+        # test that that test_selective_intern is actually interned properly
+        self.assertIs(foo.test_extern, package_d.test_extern)
+        self.assertIsNot(foo.test_selective_intern, package_d.test_selective_intern)
+        self.assertIs(foo.extern_package, package_d.extern_package)
+        self.assertIsNot(
+            foo.selective_intern_package, package_d.selective_intern_package
+        )
+
+        # test external dependencies are still externed
+        self.assertIs(
+            foo.test_extern.test_selective_intern, package_d.test_selective_intern
+        )
+
+    def test_selective_intern_subpackage(self):
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he._selective_intern("package_b", ["package_b.subpackage_0"])
+            he.save_source_string(
+                "foo",
+                "import package_b; \
+                import package_b.subpackage_0 as subpackage_0; \
+                import package_b.subpackage_1 as subpackage_1; \
+                import package_b.subpackage_0.subsubpackage_0",
+            )
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        import package_b
+
+        foo = hi.import_module("foo")
+
+        # subpackage_0 should be interned, subpackage_1 should not.
+        self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
+        self.assertIsNot(
+            foo.subpackage_0.subsubpackage_0, package_b.subpackage_0.subsubpackage_0
+        )
+        self.assertIs(package_b.subpackage_1, foo.subpackage_1)
+
+        # Check that attribute access still works on selectively interned module.
+        self.assertEqual(
+            foo.subpackage_0.subpackage_0_li[0],
+            package_b.subpackage_0.subpackage_0_li[0],
+        )
+        self.assertEqual(
+            foo.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
+            package_b.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
+        )
+        self.assertIsNot(
+            foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li
+        )
+        self.assertEqual(
+            foo.subpackage_1.subpackage_1_li, package_b.subpackage_1.subpackage_1_li
+        )
+
+        # Check that attribute access works correctly on the shim.
+        self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
+
+    def test_selective_intern_torch(self):
+        # test selective intern using torch toy examples
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.save_source_string(
+                "foo",
+                "from torch.testing._internal.quantization_torch_package_models import LinearReluFunctional",
+            )
+
+        buffer.seek(0)
+        hi = PackageImporter(buffer)
+        from torch.testing._internal.quantization_torch_package_models import (
+            LinearReluFunctional,
+        )
+
+        foo = hi.import_module("foo")
+        self.assertIsNot(LinearReluFunctional, foo.LinearReluFunctional)
+
+
+def _read_file(filename: str) -> str:
+    with open(filename, "rb") as f:
+        b = f.read()
+        return b.decode("utf-8")
+
+
+def _write_file(filename: str, filecontent: str):
+    f = open(filename, "w")
+    f.write(filecontent)
+    f.close()
+
 
 if __name__ == "__main__":
     run_tests()
