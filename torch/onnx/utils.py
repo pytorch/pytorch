@@ -526,9 +526,6 @@ def _model_to_graph(model, args, verbose=False,
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
-                                                     training == TrainingMode.TRAINING)
-
     if training is None or training == TrainingMode.EVAL:
         params_dict = torch._C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
@@ -743,6 +740,8 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                 # NOTE: cannot call DCE after this pass. DCE will remove function definition nodes.
                 node_attr_to_name = torch._C._jit_pass_onnx_function_extraction(
                     graph, export_modules_as_functions, list(params_dict.keys()))
+            params_dict = torch._C._jit_pass_onnx_deduplicate_initializers(graph, params_dict,
+                                                                           training == TrainingMode.TRAINING)
             if export_params:
                 proto, export_map, val_use_external_data_format = graph._export_onnx(
                     params_dict, opset_version, dynamic_axes, defer_weight_export,
