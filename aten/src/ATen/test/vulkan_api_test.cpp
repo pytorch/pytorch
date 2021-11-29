@@ -1663,6 +1663,86 @@ TEST(VulkanAPITest, sub_broadcast1_) {
   ASSERT_TRUE(check);
 }
 
+TEST(VulkanAPITest, transposed_conv2d) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  constexpr int64_t groups = 1;
+  constexpr std::array<int64_t, 2u> stride{1, 2};
+  constexpr std::array<int64_t, 2u> padding{1, 0};
+  constexpr std::array<int64_t, 2u> output_padding{0, 1};
+  //TODO: Support conv_transpose2d with dilation != 1
+  constexpr std::array<int64_t, 2u> dilation{1, 1};
+
+  constexpr struct {
+    uint32_t batches;
+    uint32_t channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        batches,
+        channels,
+        height,
+        width,
+      };
+    }
+  } input {1, 55, 7, 19};
+
+  constexpr struct {
+    uint32_t input_channels;
+    uint32_t output_channels;
+    uint32_t height;
+    uint32_t width;
+
+    std::array<int64_t, 4u> size() const {
+      return {
+        input_channels,
+        output_channels,
+        height,
+        width,
+      };
+    }
+  } weights {input.channels, 47, 2, 3};
+
+  const auto input_cpu = at::randn(input.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto weights_cpu = at::randn(weights.size(), at::device(at::kCPU).dtype(at::kFloat));
+  const auto bias_cpu = at::zeros({weights.output_channels}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto output_cpu = at::conv_transpose2d(
+      input_cpu,
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation);
+
+  const auto output_vk = at::conv_transpose2d(
+      input_cpu.vulkan(),
+      weights_cpu,
+      bias_cpu,
+      stride,
+      padding,
+      output_padding,
+      groups,
+      dilation).cpu();
+
+  // Assert
+  const bool check = almostEqual(output_cpu, output_vk);
+  if (!check) {
+    showRtol(output_cpu, output_vk);
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST(VulkanAPITest, upsample_nearest2d) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1825,13 +1905,13 @@ TEST(VulkanAPITest, cat_dim1_twotensors_success) {
   ASSERT_TRUE(check);
 }
 
-TEST(VulkanAPITest, cat_dim1_bat1_ch4multiple_success) {
+TEST(VulkanAPITest, cat_dim1_bat1_mult4ch_success) {
   // Guard
   if (!at::is_vulkan_available()) {
     return;
   }
 
-  // Arrange: batch=1 and channel (multiples of 4 <-> channel %4 == 0)
+  // Arrange: batch=1 and channel (a multiple of 4 <-> channel %4 == 0)
   const auto in_cpu1 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu2 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_cpu3 = at::rand({1, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
@@ -1839,6 +1919,79 @@ TEST(VulkanAPITest, cat_dim1_bat1_ch4multiple_success) {
   // Act
   const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
   const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_bat2_mult4ch_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=2 and channel (a multiple of 4 <-> channel %4 == 0)
+  const auto in_cpu1 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({2, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_mult4ch_mixed_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=1 and channel (different multiples of 4 <-> channel %4 == 0)
+  const auto in_cpu1 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 12, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 1); // dim=feature(channel)
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, cat_dim1_mult4ch_nonmult4ch_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: batch=1 and channel (a mixed set of multiples and non-multiples of 4)
+  const auto in_cpu1 = at::rand({3, 3, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu2 = at::rand({3, 4, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu3 = at::rand({3, 7, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu4 = at::rand({3, 8, 221, 193}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::cat({in_cpu1, in_cpu2, in_cpu3, in_cpu4}, 1);
+  const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan(), in_cpu4.vulkan()}, 1); // dim=feature(channel)
 
   // Assert
   const auto check = almostEqual(out_cpu, out_vulkan.cpu());
@@ -1968,6 +2121,270 @@ TEST(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
     }, ::c10::Error);
   }
+}
+
+static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
+  // generate all permutations of a given dims
+  if (i == in.size()) {
+    out.push_back(in);
+  }
+  else {
+    for (int j = i; j < in.size(); ++j) {
+      std::swap(in[i], in[j]);
+      gen_allpermutations(out, in, i + 1);
+    }
+  }
+}
+
+TEST(VulkanAPITest, permute_2d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {1, 0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {1, 0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_3d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_4d_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2, 3};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_4dmclaren_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange: McLaren Model usage
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0, 2, 1, 3});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0, 2, 1, 3});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_4dbig_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({3, 9, 89, 91}, at::device(at::kCPU).dtype(at::kFloat));
+  std::vector<std::vector<int64_t>> all_dims;
+  std::vector<int64_t> in{0, 1, 2, 3};
+  gen_allpermutations(all_dims, in, 0);
+
+  for (const auto& dims : all_dims) {
+    // Act
+    const auto out_cpu = at::permute(in_cpu, dims);
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), dims);
+
+    // Assert
+    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+    if (!check) {
+      showRtol(out_cpu, out_vulkan.cpu());
+    }
+
+    ASSERT_TRUE(check);
+  }
+}
+
+TEST(VulkanAPITest, permute_negativedims_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({5, 4, 3, 2}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act: {-1,-2,-3,0} is equivalent to {3,2,1,0}
+  const auto out_cpu = at::permute(in_cpu, {-1, -2, -3, 0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {-1, -2, -3, 0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_1d_nochange) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_sameDims_nochange) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act
+  const auto out_cpu = at::permute(in_cpu, {0, 1, 2, 3});
+  const auto out_vulkan = at::permute(in_cpu.vulkan(), {0, 1, 2, 3});
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST(VulkanAPITest, permute_invalidinputs_exceptions) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand({1, 2, 1, 161}, at::device(at::kCPU).dtype(at::kFloat));
+
+  // Act: Repeated dim
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({2, 2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Number of dims don't match
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Dim out of range
+  EXPECT_THROW({
+    const auto out_vulkan = at::permute(in_cpu.vulkan(), {5, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan = in_cpu.vulkan();
+    out_vulkan.permute({5, 2, 1, 0});
+  }, ::c10::Error);
+
+  // Act: Input tensor size > 4D
+  const auto in_cpu_5d = at::rand({1, 2, 1, 2, 161}, at::device(at::kCPU).dtype(at::kFloat));
+  EXPECT_THROW({
+    const auto out_vulkan_5d = at::permute(in_cpu_5d.vulkan(), {4, 3, 2, 1, 0});
+  }, ::c10::Error);
+
+  EXPECT_THROW({
+    const auto out_vulkan_5d = in_cpu_5d.vulkan();
+    out_vulkan_5d.permute({4, 3, 2, 1, 0});
+  }, ::c10::Error);
 }
 
 enum class OpType {
