@@ -5,6 +5,10 @@
 #include <ATen/cudnn/Types.h>
 #include <ATen/native/ConvUtils.h>
 
+#if CUDNN_VERSION < 8000
+#define AT_CUDNN_CONV_BIAS_RELU_FALLBACK
+#endif
+
 namespace at { namespace native {
 
 // ---------------------------------------------------------------------
@@ -73,6 +77,21 @@ void raw_cudnn_convolution_backward_weight_out(
     bool benchmark, bool deterministic, bool allow_tf32);
 
 void raw_cudnn_convolution_add_relu_out(
+    const Tensor& output,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& z,
+    float alpha,
+    const Tensor& bias,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    int64_t groups,
+    bool benchmark,
+    bool deterministic,
+    bool allow_tf32);
+
+void raw_cudnn_convolution_add_relu_fallback_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,

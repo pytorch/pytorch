@@ -51,6 +51,15 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
 }
 
 /*
+ * contig chooses between C-contig (true) and F-contig (false)
+ */
+static inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig) {
+  return cond ? c10::MaybeOwned<Tensor>::borrowed(borrow)
+              : c10::MaybeOwned<Tensor>::owned(contig ? clone.clone(MemoryFormat::Contiguous)
+                                                      : cloneBatchedColumnMajor(clone));
+}
+
+/*
  * This method is designed to be a faster alternative to
  * `cloneBatchedColumnMajor` with some additional features,
  * namely:
@@ -225,11 +234,17 @@ static inline void linearSolveCheckInputs(const Tensor& self, const Tensor& A, c
 }
 
 // Validates input shapes for operations on batches of square matrices (inverse, cholesky, symeig, eig)
-static inline void squareCheckInputs(const Tensor& self) {
-  TORCH_CHECK(self.dim() >= 2, "Tensor of matrices must have at least 2 dimensions. ");
+static inline void squareCheckInputs(const Tensor& self, const char* const f_name) {
+  TORCH_CHECK(self.dim() >= 2, f_name, ": The input tensor must have at least 2 dimensions.");
   TORCH_CHECK(self.size(-1) == self.size(-2),
-              "A must be batches of square matrices, "
+              f_name,
+              ": A must be batches of square matrices, "
               "but they are ", self.size(-1), " by ", self.size(-2), " matrices");
+}
+
+static inline void checkFloatingOrComplex(const Tensor& t, const char* const f_name) {
+  TORCH_CHECK((at::isFloatingType(t.scalar_type()) || at::isComplexType(t.scalar_type())),
+              f_name, ": Expected a floating point or complex tensor as input. Got ", toString(t.scalar_type()));
 }
 
 /*
@@ -265,6 +280,11 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
     } else if (strstr(name, "lstsq")) {
       TORCH_CHECK(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
+    } else if (strstr(name, "lu_factor")) {
+      TORCH_CHECK(false, name, batch_string,
+          ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
+          "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
+          "linalg.lu_factor_ex(A, pivot)");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
     }
@@ -302,9 +322,7 @@ static inline void checkAllSameDim(TensorList tensors, int64_t dim) {
   }
 }
 
-static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
-  linearSolveCheckInputs(arg1, arg2, name);
-
+static inline std::tuple<std::vector<int64_t>, std::vector<int64_t>> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2) {
   // broadcast the batch dimensions of arg1 and arg2.
   IntArrayRef arg1_batch_sizes(arg1.sizes().data(), arg1.ndimension() - 2);
   IntArrayRef arg2_batch_sizes(arg2.sizes().data(), arg2.ndimension() - 2);
@@ -315,9 +333,20 @@ static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tenso
 
   std::vector<int64_t> arg2_expand_size({expand_batch_portion});
   arg2_expand_size.insert(arg2_expand_size.end(), { arg2.size(-2), arg2.size(-1) });
+  return std::make_tuple(std::move(arg1_expand_size), std::move(arg2_expand_size));
+}
 
-  Tensor arg1_broadcasted  = arg1.expand(arg1_expand_size);
-  Tensor arg2_broadcasted = arg2.expand(arg2_expand_size);
+static inline std::tuple<Tensor,Tensor> _linalg_broadcast_batch_dims(const Tensor& arg1, const Tensor& arg2, const char* name) {
+  // If there's no name we assume we don't want to check the errors
+  if (name != nullptr) {
+    linearSolveCheckInputs(arg1, arg2, name);
+  }
+
+  std::vector<int64_t> arg1_expand_size, arg2_expand_size;
+  std::tie(arg1_expand_size, arg2_expand_size) = at::native::_linalg_broadcast_batch_dims(arg1, arg2);
+
+  auto arg1_broadcasted  = arg1_expand_size == arg1.sizes() ? arg1 : arg1.expand(arg1_expand_size);
+  auto arg2_broadcasted  = arg2_expand_size == arg2.sizes() ? arg2 : arg2.expand(arg2_expand_size);
   return std::make_tuple(arg1_broadcasted, arg2_broadcasted);
 }
 

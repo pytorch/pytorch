@@ -211,20 +211,20 @@ using lstsq_fn = void (*)(
 DECLARE_DISPATCH(lstsq_fn, lstsq_stub);
 
 using triangular_solve_fn = void (*)(
-    Tensor& /*A*/,
-    Tensor& /*B*/,
+    const Tensor& /*A*/,
+    const Tensor& /*B*/,
     bool /*left*/,
     bool /*upper*/,
     TransposeType /*transpose*/,
     bool /*unitriangular*/);
 DECLARE_DISPATCH(triangular_solve_fn, triangular_solve_stub);
 
-using lu_fn = void (*)(
+using lu_factor_fn = void (*)(
     const Tensor& /*input*/,
     const Tensor& /*pivots*/,
     const Tensor& /*infos*/,
     bool /*compute_pivots*/);
-DECLARE_DISPATCH(lu_fn, lu_stub);
+DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
 using lu_solve_fn = void (*)(
     const Tensor& /*b*/,
