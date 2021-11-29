@@ -1,6 +1,8 @@
 #include <c10/util/Logging.h>
 #include <c10d/reducer.hpp>
 
+#include <mutex>
+
 namespace c10d {
 
 class TORCH_API Logger {
@@ -93,12 +95,7 @@ class TORCH_API Logger {
   // When running without static graph, called when reducer is destroyed to log
   // if graph was actually static and is a candidate for static graph
   // optimization.
-  void log_if_graph_static(bool is_static) {
-    ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
-    // It is useful to report the iteration that training finished at.
-    ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
-    at::LogPyTorchDDPUsage(*ddp_logging_data_);
-  }
+  void log_if_graph_static(bool is_static);
 
 
  private:
