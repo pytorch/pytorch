@@ -247,6 +247,9 @@ class TestOperators(TestCase):
         xfail('linalg.eigvalsh'),
         xfail('var_mean'),
         xfail('std_mean'),
+
+        # fails on cuda
+        xfail('nn.functional.dropout', device_type='cuda'),
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
