@@ -1,3 +1,4 @@
+import collections.abc
 import copy
 from dataclasses import dataclass
 from typing import Callable, Any
