@@ -1059,15 +1059,15 @@ else:
     def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
-    @overload
+    @overload  # noqa: F811
     def tensordot(a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None):  # noqa: F811
         pass
 
@@ -1421,17 +1421,17 @@ else:
         # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload
+    @overload  # noqa: F811
     def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):  # noqa: F811
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
@@ -1648,9 +1648,10 @@ def _lu_impl(A, pivot=True, get_infos=False, out=None):
     ``True``.
 
     .. note::
-        * The pivots returned by the function are 1-indexed. If :attr:`pivot`
-          is ``False``, then the returned pivots is a tensor filled with
-          zeros of the appropriate size.
+        * The returned permutation matrix for every matrix in the batch is
+          represented by a 1-indexed vector of size ``min(A.shape[-2], A.shape[-1])``.
+          ``pivots[i] == j`` represents that in the ``i``-th step of the algorithm,
+          the ``i``-th row was permuted with the ``j-1``-th row.
         * LU factorization with :attr:`pivot` = ``False`` is not available
           for CPU, and attempting to do so will throw an error. However,
           LU factorization with :attr:`pivot` = ``False`` is available for
