@@ -205,7 +205,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
-  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
       input,
@@ -274,7 +273,6 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
   // non synchronizing cub call
   // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
   // so split at int_max/2
-  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
       input,
