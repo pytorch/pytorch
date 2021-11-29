@@ -567,7 +567,7 @@ def export_to_pretty_string(model, args, export_params=True, verbose=False, trai
     _set_opset_version(opset_version)
     _set_operator_export_type(operator_export_type)
     from torch.onnx.symbolic_helper import _set_onnx_shape_inference
-    _set_onnx_shape_inference(onnx_shape_inference)
+    _set_onnx_shape_inference(True)
     with exporter_context(model, training):
         val_keep_init_as_ip = _decide_keep_init_as_input(keep_initializers_as_inputs,
                                                          operator_export_type,
@@ -578,7 +578,6 @@ def export_to_pretty_string(model, args, export_params=True, verbose=False, trai
         graph, params_dict, torch_out = _model_to_graph(model, args, verbose, input_names,
                                                         output_names, operator_export_type,
                                                         val_do_constant_folding,
-                                                        fixed_batch_size=fixed_batch_size,
                                                         training=training, dynamic_axes=dynamic_axes)
 
         return graph._pretty_print_onnx(params_dict, opset_version, False,
