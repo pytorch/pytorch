@@ -9,7 +9,7 @@
 namespace at {
 namespace native {
 
-Tensor& addmm_out_sparse_csr_dense_cuda(
+Tensor& addmm_out_sparse_csr_cuda(
     const Tensor& self,
     const Tensor& mat1,
     const Tensor& mat2,

@@ -125,7 +125,7 @@ SparseTensor& neg_out_sparse(const SparseTensor& t, SparseTensor& r) {
 }
 
 SparseTensor neg_sparse(const SparseTensor& t) {
-  SparseTensor r = get_result_tensor_for_unary_op(t);
+  SparseTensor r = at::empty_like(t);
   neg_out_sparse(t, r);
   return r;
 }

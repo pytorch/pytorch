@@ -738,26 +738,26 @@ householder_product(A, tau, *, out=None) -> Tensor
 
 Computes the first `n` columns of a product of Householder matrices.
 
-Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
-for a matrix :math:`V \in \mathbb{K}^{m \times n}` with columns :math:`v_i \in \mathbb{K}^m`
-with :math:`m \geq n` and a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`,
-this function computes the first :math:`n` columns of the matrix
+Let :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`, and
+let :math:`V \in \mathbb{K}^{m \times n}` be a matrix with columns :math:`v_i \in \mathbb{K}^m`
+for :math:`i=1,\ldots,m` with :math:`m \geq n`. Denote by :math:`w_i` the vector resulting from
+zeroing out the first :math:`i-1` compontents of :math:`v_i` and setting to `1` the :math:`i`-th.
+For a vector :math:`\tau \in \mathbb{K}^k` with :math:`k \leq n`, this function computes the
+first :math:`n` columns of the matrix
 
 .. math::
 
-    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i v_i v_i^{\text{H}}
+    H_1H_2 ... H_k \qquad\text{with}\qquad H_i = \mathrm{I}_m - \tau_i w_i w_i^{\text{H}}
 
-where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and
-:math:`v^{\text{H}}` is the conjugate transpose when :math:`v` is complex, and the transpose when :math:`v` is real-valued.
+where :math:`\mathrm{I}_m` is the `m`-dimensional identity matrix and :math:`w^{\text{H}}` is the
+conjugate transpose when :math:`w` is complex, and the transpose when :math:`w` is real-valued.
+The output matrix is the same size as the input matrix :attr:`A`.
 
 See `Representation of Orthogonal or Unitary Matrices`_ for further details.
 
 Supports inputs of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if the inputs are batches of matrices then
 the output has the same batch dimensions.
-
-.. note:: This function only uses the values strictly below the main diagonal of :attr:`A`.
-          The other values are ignored.
 
 .. seealso::
 
@@ -769,7 +769,7 @@ the output has the same batch dimensions.
         However, that function is not supported by autograd.
 
 .. warning::
-    Gradient computations are only well-defined if :math:`tau_i ||v_i||^2 \neq 1`.
+    Gradient computations are only well-defined if :math:`tau_i \neq \frac{1}{||v_i||^2}`.
     If this condition is not met, no error will be thrown, but the gradient produced may contain `NaN`.
 
 Args:
@@ -1859,7 +1859,7 @@ Computes the solution of a square system of linear equations with a unique solut
 
 Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
 this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system** associated to
-:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{m \times k}`, which is defined as
+:math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
 
@@ -1883,9 +1883,18 @@ Letting `*` be zero or more batch dimensions,
     This function computes `X = \ `:attr:`A`\ `.inverse() @ \ `:attr:`B` in a faster and
     more numerically stable way than performing the computations separately.
 
+.. note::
+    It is possible to compute the solution of the system :math:`XA = B` by passing the inputs
+    :attr:`A` and :attr:`B` transposed and transposing the output returned by this function.
+
 """ + fr"""
 .. note:: {common_notes["sync_note"]}
 """ + r"""
+
+.. seealso::
+
+        :func:`torch.linalg.solve_triangular` computes the solution of a triangular system of linear
+        equations with a unique solution.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -1932,6 +1941,84 @@ Examples::
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
 """)
+
+solve_triangular = _add_docstr(_linalg.linalg_solve_triangular, r"""
+linalg.solve_triangular(A, B, *, upper, left=True, unitriangular=False, out=None) -> Tensor
+
+Computes the solution of a triangular system of linear equations with a unique solution.
+
+Letting :math:`\mathbb{K}` be :math:`\mathbb{R}` or :math:`\mathbb{C}`,
+this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the **linear system**
+associated to the triangular matrix :math:`A \in \mathbb{K}^{n \times n}` without zeros on the diagonal
+(that is, it is `invertible`_) and the rectangular matrix , :math:`B \in \mathbb{K}^{n \times k}`,
+which is defined as
+
+.. math:: AX = B
+
+The argument :attr:`upper` signals whether :math:`A` is upper or lower triangular.
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that
+solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
+
+If :attr:`upper`\ `= True` (resp. `False`) just the upper (resp. lower) triangular half of :attr:`A`
+will be accessed. The elements below the main diagonal will be considered to be zero and will not be accessed.
+
+If :attr:`unitriangular`\ `= True`, the diagonal of :attr:`A` is assumed to be ones and will not be accessed.
+
+The result may contain `NaN` s if the diagonal of :attr:`A` contains zeros or elements that
+are very close to zero and :attr:`unitriangular`\ `= False` (default) or if the input matrix
+has very small eigenvalues.
+
+Supports inputs of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if the inputs are batches of matrices then
+the output has the same batch dimensions.
+
+.. seealso::
+
+        :func:`torch.linalg.solve` computes the solution of a general square system of linear
+        equations with a unique solution.
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` (or `(*, k, k)` if :attr:`left`\ `= True`)
+                where `*` is zero or more batch dimensions.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    upper (bool): whether :attr:`A` is an upper or lower triangular matrix.
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
+    unitriangular (bool, optional): if `True`, the diagonal elements of :attr:`A` are assumed to be
+                                    all equal to `1`. Default: `False`.
+    out (Tensor, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
+                            Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3).triu_()
+    >>> b = torch.randn(3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=True)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 3, 3).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False)
+    >>> torch.allclose(A @ X, B)
+    True
+
+    >>> A = torch.randn(2, 4, 4).tril_()
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.solve_triangular(A, B, upper=False, left=False)
+    >>> torch.allclose(X @ A, B)
+    True
+
+.. _invertible:
+    https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
 
 tensorinv = _add_docstr(_linalg.linalg_tensorinv, r"""
 linalg.tensorinv(A, ind=2, *, out=None) -> Tensor

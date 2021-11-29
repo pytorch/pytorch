@@ -192,6 +192,20 @@ constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
 // so split at int_max/2
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, int max_cub_size=impl::max_cub_size>
 inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, int64_t num_items) {
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+  //For ROCm, use hipCUB chained iterators
+  CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::InclusiveScan,
+      input,
+      output,
+      scan_op,
+      num_items,
+      at::cuda::getCurrentCUDAStream());
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
       input,
@@ -241,10 +255,26 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         at::cuda::getCurrentCUDAStream());
 #endif
   }
+#endif
 }
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
+#if defined(USE_ROCM) && (ROCM_VERSION >= 50000)
+  //For ROCm, use hipCUB chained iterators
+  CUB_WRAPPER(NO_ROCM(detail)::hipcub::DeviceScan::ExclusiveScan,
+      input,
+      output,
+      scan_op,
+      init_value,
+      num_items,
+      at::cuda::getCurrentCUDAStream());
+  C10_HIP_KERNEL_LAUNCH_CHECK();
+#else
+  // non synchronizing cub call
+  // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
+  // so split at int_max/2
+  constexpr int max_cub_size = std::numeric_limits<int>::max() / 2 + 1; // 2**30
   int size_cub = std::min<int64_t>(num_items, max_cub_size);
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
       input,
@@ -285,6 +315,7 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         at::cuda::getCurrentCUDAStream());
 #endif
   }
+#endif
 }
 
 }}}  // namespace at::cuda::cub
