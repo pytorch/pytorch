@@ -5,6 +5,7 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/cuda/CachingHostAllocator.h>
+#include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
@@ -247,7 +248,7 @@ PyObject * THCPModule_cudaSleep(PyObject *_unused, PyObject *cycles)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(cycles), "torch.cuda._sleep(): expected 'int'");
-  THC_sleep(LIBRARY_STATE THPUtils_unpackLong(cycles));
+  at::cuda::sleep(THPUtils_unpackLong(cycles));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
