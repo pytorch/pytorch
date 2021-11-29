@@ -241,6 +241,9 @@ jobs:
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
           PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
           if [[ $TEST_CONFIG != 'xla' ]]; then
             # shellcheck disable=SC2089
             PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
