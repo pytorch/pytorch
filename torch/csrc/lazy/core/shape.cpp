@@ -33,5 +33,13 @@ std::vector<Shape> convertShapes(
   return shape;
 }
 
+size_t Shape::numel() const {
+  size_t elts = 1;
+  for (auto size : sizes_) {
+    elts *= size;
+  }
+  return elts;
+}
+
 }  // namespace lazy
 }  // namespace torch
