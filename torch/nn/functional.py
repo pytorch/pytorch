@@ -48,7 +48,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a one-element tuple `(padW,)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -96,7 +96,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -146,7 +146,7 @@ Args:
     padding: implicit paddings on both sides of the input. Can be a string {'valid', 'same'},
       single number or a tuple `(padT, padH, padW)`. Default: 0
       ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
-      the input so the output has the shape as the input. However, this mode
+      the input so the output has the same shape as the input. However, this mode
       doesn't support any stride values other than 1.
 
       .. warning::
@@ -5192,7 +5192,7 @@ def multi_head_attention_forward(
 
     # convert mask to float
     if attn_mask is not None and attn_mask.dtype == torch.bool:
-        new_attn_mask = torch.zeros_like(attn_mask, dtype=torch.float)
+        new_attn_mask = torch.zeros_like(attn_mask, dtype=q.dtype)
         new_attn_mask.masked_fill_(attn_mask, float("-inf"))
         attn_mask = new_attn_mask
 

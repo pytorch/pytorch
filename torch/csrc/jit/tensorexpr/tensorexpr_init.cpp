@@ -750,6 +750,7 @@ void initTensorExprBindings(PyObject* module) {
           py::init([](const TSGraph& g,
                       std::unordered_map<std::string, NNCLoweringFunction>
                           custom_lowerings_str,
+                      std::vector<int64_t> symbolic_shape_inputs,
                       bool pre_alloc = false) {
             std::unordered_map<c10::Symbol, NNCLoweringFunction>
                 custom_lowerings;
@@ -758,10 +759,11 @@ void initTensorExprBindings(PyObject* module) {
                   kv.second;
             }
             return std::make_unique<TensorExprKernel>(
-                g, custom_lowerings, pre_alloc);
+                g, custom_lowerings, symbolic_shape_inputs, pre_alloc);
           }),
           py::arg("g"),
           py::arg("custom_lowerings_str"),
+          py::arg("symbolic_shape_inputs") = std::vector<int64_t>(),
           py::arg("pre_alloc") = false)
       .def(
           "run",
