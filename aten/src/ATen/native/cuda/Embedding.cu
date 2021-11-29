@@ -318,7 +318,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 
     int warp_size = at::cuda::warp_size();
     int max_threads = warp_size * warp_size;
-    const int num_threads = warp_size * 2;
+    const int num_threads = 128;
     TORCH_INTERNAL_ASSERT(
         num_threads % warp_size == 0 && num_threads <= max_threads,
         "BlockReduceSum requires all warps be active");
