@@ -14,15 +14,6 @@ typedef struct TORCH_CUDA_CU_API THCDescBuff {
 } THCDescBuff;
 
 #include <THC/generic/THCTensor.h>
-#include <THC/THCGenerateAllTypes.h>
-
-#include <THC/generic/THCTensor.h>
-#include <THC/THCGenerateComplexTypes.h>
-
-#include <THC/generic/THCTensor.h>
-#include <THC/THCGenerateBoolType.h>
-
-#include <THC/generic/THCTensor.h>
-#include <THC/THCGenerateBFloat16Type.h>
+#include <THC/THCGenerateByteType.h>
 
 #endif

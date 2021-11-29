@@ -13,6 +13,7 @@ from torch.fx.experimental.fx2trt.fx2trt import (
 from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.passes import shape_prop
 
+
 def fetch_attr(mod, target):
     """
     Fetch an attribute from the ``Module`` hierarchy of ``mod.module``.
@@ -39,7 +40,7 @@ class TRTTestCase(unittest.TestCase):
     def setUp(self):
         torch.manual_seed(3)
 
-    def run_test(self, mod, inputs, expected_ops, interpreter, rtol, atol):
+    def run_test(self, mod, inputs, expected_ops, unexpected_ops, interpreter, rtol, atol):
         with torch.no_grad():
             cuda_inputs = []
             for i in inputs:
@@ -48,9 +49,15 @@ class TRTTestCase(unittest.TestCase):
             mod.eval()
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
+            if unexpected_ops:
+                self.assert_unexpected_op(mod, unexpected_ops)
 
             interpreter_result = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
+            trt_mod = TRTModule(
+                interpreter_result.engine,
+                interpreter_result.input_names,
+                interpreter_result.output_names,
+            )
 
             ref_outputs = mod(*inputs)
             outputs = trt_mod(*cuda_inputs)
@@ -67,8 +74,9 @@ class TRTTestCase(unittest.TestCase):
         mod,
         inputs,
         expected_ops,
-        comparators: List[Tuple[Callable, List]],
         interpreter,
+        comparators: List[Tuple[Callable, List]],
+        fp16_mode=False,
     ):
         """
         Runs the test and compares the result using the provided comparators.
@@ -91,8 +99,12 @@ class TRTTestCase(unittest.TestCase):
             if len(expected_ops):
                 self.assert_has_op(mod, expected_ops)
 
-            interpreter_result = interpreter.run(fp16_mode=False)
-            trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
+            interpreter_result = interpreter.run(fp16_mode=fp16_mode)
+            trt_mod = TRTModule(
+                interpreter_result.engine,
+                interpreter_result.input_names,
+                interpreter_result.output_names,
+            )
             res_trt = trt_mod(*cuda_inputs).cpu()
             res_cpu = mod(*inputs)
             assert len(res_trt) == len(res_cpu)
@@ -128,21 +140,33 @@ class TRTTestCase(unittest.TestCase):
         )
 
 
+    def assert_unexpected_op(self, mod, ops):
+        for node in mod.graph.nodes:
+            if (node.op == "call_module"):
+                if type(fetch_attr(mod, node.target)) in ops:
+                    return False
+            elif node.op in {"call_function", "call_method"}:
+                if node.target in ops:
+                    return False
+        return True
+
+
 class VanillaTestCase(TRTTestCase):
     def run_test(self, mod, inputs, expected_ops, rtol=1e-05, atol=1e-06):
         mod = torch.fx.symbolic_trace(mod)
         shape_prop.ShapeProp(mod).propagate(*inputs)
         mod = NormalizeArgs(mod).transform()
         interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
-        super().run_test(mod, inputs, expected_ops, interp, rtol, atol)
+        super().run_test(mod, inputs, expected_ops, None, interp, rtol, atol)
 
     def run_test_custom_compare_results(
         self,
         mod,
         inputs,
         expected_ops,
+        interpreter,
         comparators: List[Tuple[Callable, List]],
-        interpreter=None
+        fp16_mode=False,
     ):
         # interpreter is ignored, we do not need this for Vanilla tests
         # Note this is different from internal version, we need to fix the test case
@@ -152,7 +176,7 @@ class VanillaTestCase(TRTTestCase):
         mod = NormalizeArgs(mod).transform()
         interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
         super().run_test_custom_compare_results(
-            mod, inputs, expected_ops, comparators, interp
+            mod, inputs, expected_ops, interp, comparators, fp16_mode=fp16_mode
         )
 
 
@@ -162,6 +186,7 @@ class AccTestCase(TRTTestCase):
         mod,
         inputs,
         expected_ops,
+        unexpected_ops=None,
         apply_passes=None,
         test_explicit_batch_dim=True,
         test_implicit_batch_dim=True,
@@ -177,13 +202,13 @@ class AccTestCase(TRTTestCase):
 
         if test_implicit_batch_dim:
             interp = TRTInterpreter(mod, InputTensorSpec.from_tensors(inputs))
-            super().run_test(mod, inputs, expected_ops, interp, rtol, atol)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
 
         if test_explicit_batch_dim:
             interp = TRTInterpreter(
                 mod, InputTensorSpec.from_tensors(inputs), explicit_batch_dimension=True
             )
-            super().run_test(mod, inputs, expected_ops, interp, rtol, atol)
+            super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)
 
     def run_test_with_assert_error(
         self,
@@ -211,6 +236,7 @@ class AccTestCase(TRTTestCase):
         mod,
         input_specs,
         expected_ops,
+        unexpected_ops=None,
         rtol=1e-03,
         atol=1e-03,
     ):
@@ -218,4 +244,4 @@ class AccTestCase(TRTTestCase):
         inputs = create_inputs_from_specs(input_specs)
         mod = acc_tracer.trace(mod, inputs)
         interp = TRTInterpreter(mod, input_specs, explicit_batch_dimension=True)
-        super().run_test(mod, inputs, expected_ops, interp, rtol, atol)
+        super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)

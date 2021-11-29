@@ -528,6 +528,17 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+        # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
+        x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
+        x = x_base[1:]
+        self.assertTrue(x.is_pinned())
+        self.assertTrue(x_base.is_pinned())
+        self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
+        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
+        y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
+        _test_copy_non_blocking(x, y)
+
+
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -583,6 +594,13 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_tf32 = not orig
         self.assertEqual(torch._C._get_cublas_allow_tf32(), not orig)
         torch.backends.cuda.matmul.allow_tf32 = orig
+
+    def test_cublas_allow_fp16_reduced_precision_reduction_get_set(self):
+        orig = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = not orig
+        self.assertEqual(torch._C._get_cublas_allow_fp16_reduced_precision_reduction(), not orig)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
