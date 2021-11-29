@@ -2969,7 +2969,7 @@ def binary_cross_entropy(
     See :class:`~torch.nn.BCELoss` for details.
 
     Args:
-        input: Tensor of arbitrary shape as probabilities.
+        input: Tensor of arbitrary shape as probabilities with values between 0 and 1.
         target: Tensor of the same shape as input with values between 0 and 1.
         weight (Tensor, optional): a manual rescaling weight
                 if provided it's repeated to match input tensor shape
