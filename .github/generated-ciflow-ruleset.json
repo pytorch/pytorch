@@ -38,8 +38,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3",
-      "win-vs2019-cuda11.5-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/android": [
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
@@ -73,8 +72,7 @@
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
       "periodic-win-vs2019-cuda11.1-py3",
-      "win-vs2019-cuda11.3-py3",
-      "win-vs2019-cuda11.5-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/default": [
       "linux-bionic-cuda11.5-py3.6-gcc7",
@@ -91,8 +89,7 @@
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single",
       "pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3",
-      "win-vs2019-cuda11.5-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/ios": [
       "ios-12-5-1-arm64",
@@ -179,8 +176,7 @@
     "ciflow/win": [
       "periodic-win-vs2019-cuda11.1-py3",
       "win-vs2019-cpu-py3",
-      "win-vs2019-cuda11.3-py3",
-      "win-vs2019-cuda11.5-py3"
+      "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/xla": [
       "linux-bionic-py3.6-clang9"

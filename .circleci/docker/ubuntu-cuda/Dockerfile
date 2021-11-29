@@ -101,7 +101,7 @@ ENV CUDA_PATH /usr/local/cuda
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
-# Hack for CUDA 11.5.0 image to install cudnn8 since cidnn8 is not included with CUDA 11.5 image
+# Hack for CUDA 11.5.0 image to install cudnn8 since cudnn8 is not included with CUDA 11.5 image
 # Also note cudnn 8.2.0.53 is labeled for cuda 11.3
 ARG INSTALL_CUDNN
 ADD ./common/install_cudnn8.sh install_cudnn8.sh
