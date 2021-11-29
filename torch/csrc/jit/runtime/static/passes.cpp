@@ -493,7 +493,7 @@ void UseVariadicTupleUnpack(const std::shared_ptr<Graph>& graph) {
 // `static_runtime::select_tensor` op, which returns `b_out` if
 // `did_copy` is true and `a` otherwise. Note that this operator does
 // not need to participate in memory planning because its output
-// always aliases its input.
+// always aliases one of its inputs.
 //
 // Here is an illustration:
 //

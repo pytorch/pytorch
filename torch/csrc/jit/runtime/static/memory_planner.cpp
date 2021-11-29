@@ -105,6 +105,9 @@ MemoryPlanner::MemoryPlanner(
           // If to_maybe_copy_out did not actually do anything in the
           // first iteration, assume it will continue to not do anything
           // and avoid managing its output.
+          //
+          // This avoids the additional overhead associated with each managed
+          // tensor in MemoryPlanner::deallocate().
           static const auto to_maybe_copy_out_symbol =
               c10::Symbol::fromQualString("static_runtime::to_maybe_copy_out");
           if (pnode.node()->kind() == to_maybe_copy_out_symbol &&
