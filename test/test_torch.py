@@ -8342,6 +8342,7 @@ class TestDevicePrecision(TestCase):
         x.copy_(y)
         self.assertEqual(x[3], y)
 
+    @onlyNativeDeviceTypes
     def test_copy_math_view(self, device):
         for dst_dtype, src_dtype in [
                 (torch.float32, torch.float32),
