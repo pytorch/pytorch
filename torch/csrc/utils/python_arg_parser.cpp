@@ -79,8 +79,11 @@ static bool should_allow_numbers_as_tensors(const std::string& name) {
   static std::unordered_set<std::string> allowed = {
     "add", "add_", "add_out",
     "div", "div_", "div_out",
+    "divide", "divide_", "divide_out", // alias of div
     "mul", "mul_", "mul_out",
+    "multiply", "multiply_", "multiply_out", // alias of mul
     "sub", "sub_", "sub_out",
+    "subtract", "subtract_", "subtract_out", // alias of sub
     "true_divide", "true_divide_", "true_divide_out",
     "floor_divide", "floor_divide_", "floor_divide_out"
   };

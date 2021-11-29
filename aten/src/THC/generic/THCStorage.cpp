@@ -6,16 +6,6 @@
 #include <c10/util/typeid.h>
 
 
-scalar_t* THCStorage_(data)(THCState *state, const THCStorage *self)
-{
-  return self->data<scalar_t>();
-}
-
-int THCStorage_(elementSize)(THCState *state)
-{
-  return sizeof(scalar_t);
-}
-
 void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar_t value)
 {
   THArgCheck(
@@ -23,7 +13,7 @@ void THCStorage_(set)(THCState *state, THCStorage *self, ptrdiff_t index, scalar
       2,
       "index out of bounds");
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::memcpy_and_sync(THCStorage_(data)(state, self) + index, &value, sizeof(scalar_t),
+  at::cuda::memcpy_and_sync(self->data<scalar_t>() + index, &value, sizeof(scalar_t),
                               cudaMemcpyHostToDevice,
                               stream);
 }
@@ -36,7 +26,7 @@ scalar_t THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t ind
       "index out of bounds");
   scalar_t value;
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream();
-  at::cuda::memcpy_and_sync(&value, THCStorage_(data)(state, self) + index, sizeof(scalar_t),
+  at::cuda::memcpy_and_sync(&value, self->data<scalar_t>() + index, sizeof(scalar_t),
                                   cudaMemcpyDeviceToHost, stream);
   return value;
 }

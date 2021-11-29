@@ -6,88 +6,123 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
-#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
 
-// We're going to replay this split operation on the corresponding ID
-void IndexReferenceReplay::handle(Split* s) {
-  auto in = s->in();
-
-  auto concrete_in = GpuLower::current()->caIndexMap().getConcreteMappedID(in);
-  auto mapped_in_it = concrete_to_id_.find(concrete_in);
-  if (mapped_in_it == concrete_to_id_.end()) {
-    // If we can't find the concrete IDs in our local map, don't do anything.
-    return;
+IterDomain* IndexReferenceReplay::concreteToRefId(IterDomain* concrete_id) {
+  TORCH_INTERNAL_ASSERT(toConcrete(concrete_id) == concrete_id);
+  // If a reference id doesn't exist for the provided concrete id, make a new
+  // one and add it to the ref<->concrete maps
+  if (concrete_to_ref_id_.find(concrete_id) == concrete_to_ref_id_.end()) {
+    auto ref_id = idCopy(concrete_id);
+    ref_id_to_concrete_[ref_id] = concrete_id;
+    concrete_to_ref_id_[concrete_id] = ref_id;
+    return ref_id;
   }
-
-  auto mapped_in = mapped_in_it->second;
-
-  if (leaf_ids_.find(mapped_in) == leaf_ids_.end()) {
-    // If ID has already been replayed, don't do anything.
-    return;
-  }
-
-  auto replayed_outs =
-      IterDomain::split(mapped_in, s->factor(), s->innerSplit());
-
-  auto concrete_outer =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(s->outer());
-  auto concrete_inner =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(s->inner());
-
-  // Update leaf id set and concrete id map
-  leaf_ids_.erase(mapped_in);
-  leaf_ids_.emplace(replayed_outs.first);
-  leaf_ids_.emplace(replayed_outs.second);
-  concrete_to_id_[concrete_outer] = replayed_outs.first;
-  concrete_to_id_[concrete_inner] = replayed_outs.second;
+  return concrete_to_ref_id_.at(concrete_id);
 }
 
-// We're going to replay this merge operation on the corresponding IDs
-void IndexReferenceReplay::handle(Merge* m) {
-  auto in_outer = m->outer();
-  auto in_inner = m->inner();
+IterDomain* IndexReferenceReplay::refIdToConcrete(IterDomain* ref_id) {
+  // Assert the ref id is associated with a concrete id and return it
+  TORCH_INTERNAL_ASSERT(
+      ref_id_to_concrete_.find(ref_id) != ref_id_to_concrete_.end(),
+      "Could not find ",
+      ref_id,
+      " in reference replay.");
+  return ref_id_to_concrete_.at(ref_id);
+}
 
-  auto concrete_in_outer =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(in_outer);
-  auto concrete_in_inner =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(in_inner);
+IterDomain* IndexReferenceReplay::idCopy(IterDomain* id) {
+  // Make a new copy of the provided id for the reference to "own". Reference
+  // iteration domains should always be "iteration" type, not broadcast or
+  // reduction. All we care about are the transformations, and trying to make
+  // sure we track correctly a replaying with consistent reduction/broadcast
+  // domains is challenging and unnecessary.
+  auto copied_id =
+      new IterDomain(id->start(), id->extent(), id->getParallelType());
+  replayed_ids_.emplace_back(copied_id);
+  return copied_id;
+}
 
-  auto mapped_in_outer_it = concrete_to_id_.find(concrete_in_outer);
-  auto mapped_in_inner_it = concrete_to_id_.find(concrete_in_inner);
+IterDomain* IndexReferenceReplay::toFusionID(kir::IterDomain* kir_id) {
+  return ca_map_.toFusion(kir_id);
+}
 
-  if (mapped_in_outer_it == concrete_to_id_.end() ||
-      mapped_in_inner_it == concrete_to_id_.end()) {
-    // If we can't find the concrete IDs in our local map, don't do anything.
+IterDomain* IndexReferenceReplay::toConcrete(IterDomain* id) {
+  return ca_map_.getConcreteMappedID(id);
+}
+
+void IndexReferenceReplay::handle(Split* split) {
+  // Don't consume the same values multiple times
+  auto ref_in = concreteToRefId(toConcrete(split->in()));
+  if (ref_id_consumed_.find(ref_in) != ref_id_consumed_.end()) {
+    return;
+  }
+  // Don't produce the same values multiple times
+  auto ref_outer = concreteToRefId(toConcrete(split->outer()));
+  auto ref_inner = concreteToRefId(toConcrete(split->inner()));
+  if (ref_id_produced_.find(ref_outer) != ref_id_consumed_.end() ||
+      ref_id_produced_.find(ref_inner) != ref_id_consumed_.end()) {
     return;
   }
 
-  auto mapped_in_outer = mapped_in_outer_it->second;
-  auto mapped_in_inner = mapped_in_inner_it->second;
+  // Replay the provided split operation and add it to the reference DAG
+  new Split(
+      ref_outer,
+      ref_inner,
+      ref_in,
+      split->factor(),
+      split->innerSplit(),
+      split->startOffset(),
+      split->stopOffset());
 
-  if (leaf_ids_.find(mapped_in_outer) == leaf_ids_.end() &&
-      leaf_ids_.find(mapped_in_inner) == leaf_ids_.end()) {
-    // If ID has already been replayed, don't do anything.
+  // Mark producers and consumers
+  ref_id_consumed_.emplace(ref_in);
+  ref_id_produced_.emplace(ref_outer);
+  ref_id_produced_.emplace(ref_inner);
+}
+
+void IndexReferenceReplay::handle(Merge* merge) {
+  // Don't consume the same values multiple times
+  auto ref_outer = concreteToRefId(toConcrete(merge->outer()));
+  auto ref_inner = concreteToRefId(toConcrete(merge->inner()));
+  if (ref_id_consumed_.find(ref_outer) != ref_id_consumed_.end() ||
+      ref_id_consumed_.find(ref_inner) != ref_id_consumed_.end()) {
     return;
   }
-  auto replayed = IterDomain::merge(mapped_in_outer, mapped_in_inner);
 
-  auto concrete_out =
-      GpuLower::current()->caIndexMap().getConcreteMappedID(m->out());
+  // Don't produce the same values multiple times
+  auto ref_out = concreteToRefId(toConcrete(merge->out()));
+  if (ref_id_produced_.find(ref_out) != ref_id_consumed_.end()) {
+    return;
+  }
 
-  // Update leaf id set and concrete id map
-  leaf_ids_.erase(mapped_in_outer);
-  leaf_ids_.erase(mapped_in_inner);
-  leaf_ids_.emplace(replayed);
-  concrete_to_id_[concrete_out] = replayed;
+  // Replay the provided merge operation and add it to the reference DAG
+  new Merge(ref_out, ref_outer, ref_inner);
+
+  // Mark producers and consumers
+  ref_id_consumed_.emplace(ref_outer);
+  ref_id_consumed_.emplace(ref_inner);
+  ref_id_produced_.emplace(ref_out);
+}
+
+void IndexReferenceReplay::handle(Expr* e) {
+  // Simple expression dispatch
+  switch (e->getExprType().value()) {
+    case (ExprType::Split):
+    case (ExprType::Merge):
+      break;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "Invalid expr type found in transform traversal.");
+  }
+  OptInDispatch::handle(e);
 }
 
 TensorDomain* IndexReferenceReplay::computeReplay() {
-  auto gpu_lower = GpuLower::current();
   // Throw an error when two loops are mapped with each other, which
   // violates an assumption that unique mappings between concrete
   // IterDomains and the IterDomains of the loop structure must be
@@ -104,154 +139,127 @@ TensorDomain* IndexReferenceReplay::computeReplay() {
        ++it_i) {
     for (auto it_j = it_i + 1; it_j != loop_structure_.end(); ++it_j) {
       TORCH_INTERNAL_ASSERT(
-          !gpu_lower->caIndexMap().areMapped(
-              (*it_i)->iter_domain(), (*it_j)->iter_domain()),
+          !ca_map_.areMapped((*it_i)->iter_domain(), (*it_j)->iter_domain()),
           "Unsupported loop structure. Two loops are mapped together.");
     }
   }
 
-  // Grab the iter domain's from the loop structure
-  std::vector<IterDomain*> fusion_loop_structure;
-
+  std::vector<IterDomain*> domain_ids;
   std::transform(
       loop_structure_.begin(),
       loop_structure_.end(),
-      std::back_inserter(fusion_loop_structure),
-      [&](kir::ForLoop* fl) {
-        auto fid = gpu_lower->caIndexMap().toFusion(fl->iter_domain());
-        return fid;
-      });
+      std::back_inserter(domain_ids),
+      [this](kir::ForLoop* fl) { return toFusionID(fl->iter_domain()); });
 
-  // Get any and all inputs that generated the provided loop structure, some
-  // root inputs may be mapped to eachother but not identical
-  auto all_inputs = InputsOf::outputs(
-      FusionGuard::getCurFusion(),
-      std::vector<Val*>(
-          fusion_loop_structure.begin(), fusion_loop_structure.end()));
+  // IterVisitor based traversals don't work because we don't have all outputs.
+  // backward traversal's traverseFrom(domain_ids) will throw "Invalid backward
+  // traversal found. Some output paths were not provided". Therefore manaully
+  // do the backward traversal
 
-  // Make sure all inputs are iter domains, ignoring anything like split factor
-  // inputs
-  auto all_iter_inputs = ir_utils::filterByType<IterDomain>(all_inputs);
+  // Order is really important here, start with outer most for loops in a depth
+  // first manner. The outer most loops are topologically closer to the outputs,
+  // so their broadcast dimensions are "more" resolved than those towards the
+  // inner most loops.
+  std::deque<IterDomain*> to_visit(domain_ids.begin(), domain_ids.end());
+  std::unordered_set<Expr*> visited;
+  while (!to_visit.empty()) {
+    auto out_id = to_visit.front();
+    to_visit.pop_front();
 
-  // Sort out the inputs as there could be entires that map to eachother, and
-  // they can be a combiantion of iteration, reduction, and broadcast. Order as
-  // iter, reduction, then broadcast for iterating and removing duplicate mapped
-  // entries. Since these are input IterDomains we mainly want to prioritize
-  // non-broadcast "versions" of the iter domain if it shows up more than once.
-  // We could get both if we have a compute at structure where a consumer has a
-  // concrete iter domain but it's producer has a broadcast domain, and the
-  // compute at axis is across a split on this domain. The producer would give a
-  // broadcast input, consumer would have iter domain input.
-  // Additionally, we prefer non-reduction iter domains over reduciton
-  // domains, but this is just optional and not necessary for correctness.
-  std::vector<IterDomain*> sorted_inputs;
-  std::copy_if(
-      all_iter_inputs.begin(),
-      all_iter_inputs.end(),
-      std::back_inserter(sorted_inputs),
-      [](IterDomain* id) { return !id->isBroadcast() && !id->isReduction(); });
-  std::copy_if(
-      all_iter_inputs.begin(),
-      all_iter_inputs.end(),
-      std::back_inserter(sorted_inputs),
-      [](IterDomain* id) { return id->isReduction(); });
-  std::copy_if(
-      all_iter_inputs.begin(),
-      all_iter_inputs.end(),
-      std::back_inserter(sorted_inputs),
-      [](IterDomain* id) { return id->isBroadcast(); });
+    auto expr = out_id->definition();
 
-  // Produce a non repetitive set of inputs. Remove "duplicate" IterDomains that
-  // map to eachother.
-  std::vector<IterDomain*> root_axes;
-  for (auto root_id : sorted_inputs) {
-    auto concrete_id = gpu_lower->caIndexMap().getConcreteMappedID(root_id);
-    if (concrete_to_id_.find(concrete_id) != concrete_to_id_.end()) {
+    // ID's will be copied for the reference as we replay transformations. If
+    // there was no transformations on an iteration domain, a copy of the
+    // iteration domain for the reference is made here.
+    if (expr == nullptr) {
+      if (std::find(domain_ids.begin(), domain_ids.end(), out_id) !=
+          domain_ids.end()) {
+        concreteToRefId(toConcrete(out_id));
+      }
       continue;
     }
 
-    // Make a copy of the root_id for the reference to "own"
-    IterDomain* root_id_copy = root_id->clone();
+    if (!visited.emplace(expr).second) {
+      continue;
+    }
 
-    // Initialize root axes, concrete map, and leaf map for replay.
-    root_axes.push_back(root_id_copy);
-    concrete_to_id_[concrete_id] = root_id_copy;
-    leaf_ids_.emplace(root_id_copy);
-  }
+    handle(expr);
 
-  // Order is important here, replay expressions from loops outside to inside.
-  auto replay_exprs = ExprSort::getExprs(
-      FusionGuard::getCurFusion(),
-      {fusion_loop_structure.begin(), fusion_loop_structure.end()});
-
-  // Run the reference replay
-  for (auto expr : replay_exprs) {
-    OptInDispatch::handle(expr);
+    auto inp_ids = ir_utils::filterByType<IterDomain>(expr->inputs());
+    // Make sure to put at the begining of the deque to maintain correct
+    // ordering.
+    to_visit.insert(to_visit.begin(), inp_ids.begin(), inp_ids.end());
   }
 
   // Construct a tensor that's representitive of the replayed loop structure.
   std::vector<IterDomain*> loops_replayed_domain;
+  for (auto loop : loop_structure_) {
+    auto loop_id = toFusionID(loop->iter_domain());
+    // Map to loops with the loop map, but make sure the replayed id is actually
+    // a leaf in the replay.
+    auto ref_id_it = std::find_if(
+        replayed_ids_.begin(), replayed_ids_.end(), [&](IterDomain* ref_id) {
+          return ref_id->uses().empty() &&
+              GpuLower::current()->caLoopMap().areMapped(
+                  refIdToConcrete(ref_id), loop_id);
+        });
 
-  // Grab a set of concrete leaf ids to make it easier to search which for loop
-  // matches the leaf id from the replay.
-  std::unordered_set<IterDomain*> concrete_leaf_ids;
-  for (auto entry : concrete_to_id_) {
-    if (leaf_ids_.find(entry.second) != leaf_ids_.end()) {
-      concrete_leaf_ids.emplace(entry.first);
-    }
+    TORCH_INTERNAL_ASSERT(
+        ref_id_it != replayed_ids_.end(),
+        "Could not find required iter domain in reference replay: ",
+        loop_id);
+
+    auto ref_id = *ref_id_it;
+    loops_replayed_domain.emplace_back(ref_id);
+
+    // Preserve parallelization
+    ref_id->parallelize(loop_id->getParallelType());
   }
 
-  // Figure out which ID's that were replayed correspond to the respective loops
-  // that were replayed.
-  std::transform(
-      fusion_loop_structure.begin(),
-      fusion_loop_structure.end(),
-      std::back_inserter(loops_replayed_domain),
-      [&](IterDomain* loop_id) {
-        for (auto id : concrete_leaf_ids) {
-          // Matching has to be done on loop map, though replay was done in ID
-          // map, so we need to manually check that things are mapped in the
-          // loop map. Cannot simply look up concrete IDs to match them as index
-          // map and loop map do not have the same concrete id mapping. We also
-          // allow matching explicitly through the index map. Index map is not
-          // gauranteed to be contained in loop map, therefore if we generate
-          // mappings to conrete id's through the index map, the mapping from
-          // those ID's to the ID's we replay are not gauranteed to be in loop
-          // map. The reverse is also true, so for validation make sure one of
-          // the mappings exist. For reference check the difference between:
-          // AdvancedLowering5 test and AdvancedIndexing1.
-          if (gpu_lower->caLoopMap().areMapped(id, loop_id) ||
-              gpu_lower->caIndexMap().areMapped(id, loop_id)) {
-            concrete_leaf_ids.erase(id);
-            auto replayed_id = concrete_to_id_.at(id);
-            // Propagate parallelization and vectorization. Necessary
-            // for indexing. IndexCompute::getExtent depends on the
-            // propagated parallelization.
-            if (isParallelTypeVectorize(loop_id->getParallelType()) ||
-                isParallelTypeThread(loop_id->getParallelType())) {
-              replayed_id->parallelize(loop_id->getParallelType());
-            }
-            return replayed_id;
-          }
-        }
-
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Could not find required iter domain in reference replay: ",
-            loop_id);
-      });
-
-  // Add any remaining leaf iter domains, this can happen from rfactor patterns.
-  for (auto entry : concrete_leaf_ids) {
-    loops_replayed_domain.push_back(concrete_to_id_.at(entry));
-  }
-  if (replay_exprs.empty()) {
+  // If no domains were replayed to make the reference, just return the root
+  // domain.
+  if (std::none_of(
+          loops_replayed_domain.begin(),
+          loops_replayed_domain.end(),
+          [](IterDomain* id) { return id->definition() != nullptr; })) {
     auto domain = new TensorDomain(
         // If there was no replay only return a domain with a root domain.
         loops_replayed_domain);
     return domain;
   } else {
-    auto domain = new TensorDomain(root_axes, loops_replayed_domain);
+    // Construct the root domain as the inputs of the replayed domain
+    auto loops_replayed_domain_vals =
+        ir_utils::filterByType<Val>(loops_replayed_domain);
+    auto root_domain_vals = IterVisitor::getInputsTo(
+        {loops_replayed_domain_vals.begin(), loops_replayed_domain_vals.end()});
+    auto root_domain_ids = ir_utils::filterByType<IterDomain>(root_domain_vals);
+
+    auto all_replayed_vals = ir_utils::filterByType<Val>(replayed_ids_);
+
+    // The domain may have dangling iteration domains, i.e. the inner output of
+    // a split but not the outer. Find which replayed vals are dependant on the
+    // root domains.
+    auto all_ids_from_root = DependencyCheck::getAllValsBetween(
+        {root_domain_vals.begin(), root_domain_vals.end()},
+        {all_replayed_vals.begin(), all_replayed_vals.end()});
+
+    // Fill all dangling outputs as otherwise backwards visitor in index compute
+    // will complain for not having all outputs of the traversal.
+    for (auto id : ir_utils::filterByType<IterDomain>(all_ids_from_root)) {
+      if (id->uses().empty()) {
+        if (std::find(
+                loops_replayed_domain.begin(),
+                loops_replayed_domain.end(),
+                id) == loops_replayed_domain.end()) {
+          loops_replayed_domain.emplace_back(id);
+        }
+      }
+    }
+
+    // Create and return the reference.
+    auto domain = new TensorDomain(
+        {root_domain_ids.begin(), root_domain_ids.end()},
+        loops_replayed_domain);
     return domain;
   }
 }
@@ -268,7 +276,7 @@ IndexCompute getReferenceIndexing(
 
   TORCH_INTERNAL_ASSERT(loop_structure.size() <= reference_tensor->nDims());
   int magic_zero_loop = -1;
-  for (size_t loop_i = 0; loop_i < loop_structure.size(); loop_i++) {
+  for (const auto loop_i : c10::irange(loop_structure.size())) {
     auto ref_axis = reference_tensor->axis(loop_i);
     auto kir_ref_axis = gpu_lower->lowerValue(ref_axis)->as<kir::IterDomain>();
     auto loop = loop_structure[loop_i];
@@ -296,20 +304,21 @@ IndexCompute getReferenceIndexing(
   // Send to the other version of reference indexing that directly takes the
   // index map
   return getReferenceIndexing(
-      loop_structure, reference_tensor, initial_index_map, {});
+      loop_structure, reference_tensor, initial_index_map, {}, {});
 }
 
 IndexCompute getReferenceIndexing(
     const std::vector<kir::ForLoop*>& loop_structure,
     TensorDomain* reference_tensor,
     std::unordered_map<kir::IterDomain*, kir::Val*> index_map,
+    std::unordered_set<kir::IterDomain*> zero_domains,
     std::unordered_set<IterDomain*> preferred_paths,
     std::unordered_map<kir::IterDomain*, kir::Val*> halo_extent_map) {
   auto gpu_lower = GpuLower::current();
 
   // I thought this might be necesasry, but turns out it's not. I think it's
   // because of the root ordering above, however leaving it in case we find
-  // out it is necessary in some cases. At the time of committing, cuda-memcheck
+  // out it is necessary in some cases. At the time of commiting, cuda-memcheck
   // passed without this.
   //
   // std::unordered_map<kir::IterDomain*,
@@ -318,7 +327,7 @@ IndexCompute getReferenceIndexing(
   //   // extent
   //   auto inputs = InputsOf::outputs(
   //       FusionGuard::getCurFusion(),
-  //       {gpu_lower->caIndexMap().toFusion(loop->iter_domain())});
+  //       {toFusionID(loop->iter_domain())});
 
   //   auto iter_inputs = ir_utils::filterByType<IterDomain>(inputs);
 
@@ -349,6 +358,7 @@ IndexCompute getReferenceIndexing(
       // reference_extent_map, // Seems this is not necessary, see comment above
       // in this function
       {},
+      zero_domains,
       std::unordered_set<kir::IterDomain*>(),
       reference_tensor->contiguity(),
       kir_preferred_path,
