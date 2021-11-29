@@ -88,8 +88,6 @@ def add_auto_observation(
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
-            if enable_logging:
-                logger.debug(f'__torch_function__ {str(func)} len_args {len(args)}')
 
             nonlocal qtensor_id
             nonlocal cur_module
@@ -97,6 +95,8 @@ def add_auto_observation(
             # if we are in a function, the current module is always a parent
             parent_module = cur_module
             hook_type = get_torch_function_hook_type(parent_module, func)
+            if enable_logging:
+                logger.debug(f'__torch_function__ {str(func)} len_args {len(args)} hook_type {hook_type}')
 
             if hook_type is HookType.OP_HOOKS:
                 qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
@@ -113,6 +113,18 @@ def add_auto_observation(
                     func, output, args, first_call, qtensor_id, parent_module,
                     global_op_idx)
                 qstate.mark_cur_op_complete(func)
+
+            elif first_call and hook_type is HookType.ARG_DEQUANTS:
+                qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
+                # TODO(future PR): remove this hack by figuring out how to
+                # check for `str(func)` equality with
+                # `<method-wrapper '__get__' of getset_descriptor object at 0x7f83083102c0>`
+                # in a better way
+                if "method-wrapper '__get__' of getset_descriptor object at " \
+                        not in str(func):
+                    qstate.arg_dequant_prepare_hook_first_call(args)
+                output = super().__torch_function__(func, types, args, kwargs)
+
             else:
                 output = super().__torch_function__(func, types, args, kwargs)
 
@@ -236,11 +248,19 @@ def add_auto_observation(
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
+                        if first_call:
+                            parent_qstate: AutoQuantizationState = (  # type: ignore[no-redef]
+                                parent_module._auto_quant_state  # type: ignore[union-attr]
+                            )
+                            parent_qstate.arg_dequant_prepare_hook_first_call(args)
+
                         output = orig_module_call(self, *args, **kwargs)
-                        # if this fp32 was inplace, make sure to set the output dtype
-                        # back to torch.float
-                        if hasattr(output, '_qtensor_info'):
-                            del output._qtensor_info
+
+                        if first_call:
+                            # if this fp32 was inplace, make sure to set the output dtype
+                            # back to torch.float
+                            if hasattr(output, '_qtensor_info'):
+                                del output._qtensor_info
 
                     else:
                         output = orig_module_call(self, *args, **kwargs)

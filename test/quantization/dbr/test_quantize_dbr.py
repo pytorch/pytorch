@@ -1000,6 +1000,65 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertFalse(
             mp.conv[0]._auto_quant_state.needs_dtype_transform_on_outputs)
 
+    def test_any_child_needs_arg_dequants(self):
+        # base case - functions and modules which will be quantized
+        # and will not need dequant
+        class M0(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x + x
+                return x
+
+        m = M0().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        self.assertFalse(
+            mp._auto_quant_state.any_child_needs_arg_dequants)
+
+        # tanhshrink is a functional which does not support quantization
+        # and will need a dequant after a quantized op
+        class M1(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = F.tanhshrink(x)
+                return x
+
+        m = nn.Sequential(M1()).eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        self.assertFalse(
+            mp._auto_quant_state.any_child_needs_arg_dequants)
+        self.assertTrue(
+            mp[0]._auto_quant_state.any_child_needs_arg_dequants)
+
+        # nn.Tanhshrink is a module which does not support quantization
+        # and will need a dequant after a quantized op
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 1, 1)
+                self.tanhshrink = nn.Tanhshrink()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.tanhshrink(x)
+                return x
+
+        m = nn.Sequential(M2()).eval()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 1, 2, 2),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        self.assertFalse(
+            mp._auto_quant_state.any_child_needs_arg_dequants)
+        self.assertTrue(
+            mp[0]._auto_quant_state.any_child_needs_arg_dequants)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
