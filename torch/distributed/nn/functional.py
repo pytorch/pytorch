@@ -122,11 +122,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=dist.group.WORLD):
     return gathered list of tensors in output list.
 
     Arguments:
-        tensors (list[Tensor]): List of tensors to scatter one per rank.
-        group (ProcessGroup, optional): The process group to work on.
         out_tensor_list (list[Tensor]): list of tensors to gather one per rank.
-            This is used when the size of tensor to scatter is not same as the
-            one to gather.
+        input_tensor_list (list[Tensor]): List of tensors to scatter one per rank.
+        group (ProcessGroup, optional): The process group to work on.
 
     Returns:
         tuple([Tensor]): Output of the collective.
