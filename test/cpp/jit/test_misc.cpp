@@ -157,15 +157,12 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput;
-  std::tie(output, finput) = at::_slow_conv2d_forward(
+  at::Tensor output = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
   at::Tensor grad_output =
       torch::randn_like(output, at::MemoryFormat::Preserve);
-  at::Tensor grad_finput =
-      torch::zeros_like(finput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -176,7 +173,6 @@ TEST(THNNConvTest, Basic) {
       kernel_size,
       stride,
       padding,
-      finput,
       {true, true, true});
 
   // make JIT graph
@@ -213,7 +209,6 @@ TEST(THNNConvTest, Basic) {
 
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
-  tensor_grads_in.push_back(grad_finput);
 
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
@@ -223,7 +218,6 @@ TEST(THNNConvTest, Basic) {
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
-  expected_tensors_out.push_back(finput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
