@@ -9,7 +9,7 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 
 EXAMPLES = [
     (constraints.symmetric, False, [[2., 0], [2., 2]]),
-    (constraints.positive_definite, True, [[2., 0], [2., 2]]),
+    (constraints.positive_definite, False, [[2., 0], [2., 2]]),
     (constraints.symmetric, True, [[3., -5], [-5., 3]]),
     (constraints.positive_definite, False, [[3., -5], [-5., 3]]),
 ]
