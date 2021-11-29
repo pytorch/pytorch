@@ -1,3 +1,5 @@
+# Owner(s): ["high priority"]
+
 from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
@@ -14,7 +16,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyOnCPUAndCUDA, skipCUDAIfRocm, OpDTypes)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
@@ -56,8 +58,9 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
+    @skipMeta
     @skipCUDAIfRocm
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @ops(op_db, dtypes=OpDTypes.none)
     def test_dtypes(self, device, op):
         # dtypes to try to backward in
@@ -195,7 +198,7 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_reference_testing(self, device, dtype, op):
@@ -203,13 +206,23 @@ class TestCommon(TestCase):
         for sample_input in sample_inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @ops([op for op in op_db if op.error_inputs_func is not None], dtypes=OpDTypes.none)
+    def test_errors(self, device, op):
+        error_inputs = op.error_inputs(device)
+        for ei in error_inputs:
+            si = ei.sample_input
+            with self.assertRaisesRegex(ei.error_type, ei.error_regex):
+                op(si.input, *si.args, **si.kwargs)
+
     # Tests that the function produces the same result when called with
     #   noncontiguous tensors.
     # TODO: get working with Windows by addressing failing operators
     # TODO: get working with ASAN by addressing failing operators
     @unittest.skipIf(IS_WINDOWS, "Skipped under Windows")
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyOnCPUAndCUDA
+    @onlyNativeDeviceTypes
     @suppress_warnings
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
@@ -573,7 +586,7 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True, check_batched_grad=None):
+                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -621,7 +634,8 @@ class TestGradients(TestCase):
                                           fast_mode=op.gradcheck_fast_mode,
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=check_undefined_grad))
+                                          check_undefined_grad=check_undefined_grad,
+                                          check_batched_forward_grad=check_batched_forward_grad))
             elif check == 'gradgradcheck':
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
@@ -640,10 +654,11 @@ class TestGradients(TestCase):
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True, check_batched_grad=None):
+                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
                                   check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
-                                  check_batched_grad=check_batched_grad)
+                                  check_batched_grad=check_batched_grad,
+                                  check_batched_forward_grad=check_batched_forward_grad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
@@ -708,16 +723,19 @@ class TestGradients(TestCase):
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     def _forward_grad_helper(self, device, dtype, op, variant):
-        if op.supports_forward_ad:
+        # TODO: clean up how attributes are passed to gradcheck from OpInfos
+        def call_grad_test_helper():
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False)
+                                   check_undefined_grad=False, check_batched_grad=False,
+                                   check_batched_forward_grad=op.check_batched_forward_grad)
+        if op.supports_forward_ad:
+            call_grad_test_helper()
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                       check_undefined_grad=False, check_batched_grad=False)
+                call_grad_test_helper()
 
     @_gradcheck_ops(op_db)
     def test_forward_mode_AD(self, device, dtype, op):
