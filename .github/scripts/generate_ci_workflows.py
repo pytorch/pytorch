@@ -629,11 +629,14 @@ IOS_WORKFLOWS = [
 ]
 
 MACOS_WORKFLOWS = [
+    # Distributed tests are still run on MacOS, but part of regular shards
     CIWorkflow(
         arch="macos",
         build_environment="macos-11-py3-x86-64",
         xcode_version="12.4",
         test_runner_type=MACOS_TEST_RUNNER_11,
+        num_test_shards=2,
+        distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_MACOS},
         ),
