@@ -122,6 +122,10 @@ class AutoQuantizationState(torch.nn.Module):
         # to its final value after tracing.
         self.needs_dtype_transform_on_outputs = False
 
+        # If this is True, at least one child of the parent module was
+        # detected to need arg dequants during tracing.
+        self.any_child_needs_arg_dequants = False
+
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
@@ -815,6 +819,20 @@ class AutoQuantizationState(torch.nn.Module):
         self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
             output._qtensor_info)
         qtensor_id[0] += 1
+
+    def arg_dequant_prepare_hook_first_call(self, args: Any) -> None:
+        """
+        This is called during tracing for any arg_dequant ops.
+        """
+        # If we think any arg will need a dequant during inference,
+        # store that information in a flag so we can use it for performance
+        # optimizations.
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                qtensor_info = getattr(arg, '_qtensor_info', None)
+                if qtensor_info is not None:
+                    if qtensor_info.inf_dtype != torch.float:
+                        self.any_child_needs_arg_dequants = True
 
     # This is a hack to enable nn.Sequential to properly work with
     # this class.
