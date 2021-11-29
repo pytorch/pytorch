@@ -1066,6 +1066,8 @@ Miscellanea
         x = torch.randn(5, 3)
         torch.testing.assert_allclose(traced(x), x)
 
+  - Because of this difference, you consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
+
 
 API Reference
 -------------
