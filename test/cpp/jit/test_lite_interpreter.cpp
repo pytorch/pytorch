@@ -658,7 +658,10 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
 
   std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -721,7 +724,20 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to operator version
+  runtime_info = RuntimeCompatibilityInfo::get();
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
