@@ -325,6 +325,7 @@ def _getattr_qual(obj, name, default=_NOTHING):
 #   Each SampleInput defines an "input", "args", "kwargs",
 #   an "output_process_fn_grad" function, the "broadcasts_input" bool and
 #   a "name".
+#
 #   All the "sample_inputs" functions are invoked within a `torch.no_grad()`
 #   environment for efficiency and correctness. As such remember to set the the
 #   "requires_grad" flag on the inputs **after** performing any transformations
@@ -659,6 +660,7 @@ class OpInfo(object):
 
         self.decorators = (*decorators, *skips)
 
+        # We run the sampling functions without tracking the gradiends of the creation of inputs
         self.sample_inputs_func = torch.no_grad()(sample_inputs_func)
         self.error_inputs_func = error_inputs_func
 
@@ -1898,7 +1900,7 @@ def sample_inputs_mm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_arg_conj(size):
-        return make_arg(size).requires_grad_(requires_grad)
+        return make_arg(size).conj().requires_grad_(requires_grad)
 
     first_shape, second_shape = (S, M), (M, S)
 
@@ -1978,7 +1980,7 @@ def sample_inputs_dot_vdot(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def make_arg_conj(size):
-        return make_arg(size).requires_grad_(requires_grad)
+        return make_arg(size).conj().requires_grad_(requires_grad)
 
     sample_inputs = []
     sample_inputs.append(SampleInput(make_arg((S, )), args=(make_arg((S, )),)))
@@ -5232,7 +5234,7 @@ def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     return inputs
 
 
-def sample_inputs_linalg_qr(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_linalg_qr_geqrf(op_info, device, dtype, requires_grad=False, **kwargs):
     # QR is just well defined when the matrix is full rank
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -5992,7 +5994,10 @@ def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_rsub(op_info, device, dtype, requires_grad, other_scalar, **kwargs):
     make_arg = partial(make_tensor, device=device)
 
-    shapes = ((S, S), (S,), ())
+    shapes = ((S, S), (S,), ()) if not other_scalar else ((),)
+    # We are doing y - a*x, where y may be a scalar or a tensor
+    # If y is a scalar, y may be of any dtype that can be cast to the dtype of x
+    # a may always be of any dtype that can be cast to the dtype of x
     if dtype.is_complex:
         dtypes_a = (torch.int32, torch.float32, dtype)
     elif dtype.is_floating_point:
@@ -6003,9 +6008,6 @@ def sample_inputs_rsub(op_info, device, dtype, requires_grad, other_scalar, **kw
 
     def gen_inputs():
         for shape_x, shape_y, dtype_y, dtype_a in product(shapes, shapes, dtypes_y, dtypes_a):
-            if other_scalar and shape_y != ():
-                continue
-
             requires_grad_y = (requires_grad and
                                not other_scalar and
                                (dtype_y.is_floating_point or dtype_y.is_complex))
@@ -8781,7 +8783,7 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            dtypesIfCPU=floating_and_complex_types(),
            supports_autograd=False,
-           sample_inputs_func=sample_inputs_linalg_qr,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('gt',
            aliases=('greater',),
@@ -9065,7 +9067,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           sample_inputs_func=sample_inputs_linalg_qr,
+           sample_inputs_func=sample_inputs_linalg_qr_geqrf,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     OpInfo('linalg.slogdet',
            aten_name='linalg_slogdet',
