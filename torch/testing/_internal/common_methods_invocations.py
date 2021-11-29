@@ -10487,15 +10487,23 @@ op_db: List[OpInfo] = [
         skips=(
             # in each case, pytorch will produce a nan while numpy will not
             DecorateInfo(unittest.expectedFailure,
-                         'TestUnaryUfuncs', "test_reference_numerics_normal",
-                         dtypes=(torch.complex64,), active_if=(IS_MACOS)),
-            DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_hard",
                          dtypes=(torch.complex64,), active_if=(IS_MACOS)),
             DecorateInfo(unittest.expectedFailure,
                          'TestUnaryUfuncs', "test_reference_numerics_extremal",
                          dtypes=(torch.complex64,), device_type='cpu',
-                         active_if=(IS_MACOS or IS_WINDOWS)),)
+                         active_if=(IS_MACOS or IS_WINDOWS)),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestUnaryUfuncs', "test_reference_numerics_hard",
+                         dtypes=(torch.complex64,), device_type='cuda'),
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestUnaryUfuncs', "test_reference_numerics_extremal",
+                         dtypes=(torch.complex64,), device_type='cuda')),
+        # tan(j * pi/2 * odd_number) is nan
+        reference_numerics_filter=NumericsFilter(
+            condition=lambda x: (close_to_int(x / (math.pi * 0.5j))
+                                if x.is_complex() else x.new_tensor(False, dtype=torch.bool)),
+            safe_val=0),
     ),
     OpInfo(
         'nn.functional.threshold',
