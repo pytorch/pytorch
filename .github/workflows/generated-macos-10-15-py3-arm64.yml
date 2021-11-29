@@ -21,6 +21,7 @@ env:
   COMPACT_JOB_NAME: macos-10-15-py3-arm64
   IN_CI: 1
   IS_GHA: 1
+  PYTORCH_RETRY_TEST_CASES: 1
 
 
 jobs:
@@ -83,7 +84,7 @@ jobs:
         run: |
           zip -1 -r artifacts.zip dist/
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts on S3
+        name: Store PyTorch Build Artifacts on GHA
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14

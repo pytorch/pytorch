@@ -298,6 +298,62 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
 
+    def test_make_wrapper_subclass_propagates_metadata(self) -> None:
+        class WrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad,
+                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("NYI")
+
+        # non-contiguous strides, non-zero storage offset
+        x = torch.randn(4, 6).t().diagonal(offset=2)
+        y = WrapperTensor(x)
+        self.assertEqual(y.size(), x.size())
+        self.assertEqual(y.stride(), x.stride())
+        self.assertEqual(y.storage_offset(), x.storage_offset())
+
+    def test_index_put_where_only_index_is_subclass(self) -> None:
+        called_funcs = []
+
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+            elem: torch.Tensor
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad
+                )
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called_funcs.append(func)
+                return MyTensor(torch.tensor(3))
+
+        x = torch.randn(3, 3)
+        idxs = (MyTensor(torch.tensor(0)),)
+        v = torch.randn(1)
+        res = x.index_put_(idxs, v)
+        self.assertEqual(called_funcs, [torch.ops.aten.index_put_])
+
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
             with enable_python_mode(torch.Tensor):
