@@ -782,15 +782,29 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
-no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
-`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
-the `device` is the cpu, no copy will be performed.
+Converts data into a tensor, sharing data and preserving autograd
+history if possible.
+
+If data is already a tensor with the requeseted dtype and device
+then data itself is returned, but if data is a
+tensor with a different dtype or device then it's copied as if using
+`data.to(dtype=dtype, device=device)`.
+
+If data is a NumPy array (an ndarray) with the same dtype and device then a
+tensor is constructed using :func:`torch.from_numpy`.
+
+.. seealso::
+
+    :func:`torch.tensor` never shares its data and creates a new "leaf tensor" (see :doc:`/notes/autograd`).
+
 
 Args:
     {data}
     {dtype}
-    {device}
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
+        then the device of data is used. If None and data is not a tensor then
+        the result tensor is constructed on the CPU.
+
 
 Example::
 
@@ -8110,29 +8124,29 @@ add_docstr(torch.tensor,
            r"""
 tensor(data, *, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Constructs a tensor with :attr:`data`.
+Constructs a tensor with no autograd history (also known as a "leaf tensor", see :doc:`/notes/autograd`) by copying :attr:`data`.
 
 .. warning::
 
-    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
-    ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
-    or :func:`torch.Tensor.detach`.
-    If you have a NumPy ``ndarray`` and want to avoid a copy, use
-    :func:`torch.as_tensor`.
+    When working with tensors prefer using :func:`torch.Tensor.clone`,
+    :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
+    readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
+    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.clone().detach().requires_grad_(True)``.
 
-.. warning::
+.. seealso::
 
-    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
-    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
-    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
-    The equivalents using ``clone()`` and ``detach()`` are recommended.
+    :func:`torch.as_tensor` preserves autograd history and avoids copies where possible.
+    :func:`torch.from_numpy` creates a tensor that shares storage with a NumPy array.
 
 Args:
     {data}
 
 Keyword args:
     {dtype}
-    {device}
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
+        then the device of data is used. If None and data is not a tensor then
+        the result tensor is constructed on the CPU.
     {requires_grad}
     {pin_memory}
 
@@ -8149,10 +8163,10 @@ Example::
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
     ...              dtype=torch.float64,
-    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+    ...              device=torch.device('cuda:0'))  # creates a double tensor on a CUDA device
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
-    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
+    >>> torch.tensor(3.14159)  # Create a zero-dimensional (scalar) tensor
     tensor(3.1416)
 
     >>> torch.tensor([])  # Create an empty tensor (of size (0,))
