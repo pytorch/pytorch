@@ -212,6 +212,9 @@ static inline bool treatSequenceAsTuple(PyObject* index) {
   if (PyTuple_Check(index)) {
     return true;
   }
+  if (THPVariable_Check(index)) {
+    return false;
+  }
   if (!PySequence_Check(index)) {
     return false;
   }

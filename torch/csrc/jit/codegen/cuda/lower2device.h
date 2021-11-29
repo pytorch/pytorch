@@ -6,10 +6,13 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
 #include <torch/csrc/jit/codegen/cuda/lower_predicate.h>
 #include <torch/csrc/jit/codegen/cuda/lower_shift.h>
 #include <torch/csrc/jit/codegen/cuda/lower_trivial_reductions.h>
+#include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_dimension_map.h>
+#include <torch/csrc/jit/codegen/cuda/partial_split_map.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <memory>
@@ -92,6 +95,22 @@ class TORCH_CUDA_CU_API GpuLower {
     return pred_elimination_;
   }
 
+  LocalAllocationInfoMap& localAllocationInfoMap() {
+    return local_allocation_info_map_;
+  }
+
+  const WarpPaddedParallelInfo& getWarpPaddedParallelInfo() const {
+    return warp_pad_info_;
+  }
+
+  PartialSplitMap& partialSplitMap() {
+    return partial_split_map_;
+  }
+
+  const PartialSplitMap& partialSplitMap() const {
+    return partial_split_map_;
+  }
+
  private:
   void lower();
 
@@ -102,6 +121,11 @@ class TORCH_CUDA_CU_API GpuLower {
   // the kernel being fetched for shapes, we want to replace input and output
   // tensors to reference the runtime structure containing sizes.
   void replaceSymbolicSizes();
+
+  // Goes through the parallelized iterdomains of the used TVs and find
+  //  the parallel dimensions that need to be padded to a multiples of
+  //  warp size.
+  void collectPaddedParallelDims();
 
  private:
   // Lowered Kernel IR
@@ -119,7 +143,10 @@ class TORCH_CUDA_CU_API GpuLower {
   ComputeAtMap ca_parallel_map_;
   TrivialReductionInfo trivial_reduction_info_;
   HaloInfo halo_info_;
+  LocalAllocationInfoMap local_allocation_info_map_;
+  WarpPaddedParallelInfo warp_pad_info_;
   ParallelDimensionMap parallel_dimension_map_;
+  PartialSplitMap partial_split_map_;
 
   Fusion* fusion_ = nullptr;
 };
