@@ -810,8 +810,11 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   pnode.set_values(values.data());
   EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
@@ -828,8 +831,11 @@ TEST(
   torch::jit::StaticModule smodule(module);
   Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
   std::array<IValue, 2> values = {torch::randn({2, 3}), torch::randn({3, 1})};
-  ProcessedNode pnode(
-      sigmoid_node, createProcessedNodeInputs({0}), 1, true, false);
+  ProcessedFunction fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   pnode.set_values(values.data());
 
   ASSERT_EQ(&pnode.Output(0), &values[1]);
@@ -852,12 +858,12 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     std::array<IValue, 3> values = {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
-    ProcessedNode list_unpack_pnode(
+    ProcessedFunction fn(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
-        1,
         /*enable_out_variant=*/true,
-        /* check_memory_overlap */ false);
+        /*check_memory_overlap */ false);
+    ProcessedNode list_unpack_pnode(
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
     list_unpack_pnode.set_values(values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
     EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
@@ -865,12 +871,12 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
   {
     std::array<IValue, 3> values = {
         at::randn({2, 3}), at::empty({1, 3}), at::empty({4, 5})};
-    ProcessedNode list_unpack_pnode(
+    ProcessedFunction fn(
         list_unpack_node,
-        createProcessedNodeInputs({0}),
-        1,
         /*enable_out_variant=*/true,
-        /* check_memory_overlap */ false);
+        /*check_memory_overlap */ false);
+    ProcessedNode list_unpack_pnode(
+        list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
     list_unpack_pnode.set_values(values.data());
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
@@ -947,4 +953,209 @@ TEST(StaticRuntime, GoodSchemaAliasInfo) {
   const auto x2 = at::randn({3, 6});
   testStaticRuntime(src, {x1, 0}, {x2, 10});
   testStaticRuntime(src, {x1, 10}, {x2, 0});
+}
+
+TEST(ProcessedFunction, ProcessedFunction) {
+  const auto script = R"JIT(
+    def forward(self, inp: Tensor):
+        b = torch.sigmoid(inp).clone()
+        c = torch.transpose(b, 0, 1)
+        return (c)
+  )JIT";
+  script::Module module("module");
+  module.define(script);
+  torch::jit::StaticModule smodule(module);
+
+  Node* sigmoid_node = getNodeWithKind(smodule, "aten::sigmoid");
+  ProcessedFunction sigmoid_fn(
+      sigmoid_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(sigmoid_fn.f());
+  EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
+  EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
+
+  Node* transpose_node = getNodeWithKind(smodule, "aten::transpose");
+  ProcessedFunction transpose_fn(
+      transpose_node,
+      /*enable_out_variant=*/true,
+      /*check_memory_overlap=*/false);
+  EXPECT_TRUE(transpose_fn.f());
+  EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
+  EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
+}
+
+TEST(ManagedTensorRanges, NoAliases) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %z : Tensor = aten::mul(%y, %x)
+        %output : Tensor = aten::mul(%z, %z)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  auto* y = vmap["y"];
+  auto* z = vmap["z"];
+
+  FastSet<const Value*> managed_tensors = {y, z};
+  ManagedTensorRanges ranges(graph, managed_tensors);
+
+  std::vector<Node*> nodes(
+      graph->block()->nodes().begin(), graph->block()->nodes().end());
+  ASSERT_EQ(nodes.size(), 3);
+
+  EXPECT_FALSE(ranges.nodeFreesManagedTensors(nodes[0]));
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[1]));
+  EXPECT_EQ(
+      ranges.availableTensorsAfterNode(nodes[1]), std::vector<const Value*>{y});
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[2]));
+  EXPECT_EQ(
+      ranges.availableTensorsAfterNode(nodes[2]), std::vector<const Value*>{z});
+}
+
+TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %y_size : int[] = aten::size(%y)
+        %z1 : Tensor = aten::mul(%y, %y)
+        %y_alias : Tensor = aten::view(%y, %y_size)
+        %z2 : Tensor = aten::mul(%y_alias, %y_alias)
+        %output : Tensor = aten::mul(%z1, %z2)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  auto* y = vmap["y"];
+  auto* z1 = vmap["z1"];
+  auto* z2 = vmap["z2"];
+
+  FastSet<const Value*> managed_tensors = {y, z1, z2};
+  ManagedTensorRanges ranges(graph, managed_tensors);
+
+  std::vector<Node*> nodes(
+      graph->block()->nodes().begin(), graph->block()->nodes().end());
+  ASSERT_EQ(nodes.size(), 6);
+
+  for (const auto i : c10::irange(4)) {
+    EXPECT_FALSE(ranges.nodeFreesManagedTensors(nodes[i]));
+  }
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[4]));
+  EXPECT_EQ(
+      ranges.availableTensorsAfterNode(nodes[4]), std::vector<const Value*>{y});
+
+  EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[5]));
+  const auto& available_after_5 = ranges.availableTensorsAfterNode(nodes[5]);
+  // We don't care about the order, so convert to set. But make sure
+  // there are no duplicates.
+  FastSet<const Value*> available_after_5_set(
+      available_after_5.begin(), available_after_5.end());
+  EXPECT_EQ(available_after_5_set.size(), available_after_5.size());
+  EXPECT_EQ(available_after_5_set, FastSet<const Value*>({z1, z2}));
+}
+
+TEST(ManagedTensorRanges, UnusedTensor) {
+  const std::string src = R"IR(
+    graph(%x : Tensor):
+        %y : Tensor = aten::mul(%x, %x)
+        %z : Tensor = aten::mul(%x, %x)
+        %output : Tensor = aten::mul(%z, %z)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* y = vmap["y"];
+  auto* z = vmap["z"];
+
+  ManagedTensorRanges ranges(graph, {y});
+  EXPECT_TRUE(ranges.isUnusedValue(y));
+  EXPECT_FALSE(ranges.isUnusedValue(z));
+}
+
+TEST(ManagedTensorRanges, LifetimeOverlap) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %c : Tensor = aten::mul(%b, %b)
+        %c_size : int[] = aten::size(%c)
+        %c_alias : Tensor = aten::view(%c, %c_size)
+        %d : Tensor = aten::mul(%a, %a)
+        %e : Tensor = aten::mul(%c_alias, %c_alias)
+        %output : Tensor = aten::mul(%e, %e)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* c = vmap["c"];
+  auto* d = vmap["d"];
+  auto* e = vmap["e"];
+
+  ManagedTensorRanges ranges(graph, {b, c, d, e});
+  const std::vector<std::pair<Value*, Value*>> overlapping_values{
+      {b, c}, {c, d}, {c, e}};
+
+  const std::vector<std::pair<Value*, Value*>> disjoint_values{{b, d}, {b, e}};
+
+  for (const auto& values : overlapping_values) {
+    EXPECT_TRUE(ranges.lifetimesOverlap(values.first, values.second));
+    EXPECT_TRUE(ranges.lifetimesOverlap(values.second, values.first));
+  }
+  for (const auto& values : disjoint_values) {
+    EXPECT_FALSE(ranges.lifetimesOverlap(values.first, values.second));
+    EXPECT_FALSE(ranges.lifetimesOverlap(values.second, values.first));
+  }
+}
+
+TEST(ManagedTensorRanges, OverlappingLifetimesContainers) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %b : Tensor = aten::mul(%a, %a)
+        %c : Tensor = aten::mul(%b, %b)
+        %tuple : (Tensor, Tensor) = prim::TupleConstruct(%b, %c)
+        %b_alias : Tensor, %c_alias : Tensor = prim::TupleUnpack(%tuple)
+        %d : Tensor = aten::mul(%b_alias, %c_alias)
+        %output : Tensor = aten::mul(%d, %d)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* c = vmap["c"];
+  auto* d = vmap["d"];
+
+  ManagedTensorRanges ranges(graph, {b, c, d});
+
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, c));
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, d));
+  EXPECT_TRUE(ranges.lifetimesOverlap(c, d));
+}
+
+TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
+  const std::string src = R"IR(
+    graph(%a : Tensor):
+        %output : Tensor = aten::mul(%a, %a)
+        %b : Tensor = aten::mul(%a, %a)
+        return (%output)
+  )IR";
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+  auto* b = vmap["b"];
+  auto* output = vmap["output"];
+
+  ManagedTensorRanges ranges(graph, {b, output});
+
+  EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
 }

@@ -95,6 +95,53 @@ class ValueGroup {
   FastSet<const Value*> external_aliases_;
 };
 
+class TORCH_API ManagedTensorRanges {
+ public:
+  ManagedTensorRanges() = default;
+  ManagedTensorRanges(
+      const std::shared_ptr<Graph>& graph,
+      const FastSet<const Value*>& managed_tensor_values);
+
+  // If true, then this node is the last use of at least one
+  // managed tensor. availableTensorsAfterNode(node) will return a vector
+  // of the managed tensors that are available for re-use
+  // in the nodes following this one.
+  bool nodeFreesManagedTensors(Node* node) const;
+  const std::vector<const Value*>& availableTensorsAfterNode(Node* node) const;
+
+  // True if the value has a tracked lifetime and lifetime.start ==
+  // lifetime.end. "Unused" does not imply "unmanaged" -
+  // managed tensors can be unused if they're not passed to any ops!
+  bool isUnusedValue(const Value* value) const;
+
+  // For testing. True if v1 and v2 are both mutable types and have lifetimes
+  // that overlap.
+  bool lifetimesOverlap(const Value* v1, const Value* v2) const;
+
+ private:
+  struct Lifetime {
+    Lifetime(size_t start_, size_t end_) : start(start_), end(end_) {}
+    size_t start;
+    size_t end;
+  };
+
+  // Returns nullptr if we are not tracking the lifetime of value
+  Lifetime* getLifetime(const Value* value);
+  const Lifetime* getLifetime(const Value* value) const;
+  // Collect all values in the input that have tracked lifetimes.
+  // A value's lifetime may not be tracked if it is a graph input
+  // or immutable type (containers with at least one mutable
+  // type are mutable)
+  std::vector<const Value*> collectValuesWithTrackedLifetimes(
+      at::ArrayRef<const Value*> values);
+
+  // Maps Node* to the set of managed tensors that are now available
+  // for re-use after this node.
+  FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
+  // Maps each Value* to its lifetime (start node index, end node index)
+  FastMap<const Value*, Lifetime> value_lifetimes_{};
+};
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
@@ -156,6 +203,7 @@ struct TORCH_API StaticModuleOptions {
 ///
 
 class MemoryPlanner;
+class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
 class TORCH_API StaticModule {
@@ -270,6 +318,8 @@ class TORCH_API StaticModule {
   // Bookkeeping for creating new StaticRuntime instances
   // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
+  // The functions to be called by corresponding ProcessedNode.
+  std::vector<ProcessedFunction> functions_{};
   // The nodes we need to run
   std::vector<ProcessedNode> nodes_;
   // Indices of graph outputs in the single values array.
@@ -443,6 +493,37 @@ class TORCH_API StaticRuntime {
   std::vector<ProcessedNode> nodes_;
 };
 
+class TORCH_API ProcessedFunction {
+ public:
+  ProcessedFunction(
+      Node* node,
+      bool enable_out_variant,
+      bool check_memory_overlap);
+
+  enum class Kind : uint8_t {
+    kOutVariant,
+    kNativeFunction,
+    kInterpreterFallback,
+  };
+
+  const std::function<void(ProcessedNode*)>& f() const {
+    return f_;
+  }
+
+  Kind kind() const {
+    return kind_;
+  }
+
+  bool checkMemoryOverlap() const {
+    return check_memory_overlap_;
+  }
+
+ private:
+  std::function<void(ProcessedNode*)> f_;
+  Kind kind_{ProcessedFunction::Kind::kOutVariant};
+  bool check_memory_overlap_{false};
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
@@ -453,10 +534,9 @@ class TORCH_API ProcessedNode {
   // they are copied into a StaticRuntime.
   ProcessedNode(
       Node* n,
+      ProcessedFunction* fn,
       ProcessedNodeInputs inputs,
-      uint16_t outputs_offset,
-      bool enable_out_variant,
-      bool check_memory_overlap);
+      uint16_t outputs_offset);
 
   ProcessedNode(const ProcessedNode&) = default;
   ProcessedNode& operator=(const ProcessedNode&) = default;
@@ -504,11 +584,11 @@ class TORCH_API ProcessedNode {
   std::vector<IValue> inputs_ivalue_vec() const;
 
   bool has_out_variant() const {
-    return fn_.kind == FunctionKind::kOutVariant;
+    return fn_->kind() == ProcessedFunction::Kind::kOutVariant;
   }
 
   bool has_native() const {
-    return fn_.kind == FunctionKind::kNativeFunction;
+    return fn_->kind() == ProcessedFunction::Kind::kNativeFunction;
   }
 
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
@@ -520,15 +600,15 @@ class TORCH_API ProcessedNode {
   bool verify_no_memory_overlap() const;
 
   bool check_outputs_for_memory_overlap() const {
-    return fn_.check_memory_overlap_;
+    return fn_->checkMemoryOverlap();
   }
 
   void set_outputs_memory_overlap_detected() {
-    fn_.overlap_detected_ = true;
+    overlap_detected_ = true;
   }
 
   bool outputs_memory_overlap_detected() {
-    return fn_.overlap_detected_;
+    return overlap_detected_;
   }
 
   void verify_and_correct_memory_overlap();
@@ -548,18 +628,8 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
 
   Node* node_;
-  enum class FunctionKind : uint8_t {
-    kOutVariant,
-    kNativeFunction,
-    kInterpreterFallback,
-  };
-  struct Function {
-    std::function<void(ProcessedNode*)> f;
-    FunctionKind kind = FunctionKind::kOutVariant;
-    bool check_memory_overlap_{false};
-    bool overlap_detected_{false};
-  };
-  Function fn_;
+  const ProcessedFunction* fn_;
+  bool overlap_detected_{false};
   ProcessedNodeInputs inputs_;
   uint16_t outputs_offset_;
   uint16_t num_outputs_;

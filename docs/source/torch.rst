@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat
@@ -513,6 +514,7 @@ Other Operations
     gcd
     histc
     histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
