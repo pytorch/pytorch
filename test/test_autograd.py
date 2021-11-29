@@ -26,7 +26,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, Checkpoint
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
@@ -4308,6 +4308,35 @@ for shape in [(1,), ()]:
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
 
+    @slowTest
+    def test_checkpointing_without_reentrant(self):
+        """
+        Basic test for checkpoint without reentrant autograd.
+        """
+        num_inp = 2000
+        nz_inp = 10
+        nz_out = 10
+        nz_bottleneck = 1000
+
+        # small proxy network for some complex reasoning we want to do per input
+        module = nn.Sequential(
+            nn.Linear(nz_inp, nz_bottleneck),
+            nn.ReLU(),
+            nn.Linear(nz_bottleneck, nz_inp)
+        )
+
+        feat_combined = []
+        for r in range(num_inp):
+            data_r = torch.empty(1, nz_inp)
+            data_r.uniform_()
+            data_r.requires_grad = True
+            feat_r = checkpoint(module, data_r, use_reentrant=False)
+            feat_combined.append(feat_r)
+
+        # compute mean as a proxy for some joint reasoning
+        mean_combined = torch.stack(feat_combined).mean()
+        mean_combined.backward()
+
     def test_checkpoint_valid_reset_on_error(self):
         a = torch.randn(2, 2, requires_grad=True)
 
@@ -4317,6 +4346,116 @@ for shape in [(1,), ()]:
 
         c = checkpoint(torch.exp, a).sum()
         c.backward()
+
+    def test_checkpointing_without_reentrant_correct_grad(self):
+        """
+        Verifies that correct gradients are calculated for checkpoint
+        without reentrant autograd, for both backward() and autograd.grad().
+        """
+        a = torch.randn(2, 2, requires_grad=True)
+
+        b = torch.exp(a).sum()
+        b.backward()
+        b_grad = a.grad
+
+        a.grad = None
+        c = checkpoint(torch.exp, a, use_reentrant=False).sum()
+        c.backward()
+        c_grad = a.grad
+
+        a.grad = None
+        d = checkpoint(torch.exp, a, use_reentrant=False).sum()
+        d_grad, = torch.autograd.grad(d, (a,))
+
+        self.assertEqual(b_grad, c_grad)
+        self.assertEqual(b_grad, d_grad)
+
+    def test_checkpointing_without_reentrant_dataparallel(self):
+        """
+        Verifies gradient correctness when checkpoint without reentrant autograd
+        is used in conjunction with DataParallel.
+        """
+        class ExpModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, inp):
+                return torch.exp(inp)
+
+        a = torch.randn(20, 20, requires_grad=True)
+
+        b = torch.exp(a).sum()
+        b.backward()
+        b_grad = a.grad
+
+        a.grad = None
+
+        module = torch.nn.DataParallel(ExpModule())
+        c = checkpoint(module, a, use_reentrant=False).sum()
+        c.backward()
+        c_grad = a.grad
+
+        self.assertEqual(b_grad, c_grad)
+
+    def test_checkpointing_without_reentrant_parameter_used_in_an_out(self):
+        """
+        Ensures that gradient hooks are only called once per tensor.
+        """
+        w = torch.randn(10, 10, requires_grad=True)
+        count = 0
+
+        def hook(grad):
+            nonlocal count
+            count += 1
+
+        w.register_hook(hook)
+        x = torch.rand(10, 10, requires_grad=True)
+        h = w * x  # Using w outisde the checkpoint
+        out = checkpoint(lambda x: w * x, h, use_reentrant=False) # Using w inside the checkpoint
+
+        out.sum().backward()
+        # should only call hook once
+        self.assertEqual(count, 1)
+
+    def test_checkpointing_without_reentrant_arbitrary_input_output(self):
+        """
+        Ensures checkpointing without reentrant autograd works with functions
+        with arbitrary input/output structures.
+        """
+
+        class MyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(5, 5, bias=False)
+
+            def forward(self, dict_input):
+                tensor = dict_input["tensor"]
+                return {
+                    "result": self.layer(tensor)
+                }
+
+        model_no_checkpoint = MyModel()
+        model_checkpoint_without_reentrant = deepcopy(model_no_checkpoint)
+
+        inp = {
+            "tensor": torch.randn(5, 5)
+        }
+
+        out_no_checkpoint = model_no_checkpoint(inp)["result"].sum()
+
+        out_checkpoint = checkpoint(
+            model_checkpoint_without_reentrant,
+            inp,
+            use_reentrant=False
+        )["result"].sum()
+
+        self.assertEqual(out_checkpoint, out_no_checkpoint)
+
+        out_no_checkpoint.backward()
+        out_checkpoint.backward()
+
+        for param, checkpoint_param in zip(model_no_checkpoint.parameters(), model_checkpoint_without_reentrant.parameters()):
+            self.assertEqual(param.grad, checkpoint_param.grad)
 
     def test_callback_adds_callback(self):
         called = [0]
