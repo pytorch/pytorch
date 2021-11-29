@@ -121,14 +121,20 @@ class AutoQuantizationState(torch.nn.Module):
         # will be returned as is. This value can be precalculated and it is set
         # to its final value after tracing.
         self.needs_dtype_transform_on_outputs = False
+        # Version of the flag above for self or any descendant
+        self.self_or_any_descendant_needs_dtype_transform_on_outputs = False
 
         # If this is True, at least one child of the parent module was
         # detected to need arg dequants during tracing.
         self.any_child_needs_arg_dequants = False
+        # Version of the flag above for self or any descendant
+        self.any_descendant_needs_arg_dequants = False
 
         # If this is True, at least one child of the parent module was
         # detected to need op hooks during tracing.
         self.any_child_needs_op_hooks = False
+        # Version of the flag above for self or any descendant
+        self.any_descendant_needs_op_hooks = False
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0

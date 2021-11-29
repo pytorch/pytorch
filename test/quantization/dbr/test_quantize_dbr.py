@@ -1139,3 +1139,29 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
             m, qconfig, (torch.randn(1, 3, 224, 224),),
             # TODO fix this (reason TBD)
             do_torchscript_checks=False)
+
+    @skip_if_no_torchvision
+    def test_mobilenet_v2_turn_off_dbr_quant(self):
+        """
+        Test that DBR quant is turned off on the regions of the graph
+        which do not need auto quant.
+        """
+        import torchvision
+        m = torchvision.models.__dict__['mobilenet_v2'](pretrained=False).eval().float()
+        m.qconfig = torch.quantization.default_qconfig
+        example_args = (torch.randn(1, 3, 224, 224),)
+        mp = _quantize_dbr.prepare(m, example_args)
+        print(mp)
+
+        for k, v in mp.named_modules():
+            if hasattr(v, '_auto_quant_state'):
+                print(k, type(v))
+                qstate = v._auto_quant_state
+                print(
+                    'mod_outputs', qstate.needs_dtype_transform_on_outputs,
+                    'op_dequants', qstate.any_child_needs_arg_dequants,
+                    'op_hooks', qstate.any_child_needs_op_hooks)
+                print(
+                    'd_mod_outputs', qstate.self_or_any_descendant_needs_dtype_transform_on_outputs,
+                    'd_op_dequants', qstate.any_descendant_needs_arg_dequants,
+                    'd_op_hooks', qstate.any_descendant_needs_op_hooks)

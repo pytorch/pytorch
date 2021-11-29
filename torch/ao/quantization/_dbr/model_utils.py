@@ -127,3 +127,48 @@ def attach_op_convert_info_to_model(
 
     for _, child in module.named_children():
         attach_op_convert_info_to_model(child)
+
+def _populate_descendant_boolean_attr(
+    module: torch.nn.Module,
+    cur_mod_attr_name: str,
+    cur_or_any_descendant_mod_attr_name: str,
+) -> bool:
+    """
+    Assumes that `cur_mod_attr_name` is a boolean module attribute
+    on `AutoQuantizationState`, and `cur_or_any_descendant_mod_attr_name`
+    is the version of `cur_mod_attr_name` which applies to the current
+    module and any of its descendants.
+
+    Populates `cur_or_any_descendant_mod_attr_name` for `mod` and all of
+    its children, based on the values of `cur_mod_attr_name`.
+    """
+    cur_value = False
+    for k, v in module.named_children():
+        child_value = _populate_descendant_boolean_attr(
+            v, cur_mod_attr_name, cur_or_any_descendant_mod_attr_name)
+        cur_value = cur_value or child_value
+
+    if hasattr(module, '_auto_quant_state'):
+        qstate: AutoQuantizationState = module._auto_quant_state  # type: ignore[assignment]
+        cur_value = cur_value or getattr(qstate, cur_mod_attr_name)
+        setattr(qstate, cur_or_any_descendant_mod_attr_name, cur_value)
+
+    return cur_value
+
+def attach_descendant_usage_info_to_model(
+    module: torch.nn.Module,
+) -> None:
+    """
+    Populates the `self_or_any_descendant_needs_dtype_transform_on_outputs`,
+    `any_descendant_needs_arg_dequants` and `any_descendant_needs_op_hooks`
+    flags on the model.
+    """
+    _populate_descendant_boolean_attr(
+        module, 'needs_dtype_transform_on_outputs',
+        'self_or_any_descendant_needs_dtype_transform_on_outputs')
+    _populate_descendant_boolean_attr(
+        module, 'any_child_needs_arg_dequants',
+        'any_descendant_needs_arg_dequants')
+    _populate_descendant_boolean_attr(
+        module, 'any_child_needs_op_hooks',
+        'any_descendant_needs_op_hooks')

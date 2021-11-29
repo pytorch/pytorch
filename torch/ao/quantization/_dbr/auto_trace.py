@@ -18,6 +18,7 @@ from .model_utils import (
     pack_weights_for_functionals,
     attach_scale_zp_values_to_model,
     attach_op_convert_info_to_model,
+    attach_descendant_usage_info_to_model,
 )
 from . import auto_trace_rewriter
 
@@ -317,6 +318,7 @@ def add_auto_observation(
     model.__class__ = QuantizationInterceptionModule
     # create the graph
     trace_with_inputs(model, example_inputs)
+    attach_descendant_usage_info_to_model(model)
     return model
 
 
@@ -328,12 +330,19 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
         else:
             return x
 
+    def convert_from_dispatch_proxy(x):
+        if isinstance(x, QuantizationConvertTensorProxy):
+            return x.as_subclass(torch.Tensor)  # type: ignore[arg-type]
+        else:
+            return x
+
     module_id_to_fqn: Dict[int, str] = {}
     # Counter for global quantizeable ops, useful for intermediate activation
     # logging.
     global_op_idx = [0]
 
     global_disable_torch_function_override = False
+    global_disable_module_call_override = False
 
     class QuantizationConvertTensorProxy(torch.Tensor):
         """
@@ -471,6 +480,9 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             orig_nn_sequential_forward = torch.nn.Sequential.forward
 
             def _patched_module_call(self, *args, **kwargs):
+                nonlocal global_disable_module_call_override
+                if global_disable_module_call_override:
+                    return orig_module_call(self, *args, **kwargs)
                 if enable_logging:
                     fqn = module_id_to_fqn.get(id(self), None)
                     logger.debug(f"\nstarting fqn {fqn}")
@@ -522,28 +534,58 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
                         cur_qstate: AutoQuantizationState = cur_module._auto_quant_state
-                        if enable_logging:
-                            logger.debug(cur_qstate)
+                        no_dbr_quant_needed = not (
+                            cur_qstate.self_or_any_descendant_needs_dtype_transform_on_outputs or
+                            cur_qstate.any_descendant_needs_arg_dequants or
+                            cur_qstate.any_descendant_needs_op_hooks
+                        )
+                        if no_dbr_quant_needed and True:
+                            # torch.nn.Module.__call__ = orig_module_call
+                            old_global_disable_module_call_override = \
+                                global_disable_module_call_override
+                            global_disable_module_call_override = True
+                            if not old_global_disable_module_call_override:
+                                args = map_aggregate(args, convert_from_dispatch_proxy)
+                                kwargs = map_aggregate(kwargs, convert_from_dispatch_proxy)
 
-                        cur_qstate.reset_to_new_call()
+                            old_global_disable_torch_function_override = \
+                                global_disable_torch_function_override
+                            global_disable_torch_function_override = True
 
-                        # before hooks (TODO)
-                        # forward
-                        output = orig_module_call(self, *args, **kwargs)
-                        # after hooks
+                            output = orig_module_call(self, *args, **kwargs)
 
-                        # For the sake of performance, we assume no overrides
-                        # are needed for quantizing/dequantizing things
-                        old_global_disable_torch_function_override = \
-                            global_disable_torch_function_override
-                        global_disable_torch_function_override = True
+                            global_disable_torch_function_override = \
+                                old_global_disable_torch_function_override
+                            global_disable_module_call_override = \
+                                old_global_disable_module_call_override
+                            if not old_global_disable_module_call_override:
+                                output = map_aggregate(output, convert_to_dispatch_proxy)
+                            # torch.nn.Module.__call__ = _patched_module_call
 
-                        output = cur_qstate.outputs_convert_hook(output)
+                        else:
 
-                        global_disable_torch_function_override = \
-                            old_global_disable_torch_function_override
+                            if enable_logging:
+                                logger.debug(cur_qstate)
 
-                        cur_qstate.validate_is_at_last_seen_idx()
+                            cur_qstate.reset_to_new_call()
+
+                            # before hooks (TODO)
+                            # forward
+                            output = orig_module_call(self, *args, **kwargs)
+                            # after hooks
+
+                            # For the sake of performance, we assume no overrides
+                            # are needed for quantizing/dequantizing things
+                            old_global_disable_torch_function_override = \
+                                global_disable_torch_function_override
+                            global_disable_torch_function_override = True
+
+                            output = cur_qstate.outputs_convert_hook(output)
+
+                            global_disable_torch_function_override = \
+                                old_global_disable_torch_function_override
+
+                            cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
                         # disabling torch function to prevent infinite recursion on
