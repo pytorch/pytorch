@@ -13600,7 +13600,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.margin_ranking_loss",
         ref=_NOTHING,
-        dtypesIfCPU=all_types_and(torch.bfloat16),
+        dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_margin_ranking_loss,
@@ -13609,7 +13609,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multi_margin_loss",
         ref=_NOTHING,
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types(),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
@@ -13617,7 +13618,8 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.multilabel_margin_loss",
         ref=_NOTHING,
-        dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+        dtypes=floating_types(),
+        dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
@@ -13626,6 +13628,7 @@ op_db: List[OpInfo] = [
         "nn.functional.multilabel_soft_margin_loss",
         ref=_NOTHING,
         supports_out=False,
+        dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.float16),
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
     ),
@@ -13718,7 +13721,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.soft_margin_loss",
         ref=_NOTHING,
-        dtypesIfCPU=floating_types_and(torch.bfloat16),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         sample_inputs_func=sample_inputs_soft_margin_loss,
