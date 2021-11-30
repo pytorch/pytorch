@@ -23,14 +23,7 @@ namespace {
 // Provide a new for loop matching the one provided
 kir::ForLoop* cloneLoopNest(const kir::ForLoop* for_loop) {
   kir::IrBuilder ir_builder(GpuLower::current()->kernel());
-  const auto new_loop = ir_builder.create<kir::ForLoop>(
-      for_loop->iter_domain(),
-      for_loop->index(),
-      for_loop->start(),
-      for_loop->stop(),
-      for_loop->step(),
-      for_loop->vectorize(),
-      for_loop->vectorize_shift());
+  const auto new_loop = ir_builder.create<kir::ForLoop>(for_loop);
   for (auto expr : for_loop->body().exprs()) {
     if (auto nested_for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
       expr = cloneLoopNest(nested_for_loop);
@@ -80,49 +73,62 @@ void UnrollPass::handle(kir::Expr* expr) {
         ? ir_builder.trueVal()
         : GpuLower::current()->threadPredMap().getPredicate(out_tv->fuserTv());
 
+    // When this expr is in an unswitched block, only attach the
+    // thread predicate to the expr as thread predicates are not
+    // grouped to the unswitch predicate.
+    kir::Predicate* thread_pred_expr = nullptr;
+    if (unswitched_loop_) {
+      thread_pred_expr = ir_builder.create<kir::Predicate>(thread_pred);
+    }
+
+    non_trivial_pred_found_ = true;
+
     // When a predicate needs to account for ShiftOp, it is currently
     // taken care by its own function.
     if (GpuLower::current()->haloInfo().needsShiftPredicate(expr)) {
-      ShiftPredicateInserter::insert(expr, for_loops_, thread_pred);
+      ShiftPredicateInserter::insert(
+          expr, for_loops_, thread_pred, unswitched_loop_);
       return;
     }
 
     // Reduction may need a separate predicate for writes.
     if (!isReductionInitExpr(expr) && out_tv->domain()->hasReduction()) {
-      const auto write_pred = ir_builder.create<kir::Predicate>(
-          PredicateType::ReductionWrite, expr, thread_pred);
+      const auto write_pred = unswitched_loop_
+          ? thread_pred_expr
+          : ir_builder.create<kir::Predicate>(
+                PredicateType::ReductionWrite, expr, thread_pred);
       expr->setWritePredicate(write_pred);
     }
 
     // For expr calling a device func with block sync, don't create
     // if-then-else but pass the predicate to the device func
     if (ir_utils::hasBlockSync(expr, GpuLower::current()->threadPredMap())) {
-      const auto pred = ir_builder.create<kir::Predicate>(
-          PredicateType::Inline, expr, thread_pred);
+      const auto pred = unswitched_loop_
+          ? thread_pred_expr
+          : ir_builder.create<kir::Predicate>(
+                PredicateType::Inline, expr, thread_pred);
       expr->setPredicate(pred);
       return;
     }
 
     // Vectorized expressions should never use inline predicates
-    kir::Predicate* vectorized_pred = nullptr;
-    if (std::any_of(
+    kir::Predicate* pred = nullptr;
+    if (!unswitched_loop_ &&
+        std::any_of(
             for_loops_.begin(), for_loops_.end(), [](const kir::ForLoop* fl) {
               return fl->iter_domain()->parallelType() ==
                   ParallelType::Vectorize;
             })) {
-      vectorized_pred =
-          ir_builder.create<kir::Predicate>(PredicateType::Vectorize);
+      pred = ir_builder.create<kir::Predicate>(PredicateType::Vectorize);
     }
 
-    const auto pred = vectorized_pred == nullptr
-        ? ir_builder.create<kir::Predicate>(
-              PredicateType::Inline, expr, thread_pred)
-        : vectorized_pred;
-
-    TORCH_INTERNAL_ASSERT(pred != nullptr);
+    if (pred == nullptr) {
+      pred = unswitched_loop_ ? thread_pred_expr
+                              : ir_builder.create<kir::Predicate>(
+                                    PredicateType::Inline, expr, thread_pred);
+    }
 
     // If we need a predicate, put expr inside an if then else
-    non_trivial_pred_found_ = true;
     kir::IfThenElse* inline_ite = ir_builder.create<kir::IfThenElse>(pred);
     if (for_loops_.empty()) {
       // Special handling for top level output expressions that still
@@ -145,8 +151,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   // Setup for loop scoping
   const bool is_unroll =
       fl->iter_domain()->parallelType() == ParallelType::Unroll ||
-      fl->iter_domain()->parallelType() == ParallelType::Unswitch ||
-      fl->iter_domain()->parallelType() == ParallelType::Vectorize;
+      fl->iter_domain()->parallelType() == ParallelType::Unswitch;
 
   // If we're not looking for an unroll loop, or didn't find one, process as
   // normal.
@@ -175,11 +180,15 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   // Get the loop nest for the unrolled path
   kir::ForLoop* unrolled_loop_nest = cloneLoopNest(fl);
 
+  // Thread predicates are not removed from the expressions. Visit
+  // each expression to attach kir::Predicate.
+  unswitched_loop_ = true;
+  look_for_unroll_ = false;
+  handle(unrolled_loop_nest);
+  unswitched_loop_ = false;
+  look_for_unroll_ = true;
+
   unroll_ite->thenBody().push_back(unrolled_loop_nest);
-  if (fl->iter_domain()->parallelType() == ParallelType::Vectorize) {
-    expr_replacement_map_.insert({fl, unroll_ite});
-    return;
-  }
 
   // Loop nest for inlined path
   kir::ForLoop* inlined_loop = cloneLoopNest(fl);
@@ -199,7 +208,7 @@ void UnrollPass::handle(kir::ForLoop* fl) {
   }
 }
 
-bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) const {
+bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
   kir::ExpressionEvaluator eval;
   std::vector<kir::ForLoop*> loops({fl});
 
