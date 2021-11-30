@@ -18,6 +18,7 @@ from .model_utils import (
     pack_weights_for_functionals,
     attach_scale_zp_values_to_model,
     attach_op_convert_info_to_model,
+    attach_output_convert_info_to_model,
 )
 from . import auto_trace_rewriter
 
@@ -58,6 +59,8 @@ def add_auto_observation(
     # logging.
     global_op_idx = [0]
 
+    global_disable_torch_function_override = False
+
     class QuantizationPrepareTensorProxy(torch.Tensor):
         """
         An override of `torch.Tensor` to enable dynamic tracing for
@@ -79,6 +82,10 @@ def add_auto_observation(
 
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
+            nonlocal global_disable_torch_function_override
+            if global_disable_torch_function_override:
+                return super().__torch_function__(func, types, args, kwargs)
+
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
@@ -188,12 +195,25 @@ def add_auto_observation(
                         # before hooks
                         if not first_call:
                             parent_qstate.validate_cur_op(cur_module)
+
+                        # If we are in this hook, `cur_module` is a leaf module.
+                        # Therefore, we do not need to override any of its
+                        # children. Disabling the overrides for performance.
+                        nonlocal global_disable_torch_function_override
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         args, kwargs = parent_qstate.op_prepare_before_hook(
                             cur_module, args, kwargs, first_call, qtensor_id,
                             fqn, cur_module)
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
+
+                        # Re-enable the overrides.
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
 
                         # after hooks
                         # TODO is it correct to call_cur_module twice here?
@@ -294,6 +314,8 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     # logging.
     global_op_idx = [0]
 
+    global_disable_torch_function_override = False
+
     class QuantizationConvertTensorProxy(torch.Tensor):
         """
         An override of `torch.Tensor` to enable dynamic dispatch for
@@ -316,6 +338,10 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
+            nonlocal global_disable_torch_function_override
+            if global_disable_torch_function_override:
+                return super().__torch_function__(func, types, args, kwargs)
+
             # to prevent printing things from going into an infinite loop
             if func == torch.Tensor.__repr__:
                 return super().__torch_function__(func, types, args, kwargs)
@@ -433,16 +459,18 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self
+                nonlocal global_disable_torch_function_override
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
                     hook_type = get_module_hook_type(parent_module, cur_module)
                     if enable_logging:
-                        logger.debug(
-                            f"_patched_module_call {type(self)} " +
-                            # f"arg_types {[type(arg) for arg in args]} " +
-                            f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
-                            f"hook_type {hook_type}")
+                        with torch._C.DisableTorchFunction():
+                            logger.debug(
+                                f"_patched_module_call {type(self)} " +
+                                # f"arg_types {[type(arg) for arg in args]} " +
+                                f"arg_dtypes {[arg.dtype if isinstance(arg, torch.Tensor) else None for arg in args]} " +
+                                f"hook_type {hook_type}")
 
                     if hook_type is HookType.OP_HOOKS:
                         # before hooks
@@ -451,6 +479,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         if enable_logging:
                             logger.debug(qstate)
                         qstate.validate_cur_op(cur_module)
+
+                        # If we are in this hook, `cur_module` is a leaf module.
+                        # Therefore, we do not need to override any of its
+                        # children. Disabling the overrides for performance.
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         _, args, kwargs = qstate.op_convert_before_hook(
                             cur_module, args, kwargs, cur_module)
                         # forward
@@ -458,6 +494,11 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # after hooks
                         output = qstate.op_convert_after_hook(
                             cur_module, output, global_op_idx)
+
+                        # Re-enable the override.
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         qstate.mark_cur_op_complete(cur_module)
 
                     elif hook_type is HookType.MODULE_IO_HOOKS:
@@ -471,7 +512,18 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
+
+                        # For the sake of performance, we assume no overrides
+                        # are needed for quantizing/dequantizing things
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         output = cur_qstate.outputs_convert_hook(output)
+
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
@@ -494,12 +546,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         output = orig_module_call(self, *args, **kwargs)
 
                     if enable_logging:
-                        logger.debug(
-                            f"_patched_module_call {type(self)} " +
-                            # f"out {type(output)} " +
-                            f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
-                            "end")
-                        logger.debug(f"ending fqn {fqn}\n")
+                        with torch._C.DisableTorchFunction():
+                            logger.debug(
+                                f"_patched_module_call {type(self)} " +
+                                # f"out {type(output)} " +
+                                f"dtype {output.dtype if isinstance(output, torch.Tensor) else None} " +
+                                "end")
+                            logger.debug(f"ending fqn {fqn}\n")
                     return output
                 finally:
                     module_stack.pop()
@@ -510,24 +563,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
             try:
                 global_op_idx[0] = 0
-
-                needs_io_hooks = hasattr(self, '_auto_quant_state')
-
-                # handle module input dtype conversions
-                # TODO(implement)
-
                 output = super().__call__(*new_args, **new_kwargs)
-
-                # handle module output dtype conversions
-                if needs_io_hooks:
-                    qstate = self._auto_quant_state
-                    assert isinstance(qstate, AutoQuantizationState)
-                    output = qstate.outputs_convert_hook(output)
 
                 def unwrap_proxy(a):
                     if isinstance(a, QuantizationConvertTensorProxy):
                         a.__class__ = torch.Tensor  # type: ignore[assignment]
                     return a
+
                 output = map_aggregate(output, unwrap_proxy)
                 return output
             finally:
@@ -540,6 +582,13 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
     pack_weights_for_functionals(module)
     attach_scale_zp_values_to_model(module)
     attach_op_convert_info_to_model(module)
+    attach_output_convert_info_to_model(module)
+
+    # Since eager mode convert could have changed the IDs of some modules,
+    # populate the FQN map again
+    for k, v in module.named_modules():
+        module_id_to_fqn[id(v)] = k
+
     module.__class__ = QuantizationDispatchModule
 
     return module

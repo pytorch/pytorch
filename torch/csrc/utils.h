@@ -138,7 +138,6 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THWTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
@@ -181,5 +180,8 @@ std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStre
 #endif
 
 void storage_copy(at::Storage dst, at::Storage src, bool non_blocking=false);
+void storage_fill(at::Storage self, uint8_t value);
+void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(at::Storage self, ptrdiff_t idx);
 
 #endif
