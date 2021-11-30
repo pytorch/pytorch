@@ -62,9 +62,9 @@ class Wishart(Distribution):
             event_shape = scale_tril.shape[-2:]
             self.scale_tril = scale_tril
             self.df = torch.tensor(
-                self.scale_tril.shape[-1] if df is None else df,
+                [self.scale_tril.shape[-1]],
                 dtype=scale_tril.dtype
-            )
+            ) if df is None else df
         elif covariance_matrix is not None:
             assert covariance_matrix.dim() > 1, \
                 "covariance_matrix must be at least two-dimensional, with optional leading batch dimensions"
@@ -72,9 +72,9 @@ class Wishart(Distribution):
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix
             self.df = torch.tensor(
-                self.covariance_matrix.shape[-1] if df is None else df,
+                [self.covariance_matrix.shape[-1]],
                 dtype=covariance_matrix.dtype
-            )
+            ) if df is None else df
         else:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
@@ -82,11 +82,11 @@ class Wishart(Distribution):
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
             self.df = torch.tensor(
-                self.precision_matrix.shape[-1] if df is None else df,
+                [self.precision_matrix.shape[-1]],
                 dtype=precision_matrix.dtype
-            )
+            ) if df is None else df
 
-        assert self.df > event_shape[-1] - 1, \
+        assert self.df.gt(event_shape[-1] - 1).all(), \
             f"Expected parameter 'df' to have value greater than {event_shape[-1] - 1}."
 
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
