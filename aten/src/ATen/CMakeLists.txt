@@ -188,14 +188,14 @@ endif()
 if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
 
-  set(ATen_CUDA_CU_SRCS
+  list(APPEND ATen_CUDA_CU_SRCS
     ${cuda_cu}
     ${native_cuda_cu}
     ${native_sparse_cuda_cu}
     ${native_quantized_cuda_cu}
     ${cuda_generated_sources}
   )
-  set(ATen_CUDA_CPP_SRCS
+  list(APPEND ATen_CUDA_CPP_SRCS
     ${cuda_cpp}
     ${native_cuda_cpp}
     ${native_cudnn_cpp}
