@@ -1834,6 +1834,27 @@ class TestNN(NNTestCase):
         parameters.pop('p4')
         check()
 
+        # Check reverse works
+        forward = list(iter(parameter_dict))
+        backward = list(reversed(parameter_dict))
+        self.assertEqual(len(forward), len(backward))
+        n = len(forward)
+        for i in range(n):
+            self.assertIs(forward[i], backward[n - i - 1])
+        check()
+
+        # Check copy works
+        copy = parameter_dict.copy()
+        parameter_dict["p15"] = Parameter(torch.randn(10, 10))
+        copy["p16"] = Parameter(torch.randn(9, 10))
+
+        self.assertEqual("p15" in parameter_dict, True)
+        self.assertEqual("p15" in copy, False)
+        self.assertEqual("p16" in parameter_dict, False)
+        self.assertEqual("p16" in copy, True)
+        check()
+        
+
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
