@@ -619,6 +619,9 @@ CUSTOM_HANDLERS = {
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
     "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_faulty_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
+    "distributed/rpc/cuda/test_tensorpipe_agent": get_run_test_with_subprocess_fn(),
 }
 
 
