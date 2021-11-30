@@ -25,16 +25,14 @@ class TestLazyTensor(JitTestCase):
                 weight = torch.rand(32, 3, 8, 8, device='cuda', requires_grad = True)
                 weight_copy = clone_move(weight)
                 bias = torch.rand(32, device='cuda', requires_grad = True)
-                bias = bias
-                bias_copy = clone_move(bias) 
-                bias_copy = bias_copy
+                bias_copy = clone_move(bias)
 
                 # run eager
                 conv_out = torch.nn.functional.conv2d(inp, weight, bias)
                 (inp_grad, weight_grad, bias_grad) = torch.autograd.grad([conv_out], [inp, weight, bias], [grad])
 
                 # run lazy
-                conv_copy_out = torch.nn.functional.conv2d(inp_copy, weight_copy, bias_copy) 
+                conv_copy_out = torch.nn.functional.conv2d(inp_copy, weight_copy, bias_copy)
                 (inp_copy_grad, weight_copy_grad, bias_copy_grad) = torch.autograd.grad([conv_copy_out], [inp_copy, weight_copy, bias_copy], [grad_copy])
 
                 jit_graph = lazy_tensor_core._LAZYC._get_ltc_tensors_backend([bias_copy_grad])
