@@ -107,7 +107,6 @@ class TestFSDPWrap(FSDPTest):
         model = MyModel(nested=nested)
         return model
 
-    # TODO: this generates 8 tests, is it worth testing all these config?
     @skip_if_lt_x_gpu(2)
     @parametrize("nested", [True, False])
     @parametrize("fsdp_init_mode", [FSDPInitMode.CUDA_AFTER, FSDPInitMode.CUDA_BEFORE])
