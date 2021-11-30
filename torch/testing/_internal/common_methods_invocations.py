@@ -13615,8 +13615,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         '_masked.normalize',
         method_variant=None,
-        dtypesIfCPU=floating_types_and(torch.half, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_masked_normalize,
         skips=(
             # torch.jit.frontend.NotSupportedError: Compiled
