@@ -105,7 +105,8 @@ static void imageYUV420CenterCropToFloatBuffer(
         xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
         yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
         yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
-        uvIdx = (yBeforeRtn >> 1) * uvRowStride + (xBeforeRtn >> 1) * uvPixelStride;
+        uvIdx =
+            (yBeforeRtn >> 1) * uvRowStride + (xBeforeRtn >> 1) * uvPixelStride;
         ui = uData[uvIdx];
         vi = vData[uvIdx];
         yi = yData[yIdx];
@@ -131,7 +132,8 @@ static void imageYUV420CenterCropToFloatBuffer(
         xBeforeRtn = cropXAdd + cropXMult * (int)(x * scale);
         yBeforeRtn = cropYAdd + cropYMult * (int)(y * scale);
         yIdx = yBeforeRtn * yRowStride + xBeforeRtn * yPixelStride;
-        uvIdx = (yBeforeRtn >> 1) * uvRowStride + (xBeforeRtn >> 1) * uvPixelStride;
+        uvIdx =
+            (yBeforeRtn >> 1) * uvRowStride + (xBeforeRtn >> 1) * uvPixelStride;
         ui = uData[uvIdx];
         vi = vData[uvIdx];
         yi = yData[yIdx];
@@ -152,7 +154,7 @@ static void imageYUV420CenterCropToFloatBuffer(
     }
   } else {
     jclass Exception = jniEnv->FindClass("java/lang/IllegalArgumentException");
-    jniEnv->ThrowNew(Exception,"Illegal memory format code");
+    jniEnv->ThrowNew(Exception, "Illegal memory format code");
   }
 }
 } // namespace pytorch_vision_jni

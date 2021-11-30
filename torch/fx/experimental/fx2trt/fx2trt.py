@@ -72,6 +72,17 @@ class TRTModule(torch.nn.Module):
         self.output_binding_indices_in_order: Sequence[int] = [
             self.engine.get_binding_index(name) for name in self.output_names
         ]
+        primary_input_outputs = set()
+        primary_input_outputs.update(self.input_binding_indices_in_order)
+        primary_input_outputs.update(self.output_binding_indices_in_order)
+        self.hidden_output_binding_indices_in_order: Sequence[int] = []
+        self.hidden_output_names: Sequence[str] = []
+        for i in range(self.engine.num_bindings):
+            if i not in primary_input_outputs:
+                self.hidden_output_binding_indices_in_order.append(i)
+                self.hidden_output_names.append(self.engine.get_binding_name(i))
+
+        assert self.engine.num_bindings == (len(self.input_names) + len(self.output_names) + len(self.hidden_output_names))
 
         self.input_dtypes: Sequence[torch.dtype] = [
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
@@ -85,6 +96,19 @@ class TRTModule(torch.nn.Module):
             torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
             for idx in self.output_binding_indices_in_order
         ]
+        self.output_shapes = [
+            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
+            for idx in self.output_binding_indices_in_order
+        ]
+        self.hidden_output_dtypes: Sequence[torch.dtype] = [
+            torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
+            for idx in self.hidden_output_binding_indices_in_order
+        ]
+        self.hidden_output_shapes = [
+            tuple(self.engine.get_binding_shape(idx)) if self.engine.has_implicit_batch_dimension else tuple()
+            for idx in self.hidden_output_binding_indices_in_order
+        ]
+
 
     def _check_initialized(self):
         if not self.initialized:
@@ -144,7 +168,7 @@ class TRTModule(torch.nn.Module):
                 batch_size = inputs[0].shape[0]
                 contiguous_inputs: List[torch.Tensor] = [i.contiguous() for i in inputs]
                 bindings: List[Any] = [None] * (
-                    len(self.input_names) + len(self.output_names)
+                    len(self.input_names) + len(self.output_names) + len(self.hidden_output_names)
                 )
 
                 for i, input_name in enumerate(self.input_names):
@@ -157,7 +181,7 @@ class TRTModule(torch.nn.Module):
 
                     idx = self.input_binding_indices_in_order[i]
                     bindings[idx] = contiguous_inputs[i].data_ptr()
-                    # print(contiguous_inputs[i].shape)
+
                     if not self.engine.has_implicit_batch_dimension:
                         self.context.set_binding_shape(
                             idx, tuple(contiguous_inputs[i].shape)
@@ -171,11 +195,10 @@ class TRTModule(torch.nn.Module):
             with torch.autograd.profiler.record_function("TRTModule:ProcessOutputs"):
                 # create output tensors
                 outputs: List[torch.Tensor] = []
+
                 for i, idx in enumerate(self.output_binding_indices_in_order):
                     if self.engine.has_implicit_batch_dimension:
-                        shape = (batch_size,) + tuple(
-                            self.engine.get_binding_shape(idx)
-                        )
+                        shape = (batch_size,) + self.output_shapes[i]
                     else:
                         shape = tuple(self.context.get_binding_shape(idx))
 
@@ -185,6 +208,19 @@ class TRTModule(torch.nn.Module):
                         device=torch.cuda.current_device(),
                     )
                     outputs.append(output)
+                    bindings[idx] = output.data_ptr()
+
+                for i, idx in enumerate(self.hidden_output_binding_indices_in_order):
+                    if self.engine.has_implicit_batch_dimension:
+                        shape = (batch_size,) + self.hidden_output_shapes[i]
+                    else:
+                        shape = tuple(self.context.get_binding_shape(idx))
+
+                    output = torch.empty(  # type: ignore[call-overload]
+                        size=shape,
+                        dtype=self.hidden_output_dtypes[i],
+                        device=torch.cuda.current_device(),
+                    )
                     bindings[idx] = output.data_ptr()
 
             with torch.autograd.profiler.record_function("TRTModule:TensorRTRuntime"):
@@ -224,14 +260,26 @@ class TRTModule(torch.nn.Module):
 
 
 CONVERTERS = {}
+NO_IMPLICIT_BATCH_DIM_SUPPORT = {}
+NO_EXPLICIT_BATCH_DIM_SUPPORT = {}
 
 
-def tensorrt_converter(key):
+def tensorrt_converter(key, no_implicit_batch_dim=False, no_explicit_batch_dim=False, enabled=True):
     def register_converter(converter):
         CONVERTERS[key] = converter
+        if no_implicit_batch_dim:
+            NO_IMPLICIT_BATCH_DIM_SUPPORT[key] = converter
+        if no_explicit_batch_dim:
+            NO_EXPLICIT_BATCH_DIM_SUPPORT[key] = converter
         return converter
 
-    return register_converter
+    def pass_converter(converter):
+        return converter
+
+    if enabled:
+        return register_converter
+    else:
+        return pass_converter
 
 
 class InputTensorSpec(NamedTuple):
@@ -445,7 +493,9 @@ class TRTInterpreter(torch.fx.Interpreter):
         if timing_cache:
             cache_file = numpy.array(timing_cache)
             cache = builder_config.create_timing_cache(cache_file.tobytes())
-            builder_config.set_timing_cache(cache, True)
+        else:
+            cache = builder_config.create_timing_cache(b"")
+        builder_config.set_timing_cache(cache, False)
 
         if fp16_mode:
             builder_config.set_flag(trt.BuilderFlag.FP16)
@@ -467,7 +517,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         engine = self.builder.build_engine(self.network, builder_config)
         assert engine
 
-        serialized_cache = bytearray(builder_config.get_timing_cache().serialize()) \
+        serialized_cache = bytearray(cache.serialize()) \
             if builder_config.get_timing_cache() else bytearray()
 
         return TRTInterpreterResult(engine, self._input_names, self._output_names, serialized_cache)
