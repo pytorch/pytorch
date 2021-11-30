@@ -425,7 +425,6 @@ class TestOperators(TestCase):
         xfail('min', 'reduction_no_dim', device_type='cpu'),
         xfail('nanmedian', device_type='cpu'),
         xfail('nanquantile'),
-        xfail('nn.functional.pad', 'circular'),
         xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
         xfail('prod'),
