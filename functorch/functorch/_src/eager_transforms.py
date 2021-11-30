@@ -646,8 +646,8 @@ def jvp(f, primals, tangents, *, strict=False):
 
 def safe_unflatten(tensor, dim, shape):
     if len(shape) == 0:
-        assert tensor.numel() == 1
-        return tensor.squeeze()
+        assert tensor.shape[dim] == 1
+        return tensor.squeeze(dim)
     return tensor.unflatten(dim, shape)
 
 def jacfwd(f, argnums=0):

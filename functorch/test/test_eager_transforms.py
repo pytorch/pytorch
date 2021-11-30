@@ -1275,6 +1275,126 @@ class TestJac(TestCase):
         x = torch.randn(3, device=device)
         result = hessian(f)(x)
 
+    def _test_against_reference(self, f, inputs, jacapi):
+        def foo(inputs):
+            return f(*inputs)
+
+        expected = torch.autograd.functional.jacobian(f, inputs)
+        result = jacapi(foo)(inputs)
+        self.assertEqual(result, expected)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_simple(self, device, jacapi):
+        def f(x):
+            return 3 * x ** 2
+
+        x = torch.randn(2, 3, 5, device=device)
+        self._test_against_reference(f, (x,), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_multi_input(self, device, jacapi):
+        def f(x, y):
+            return (x.cos() * x) @ y.sin()
+
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(3, 5, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_multi_input_multi_output(self, device, jacapi):
+        def f(x, y):
+            return (x * x) @ y, x @ (x.sum(1) * y), y.sum()
+
+        x = torch.randn(5, 3, device=device)
+        y = torch.randn(3, 5, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_unrelated_outputs(self, device, jacapi):
+        def f(x, y):
+            return x, y, x, y
+
+        x = torch.randn(2, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+    @jacrev_and_jacfwd
+    def test_against_reference_zero_dim(self, device, jacapi):
+        # zero-dim output
+        def f(x, y):
+            return x.sum(), y.sum(), x * y
+
+        x = torch.randn(3, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y), jacapi)
+
+        # zero-dim input
+        def g(x):
+            return torch.stack([x, x, x])
+
+        x = torch.randn([], device=device)
+        self._test_against_reference(g, (x,), jacapi)
+
+        # Mixed zero-dim input / zero-dim output
+        def h(x, y):
+            return y.sum(), x * y
+
+        x = torch.randn([], device=device)
+        y = torch.randn(1, device=device)
+        self._test_against_reference(h, (x, y), jacapi)
+
+    @unittest.skip("TODO(rzou): There's a race condition in DynamicLayerStack")
+    @jacrev_and_jacfwd
+    def test_against_reference_correctness_different_devices(self, device, jacapi):
+        def f(x, y):
+            return x * y, (x * y).to(device=device)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        self._test_against_reference(f, (x, y), jacapi)
+
+class TestHessian(TestCase):
+    def _test_against_reference(self, f, inputs):
+        def foo(inputs):
+            return f(*inputs)
+
+        expected = torch.autograd.functional.hessian(f, inputs)
+        result = hessian(foo)(inputs)
+        self.assertEqual(result, expected)
+
+    def test_hessian_vectorize_correctness_simple(self, device):
+        def f(x):
+            return (3 * x ** 2).sum()
+
+        x = torch.randn(2, 3, 5, device=device)
+        self._test_against_reference(f, (x,))
+
+    def test_hessian_vectorize_correctness_multi_input(self, device):
+        def f(x, y, z):
+            return ((x.relu() * x) @ y.sin() @ z).sum()
+
+        x = torch.randn(2, 3, device=device)
+        y = torch.randn(3, 5, device=device)
+        z = torch.randn(5, 5, device=device)
+        self._test_against_reference(f, (x, y, z))
+
+    def test_hessian_vectorize_correctness_unrelated_outputs(self, device):
+        # output unrelated to one input
+        def f(x, y):
+            return (x ** 2).sum()
+
+        x = torch.randn(2, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y))
+
+        # output unrelated to all inputs
+        def f(x, y):
+            return torch.ones([])
+
+        x = torch.randn(2, device=device)
+        y = torch.randn(3, device=device)
+        self._test_against_reference(f, (x, y))
+
 class TestJvp(TestCase):
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1., 2., 3.], device=device)
@@ -1925,6 +2045,11 @@ instantiate_device_type_tests(
     only_for=only_for,
 )
 instantiate_device_type_tests(
+    TestHessian,
+    globals(),
+    only_for=only_for,
+)
+instantiate_device_type_tests(
     TestComposability,
     globals(),
     only_for=only_for,
@@ -1934,7 +2059,6 @@ instantiate_device_type_tests(
     globals(),
     only_for=only_for,
 )
-
 
 
 if __name__ == '__main__':
