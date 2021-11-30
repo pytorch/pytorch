@@ -211,10 +211,7 @@ struct TORCH_API SimpleValue : public SugaredValue {
 };
 
 struct TORCH_API BuiltinFunction : public SugaredValue {
-  BuiltinFunction(
-      Symbol symbol,
-      c10::optional<NamedValue> self,
-      c10::optional<int64_t> version = c10::nullopt)
+  BuiltinFunction(Symbol symbol, c10::optional<NamedValue> self)
       : symbol(symbol), self(std::move(self)) {}
 
   // The symbol of the function (e.g. `aten::relu`).
