@@ -34,4 +34,11 @@
 #define CUB_SUPPORTS_SCAN_BY_KEY() 1
 #else
 #define CUB_SUPPORTS_SCAN_BY_KEY() 0
+
+// cub support for cub::FutureValue is added to cub 1.15 in:
+// https://github.com/NVIDIA/cub/pull/305
+#if CUB_VERSION >= 101500
+#define CUB_SUPPORTS_FUTURE_VALUE() true
+#else
+#define CUB_SUPPORTS_FUTURE_VALUE() false
 #endif

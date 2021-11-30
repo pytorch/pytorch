@@ -203,15 +203,13 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        try:
+        if activation_post_process is None or activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
             act_scale, act_zp = activation_post_process.calculate_qparams()
-        except Exception:
-            # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
-            act_scale, act_zp = 0.0, 0
-
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-        return qconv
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
     @staticmethod
     def from_float(cls, mod):
@@ -232,7 +230,8 @@ class _ConvNd(nn.Module):
                 cls._FLOAT_MODULE.__name__ + " but got:" + str(type(mod))
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
-            activation_post_process = mod.activation_post_process
+            activation_post_process = None if not hasattr(
+                mod, "activation_post_process") else mod.activation_post_process
             if type(mod) == cls._NNI_CONV_RELU_MODULE:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
@@ -588,16 +587,13 @@ class _ConvTransposeNd(_ConvNd):
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        try:
+        if not hasattr(mod, "activation_post_process") or mod.activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
             act_scale, act_zp = mod.activation_post_process.calculate_qparams()
-        except Exception:
-            # for things like dynamic quantization, want to assign arbitrary s+z to not break serialization
-            act_scale, act_zp = 0.0, 0
-
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-
-        return qconv
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
 
 class ConvTranspose1d(_ConvTransposeNd):
