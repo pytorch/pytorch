@@ -163,7 +163,7 @@ void GroupNormKernelImplChannelsLastInternal(
           for (; d < inner_size; d += K) {
             Vec x_vec = Vec::loadu(X_ptr + d);
             acc0_vec += x_vec;
-            acc1_vec += x_vec + x_vec;
+            acc1_vec += x_vec * x_vec;
           }
           if (D - d > 0) {
             Vec x_vec = Vec::loadu(X_ptr + d, D - d);

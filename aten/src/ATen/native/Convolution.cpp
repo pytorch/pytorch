@@ -1103,7 +1103,7 @@ at::Tensor _convolution(
           input.contiguous(backend_memory_format), weight, bias, params.padding, params.output_padding,
           params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
       break;
-    case ConvBackend::Mkldnn:
+    case ConvBackend::Mkldnn: {
 #if AT_MKLDNN_ENABLED()
       TORCH_CHECK(input.options().type_equal(weight.options())
           || (input.is_mkldnn() && weight.device().is_cpu() && weight.scalar_type() == kFloat),
@@ -1129,6 +1129,7 @@ at::Tensor _convolution(
       TORCH_INTERNAL_ASSERT(false, "Mkldnn backend was selected in PyTorch compiled without mkldnn support");
 #endif
       break;
+    }
     case ConvBackend::MkldnnEmpty:
 #if AT_MKLDNN_ENABLED()
       output = empty_mkldnn(
