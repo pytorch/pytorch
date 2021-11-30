@@ -1934,12 +1934,15 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
     return;
   }
 #ifdef USE_CUSOLVER
-  // Use a heuristic to determine that cusolver is faster than MAGMA for the following sizes.
-  auto m = input.size(-2);
-  // exclude complex128 since nan_to_num_ does not work with it.
+  // If there's no magma, we always default to CUSOLVER
+  // Otherwise, we do not use it for complex inputs if !get_pivots since nan_to_num_ does not work with it.
   // See https://github.com/pytorch/pytorch/issues/59247 for more info
-  if ((batch_size == 1 || (batch_size <= 8 && m <= 16) || !use_magma_ ) && !input.is_complex()) {
-    lu_factor_looped_cusolver(input, pivots, infos, compute_pivots);
+  // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
+  auto m = input.size(-2);
+  if (((batch_size == 1 || (batch_size <= 8 && m <= 16))
+       && (!input.is_complex() || compute_pivots))
+      || !use_magma_ ){
+    lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
   }
 #else
   if (batch_size == 1) {
