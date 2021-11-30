@@ -1075,8 +1075,10 @@ if(BUILD_PYTHON)
     add_library(python::python INTERFACE IMPORTED)
     set_property(TARGET python::python PROPERTY
         INTERFACE_INCLUDE_DIRECTORIES ${PYTHON_INCLUDE_DIRS})
-    set_property(TARGET python::python PROPERTY
-        INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    if(WIN32)
+      set_property(TARGET python::python PROPERTY
+          INTERFACE_LINK_LIBRARIES ${PYTHON_LIBRARIES})
+    endif()
 
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
