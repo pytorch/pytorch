@@ -1295,6 +1295,33 @@ class TestJvp(TestCase):
         self.assertTrue(isinstance(result, tuple))
         self.assertEqual(result, expected)
 
+    def test_pytree_inputs(self, device):
+        def f(x, y, z):
+            a, b = x
+            return a + 2 * b + 3 * y + 4 * z
+
+        one = torch.tensor(1., device=device)
+        primal_outs, tangent_outs = jvp(f, ((one, one), one, one), ((one, one), one, one))
+        self.assertEqual(primal_outs, one * 10)
+        self.assertEqual(tangent_outs, one * 10)
+
+    def test_pytree_inputs_error_cases(self, device):
+        def f(x):
+            return x
+
+        one = torch.tensor(1., device=device)
+
+        with self.assertRaisesRegex(RuntimeError, 'Expected primals to be a tuple'):
+            jvp(f, one, one)
+        with self.assertRaisesRegex(RuntimeError, 'same python structure'):
+            jvp(f, ((one, one), one), (one, one))
+        with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
+            jvp(f, ((one, one), 1), ((one, one), one))
+        with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
+            jvp(f, ((one, one), 1), ((1, one), one))
+        with self.assertRaisesRegex(RuntimeError, 'at least one Tensor'):
+            jvp(f, ((),), ((),))
+
     def test_unrelated_input(self, device):
         def f(x, y):
             return x
@@ -1365,28 +1392,29 @@ class TestJvp(TestCase):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "same number of Tensors"):
+        msg = "same python structure"
+        with self.assertRaisesRegex(RuntimeError, msg):
             jvp(torch.sin, (x,), (t, t))
-        with self.assertRaisesRegex(RuntimeError, "same number of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, msg):
             jvp(torch.sin, (x, x), (t, t, t))
 
     def test_nonempty_primals_and_tangents(self, device):
-        with self.assertRaisesRegex(RuntimeError, "non-empty tuple"):
+        with self.assertRaisesRegex(RuntimeError, "at least one Tensor"):
             jvp(torch.sin, (), ())
 
-    def test_inputs_are_flat_tuples_of_tensors(self, device):
+    def test_inputs_are_tuples_of_tensors(self, device):
         x = torch.randn(2, 3, device=device)
         t = torch.randn(2, 3, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, 'be a tuple'):
             jvp(torch.sin, x, (t,))
-        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, 'same python structure'):
             jvp(torch.sin, (x,), t)
-        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, 'same python structure'):
             jvp(torch.sin, (x,), [t])
-        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
             jvp(torch.sin, (1.,), (t,))
-        with self.assertRaisesRegex(RuntimeError, "tuple of Tensors"):
+        with self.assertRaisesRegex(RuntimeError, 'only contain Tensors'):
             jvp(torch.sin, (x,), (1.,))
 
     def test_outputs_should_be_tensor_or_tensors(self, device):
