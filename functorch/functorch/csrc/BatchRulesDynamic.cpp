@@ -39,7 +39,8 @@ void unsupportedItem(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
     TORCH_CHECK(false,
         "vmap: It looks like you're calling .item() on a Tensor. ",
         "We don't support vmap over calling .item() on a Tensor, please try to ",
-        "rewrite what you're doing with other operations.");
+        "rewrite what you're doing with other operations. If error is occurring ",
+        "somewhere inside PyTorch internals, please file a bug report.");
 }
 
 void unsupportedIsNonzero(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
@@ -59,7 +60,6 @@ void unsupportedAllclose(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
     UNSUPPORTED_DYNAMIC(nonzero);
     UNSUPPORTED_DYNAMIC(unique);
-    UNSUPPORTED_DYNAMIC(masked_select);
     m.impl("_local_scalar_dense", torch::CppFunction::makeFromBoxedFunction<&unsupportedLocalScalarDense>());
     m.impl("item", torch::CppFunction::makeFromBoxedFunction<&unsupportedItem>());
     m.impl("is_nonzero", torch::CppFunction::makeFromBoxedFunction<&unsupportedIsNonzero>());
