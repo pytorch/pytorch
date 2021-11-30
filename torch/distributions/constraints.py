@@ -22,6 +22,7 @@ The following constraints are implemented:
 - ``constraints.real_vector``
 - ``constraints.real``
 - ``constraints.simplex``
+- ``constraints.symmetric``
 - ``constraints.stack``
 - ``constraints.unit_interval``
 """
@@ -54,6 +55,7 @@ __all__ = [
     'real_vector',
     'simplex',
     'stack',
+    'symmetric',
     'unit_interval',
 ]
 
@@ -456,6 +458,16 @@ class _CorrCholesky(Constraint):
         return _LowerCholesky().check(value) & unit_row_norm
 
 
+class _Symmetric(Constraint):
+    """
+    Constrain to Symmetric square matrices.
+    """
+    event_dim = 2
+
+    def check(self, value):
+        return (value.transpose(-2, -1) == value).all(dim=-1).all(dim=-1)
+
+
 class _PositiveDefinite(Constraint):
     """
     Constrain to positive-definite matrices.
@@ -557,6 +569,7 @@ simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
 corr_cholesky = _CorrCholesky()
+symmetric = _Symmetric()
 positive_definite = _PositiveDefinite()
 cat = _Cat
 stack = _Stack
