@@ -724,10 +724,11 @@ def parse_args():
         action="store_true",
         help="always run blocklisted windows tests",
     )
-    parser.add_argument(
-        "--determine-from",
-        help="File of affected source filenames to determine which tests to run.",
-    )
+    # NS: Disable target determination until it can be made more reliable
+    # parser.add_argument(
+    #     "--determine-from",
+    #     help="File of affected source filenames to determine which tests to run.",
+    # )
     parser.add_argument(
         "--continue-through-error",
         action="store_true",
