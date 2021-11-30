@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like)
+     GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like, freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
@@ -2480,6 +2480,68 @@ def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=Fal
                 yield SampleInput(a, args=(b,))
 
     return list(generate_samples())
+
+
+def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False, **kwargs):
+
+    batches = [(), (0, ), (2, ), (1, 1)]
+    size = [1, 5, 10]
+
+    def generator():
+        for batch, m, n in product(batches, size, size):
+            for k in range(min(3, min(m, n))):
+                a = make_tensor((*batch, m, k), device, dtype, requires_grad=requires_grad)
+                b = make_tensor((*batch, n, k), device, dtype, requires_grad=requires_grad)
+                yield SampleInput(a, args=(b,), kwargs=kwargs)
+
+    return list(generator())
+
+
+def clone_sample(sample, requires_grad=False, **kwargs):
+
+    def clone_tensor(t):
+        return t.detach().clone().requires_grad_(requires_grad)
+
+    return SampleInput(
+        clone_tensor(sample.input),
+        args=tuple(map(clone_tensor, sample.args)),
+        kwargs=kwargs if kwargs else sample.kwargs
+    )
+
+
+def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
+
+    def generator():
+        for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
+            *batch, m, k = sample.input.shape
+            *_, n, _ = sample.args[0].shape
+
+            # NOTE: since svd_lowrank relies on non rank-revealing SVD,
+            # it inherits the problem of unstable behavior with repeated
+            # singular values including zeros.
+            # Since we want to avoid repeated zeros as singular values,
+            # we can only use k and k + 1 values for q.
+            # This issues could be resolved with using a rank-revealing SVD
+            # which does not include "zero" singular values.
+            for q in (k, min(k + 1, min(m, n))):
+                op_kwargs = {
+                    'q': q,
+                    'M': None
+                }
+                sample.kwargs = op_kwargs
+
+                # without M specified
+                yield clone_sample(sample, requires_grad)
+
+                # now with M
+                # TODO: fix bug in the documentation for svd_lowrank:
+                # M has to be (*, m, n), and not (*, 1, n) as written
+                # in the documentation
+                op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
+                yield clone_sample(sample, requires_grad, **op_kwargs)
+
+    return list(generator())
+
 
 def sample_inputs_linalg_cond(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -7578,12 +7640,13 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def wrapper_set_seed(op, input, *args, **kwargs):
+def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout
     See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
     """
-    torch.manual_seed(42)
-    return op(input, *args, **kwargs)
+    with freeze_rng_state():
+        torch.manual_seed(42)
+        return op(*args, **kwargs)
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
@@ -11520,15 +11583,16 @@ op_db: List[OpInfo] = [
                skipCUDAIfNoMagmaAndNoCusolver,
                skipCPUIfNoLapack]),
     OpInfo('svd_lowrank',
-           # We feed inputs that are the products of two full-rank factors,
-           # to avoid any rank changes caused by the perturbations in the gradcheck
-           op=lambda a, b: torch.svd_lowrank(a @ b.mT, q=a.shape[-1], niter=100),
+           op=lambda *args, **kwargs: wrapper_set_seed(
+               lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
+               *args, **kwargs
+           ),
            dtypes=floating_types(),
            supports_out=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=False,
-           sample_inputs_func=sample_inputs_linalg_pinv_singular,
+           sample_inputs_func=sample_inputs_svd_lowrank,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
