@@ -1345,7 +1345,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
             char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv) {
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
               for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
