@@ -1853,7 +1853,6 @@ class TestNN(NNTestCase):
         self.assertEqual("p16" in parameter_dict, False)
         self.assertEqual("p16" in copy, True)
         check()
-        
 
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
