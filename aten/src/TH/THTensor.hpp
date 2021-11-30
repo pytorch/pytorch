@@ -4,7 +4,7 @@
 // read Note [TH abstraction violation]
 
 #include <TH/THTensor.h>
-#include <TH/THStorageFunctions.hpp>
+#include <c10/core/StorageImpl.h>
 
 #include <atomic>
 #include <ATen/ATen.h>
@@ -18,4 +18,4 @@ inline at::Tensor THTensor_wrap(THTensor* tensor) {
 
 TH_API void THTensor_free(THTensor *self);
 
-TH_CPP_API void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
+TH_CPP_API void THTensor_setStorage(THTensor *self, c10::StorageImpl *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_);
