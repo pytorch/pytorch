@@ -1052,6 +1052,37 @@ class IrParser {
           nullptr);
     }
 
+    { // LTC uses threshold_backward for relu_backward
+      auto ptr_op = getOperatorForLiteral(
+          "aten::threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                c10::nullopt,
+                value_map[node->inputs()[0]->unique()],
+                value_map[node->inputs()[1]->unique()]);
+            auto grad_output = list_val.front();
+            list_val.pop_front();
+            auto input = list_val.front();
+            auto& threshold = value_map[node->inputs()[2]->unique()];
+
+            auto comparison = binaryOp(
+                BinaryOpType::GT,
+                input,
+                threshold,
+                TypePromotion::comparison_op_config);
+            auto mask = castOp(input->getDataType().value(), comparison);
+            auto out = mul(grad_output, mask);
+
+            value_map.emplace(node->output()->unique(), ValueHolder(out, format));
+          },
+          nullptr,
+          nullptr);
+    }
+
     {
       auto ptr_op = getOperatorForLiteral(
           "aten::clamp(Tensor self, Scalar? min, Scalar? max) -> Tensor");
@@ -1825,6 +1856,51 @@ class IrParser {
                     static_cast<c10::TypePtr>(NoneType::get())) &&
                 node->inputs()[2]->node()->kind() != prim::Constant) {
               return false;
+            }
+            return true;
+          },
+          [](const Node* node) -> OperatorType {
+            return OperatorType::Normalization;
+          });
+    }
+
+    { // LTC uses this op for softmax
+      auto ptr_op = getOperatorForLiteral(
+          "aten::_softmax(Tensor self, int dim, bool half_to_float) -> Tensor");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(),
+                value_map[node->inputs()[0]->unique()]);
+            auto input_t = list_val.front();
+            list_val.pop_front();
+            auto input = input_t->as<TensorView>();
+
+            auto dim_value = constant_as<int>(node->input(1));
+            TORCH_INTERNAL_ASSERT(
+                dim_value.has_value(), "dim in softmax is not valid");
+
+            auto output = softmax(input, dim_value.value());
+            value_map.emplace(node->output()->unique(), output);
+          },
+          [](const Node* node) -> bool {
+            if (node->inputs()[1]->node()->kind() != prim::Constant) {
+              return false;
+            }
+            if (node->inputs()[2]->node()->kind() != prim::Constant) {
+              return false;
+            } else {
+              const auto half_to_float = constant_as<bool>(node->input(2));
+              TORCH_INTERNAL_ASSERT(
+                half_to_float.has_value(), "Bool half_to_float is not valid");
+              auto input_tensor_type = node->input(0)->type()->cast<TensorType>();
+              if (half_to_float.value() &&
+                  input_tensor_type->scalarType() != at::ScalarType::Half) {
+                return false;
+              }
             }
             return true;
           },

@@ -148,6 +148,7 @@ class NaiveTypePropagator {
       // TODO: first operand for pow can be Tensor / Scalar
       case aten::pow:
       case aten::remainder:
+      case aten::threshold_backward:
       case aten::fmod:
       case aten::lerp:
       // add/sub could be ternary op and the third argument does not contribute
@@ -359,6 +360,20 @@ class NaiveTypePropagator {
             out_type = out_type->withScalarType(opt_ivalue->toScalarType());
           }
         }
+        node->output()->setType(out_type);
+        break;
+      }
+      case aten::_softmax: {
+        auto out_type = getInputTensorType(node, 0);
+
+        const auto half_to_float = constant_as<bool>(node->input(2));
+        TORCH_CHECK(
+            half_to_float.has_value(),
+            "half_to_float bool doesn't have a value.");
+        if (half_to_float.value()) {
+          out_type = out_type->withScalarType(at::ScalarType::Float);
+        }
+
         node->output()->setType(out_type);
         break;
       }

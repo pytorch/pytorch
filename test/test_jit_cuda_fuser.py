@@ -1493,6 +1493,54 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test__softmax_function(self):
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = torch.mul(x, y)
+            o = torch._softmax(o, dim=-1, half_to_float=False)
+            return o
+
+        x = torch.randn([4, 4], dtype=torch.float16, device="cuda")
+        y = torch.randn_like(x)
+
+        o = t(x, y)
+
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-3))
+        self.assertGraphContainsExactly(t_jit.graph_for(x, y), FUSION_GUARD, 1, consider_subgraphs=True)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test__softmax_function_half_to_float(self):
+        def t(x: torch.Tensor, y: torch.Tensor):
+            o = torch.mul(x, y)
+            o = torch._softmax(o, dim=-1, half_to_float=True)
+            return o
+
+        x = torch.randn([4, 4], dtype=torch.float16, device="cuda")
+        y = torch.randn_like(x)
+
+        o = t(x, y)
+
+        t_jit = torch.jit.script(t)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+        jit_o = t_jit(x, y)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, 1e-3))
+        self.assertGraphContainsExactly(t_jit.graph_for(x, y), FUSION_GUARD, 1, consider_subgraphs=True)
+
+    @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_softmax(self):
         output_size = 10000
         dims = 4

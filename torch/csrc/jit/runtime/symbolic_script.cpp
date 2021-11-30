@@ -896,7 +896,9 @@ const std::vector<std::string> functions = {
         def relu(self):
             result = torch.relu(self)
             def backward(grad_output):
-                return grad_output * (result > 0).type_as(result)
+                # Use threshold_backward for testing
+                #return grad_output * (result > 0).type_as(result)
+                return torch.threshold_backward(grad_output, result, 0.)
 
             return result, backward
 
