@@ -576,6 +576,17 @@ def assert_output_is_tensor_or_tensors(output, api):
             f'{api}: Expected output of f to be a Tensor or Tensors, got '
             f'{type(out)} as an output')
 
+def assert_non_empty_list_of_tensors(output, api, argname):
+    if len(output) == 0:
+        raise RuntimeError(
+            f'{api}: Expected {argname} to contain at least one Tensor.')
+    for out in output:
+        if isinstance(out, torch.Tensor):
+            continue
+        raise RuntimeError(
+            f'{api}: Expected {argname} to only contain Tensors, got '
+            f'{type(out)}')
+
 jvp_str = 'jvp(f, primals, tangents)'
 
 def safe_unpack_dual(dual, strict):
@@ -590,12 +601,20 @@ def safe_unpack_dual(dual, strict):
     return primal, tangent
 
 def jvp(f, primals, tangents, *, strict=False):
-    assert_flat_tuple_of_tensors(primals, jvp_str, 'primals')
-    assert_flat_tuple_of_tensors(tangents, jvp_str, 'tangents')
-    if len(primals) != len(tangents):
+    if not isinstance(primals, tuple):
         raise RuntimeError(
-            f'{jvp_str}: Expected primals ({len(primals)}) and tangents '
-            f'({len(tangents)}) to have the same number of Tensors.')
+            f'{jvp_str}: Expected primals to be a tuple. '
+            f'E.g. it should be valid to call f(*primals).')
+    flat_primals, primals_spec = tree_flatten(primals)
+    flat_tangents, tangents_spec = tree_flatten(tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f'{jvp_str}: Expected primals and tangents to have the same python '
+            f'structure. For example, if primals is a tuple of 3 tensors, '
+            f'tangents also must be. Got primals with structure {primals_spec} '
+            f'and tangents with structure {tangents_spec}')
+    assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
+    assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
     level = _grad_increment_nesting()
     try:
@@ -607,7 +626,9 @@ def jvp(f, primals, tangents, *, strict=False):
         JVP_NESTING += 1
         ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
         with ctx():
-            duals = tuple(fwAD.make_dual(p, t) for p, t in zip(primals, tangents))
+            flat_duals = tuple(fwAD.make_dual(p, t)
+                               for p, t in zip(flat_primals, flat_tangents))
+            duals = tree_unflatten(flat_duals, primals_spec)
             result_duals = f(*duals)
             assert_output_is_tensor_or_tensors(result_duals, jvp_str)
             result_duals, spec = tree_flatten(result_duals)
