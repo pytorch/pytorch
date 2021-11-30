@@ -5,6 +5,7 @@ from enum import Enum, auto
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -109,7 +110,7 @@ class FullyShardedDataParallel(nn.Module):
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
         cpu_offload: Optional[CPUOffload] = None,
-        fsdp_auto_wrap_policy: Optional[callable] = None,
+        fsdp_auto_wrap_policy: Optional[Callable] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -148,9 +149,6 @@ class FullyShardedDataParallel(nn.Module):
                 )
             assert not ConfigAutoWrap.in_autowrap_context
 
-        # TODO: if we want to apply the policy to the outermost module, it
-        # should be applied here and we can have a flag to control whether this
-        # module behaves like an nn.Module or FSDP.
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
