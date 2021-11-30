@@ -1,2 +1,2 @@
-result="extern_package"
-test_number=[789]
+result = "extern_package"
+test_number = [789]

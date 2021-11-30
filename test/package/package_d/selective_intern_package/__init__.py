@@ -1,2 +1,2 @@
-result="selective_intern_package"
-test_number=[456]
+result = "selective_intern_package"
+test_number = [456]
