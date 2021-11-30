@@ -10521,10 +10521,9 @@ Keyword args:
 
 Example::
 
-    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
-    >>> torch.empty_like(a)
-    tensor([[0, 0, 0],
-            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
+    >>> torch.empty((2,3), dtype=torch.int64)
+    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
+            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_common_args))
 
 add_docstr(torch.empty_like,
@@ -10547,9 +10546,10 @@ Keyword args:
 
 Example::
 
-    >>> torch.empty((2,3), dtype=torch.int64)
-    tensor([[ 9.4064e+13,  2.8000e+01,  9.3493e+13],
-            [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
+    >>> a=torch.empty((2,3), dtype=torch.int32, device = 'cuda')
+    >>> torch.empty_like(a)
+    tensor([[0, 0, 0],
+            [0, 0, 0]], device='cuda:0', dtype=torch.int32)
 """.format(**factory_like_common_args))
 
 add_docstr(torch.empty_strided,
