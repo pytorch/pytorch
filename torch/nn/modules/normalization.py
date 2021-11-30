@@ -231,7 +231,7 @@ class GroupNorm(Module):
         >>> m = nn.GroupNorm(3, 6)
         >>> # Separate 6 channels into 6 groups (equivalent with InstanceNorm)
         >>> m = nn.GroupNorm(6, 6)
-        >>> # Put all 6 channels into a single group (equivalent with LayerNorm)
+        >>> # Put all 6 channels into a single group
         >>> m = nn.GroupNorm(1, 6)
         >>> # Activating the module
         >>> output = m(input)
