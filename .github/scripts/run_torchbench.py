@@ -74,7 +74,7 @@ def extract_models_from_pr(torchbench_path: str, prbody_file: str) -> List[str]:
     return model_list
 
 def identify_torchbench_branch(torchbench_path: str, prbody_file: str) -> None:
-    branch_name: str
+    branch_name: str = ""
     with open(prbody_file, "r") as pf:
         lines = map(lambda x: x.strip(), pf.read().splitlines())
         magic_lines = list(filter(lambda x: x.startswith(MAGIC_TORCHBENCH_PREFIX), lines))

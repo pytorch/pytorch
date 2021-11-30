@@ -57,7 +57,7 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
   }
 
   void handle(kir::ForLoop* fl) {
-    if (fl->isUnrollable()) {
+    if (fl->isUnrolled()) {
       kir::Scope* scope = nullptr;
       if (!scope_nest_.empty()) {
         scope = scope_nest_.back();
@@ -106,25 +106,35 @@ std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs) {
   FUSER_PERF_SCOPE("GpuLower::Lower::insertMagicZero");
   // Check if magic zero was even used, if not we don't have to define it or
   // update it.
-  bool has_magic_zero = false;
   const auto gpu_lower = GpuLower::current();
   auto kernel = gpu_lower->kernel();
-  for (auto& val : kernel->irNodes()) {
-    if (val->isA<kir::NamedScalar>()) {
-      auto named_scalar = val->as<kir::NamedScalar>();
-      if (named_scalar->dtype() == DataType::Int &&
-          named_scalar->name() == "nvfuser_zero") {
-        has_magic_zero = true;
-        break;
-      }
-    }
-  }
+  const bool has_magic_zero = std::any_of(
+      kernel->irNodes().begin(),
+      kernel->irNodes().end(),
+      [](const std::unique_ptr<kir::Node>& ir_node) {
+        return ir_node->isA<kir::Val>() && isMagicZero(ir_node->as<kir::Val>());
+      });
 
   if (!has_magic_zero) {
     return exprs;
   }
 
   return MagicZeroInserter::insert(exprs);
+}
+
+bool isMagicZero(kir::Val* val) {
+  auto ns = dynamic_cast<kir::NamedScalar*>(val);
+  if (ns == nullptr) {
+    return false;
+  }
+  return ns->dtype() == DataType::Int &&
+      ns->name() == std::string(kMagicZeroName);
+}
+
+bool isProtectedWithMagicZero(kir::Val* val) {
+  auto def = dynamic_cast<kir::BinaryOp*>(val->definition());
+  return def && def->operation() == BinaryOpType::Add &&
+      isMagicZero(def->rhs());
 }
 
 } // namespace cuda

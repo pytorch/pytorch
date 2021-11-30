@@ -9,6 +9,7 @@
 #include <ATen/NamedTensorUtils.h>
 
 #include <c10/core/TensorOptions.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace meta {
@@ -129,10 +130,12 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
-  for (int64_t i = 0; i < dim; ++i)
+  for (const auto i : c10::irange(dim)) {
     outer_size *= input.size(i);
-  for (int64_t i = dim + 1; i < input.dim(); ++i)
+  }
+  for (int64_t i = dim + 1; i < input.dim(); ++i) {
     inner_size *= input.size(i);
+  }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   scalar_t* input_data_base = input.data_ptr<scalar_t>();
@@ -141,7 +144,7 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   parallel_for(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
           scalar_t* input_data =
@@ -149,11 +152,12 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
           scalar_t* output_data =
               output_data_base + outer_idx * outer_stride + inner_idx;
           scalar_t max_input = input_data[0];
-          for (int64_t d = 1; d < dim_size; d++)
+          for (const auto d : c10::irange(1, dim_size)) {
             max_input = std::max(max_input, input_data[d * dim_stride]);
+          }
 
           acc_type<scalar_t, false> tmpsum = 0;
-          for (int64_t d = 0; d < dim_size; d++) {
+          for (const auto d : c10::irange(dim_size)) {
             scalar_t z = std::exp(input_data[d * dim_stride] - max_input);
             if (!LogSoftMax) {
               output_data[d * dim_stride] = z;
@@ -161,17 +165,20 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
             tmpsum += z;
           }
 
-          if (LogSoftMax)
+          if (LogSoftMax) {
             tmpsum = std::log(tmpsum);
-          else
+          } else {
             tmpsum = 1 / tmpsum;
+          }
 
-          for (int64_t d = 0; d < dim_size; d++)
-            if (LogSoftMax)
+          for (const auto d : c10::irange(dim_size)) {
+            if (LogSoftMax) {
               output_data[d * dim_stride] =
                   input_data[d * dim_stride] - max_input - tmpsum;
-            else
+            } else {
               output_data[d * dim_stride] *= tmpsum;
+            }
+          }
         }
       });
 }
@@ -186,10 +193,12 @@ void host_softmax_backward(
   int64_t outer_size = 1;
   int64_t dim_size = grad.size(dim);
   int64_t inner_size = 1;
-  for (int64_t i = 0; i < dim; ++i)
+  for (const auto i : c10::irange(dim)) {
     outer_size *= grad.size(i);
-  for (int64_t i = dim + 1; i < grad.dim(); ++i)
+  }
+  for (int64_t i = dim + 1; i < grad.dim(); ++i) {
     inner_size *= grad.size(i);
+  }
   int64_t dim_stride = inner_size;
   int64_t outer_stride = dim_size * dim_stride;
   scalar_t* gradInput_data_base = gI.data_ptr<scalar_t>();
@@ -198,7 +207,7 @@ void host_softmax_backward(
   int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
-        for (int64_t i = begin; i < end; i++) {
+        for (const auto i : c10::irange(begin, end)) {
           int64_t outer_idx = i / inner_size;
           int64_t inner_idx = i % inner_size;
           scalar_t* gradInput_data =
@@ -209,14 +218,16 @@ void host_softmax_backward(
               gradOutput_data_base + outer_idx * outer_stride + inner_idx;
 
           acc_type<scalar_t, false> sum = 0;
-          for (int64_t d = 0; d < dim_size; d++)
-            if (LogSoftMax)
+          for (const auto d : c10::irange(dim_size)) {
+            if (LogSoftMax) {
               sum += gradOutput_data[d * dim_stride];
-            else
+            } else {
               sum +=
                   gradOutput_data[d * dim_stride] * output_data[d * dim_stride];
+            }
+          }
 
-          for (int64_t d = 0; d < dim_size; d++) {
+          for (const auto d : c10::irange(dim_size)) {
             if (LogSoftMax) {
               gradInput_data[d * dim_stride] = gradOutput_data[d * dim_stride] -
                   std::exp(output_data[d * dim_stride]) * sum;

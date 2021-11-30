@@ -24,11 +24,11 @@ class HTTPReaderIterDataPipe(IterDataPipe[Tuple[str, IOBase]]):
         from requests import HTTPError, RequestException, Session
         for url in self.datapipe:
             try:
-                session = Session()
-                if self.timeout is None:
-                    r = session.get(url, stream=True)
-                else:
-                    r = session.get(url, timeout=self.timeout, stream=True)
+                with Session() as session:
+                    if self.timeout is None:
+                        r = session.get(url, stream=True)
+                    else:
+                        r = session.get(url, timeout=self.timeout, stream=True)
                 return url, r.raw
             except HTTPError as e:
                 raise Exception(f"Could not get the file. [HTTP Error] {e.response}.")

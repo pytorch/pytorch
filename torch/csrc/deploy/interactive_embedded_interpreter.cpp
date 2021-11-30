@@ -2,25 +2,28 @@
  * The tool provides a shell to the embedded interpreter. Useful to inspect the
  * state of the embedding interpreter interactively.
  */
-#include <glog/logging.h>
+#include <c10/util/Flags.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/csrc/deploy/path_environment.h>
 
-DEFINE_string(
+C10_DEFINE_string(
     python_path,
     "",
     "The root of the installed python libraries in the system");
-DEFINE_string(pyscript, "", "The path of the python script to execute");
+C10_DEFINE_string(pyscript, "", "The path of the python script to execute");
 
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
-  gflags::ParseCommandLineFlags(&argc, &argv, true);
+  c10::ParseCommandLineFlags(&argc, &argv);
 
   if (FLAGS_python_path.size() > 0) {
     LOG(INFO) << "Will add " << FLAGS_python_path << " to python sys.path";
   }
+  std::shared_ptr<torch::deploy::Environment> env =
+      std::make_shared<torch::deploy::PathEnvironment>(FLAGS_python_path);
   // create multiple interpreter instances so the tool does not just cover the
   // simplest case with a single interpreter instance.
-  torch::deploy::InterpreterManager m(2, FLAGS_python_path);
+  torch::deploy::InterpreterManager m(2, env);
   auto I = m.acquireOne();
 
   if (FLAGS_pyscript.size() > 0) {

@@ -4,12 +4,11 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAEvent.h>
+#include <ATen/cuda/PeerToPeerAccess.h>
 #include <c10/cuda/CUDAStream.h>
 #include <ATen/native/Copy.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
-
-#include <THC/THC.h>
 
 namespace at {
 namespace native {
@@ -142,8 +141,7 @@ static bool maybe_enable_p2p_access(Device dst_device, Device src_device) {
   if (dst_device.is_cpu() || src_device.is_cpu()) {
     return false;
   }
-  return THCState_getPeerToPeerAccess(
-        globalContext().getTHCState(), src_device.index(), dst_device.index());
+  return at::cuda::get_p2p_access(src_device.index(), dst_device.index());
 }
 
 static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
@@ -219,8 +217,13 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
 
   if (non_blocking) {
     AT_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
-    void* ptr = (dst_device == kCPU ? dst : src);
-    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ptr, stream));
+    // we use the storage context as the key for the caching host allocator,
+    // and not the data pointer.
+    // This allows us to attribute the events to the original tensor allocation correctly.
+    const auto& dst_tensor = iter.tensor(0);
+    const auto& src_tensor = iter.tensor(1);
+    auto* ctx = (dst_device == kCPU ? dst_tensor : src_tensor).storage().data_ptr().get_context();
+    AT_CUDA_CHECK(CachingHostAllocator_recordEvent(ctx, stream));
   } else {
     at::cuda::memcpy_and_sync(dst, src, nbytes, kind, stream);
   }

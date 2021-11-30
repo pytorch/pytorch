@@ -834,10 +834,10 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
     auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
     auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
 
-    auto batched_out = batched.transpose(-2, -1);
+    auto batched_out = batched.mT();
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.transpose(-2, -1)));
+    ASSERT_TRUE(at::allclose(out, tensor.mT()));
   }
 }
 
