@@ -11401,6 +11401,11 @@ op_db: List[OpInfo] = [
                                     dtypes=[torch.bfloat16]),
                        DecorateInfo(unittest.skip("Skipped! sparse backward not supported"),
                                     'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
+<<<<<<< HEAD
+=======
+                       DecorateInfo(unittest.skip("Skipped! sqrt_ not implemented for sparse"),
+                                    'TestSparseUnaryUfuncs', 'test_inplace'),
+>>>>>>> aa2163eba53036d998d564138e10f18634c890b9
                    ),
                    safe_casts_outputs=True,
                    handles_complex_extremals=False),
