@@ -433,6 +433,15 @@ Tensor index_copy_decomp(
   return at::scatter(self, dim, index_, source);  ;
 }
 
+Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
+                            int64_t dim, c10::optional<int64_t> start,
+                            c10::optional<int64_t> end, int64_t step)
+{
+  auto idx = at::arange(start.value_or(0), end.value_or(self.size(dim)), step, self.options().dtype(kLong));
+  idx = get_expanded_index(idx, self.sizes(), dim);
+  return at::scatter(self, dim, idx, src);
+}
+
 Tensor select_scatter_decomp(
     const Tensor &self, const Tensor &source,
     int64_t dim, int64_t index)
@@ -447,6 +456,7 @@ Tensor select_scatter_decomp(
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
+  m.impl("slice_scatter", slice_scatter_decomp);
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
