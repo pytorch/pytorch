@@ -190,7 +190,7 @@ class AutoQuantizationState(torch.nn.Module):
             expected_op = seen_op_info.type
         except IndexError:
             _raise_obs_not_found_error(cur_op)
-        if not ops_are_related(cur_op, expected_op):
+        if not ops_are_related(cur_op, expected_op, seen_op_info.type_is_module):
             _raise_obs_op_mismatch(cur_op, expected_op)
 
     def mark_cur_op_complete(self, cur_op: Callable) -> None:
@@ -714,9 +714,10 @@ class AutoQuantizationState(torch.nn.Module):
                         kwarg_name_on_module
 
         if self.idx not in self.idx_to_seen_op_infos:
-            op_type = op if not isinstance(op, torch.nn.Module) else type(op)
+            op_type_is_module = isinstance(op, torch.nn.Module)
+            op_type = type(op) if op_type_is_module else op
             self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
-                self.idx, op_type, fqn, arg_tensor_infos, [],
+                self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
                 op_packing_only_uses_module_attributes)
