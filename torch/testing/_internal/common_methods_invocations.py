@@ -7081,6 +7081,27 @@ def sample_inputs_ctc_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     return list(gen_inputs())
 
+def sample_inputs_soft_margin_loss(op_info, device, dtype, requires_grad, **kwargs):
+    _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_kwargs = [
+        ((), dict()),
+        ((S,), dict(reduction="mean")),
+        ((S,), dict(reduction="sum")),
+        ((S,), dict(reduction="none")),
+        ((S, S), dict()),
+        ((S, S, S), dict()),
+    ]
+
+    samples = []
+
+    for shape, kwargs in shapes_and_kwargs:
+            input = _make_tensor(shape)
+            target = _make_tensor(shape)
+            samples.append(SampleInput(input, args=(target,), kwargs=kwargs))
+
+    return samples
+
 def sample_inputs_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     shape = (2, 3)
     num_classes = shape[1]
@@ -13484,6 +13505,20 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_cosine_embedding_loss,
+    ),
+    OpInfo(
+        "nn.functional.soft_margin_loss",
+        ref=_NOTHING,
+        dtypes=floating_and_complex_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        supports_autograd=False,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_soft_margin_loss,
+        skips=(
+            # soft_margin_loss intentionally raises an error when passed a 'target' tensor with requires_grad=True.
+            # RuntimeError: The function 'soft_margin_loss' is not differentiable with respect to argument 'target'.
+            # This input cannot have requires_grad True.
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_nondifferentiable',),),
     ),
     OpInfo(
         "nn.functional.nll_loss",
