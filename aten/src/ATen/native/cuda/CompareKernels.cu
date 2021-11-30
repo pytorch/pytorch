@@ -11,55 +11,46 @@
 
 namespace at { namespace native {
 
-namespace {
-  enum class CompareOpType {LE, GE, LT, GT};
-}
-
 template<typename scalar_t>
 struct CompareFunctor{
-  CompareFunctor(const CompareOpType op): op_(op) {}
-  const CompareOpType op_;
+  CompareFunctor(const int op): op_(op) {TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op_>=0 && op_ <= 3);}
+  const int op_;
   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-    if (op_ == CompareOpType::GE) {
+    //printf("vals %ld %ld\n", a, b);
+    if (op_ == 0) {
       return a >= b;
-    } else if (op_ == CompareOpType::GT) {
+    } else if (op_ == 1) {
       return a > b;
-    } else if (op_ == CompareOpType::LE) {
+    } else if (op_ == 2) {
       return a <= b;
-    } else { //LT
+    } else if (op_ == 3) { //LT
       return a < b;
     }
   }
 };
 
-template<typename scalar_t>
-struct CompareGEFunctor {
-  __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-    return a >= b;
-  }
-};
 
 void ge_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(CompareOpType::GE));
+    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(0));
   });
 }
 
 void gt_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(CompareOpType::GT));
+    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(1));
   });
 }
 
 void le_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(CompareOpType::LE));
+    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(2));
   });
 }
 
 void lt_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(CompareOpType::LT));
+    gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(3));
   });
 }
 
