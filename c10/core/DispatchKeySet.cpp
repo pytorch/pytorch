@@ -102,6 +102,7 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
     case DispatchKey::XLA:
+    case DispatchKey::Lazy:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();
