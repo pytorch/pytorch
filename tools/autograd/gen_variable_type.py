@@ -39,7 +39,8 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
-                                     ListCType, SpecialArgName, scalarT, stringT)
+                                     ListCType, SpecialArgName, scalarT, stringT,
+                                     VectorCType)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -104,9 +105,9 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     'replication_pad1d_backward', 'replication_pad2d_backward', 'replication_pad3d_backward',
     'diag', 'masked_scatter', 'masked_select', 'index_fill', 'trace', 'polar', 'cumsum', 'rsub',
     'eig', 'lerp', 'linalg_vector_norm', 'cumprod', 'prod', 'index_copy', 'lu', 'unfold', 'unfold_backward',
-    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical', 'linalg_lu_factor_ex',
+    'index', 'masked_fill', 'linalg_cross', 'lu_unpack', 'renorm', '_conj_physical',
     'scatter', 'scatter_add', 'sigmoid', 'sigmoid_backward', 'trapezoid', 'cumulative_trapezoid',
-    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve',
+    'conj_physical_', '_neg_view', '_reshape_alias', '_det_lu_based_helper', 'lu_solve', '_lu_with_info',
     'linalg_solve_triangular', 'linalg_pinv', 'linalg_lstsq', 'col2im', 'col2im_backward', 'im2col', 'im2col_backward',
 }
 
@@ -334,7 +335,7 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
 if (${out_arg}_new_fw_grad_opt.has_value()) {
-  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value()
+  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
     if (${out_arg}_new_fw_grad[i].defined()) {
@@ -925,7 +926,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res, is_inplace=is_inplace_str)
             elif isinstance(derivative.var_type, ListType) and derivative.var_type.is_tensor_like():
-                opt_res_grad_type = OptionalCType(ListCType(BaseCType(tensorT))).cpp_type()
+                opt_res_grad_type = OptionalCType(VectorCType(BaseCType(tensorT))).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res, is_inplace=is_inplace_str)
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
