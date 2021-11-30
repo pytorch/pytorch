@@ -328,7 +328,6 @@ LINUX_WORKFLOWS = [
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         enable_doc_jobs=True,
         exclude_test=True,
-        # is_scheduled="0 0 * * *",  # run pushes only on a nightly schedule
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_DOCS, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
