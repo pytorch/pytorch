@@ -3038,6 +3038,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('view_as_complex'),
         xfail('H'),
         xfail('mH'),
+        xfail('masked_select'),
 
         # entries in here don't work and need to be fixed.
         # Each one of these is a bug

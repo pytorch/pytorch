@@ -36,6 +36,16 @@ struct NewBlahBatchRuleHelper<F, Func, typelist<A, B, T...>> {
       &fn,\
       c10::guts::function_traits<decltype(fn)>::parameter_types>::apply)
 
+std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
+    int64_t self_num_batch_dims) {
+  TORCH_CHECK(!other_bdim.has_value(),
+      "NYI: vmap over jvp of the primal. Please file an issue.");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto result = at::_new_zeros_with_same_feature_meta(self, other, self_num_batch_dims + 1);
+  return std::make_tuple(result, 0);
+}
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("ones_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(ones_like)));
@@ -48,6 +58,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("new_zeros", NEW_BLAH_BATCH_RULE(ATEN_FN(new_zeros)));
   VMAP_SUPPORT("new_ones", NEW_BLAH_BATCH_RULE(ATEN_FN(new_ones)));
   VMAP_SUPPORT("new_full", NEW_BLAH_BATCH_RULE(ATEN_FN(new_full)));
+  VMAP_SUPPORT("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batch_rule);
   // Not sure how to add the ones with irregular args to the mix cleanly (i.e. randint takes an extra int parameter)
 }
 }}
