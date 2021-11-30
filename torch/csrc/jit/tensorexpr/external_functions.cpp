@@ -117,6 +117,20 @@ at::Tensor from_blob_quantized(
   return qx;
 }
 
+#ifndef _WIN32
+at::Tensor quantized_add(
+    const at::Tensor& x1,
+    const at::Tensor& x2,
+    double scale,
+    int64_t zero) {
+  const auto qadd_op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::add", "")
+          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
+  return qadd_op.call(x1, x2, scale, zero);
+}
+#endif // _WIN32
+
 #ifdef C10_MOBILE
 extern "C" {
 #endif
@@ -234,6 +248,7 @@ void nnc_aten_quantized_conv2d_relu(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+#ifndef _WIN32
 void nnc_aten_quantized_add(
     int64_t bufs_num,
     void** buf_data,
@@ -269,9 +284,10 @@ void nnc_aten_quantized_add(
       toQIntType(b_qdtype));
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
-  auto r = at::native::quantized_add(qa, qb, out_qscale, out_qzero);
+  auto r = quantized_add(qa, qb, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
+#endif // _WIN32
 
 #endif // DISABLE_NNC_QUANTIZATION
 
@@ -616,9 +632,11 @@ const static RegisterNNCExternalFunction nnc_quantized_conv2d(
 const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
     "nnc_aten_quantized_conv2d_relu",
     nnc_aten_quantized_conv2d_relu);
+#ifndef _WIN32
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_aten_quantized_add",
     nnc_aten_quantized_add);
+#endif // _WIN32
 const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
     "nnc_aten_quantize_per_tensor",
     nnc_aten_quantize_per_tensor);

@@ -95,6 +95,53 @@ class ValueGroup {
   FastSet<const Value*> external_aliases_;
 };
 
+class TORCH_API ManagedTensorRanges {
+ public:
+  ManagedTensorRanges() = default;
+  ManagedTensorRanges(
+      const std::shared_ptr<Graph>& graph,
+      const FastSet<const Value*>& managed_tensor_values);
+
+  // If true, then this node is the last use of at least one
+  // managed tensor. availableTensorsAfterNode(node) will return a vector
+  // of the managed tensors that are available for re-use
+  // in the nodes following this one.
+  bool nodeFreesManagedTensors(Node* node) const;
+  const std::vector<const Value*>& availableTensorsAfterNode(Node* node) const;
+
+  // True if the value has a tracked lifetime and lifetime.start ==
+  // lifetime.end. "Unused" does not imply "unmanaged" -
+  // managed tensors can be unused if they're not passed to any ops!
+  bool isUnusedValue(const Value* value) const;
+
+  // For testing. True if v1 and v2 are both mutable types and have lifetimes
+  // that overlap.
+  bool lifetimesOverlap(const Value* v1, const Value* v2) const;
+
+ private:
+  struct Lifetime {
+    Lifetime(size_t start_, size_t end_) : start(start_), end(end_) {}
+    size_t start;
+    size_t end;
+  };
+
+  // Returns nullptr if we are not tracking the lifetime of value
+  Lifetime* getLifetime(const Value* value);
+  const Lifetime* getLifetime(const Value* value) const;
+  // Collect all values in the input that have tracked lifetimes.
+  // A value's lifetime may not be tracked if it is a graph input
+  // or immutable type (containers with at least one mutable
+  // type are mutable)
+  std::vector<const Value*> collectValuesWithTrackedLifetimes(
+      at::ArrayRef<const Value*> values);
+
+  // Maps Node* to the set of managed tensors that are now available
+  // for re-use after this node.
+  FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
+  // Maps each Value* to its lifetime (start node index, end node index)
+  FastMap<const Value*, Lifetime> value_lifetimes_{};
+};
+
 struct TORCH_API StaticModuleOptions {
   // to batch allocate (deallocate) tensor storage for all non-escaping
   // temporary tensors
