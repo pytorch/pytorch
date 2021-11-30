@@ -176,47 +176,12 @@ endif()
 
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
-  set(Caffe2_GPU_SRCS_CU
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDABlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASolver.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASparseBlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CublasHandlePool.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CusolverDnHandlePool.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Activation.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Blas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Equal.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/IndexKernel.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ReduceOps.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ScanKernels.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sort.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sorting.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorModeKernel.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorShapeCUDA.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorTopK.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCStorage.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCTensor.cpp"
-
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterQuantizedCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCsrCUDA.cpp"
-   )
-
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES ".*aten.*\\.cu")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sort|TensorTopK|TensorModeKernel|IndexKernel).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
-      list(APPEND Caffe2_GPU_SRCS_CU "${tmp}")
+      list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
-      # Exclude special cases listed above that need to link to torch_cuda_cu
-      if(NOT "${tmp}" IN_LIST Caffe2_GPU_SRCS_CU)
-        list(APPEND Caffe2_GPU_SRCS_CPP "${tmp}")
-      endif()
+      list(APPEND Caffe2_GPU_SRCS_CPP ${tmp})
     endif()
   endforeach()
 
