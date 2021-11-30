@@ -514,6 +514,9 @@ class TestOperators(TestCase):
         # xfail "above the line".
         xfail('double', 'channels_last'),
 
+        # See https://github.com/pytorch/pytorch/issues/66357
+        xfail('nn.functional.pad', 'circular'),
+
         # =============================================
         # NB: The above failures also fail in PyTorch core.
         #     The failures below only fail in functorch
@@ -525,9 +528,6 @@ class TestOperators(TestCase):
         xfail('linalg.inv'),
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
-
-        # Other
-        xfail('nn.functional.pad', 'circular'),
     })
     def test_vmapjvp(self, device, dtype, op):
          # These are too annoying to put into the list above
