@@ -59,9 +59,11 @@ class _SubgraphMatcher:
             return self.nodes_map[pn] == gn
 
         PRIM_TYPES = (int, float, torch.dtype)
+        # if both pattern and graph are not Node, we check for equality of these values
         if not isinstance(pn, Node) and not isinstance(gn, Node):
             return pn == gn
 
+        # trying to match the input in pattern graph with a primitive type values
         if isinstance(gn, PRIM_TYPES):
             if isinstance(pn, Node) and pn.op == "placeholder":
                 self.nodes_map[pn] = gn
@@ -99,6 +101,9 @@ class _SubgraphMatcher:
             match_found = any(self._match_nodes(pn.all_input_nodes[0], gn_)
                               for gn_ in gn.all_input_nodes)
         else:
+            # using args here to make sure we can match Node and non-Node
+            # arguments
+            # also allows us to match a Node with a primitive type value
             match_found = (len(pn.args) == len(gn.args)
                            and all(self._match_nodes(pn_, gn_) for pn_, gn_
                                    in zip(pn.args, gn.args)))
@@ -115,13 +120,14 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     if isinstance(replacement, GraphModule):
         replacement.graph.lint()
 
-    def try_get_submodule(mod: torch.nn.Module, target: str) -> Optional[torch.nn.Module]:
+    def try_get_submodule_or_attr(mod: torch.nn.Module, target: str) -> Optional[torch.nn.Module]:
         try:
             mod_match = mod.get_submodule(target)
             return mod_match
         except AttributeError:
             pass
 
+        # supports getattr as well
         try:
             attr = getattr(mod, target)
             return attr
@@ -132,9 +138,9 @@ def _replace_submodules(gm: GraphModule, replacement: torch.nn.Module) -> None:
     for node in gm.graph.nodes:
         if node.op == "call_module" or node.op == "get_attr":
 
-            gm_submod = try_get_submodule(gm, node.target)
+            gm_submod = try_get_submodule_or_attr(gm, node.target)
 
-            replacement_submod = try_get_submodule(replacement, node.target)
+            replacement_submod = try_get_submodule_or_attr(replacement, node.target)
 
             # CASE 1: This target already exists as a submodule in our
             # result GraphModule. Whether or not it exists in
