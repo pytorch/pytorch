@@ -406,6 +406,12 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
+        // check if the activation is quantized
+        const BufHandle& x = c10::get<BufHandle>(inputs[0]);
+        if (x.node()->qscale()) {
+          return computeQuantizedSigmoidExternalCall(
+              inputs, outputShape, outputType, device);
+        }
         return computeOneOperand(
             "aten_sigmoid",
             inputs,
@@ -1399,16 +1405,21 @@ int nnc_lowerings_lazy_registration() {
         auto A = c10::get<BufHandle>(inputs[0]);
         // Trivial case of 0-dim tensors: just a copy of the input
         if (A.ndim() == 0) {
-          return Compute(
+          auto tensor = Compute(
               "aten_permute",
               c10::fmap<DimArg>(outputShape),
               [&](const std::vector<VarHandle>& axes) {
                 std::vector<ExprHandle> empty_indices;
                 return A.load(empty_indices);
               });
+          if (A.node()->qscale()) {
+            tensor.buf()->set_qscale(A.node()->qscale());
+            tensor.buf()->set_qzero(A.node()->qzero());
+          }
+          return tensor;
         }
         auto permute_dims = c10::get<IntList>(inputs[1]);
-        return Compute(
+        auto tensor = Compute(
             "aten_permute",
             c10::fmap<DimArg>(outputShape),
             [&](const std::vector<VarHandle>& axes) {
@@ -1421,6 +1432,11 @@ int nnc_lowerings_lazy_registration() {
               }
               return A.load(new_axes);
             });
+        if (A.node()->qscale()) {
+          tensor.buf()->set_qscale(A.node()->qscale());
+          tensor.buf()->set_qzero(A.node()->qzero());
+        }
+        return tensor;
       });
   RegisterNNCLoweringsFunction aten_expand(
       {"aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> (Tensor(a))",
@@ -1538,6 +1554,9 @@ int nnc_lowerings_lazy_registration() {
       computeDequantizeExternalCall
 #endif
   );
+  RegisterNNCLoweringsFunction quantized_conv1d(
+      {"quantized::conv1d(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
+      computeQuantizedConv1d);
 
   RegisterNNCLoweringsFunction quantized_conv2d(
       {"quantized::conv2d.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
@@ -1547,9 +1566,25 @@ int nnc_lowerings_lazy_registration() {
       {"quantized::conv2d_relu.new(Tensor qx, __torch__.torch.classes.quantized.Conv2dPackedParamsBase packed_weight, float output_scale, int output_zero_point) -> (Tensor)"},
       computeQuantizedConv2dRelu);
 
+  RegisterNNCLoweringsFunction quantized_linear(
+      {"quantized::linear(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> (Tensor Y)"},
+      computeQuantizedLinear);
+
+  RegisterNNCLoweringsFunction quantized_linear_relu(
+      {"quantized::linear_relu(Tensor X, __torch__.torch.classes.quantized.LinearPackedParamsBase W_prepack, float Y_scale_i, int Y_zero_point_i) -> (Tensor Y)"},
+      computeQuantizedLinear);
+
   RegisterNNCLoweringsFunction quantized_add(
       {"quantized::add(Tensor qa, Tensor qb, float scale, int zero_point) -> (Tensor qc)"},
       computeQuantizedAdd);
+
+  RegisterNNCLoweringsFunction quantized_mul(
+      {"quantized::mul(Tensor qa, Tensor qb, float scale, int zero_point) -> (Tensor qc)"},
+      computeQuantizedMul);
+
+  RegisterNNCLoweringsFunction quantized_mul_scalar(
+      {"quantized::mul.Scalar(Tensor qa, Scalar b) -> (Tensor qc)"},
+      computeQuantizedMulScalar);
 
   RegisterNNCLoweringsFunction quantized_conv2d_prepack(
       {"quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> (__torch__.torch.classes.quantized.Conv2dPackedParamsBase)"},
