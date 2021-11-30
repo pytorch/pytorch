@@ -81,14 +81,11 @@ def reduce(tensor, dst, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
 
 def reduce_scatter(output, input_list, op=dist.ReduceOp.SUM, group=dist.group.WORLD):
     """
-    Reduces the tensor data across all machines, then scatters a list of
-        tensors to all processes in a group.
-
-    Each process is going to receive its corresponding final result.
+    Reduces, then scatters a list of tensors to all processes in a group.
 
     Arguments:
-        output (Tensor): Output of the collective.
-        input_list (list[Tensor]): List of tensors to be aggregated and scatter one per rank.
+        output (Tensor): Output tensor.
+        input_list (list[Tensor]): List of tensors to reduce and scatter.
         op (optional): One of the values from
             ``torch.distributed.ReduceOp``
             enum.  Specifies an operation used for element-wise reductions.
@@ -287,9 +284,7 @@ class _AllGather(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        tensor_list = [
-            torch.empty_like(tensor) for tensor in grad_outputs
-        ]
+        tensor_list = [torch.empty_like(tensor) for tensor in grad_outputs]
         gxs = _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
         gx = torch.sum(torch.stack(gxs), dim=0)
         return (None, gx)
@@ -302,7 +297,6 @@ class _AlltoAll(Function):
         ctx.input_tensor_size_list = [
             tensors[i].size() for i in range(dist.get_world_size(group=group))
         ]
-        out_tensor_list = [tensor.contiguous() for tensor in out_tensor_list]
         my_rank = dist.get_rank(group=group)
         # Implement it on means of scatter/gather, send/recv async operations have issues
         if dist.get_backend(group=group) is dist.Backend.GLOO:
@@ -314,7 +308,7 @@ class _AlltoAll(Function):
         else:
             dist.all_to_all(
                 out_tensor_list,
-                list(tensor.contiguous() for tensor in tensors),
+                list(tensors),
                 group=group,
             )
         return tuple(out_tensor_list)
@@ -325,6 +319,7 @@ class _AlltoAll(Function):
             torch.empty(size, device=grad_outputs[0].device)
             for size in ctx.input_tensor_size_list
         ]
+        grad_outputs = [tensor.contiguous() for tensor in grad_outputs]
         return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
 
 
@@ -333,8 +328,8 @@ class _AlltoAllSingle(Function):
     def forward(ctx, group, output, output_split_sizes, input_split_sizes, input):
         ctx.group = group
         ctx.input_size = input.size()
-        ctx.output_split_sizes_grad = input_split_sizes
-        ctx.input_split_sizes_grad = output_split_sizes
+        ctx.output_split_sizes = input_split_sizes
+        ctx.input_split_sizes = output_split_sizes
         dist.all_to_all_single(
             output,
             input,
@@ -347,14 +342,15 @@ class _AlltoAllSingle(Function):
     @staticmethod
     def backward(ctx, grad_output):
         tensor = torch.empty(ctx.input_size, device=grad_output.device)
-        tensor = _AlltoAllSingle.apply(
-            ctx.group,
-            grad_output,
-            ctx.output_split_sizes_grad,
-            ctx.input_split_sizes_grad,
-            tensor,
+        return (None, None, None, None) + (
+            _AlltoAllSingle.apply(
+                ctx.group,
+                grad_output,
+                ctx.output_split_sizes,
+                ctx.input_split_sizes,
+                tensor,
+            ),
         )
-        return (None, None, None, None, tensor)
 
 
 class _AllReduce(Function):
