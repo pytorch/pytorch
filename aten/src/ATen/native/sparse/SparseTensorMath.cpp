@@ -75,42 +75,6 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, cons
 }
 
 // --------------------------------------------------------------------
-// log1p(SparseTensor)
-// --------------------------------------------------------------------
-
-// In-place log1p on uncoalesced tensors is not supported since the operation is not a linear map.
-// Values of uncoalesced tensor corresponding to the same indices are summed
-// and log1p(summed_value) != log1p(v1) + log1p(v2)
-
-SparseTensor& log1p_out_sparse(const SparseTensor& t, SparseTensor& r) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(
-      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
-      "log1p: result type cannot be Integral, got:",
-      r.scalar_type());
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
-    TORCH_CHECK(r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported");
-  }
-  else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().log1p_();
-  return r;
-}
-
-SparseTensor log1p_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
-  return log1p_out_sparse(t, result);
-}
-
-SparseTensor& log1p_sparse_(SparseTensor& t) {
-  return log1p_out_sparse(t, t);
-}
-
-// --------------------------------------------------------------------
 // neg(SparseTensor)
 // --------------------------------------------------------------------
 
@@ -125,7 +89,7 @@ SparseTensor& neg_out_sparse(const SparseTensor& t, SparseTensor& r) {
 }
 
 SparseTensor neg_sparse(const SparseTensor& t) {
-  SparseTensor r = get_result_tensor_for_unary_op(t);
+  SparseTensor r = at::empty_like(t);
   neg_out_sparse(t, r);
   return r;
 }
@@ -134,69 +98,6 @@ SparseTensor& neg_sparse_(SparseTensor& t) {
   return neg_out_sparse(t, t);
 }
 
-// --------------------------------------------------------------------
-// asin(SparseTensor)
-// --------------------------------------------------------------------
-
-// In-place asin on uncoalesced tensors is not supported since the operation is not a linear map.
-// Values of uncoalesced tensor corresponding to the same indices are summed
-// and asin(summed_value) != asin(v1) + asin(v2)
-
-SparseTensor& asin_out_sparse(const SparseTensor& t, SparseTensor& r) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(
-      !c10::isIntegralType(r.scalar_type(), /*includeBool=*/true),
-      "asin: result type cannot be Integral, got:",
-      r.scalar_type());
-
-  if (is_same_tensor(r, t)) {
-    // don't have in-place asin for uncoalesced input because coalesce() is not in-place, see above comment
-    TORCH_CHECK(r.is_coalesced(), "asin: in-place on uncoalesced tensors is not supported");
-  } else {
-    copy_sparse_to_sparse_(r, t.coalesce());
-  }
-  r._values().asin_();
-  return r;
-}
-
-SparseTensor asin_sparse(const SparseTensor& t) {
-  auto result = get_result_tensor_for_unary_op(t);
-  return asin_out_sparse(t, result);
-}
-
-SparseTensor& asin_sparse_(SparseTensor& t) {
-  return asin_out_sparse(t, t);
-}
-
-// --------------------------------------------------------------------
-// sqrt(SparseTensor)
-// --------------------------------------------------------------------
-
-// TODO: add in-place variant
-
-SparseTensor& sqrt_out_sparse(const SparseTensor& t_, SparseTensor& r) {
-  TORCH_CHECK(r.is_sparse(), "Tensor should be sparse");
-  TORCH_CHECK(t_.is_sparse(), "Tensor should be sparse");
-
-  // This coalesce is why we can't easily provide an inplace variant
-  SparseTensor t = t_.coalesce();
-
-  r.resize_as_(t);
-  auto indices = r._indices();
-  indices.resize_as_(t._indices());
-  indices.copy_(t._indices());
-  Tensor r_values = r._values();
-  at::sqrt_out(r_values, t._values());
-  get_sparse_impl(r)->set_nnz_and_narrow(t._nnz());
-  return r._coalesced_(t.is_coalesced());
-}
-
-SparseTensor sqrt_sparse(const SparseTensor& t) {
-  SparseTensor r = get_result_tensor_for_unary_op(t);
-  sqrt_out_sparse(t, r);
-  return r;
-}
 // --------------------------------------------------------------------
 // pow(SparseTensor, Scalar)
 // --------------------------------------------------------------------
@@ -1502,20 +1403,6 @@ Tensor _sparse_sum_backward_cpu(const Tensor& grad_, const SparseTensor& input_,
     }
     return at::_sparse_coo_tensor_with_dims_and_tensors(input_sparse_dim, input_dense_dim, input_sizes, input_indices.clone(at::MemoryFormat::Contiguous), grad_input_values, grad.options());
   }
-}
-
-Tensor isnan_sparse(const Tensor & self){
-  TORCH_INTERNAL_ASSERT(self.is_sparse());
-  SparseTensor out =  at::sparse_coo_tensor({0}, self.options().dtype(at::kBool));
-  out.resize_as_(self);
-  auto indices = out._indices();
-  indices.resize_as_(self._indices());
-  indices.copy_(self._indices());
-  Tensor out_values = out._values();
-  out_values.resize_as_(self._values());
-  Tensor nan_values = at::isnan(self._values());
-  out_values.copy_(nan_values);
-  return out;
 }
 
 Tensor any_sparse(const Tensor& self) {
