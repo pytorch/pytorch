@@ -16,11 +16,12 @@ namespace native {
 namespace {
 
 static Tensor compute_columns3d(
-    const Tensor& input,
+    const Tensor& input_,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef kernel_size,
     const int64_t groups) {
+  const Tensor input = input_.contiguous();
   const int64_t kernel_depth = kernel_size[0];
   const int64_t kernel_height = kernel_size[1];
   const int64_t kernel_width = kernel_size[2];
@@ -58,9 +59,8 @@ static Tensor compute_columns3d(
                         output_depth * output_height * output_width},
                         input.options());
 
-    const Tensor input_ = input.contiguous();
-    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input_.scalar_type(), "compute_columns3d", [&] {
-      auto input_a = input_.accessor<scalar_t, 5>();
+    AT_DISPATCH_ALL_TYPES_AND(kBFloat16, input.scalar_type(), "compute_columns3d", [&] {
+      auto input_a = input.accessor<scalar_t, 5>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
