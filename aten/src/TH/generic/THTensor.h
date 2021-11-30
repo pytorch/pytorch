@@ -24,7 +24,7 @@
 #define THComplexDoubleTensor THTensor
 
 /**** creation methods ****/
-TH_API THTensor *THTensor_(newWithStorage1d)(THStorage *storage_, ptrdiff_t storageOffset_,
+TH_API THTensor *THTensor_(newWithStorage1d)(c10::StorageImpl *storage_, ptrdiff_t storageOffset_,
                                 int64_t size0_, int64_t stride0_);
 
 #endif

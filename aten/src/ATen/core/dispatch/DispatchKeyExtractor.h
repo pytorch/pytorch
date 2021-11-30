@@ -66,12 +66,17 @@ namespace detail {
         ts = ts | x.key_set();
       }
     }
-    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
-      for (const auto& x : xs) {
+    // Tensor?[] translates to this case.
+    void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
+      for (c10::optional<at::Tensor> x : xs) {
         if (x.has_value()) {
           ts = ts | x.value().key_set();
         }
       }
+    }
+    void operator()(at::ArrayRef<c10::optional<at::Tensor>> xs) {
+      // Just checking that the handling of Tensor?[] didn't change.
+      TORCH_INTERNAL_ASSERT(false);
     }
     void operator()(const at::Generator& gen) {
       if (gen.defined()) {

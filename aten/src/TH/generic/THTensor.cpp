@@ -10,7 +10,7 @@
 
 /**** creation methods ****/
 
-THTensor *THTensor_(newWithStorage1d)(THStorage *storage, ptrdiff_t storageOffset,
+THTensor *THTensor_(newWithStorage1d)(c10::StorageImpl *storage, ptrdiff_t storageOffset,
                                int64_t size0, int64_t stride0)
 {
   c10::raw::intrusive_ptr::incref(storage);
