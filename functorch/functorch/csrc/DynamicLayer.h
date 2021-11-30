@@ -75,5 +75,11 @@ TORCH_API std::shared_ptr<bool> getLifeHandleForLevel(int64_t level);
 // add_(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
 bool isInplaceOp(const c10::FunctionSchema& schema);
 
+// Applies the following for-loop:
+// for i in range(begin, end):
+//   args[i] = func(args[i])
+void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
+    std::function<Tensor(const Tensor&)> func);
+
 }
 } // namespace at
