@@ -8261,6 +8261,7 @@ op_db: List[OpInfo] = [
     OpInfo('chunk',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            sample_inputs_func=sample_inputs_chunk,
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('clone',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
@@ -10886,6 +10887,7 @@ op_db: List[OpInfo] = [
     OpInfo('split',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=False),
+           supports_forward_ad=True,
            supports_out=False,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
@@ -10894,6 +10896,7 @@ op_db: List[OpInfo] = [
            variant_test_name='list_args',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=partial(sample_inputs_split, list_args=True),
+           supports_forward_ad=True,
            supports_out=False),
     OpInfo('split_with_sizes',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
@@ -10901,6 +10904,7 @@ op_db: List[OpInfo] = [
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            supports_out=False,
+           supports_forward_ad=True,
            assert_autodiffed=True),
     OpInfo('__radd__',
            op=torch.Tensor.__radd__,
