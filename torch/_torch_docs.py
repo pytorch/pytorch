@@ -2313,7 +2313,7 @@ triangular such that the returned tensor is
 
 Args:
     input (Tensor): the input tensor :math:A of size :math:`(*, n, n)`,
-                where * is zero or more batch dimensions consisting of
+                where :math:`*` is zero of more batch dimensions composed of
                 symmetric positive-definite matrices.
     upper (bool, optional): flag that indicates whether to return a
                 upper or lower triangular matrix. Default: False
