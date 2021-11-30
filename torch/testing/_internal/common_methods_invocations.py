@@ -2562,6 +2562,8 @@ def sample_inputs_pca_lowrank(op_info, device, dtype, requires_grad=False, **kwa
         for s1, s2 in chunk_iter(samples, 2):
             del s1.kwargs['M']
             del s2.kwargs['M']
+            s1.kwargs['center'] = False
+            s2.kwargs['center'] = True
             yield s1
             yield s2
 
@@ -11618,6 +11620,22 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=False,
            sample_inputs_func=sample_inputs_svd_lowrank,
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
+           skips=(
+               # test does not work with passing lambda for op
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+           )),
+    OpInfo('pca_lowrank',
+           op=lambda *args, **kwargs: wrapper_set_seed(
+               lambda a, b, **kwargs: torch.pca_lowrank(a @ b.mT, **kwargs),
+               *args, **kwargs
+           ),
+           dtypes=floating_types(),
+           supports_out=False,
+           check_batched_grad=False,
+           check_batched_gradgrad=False,
+           supports_forward_ad=False,
+           sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # test does not work with passing lambda for op
