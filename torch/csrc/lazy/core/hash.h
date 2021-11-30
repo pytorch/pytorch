@@ -88,7 +88,7 @@ static inline hash_t Hash(const c10::Scalar& value) {
   }
 }
 
-static inline torch::lazy::hash_t TensorHash(const at::Tensor& tensor) {
+static inline hash_t TensorHash(const at::Tensor& tensor) {
   at::Tensor ctensor = tensor.contiguous();
   int64_t size = ctensor.numel() * ctensor.element_size();
   switch (ctensor.scalar_type()) {
@@ -182,8 +182,8 @@ static inline hash_t Hash(const hash_t& value) {
 }
 
 template <typename T>
-torch::lazy::hash_t Hash(c10::ArrayRef<T> values) {
-  return torch::lazy::ContainerHash(values);
+hash_t Hash(c10::ArrayRef<T> values) {
+  return ContainerHash(values);
 }
 
 template <typename T>
