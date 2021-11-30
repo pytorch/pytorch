@@ -699,7 +699,7 @@ class TensorLikePair(Pair):
         elif actual.is_sparse_csr:
             compare_fn = self._compare_sparse_csr_values
         else:
-            compare_fn = self._compare_regular_values
+            compare_fn = self._compare_regular_values_close
 
         compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
 
@@ -707,20 +707,14 @@ class TensorLikePair(Pair):
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
         r"""TODO"""
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             torch.tensor(actual.q_scale()),
             torch.tensor(expected.q_scale()),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
             identifier=lambda default_identifier: f"Scale of quantized {default_identifier.lower()}",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             torch.tensor(actual.q_zero_point()),
             torch.tensor(expected.q_zero_point()),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
             identifier=lambda default_identifier: f"Zero point of quantized {default_identifier.lower()}",
         )
 
@@ -736,26 +730,54 @@ class TensorLikePair(Pair):
                     f"{actual.q_per_channel_axis()} != {expected.q_per_channel_axis()}"
                 ),
             )
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
+            actual.q_per_channel_scales(),
+            expected.q_per_channel_scales(),
+            identifier=lambda default_identifier: f"Per-channel scales of quantized {default_identifier.lower()}",
+        )
+        self._compare_regular_values_equal(
+            actual.q_per_channel_zero_points(),
+            expected.q_per_channel_zero_points(),
+            identifier=lambda default_identifier: f"Per-channel zero points of quantized {default_identifier.lower()}",
+        )
+
+    def _compare_per_channel_affine_float_qparams(
+        self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
+    ) -> None:
+        r"""TODO"""
+        if actual.q_per_channel_axis() != expected.q_per_channel_axis():
+            raise self._make_error_meta(
+                AssertionError,
+                (
+                    f"The quantization dimension of per-channel quantized tensors with float parameters does not match: "
+                    f"{actual.q_per_channel_axis()} != {expected.q_per_channel_axis()}"
+                ),
+            )
+        self._compare_regular_values_close(
             actual.q_per_channel_scales(),
             expected.q_per_channel_scales(),
             rtol=rtol,
             atol=atol,
             equal_nan=equal_nan,
-            identifier=lambda default_identifier: f"Per-channel scales of quantized {default_identifier.lower()}",
+            identifier=lambda default_identifier: (
+                f"Per-channel scales of quantized {default_identifier.lower()} with float parameters"
+            ),
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual.q_per_channel_zero_points(),
             expected.q_per_channel_zero_points(),
             rtol=rtol,
             atol=atol,
             equal_nan=equal_nan,
-            identifier=lambda default_identifier: f"Per-channel zero points of quantized {default_identifier.lower()}",
+            identifier=lambda default_identifier: (
+                f"Per-channel zero points of quantized {default_identifier.lower()} with float parameters"
+            ),
         )
 
     _QUANTIZED_COMPONENT_COMPARE_FNS = {
         torch.per_tensor_affine: _compare_per_tensor_quantized_components,
         torch.per_channel_affine: _compare_per_channel_quantized_components,
+        torch.per_channel_affine_float_qparams: _compare_per_channel_affine_float_qparams,
     }
 
     def _compare_quantized_values(
@@ -765,18 +787,14 @@ class TensorLikePair(Pair):
 
         FIXME
         """
-
         component_compare_fn = self._QUANTIZED_COMPONENT_COMPARE_FNS[actual.qscheme()]
         # Although it looks weird to pass `self` here, this is the correct way. The dictionary stores the methods at
         # class instantiation and thus the values are equal to `Foo.bar` and not `Foo().bar`.
         component_compare_fn(self, actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.int_repr(),
             expected.int_repr(),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
             identifier=lambda default_identifier: f"Integer representation of quantized {default_identifier.lower()}",
         )
 
@@ -808,15 +826,12 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual._indices(),
             expected._indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse COO indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual._values(),
             expected._values(),
             rtol=rtol,
@@ -844,23 +859,17 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.crow_indices(),
             expected.crow_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR crow_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.col_indices(),
             expected.col_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR col_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual.values(),
             expected.values(),
             rtol=rtol,
@@ -869,7 +878,17 @@ class TensorLikePair(Pair):
             identifier="Sparse CSR values",
         )
 
-    def _compare_regular_values(
+    def _compare_regular_values_equal(
+        self,
+        actual: torch.Tensor,
+        expected: torch.Tensor,
+        *,
+        equal_nan: bool = False,
+        identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    ) -> None:
+        self._compare_regular_values_close(actual, expected, rtol=0, atol=0, equal_nan=equal_nan, identifier=identifier)
+
+    def _compare_regular_values_close(
         self,
         actual: torch.Tensor,
         expected: torch.Tensor,
