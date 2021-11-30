@@ -118,6 +118,40 @@ std::pair<double, double> getTolerance(
         return {abs_tol, abs_tol * 0.01};
       }
     }
+    case DataType::BFloat16: {
+      // Copied from float case
+      const auto& sum_tolerance_entry = tolerances.sum_tolerances_half;
+      const auto& base_abs = tolerances.base_half_abs_tol;
+      const auto& base_rel = tolerances.base_half_rel_tol;
+
+      if (reduction_size <= 1) {
+        // No reduction case
+        if (base_abs == -1 || base_rel == -1) {
+          return {sum_tolerance_entry[0][1], sum_tolerance_entry[1][1]};
+        } else {
+          return {base_abs * 10.0, base_rel * 10.0};
+        }
+      } else {
+        // Reduction case
+        size_t entry = 0;
+        while (sum_tolerance_entry[entry][0] < reduction_size &&
+               entry < sum_tolerance_entry.size()) {
+          entry++;
+        }
+        double abs_tol = 0.0;
+        if (entry + 1 < sum_tolerance_entry.size()) {
+          // Grab the next entry up so we have some margin
+          abs_tol = sum_tolerance_entry[entry + 1][1];
+        } else {
+          // If we hit the end of the list, return twice the max error we
+          // measured
+          abs_tol = sum_tolerance_entry[sum_tolerance_entry.size() - 1][1] * 2.;
+        }
+        // Relative tol we're going to set to 1% of abs tol just for
+        // a small margin of rel error.
+        return {abs_tol * 10.0, abs_tol * 0.01 * 10.0};
+      }
+    }
     case DataType::Int:
       return {0.0, 0.0};
     case DataType::Int32:
