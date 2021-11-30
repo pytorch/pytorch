@@ -1,5 +1,3 @@
-
-
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
@@ -13,7 +11,7 @@ namespace jit {
 const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
   // clang-format off
  static const OperatorMap<std::string> tensorexpr_elementwise_set{
-     {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
+      {"aten::add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::_cast_Float(Tensor self, bool non_blocking) -> Tensor", "unary"},
       {"aten::sub.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", "unary"},
       {"aten::mul.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
@@ -88,6 +86,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::__rshift__.Scalar(Tensor self, Scalar other) -> Tensor", "unary"},
       {"aten::where.Scalar(Tensor condition, Scalar self, Scalar other) -> Tensor", "unary"},
       {"aten::add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
+      {"aten::where.ScalarOther(Tensor condition, Tensor self, Scalar other) -> Tensor", "broadcast"},
       {"aten::type_as(Tensor self, Tensor other) -> Tensor", "broadcast"},
       {"aten::sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor", "broadcast"},
       {"aten::mul.Tensor(Tensor self, Tensor other) -> Tensor", "broadcast"},
