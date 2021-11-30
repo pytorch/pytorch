@@ -57,34 +57,37 @@ class Wishart(Distribution):
 
         if scale_tril is not None:
             assert scale_tril.dim() > 1, \
-                "scale_tril matrix must be at least two-dimensional, with optional leading batch dimensions"
+                "scale_tril must be at least two-dimensional, with optional leading batch dimensions"
             batch_shape = scale_tril.shape[:-2]
             event_shape = scale_tril.shape[-2:]
             self.scale_tril = scale_tril
-            self.df = torch.tensor(
-                [self.scale_tril.shape[-1]],
-                dtype=scale_tril.dtype
-            ) if df is None else df
+            if df is None:
+                self.df = torch.tensor([self.scale_tril.shape[-1]], dtype=scale_tril.dtype)
+            else:
+                assert df.shape == batch_shape, \
+                    "'df' parameter and scale_tril should have equal batch shape"
         elif covariance_matrix is not None:
             assert covariance_matrix.dim() > 1, \
                 "covariance_matrix must be at least two-dimensional, with optional leading batch dimensions"
             batch_shape = covariance_matrix.shape[:-2]
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix
-            self.df = torch.tensor(
-                [self.covariance_matrix.shape[-1]],
-                dtype=covariance_matrix.dtype
-            ) if df is None else df
+            if df is None:
+                self.df = torch.tensor([self.covariance_matrix.shape[-1]], dtype=covariance_matrix.dtype)
+            else:
+                assert df.shape == batch_shape, \
+                    "'df' parameter and covariance_matrix should have equal batch shape"
         else:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
             batch_shape = precision_matrix.shape[:-2]
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
-            self.df = torch.tensor(
-                [self.precision_matrix.shape[-1]],
-                dtype=precision_matrix.dtype
-            ) if df is None else df
+            if df is None:
+                self.df = torch.tensor([self.precision_matrix.shape[-1]], dtype=precision_matrix.dtype)
+            else:
+                assert df.shape == batch_shape, \
+                    "'df' parameter and precision_matrix should have equal batch shape"
 
         assert self.df.gt(event_shape[-1] - 1).all(), \
             f"Expected parameter 'df' to have value greater than {event_shape[-1] - 1}."
