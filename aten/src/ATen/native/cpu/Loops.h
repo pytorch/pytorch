@@ -40,7 +40,7 @@
 #pragma GCC diagnostic ignored "-Wunused-but-set-parameter"
 #endif
 
-namespace at { namespace native { namespace {
+namespace at { namespace native { inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
