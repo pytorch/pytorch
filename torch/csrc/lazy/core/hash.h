@@ -138,6 +138,11 @@ static inline hash_t Hash(const hash_t& value) {
 }
 
 template <typename T>
+torch::lazy::hash_t Hash(c10::ArrayRef<T> values) {
+  return torch::lazy::ContainerHash(values);
+}
+
+template <typename T>
 hash_t ContainerHash(const T& values) {
   hash_t h(static_cast<uint64_t>(0x85ebca77c2b2ae63));
   for (const auto& value : values) {

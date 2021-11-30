@@ -1,4 +1,4 @@
-from cimodel.lib.conf_tree import ConfigNode, X, XImportant
+from cimodel.lib.conf_tree import ConfigNode, X
 
 
 CONFIG_TREE_DATA = [
@@ -11,23 +11,6 @@ CONFIG_TREE_DATA = [
             ]),
             # TODO: bring back libtorch test
         ]),
-    ]),
-    ("bionic", [
-        ("clang", [
-            ("9", [
-                ("3.6", [
-                    ("xla", [XImportant(True)]),
-                ]),
-            ]),
-        ]),
-        # @jithunnair-amd believes Jenkins builds are sufficient
-        # ("rocm", [
-        #     ("3.9", [
-        #         ("3.6", [
-        #             ('build_only', [XImportant(True)]),
-        #         ]),
-        #     ]),
-        # ]),
     ]),
 ]
 
