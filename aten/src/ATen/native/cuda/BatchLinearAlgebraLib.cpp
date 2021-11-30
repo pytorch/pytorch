@@ -1451,7 +1451,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend
 // apply_ to this function.
-void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots) {
+void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const Tensor& infos, bool get_pivots, const bool use_magma_) {
   AT_DISPATCH_FLOATING_TYPES(
     self.scalar_type(),
     "lu_factor_cusolver",
@@ -1484,7 +1484,7 @@ void lu_factor_looped_cusolver(const Tensor& self, const Tensor& pivots, const T
 
   // Necessary because cuSOLVER uses nan for outputs that correspond to 0 in MAGMA for non-pivoted LU.
   // See https://github.com/pytorch/pytorch/issues/53879 for more details.
-  if (!get_pivots) {
+  if (!get_pivots && use_magma_) {
     at::nan_to_num_(const_cast<Tensor&>(self), 0, std::numeric_limits<double>::infinity(),
       -std::numeric_limits<double>::infinity());
   }
