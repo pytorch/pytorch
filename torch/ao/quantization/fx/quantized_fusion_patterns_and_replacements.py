@@ -1,6 +1,5 @@
 import torch
 import operator
-import copy
 
 def relu_inplace_pattern(x, scale, zero_point):
     x = x.dequantize()
