@@ -21,6 +21,7 @@ from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
     DeviceType, ProfilerAction, ProfilerActivity
 )
+from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
 try:
     import psutil
@@ -35,6 +36,8 @@ import pickle
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+
+    @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA
         """
