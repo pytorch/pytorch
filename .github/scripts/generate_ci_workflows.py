@@ -435,6 +435,27 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-bionic-cuda11.5-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
