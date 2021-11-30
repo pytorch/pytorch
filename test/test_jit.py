@@ -69,6 +69,7 @@ from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
 from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_device_analysis import TestDeviceAnalysis  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 
 # Torch
