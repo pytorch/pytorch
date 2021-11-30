@@ -463,7 +463,7 @@ REGISTER_OPERATOR_FUNCTOR(
         if (!out_l.isNone() && can_optimize) {
           return;
         }
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         c10::List<IValue> vals(type.getElementType());
         vals.reserve(size);
         for (const auto i : c10::irange(size)) {
@@ -484,7 +484,7 @@ REGISTER_OPERATOR_FUNCTOR(
           return;
         }
         // prepare inputs
-        const size_t size = p_node->inputs().size();
+        const size_t size = p_node->num_inputs();
         switch (size) {
           case 1:
             p_node->Output(0) = c10::ivalue::Tuple::create(p_node->Input(0));
@@ -669,7 +669,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_VarStack,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const size_t num_inputs = p_node->inputs().size();
+        const size_t num_inputs = p_node->num_inputs();
 
         std::vector<at::Tensor> inputs(num_inputs - 1);
         for (size_t i = 0; i < num_inputs - 1; ++i) {
@@ -1067,7 +1067,7 @@ REGISTER_OPERATOR_FUNCTOR(
         // handle memory format
         bool copy_strides = false;
         c10::optional<c10::MemoryFormat> memory_format = c10::nullopt;
-        if (p_node->inputs().size() == 5) {
+        if (p_node->num_inputs() == 5) {
           memory_format = p_node->Input(4).toOptional<c10::MemoryFormat>();
         }
         memory_format = memory_format.value_or(c10::MemoryFormat::Preserve);
@@ -1221,7 +1221,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -
     auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
     auto include_last_offset = p_node->Input(7).toBool();
     c10::optional<int64_t> padding_idx;
-    if (p_node->inputs().size() == 9) {
+    if (p_node->num_inputs() == 9) {
       if (p_node->Input(8).isNone()) {
         padding_idx = c10::nullopt;
       } else {
@@ -1355,7 +1355,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
   return [](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     c10::optional<c10::string_view> rounding_mode = c10::nullopt;
-    if (p_node->inputs().size() > 2) {
+    if (p_node->num_inputs() > 2) {
       rounding_mode = p_node->Input(2).toOptional<c10::string_view>();
     }
     const auto& in1_t = p_node->Input(1).isTensor()
@@ -1988,7 +1988,7 @@ REGISTER_OPERATOR_FUNCTOR(
     prim_VarConcat,
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
-        const size_t num_inputs = p_node->inputs().size();
+        const size_t num_inputs = p_node->num_inputs();
         std::vector<at::Tensor> inputs(num_inputs - 1);
         for (const auto i : c10::irange(num_inputs - 1)) {
           inputs[i] = p_node->Input(i).toTensor();
