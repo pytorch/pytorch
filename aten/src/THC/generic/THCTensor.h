@@ -20,12 +20,12 @@
 #define THCudaComplexDoubleTensor   THCTensor
 
 /**** access methods ****/
-TORCH_CUDA_CU_API THCStorage* THCTensor_(
+TORCH_CUDA_CU_API c10::StorageImpl* THCTensor_(
     storage)(THCState* state, const THCTensor* self);
 /**** creation methods ****/
 TORCH_CUDA_CU_API THCTensor* THCTensor_(newWithStorage1d)(
     THCState* state,
-    THCStorage* storage_,
+    c10::StorageImpl* storage_,
     ptrdiff_t storageOffset_,
     int64_t size0_,
     int64_t stride0_);
