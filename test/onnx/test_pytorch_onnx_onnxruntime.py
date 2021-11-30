@@ -950,18 +950,12 @@ class TestONNXRuntime(unittest.TestCase):
         y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
         self.run_test(NestedTupleModel(), input=(x, y))
 
-    @skipIfUnsupportedMinOpsetVersion(15)
-    def test_optional_inputs_with_no_optionals(self):
-        class NoOptionalModel(torch.nn.Module):
+    def test_empty_kwargs(self):
+        class IdentityModel(torch.nn.Module):
             def forward(self, input):
                 return input
 
-        # Without empty optional arguments dictionary
-        x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,))
-        # With empty optional arguments dictionary
-        y = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (y, {}))
+        self.run_test(IdentityModel(), (torch.randn(2, 3), {}))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     def test_optional_inputs_with_mixed_optionals(self):
