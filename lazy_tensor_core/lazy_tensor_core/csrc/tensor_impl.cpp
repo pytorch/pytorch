@@ -67,7 +67,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
     : c10::TensorImpl(c10::DispatchKeySet{c10::DispatchKey::Lazy,
                                           c10::DispatchKey::AutogradLazy},
                       c10::scalarTypeToTypeMeta(tensor.dtype()),
-                      bridge::LtcDeviceToAtenDevice(tensor.GetDevice())),
+                      bridge::BackendDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(std::move(tensor)) {
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.

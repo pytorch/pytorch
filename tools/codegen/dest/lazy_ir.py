@@ -159,7 +159,7 @@ class GenLazyNativeFuncDefinition:
         scalar_types = schema.filtered_types(values=False, scalars=True)
         returns_length = len(schema.returns)
 
-        get_device_str = f"""auto device = bridge::GetSameBackendDeviceOrUseDefault(
+        get_device_str = f"""auto device = bridge::GetBackendDevice(
             {", ".join([f"{t.name}" for t in value_types])});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
