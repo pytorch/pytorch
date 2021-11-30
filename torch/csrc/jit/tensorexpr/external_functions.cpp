@@ -7,6 +7,8 @@
 #include <ATen/native/quantized/cpu/conv_packed_params.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
 #include <ATen/native/quantized/cpu/qadd.h>
+#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/quantized_ops.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/TensorOptions.h>
@@ -144,9 +146,10 @@ at::Tensor quantized_mul(
 
 at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
   const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::mul.Scalar", "")
-                      .typed<at::Tensor(at::Tensor, double)>();
-  return op.call(x, scalar);
+                      .findSchemaOrThrow("quantized::mul", "Scalar")
+                      .typed<at::Tensor(at::Tensor, c10::Scalar const&)>();
+  auto s = c10::Scalar(scalar);
+  return op.call(x, s);
 }
 
 at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
@@ -154,6 +157,28 @@ at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
                       .findSchemaOrThrow("quantized::sigmoid", "")
                       .typed<at::Tensor(at::Tensor, double, int64_t)>();
   return op.call(x, scale, zero);
+}
+
+at::Tensor quantized_cat(
+    const c10::List<at::Tensor>& qxs,
+    int64_t dim,
+    c10::optional<double> scale,
+    c10::optional<int64_t> zero) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::cat", "")
+                      .typed<at::Tensor(
+                          c10::List<at::Tensor> const&,
+                          int64_t,
+                          c10::optional<double>,
+                          c10::optional<int64_t>)>();
+  return op.call(qxs, dim, scale, zero);
+}
+
+at::Tensor quantized_relu(const at::Tensor& qx) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::relu", "")
+                      .typed<at::Tensor(at::Tensor)>();
+  return op.call(qx);
 }
 #endif // _WIN32
 
@@ -239,10 +264,12 @@ void nnc_aten_quantized_conv1d(
       toQIntType(x_qdtype));
 
   auto convPackedParams =
-      reinterpret_cast<ConvPackedParamsBase<1>*>(buf_data[2]);
+      reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  qx = qx.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
+  r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
@@ -479,6 +506,34 @@ void nnc_aten_quantized_mul_scalar(
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
+void nnc_aten_quantized_relu(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  TORCH_INTERNAL_ASSERT(tensors.size() == 2);
+
+  const double a_qscale = ((double*)extra_args)[0];
+  const int64_t a_qzero = extra_args[1];
+  const c10::ScalarType a_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  auto qa = from_blob_quantized(
+      buf_data[1],
+      // NOLINTNEXTLINE
+      tensors[1].sizes(),
+      tensors[1].strides(),
+      a_qscale,
+      a_qzero,
+      toQIntType(a_qdtype));
+  auto r = at::relu(qa);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
 void nnc_aten_quantized_sigmoid(
     int64_t bufs_num,
     void** buf_data,
@@ -505,6 +560,42 @@ void nnc_aten_quantized_sigmoid(
       toQIntType(x_qdtype));
 
   auto r = quantized_sigmoid(qx, out_qscale, out_qzero);
+  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+}
+
+void nnc_aten_quantized_cat(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  c10::List<at::Tensor> qxs;
+  for (int i = 0; i < bufs_num - 1; ++i) {
+    const double qscale = ((double*)extra_args)[3 * i + 0];
+    const int64_t qzero = extra_args[3 * i + 1];
+    const c10::ScalarType qdtype =
+        static_cast<c10::ScalarType>(extra_args[3 * i + 2]);
+    auto tensor = tensors[i + 1];
+    auto qx = from_blob_quantized(
+        buf_data[i + 1],
+        // NOLINTNEXTLINE
+        tensor.sizes(),
+        tensor.strides(),
+        qscale,
+        qzero,
+        toQIntType(qdtype));
+    qxs.push_back(qx);
+  }
+  const int64_t dim = extra_args[3 * bufs_num + 0];
+  const double out_qscale = ((double*)extra_args)[3 * bufs_num + 1];
+  const int64_t out_qzero = extra_args[3 * bufs_num + 2];
+
+  auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 #endif // _WIN32
@@ -847,20 +938,37 @@ const static RegisterNNCExternalFunction nnc_conv2d(
     nnc_aten_conv2d);
 
 #ifndef DISABLE_NNC_QUANTIZATION
+const static RegisterNNCExternalFunction nnc_quantized_conv1d(
+    "nnc_aten_quantized_conv1d",
+    nnc_aten_quantized_conv1d);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d(
     "nnc_aten_quantized_conv2d",
     nnc_aten_quantized_conv2d);
 const static RegisterNNCExternalFunction nnc_quantized_conv2d_relu(
     "nnc_aten_quantized_conv2d_relu",
     nnc_aten_quantized_conv2d_relu);
+const static RegisterNNCExternalFunction nnc_quantized_linear(
+    "nnc_aten_quantized_linear",
+    nnc_aten_quantized_linear);
 #ifndef _WIN32
 const static RegisterNNCExternalFunction nnc_quantized_add(
     "nnc_aten_quantized_add",
     nnc_aten_quantized_add);
-
+const static RegisterNNCExternalFunction nnc_quantized_mul(
+    "nnc_aten_quantized_mul",
+    nnc_aten_quantized_mul);
+const static RegisterNNCExternalFunction nnc_quantized_mul_scalar(
+    "nnc_aten_quantized_mul_scalar",
+    nnc_aten_quantized_mul_scalar);
 const static RegisterNNCExternalFunction nnc_quantized_sigmoid(
     "nnc_aten_quantized_sigmoid",
     nnc_aten_quantized_sigmoid);
+const static RegisterNNCExternalFunction nnc_quantized_cat(
+    "nnc_aten_quantized_cat",
+    nnc_aten_quantized_cat);
+const static RegisterNNCExternalFunction nnc_quantized_relu(
+    "nnc_aten_quantized_relu",
+    nnc_aten_quantized_relu);
 #endif // _WIN32
 const static RegisterNNCExternalFunction nnc_quantize_per_tensor(
     "nnc_aten_quantize_per_tensor",
