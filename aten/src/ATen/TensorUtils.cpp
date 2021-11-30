@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/TensorUtils.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <ostream>
 #include <sstream>
@@ -282,7 +283,6 @@ bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
   return contig_if_nonempty;
 }
 
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -324,7 +324,7 @@ size_t computeStorageNbytes(
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
   size_t size = 1;
-  for(size_t i = 0; i < sizes.size(); i++) {
+  for (const auto i : c10::irange(sizes.size())) {
     if(sizes[i] == 0) {
       return 0;
     }

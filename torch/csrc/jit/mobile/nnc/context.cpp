@@ -3,6 +3,7 @@
 #include <ATen/Functions.h>
 #include <ATen/core/functional.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/mobile/nnc/registry.h>
 
@@ -14,6 +15,10 @@ namespace nnc {
 constexpr int64_t kProducedNNCFileFormatVersion = 0x1L;
 
 namespace {
+
+c10::IValue Tup(std::initializer_list<c10::IValue> ivalues) {
+  return c10::ivalue::Tuple::create(ivalues);
+}
 
 c10::IValue Tup(std::vector<c10::IValue>&& ivalues) {
   return c10::ivalue::Tuple::create(ivalues);
@@ -43,6 +48,12 @@ OutputSpec::OutputSpec(const c10::IValue& value) {
   auto dict = value.toGenericDict();
   sizes_ = dict.at("sizes").toIntVector();
   dtype_ = dict.at("dtype").toScalarType();
+  if (dict.contains("qscale")) {
+    qscale_ = dict.at("qscale").toDouble();
+  }
+  if (dict.contains("qzero")) {
+    qzero_ = dict.at("qzero").toInt();
+  }
 }
 
 c10::IValue OutputSpec::serialize() const {
@@ -50,10 +61,30 @@ c10::IValue OutputSpec::serialize() const {
       at::StringType::get(), at::AnyType::get());
   dict.insert("sizes", sizes_);
   dict.insert("dtype", dtype_);
+  if (qscale_) {
+    dict.insert("qscale", *qscale_);
+  }
+  if (qzero_) {
+    dict.insert("qzero", *qzero_);
+  }
   return dict;
 }
 
 at::Tensor OutputSpec::allocate() const {
+  if (isQIntType(dtype_)) {
+    TORCH_CHECK(
+        qscale_ && qzero_,
+        "Quantized output tensor must have qscale_ and qzero_");
+    return at::_empty_affine_quantized(
+        sizes_,
+        at::TensorOptions()
+            .dtype(dtype_)
+            .layout(at::kStrided)
+            .device(at::kCPU)
+            .requires_grad(false),
+        *qscale_,
+        *qzero_);
+  }
   return at::empty(
       sizes_,
       at::TensorOptions()
@@ -92,13 +123,14 @@ Function::Function(const c10::IValue& value) {
   parameters_ = dict.at("parameters").toList();
 
   // input_specs_
-  for (const auto& input_value : dict.at("input_specs").toTuple()->elements()) {
+  for (const auto& input_value :
+       dict.at("input_specs").toTupleRef().elements()) {
     input_specs_.emplace_back(input_value);
   }
 
   // output_specs_
   for (const auto& output_value :
-       dict.at("output_specs").toTuple()->elements()) {
+       dict.at("output_specs").toTupleRef().elements()) {
     output_specs_.emplace_back(output_value);
   }
 
@@ -197,7 +229,7 @@ c10::impl::GenericList Function::run(
       input_specs_.size(),
       " actual: ",
       inputs.size());
-  for (size_t i = 0; i < inputs.size(); ++i) {
+  for (const auto i : c10::irange(inputs.size())) {
     const c10::IValue& input = inputs[i];
     const auto& input_tensor = input.toTensor();
     TORCH_CHECK(
@@ -208,7 +240,7 @@ c10::impl::GenericList Function::run(
   // Preallocate and fill in output tensors.
   c10::List<at::Tensor> outputs;
   outputs.reserve(output_specs_.size());
-  for (size_t i = 0; i < output_specs_.size(); ++i) {
+  for (const auto i : c10::irange(output_specs_.size())) {
     at::Tensor output = output_specs_[i].allocate();
     outputs.emplace_back(output);
     args[inputs.size() + i] = output.data_ptr();
@@ -223,8 +255,8 @@ c10::impl::GenericList Function::run(
 }
 
 CompilationUnit::CompilationUnit(const c10::IValue& value) {
-  const auto& root = value.toTuple()->elements();
-  const auto& functions = root[1].toTuple()->elements();
+  const auto& root = value.toTupleRef().elements();
+  const auto& functions = root[1].toTupleRef().elements();
   for (const auto& function : functions) {
     register_function(std::make_unique<Function>(function));
   }

@@ -1,9 +1,6 @@
 #pragma once
 
-#include <ATen/ATen.h>
-
-// Contents of this file are copied from THCUNN/common.h for the ease of porting
-// THCUNN functions into ATen.
+#include <limits>
 
 namespace at { namespace cuda { namespace detail {
 

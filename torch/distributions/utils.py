@@ -92,7 +92,7 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
-class lazy_property(object):
+class lazy_property:
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
@@ -105,11 +105,21 @@ class lazy_property(object):
 
     def __get__(self, instance, obj_type=None):
         if instance is None:
-            return self
+            return _lazy_property_and_property(self.wrapped)
         with torch.enable_grad():
             value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value
+
+
+class _lazy_property_and_property(lazy_property, property):
+    """We want lazy properties to look like multiple things.
+
+    * property when Sphinx autodoc looks
+    * lazy_property when Distribution validate_args looks
+    """
+    def __init__(self, wrapped):
+        return property.__init__(self, wrapped)
 
 
 def tril_matrix_to_vec(mat, diag=0):

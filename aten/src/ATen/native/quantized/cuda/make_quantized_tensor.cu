@@ -1,3 +1,4 @@
+#include <ATen/ATen.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 

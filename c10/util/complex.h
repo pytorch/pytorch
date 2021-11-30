@@ -1,7 +1,6 @@
 #pragma once
 
 #include <complex>
-#include <iostream>
 
 #include <c10/macros/Macros.h>
 
@@ -542,7 +541,7 @@ C10_HOST_DEVICE T abs(const c10::complex<T>& z) {
 #endif
 }
 
-#ifdef __HIP_PLATFORM_HCC__
+#if defined(USE_ROCM)
 #define ROCm_Bug(x)
 #else
 #define ROCm_Bug(x) x
@@ -588,7 +587,9 @@ C10_HOST_DEVICE complex<T> polar(const T& r, const T& theta = T()) {
 #if defined(__CUDACC__) || defined(__HIPCC__)
   return static_cast<complex<T>>(thrust::polar(r, theta));
 #else
-  return static_cast<complex<T>>(std::polar(r, theta));
+  // std::polar() requires r >= 0, so spell out the explicit implementation to
+  // avoid a branch.
+  return complex<T>(r * std::cos(theta), r * std::sin(theta));
 #endif
 }
 

@@ -105,7 +105,7 @@ namespace related to the C++ Frontend include `torch::nn
 and `torch::python
 <https://pytorch.org/cppdocs/api/namespace_torch__python.html#namespace-torch-python>`_.
 Examples of the C++ frontend can be found in `this repository
-<https://github.com/goldsborough/examples/tree/cpp/cpp>`_ which is being
+<https://github.com/pytorch/examples/tree/master/cpp>`_ which is being
 expanded on a continuous and active basis.
 
 .. note::

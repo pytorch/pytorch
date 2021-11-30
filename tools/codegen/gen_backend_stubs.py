@@ -5,11 +5,11 @@ import yaml
 import re
 from collections import namedtuple, Counter, defaultdict
 from typing import List, Dict, Union, Sequence, Optional
-from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
 from tools.codegen.model import (BackendIndex, BackendMetadata, DispatchKey,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import Target, concatMap, context, YamlLoader
+from tools.codegen.utils import Target, concatMap, context, YamlLoader, FileManager
 from tools.codegen.context import native_function_manager
 import tools.codegen.dest as dest
 import tools.codegen.api.dispatcher as dispatcher
@@ -215,23 +215,24 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'class_name': class_name,
             # Convert to a set first to remove duplicate kernel names.
             # Backends are allowed to repeat kernel names; only generate the declaration once!
-            'dispatch_declarations': list(set(concatMap(
+            # Sort for deterministic output.
+            'dispatch_declarations': list(sorted(set(concatMap(
                 lambda f: dest.compute_native_function_declaration(f, backend_indices[backend_dispatch_key]),
                 grouped_native_functions
-            ))) + list(set(concatMap(
+            )))) + list(sorted(set(concatMap(
                 lambda f: dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
                 grouped_native_functions
-            ))),
+            )))),
         })
 
         for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
             fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
                 'extra_cuda_headers': '',
-                'legacy_th_headers': '',
                 'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
                 'namespaced_headers': '',
                 'DispatchKey': dispatch_key,
                 'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
                 'dispatch_namespaced_definitions': list(concatMap(
                     dest.RegisterDispatchKey(
                         backend_indices[dispatch_key],

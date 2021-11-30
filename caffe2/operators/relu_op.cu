@@ -6,10 +6,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
 
-#ifdef __HIP_PLATFORM_HCC__
-#include <hip/hip_version.h>
-#endif
-
 namespace caffe2 {
 
 namespace {
@@ -37,7 +33,7 @@ __global__ void ReluCUDAKernel<half>(const int N, const half* X, half* Y) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half kZero = __float2half(0.0f);
-#if __CUDA_ARCH__ >= 530 || HIP_VERSION >= 300
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     Y[i] = __hgt(__ldg(X + i), kZero) ? __ldg(X + i) : kZero;
 #else
     Y[i] = (__half2float(X[i]) > 0) ? X[i] : kZero;
@@ -50,7 +46,7 @@ __global__ void ReluCUDAKernel<half2>(const int N, const half2* X, half2* Y) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half2 kZero = __float2half2_rn(0.0f);
-#if __CUDA_ARCH__ >= 530 || HIP_VERSION >= 300
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     Y[i] = __hmul2(__hgt2(__ldg(X + i), kZero), __ldg(X + i));
 #else
     const float2 xx = __half22float2(X[i]);
@@ -70,7 +66,7 @@ __global__ void
 ReluGradientCUDAKernel(const int N, const T* dY, const T* Y, T* dX) {
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
-#if __CUDA_ARCH__ >= 350 || HIP_VERSION >= 300
+#if __CUDA_ARCH__ >= 350 || TORCH_HIP_VERSION >= 300
     dX[i] = __ldg(Y + i) > T(0) ? __ldg(dY + i) : T(0);
 #else
     dX[i] = Y[i] > T(0) ? dY[i] : T(0);
@@ -87,7 +83,7 @@ __global__ void ReluGradientCUDAKernel<half>(
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half kZero = __float2half(0.0f);
-#if __CUDA_ARCH__ >= 530 || HIP_VERSION >= 300
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     dX[i] = __hgt(__ldg(Y + i), kZero) ? __ldg(dY + i) : kZero;
 #else
     dX[i] = (__half2float(Y[i]) > 0) ? dY[i] : kZero;
@@ -104,7 +100,7 @@ __global__ void ReluGradientCUDAKernel<half2>(
   const int i = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (i < N) {
     const half2 kZero = __float2half2_rn(0.0f);
-#if __CUDA_ARCH__ >= 530 || HIP_VERSION >= 300
+#if __CUDA_ARCH__ >= 530 || TORCH_HIP_VERSION >= 300
     dX[i] = __hmul2(__hgt2(__ldg(Y + i), kZero), __ldg(dY + i));
 #else
     const float2 dy = __half22float2(dY[i]);

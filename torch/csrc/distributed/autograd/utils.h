@@ -31,7 +31,7 @@ TORCH_API ContextPtr addRecvRpcBackward(
     const AutogradMetadata& autogradMetadata,
     std::vector<torch::Tensor>& tensors,
     rpc::worker_id_t fromWorkerId,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap);
+    const rpc::DeviceMap& deviceMap);
 
 // This method is a wrapper utility used internally to wrap autograd info
 // and attach autograd function for each type of rpc call if it has valid
@@ -44,7 +44,7 @@ TORCH_API c10::intrusive_ptr<rpc::Message> getMessageWithAutograd(
     c10::intrusive_ptr<rpc::Message> wrappedRpcMsg,
     rpc::MessageType msgType,
     bool forceGradRecording = false,
-    const std::unordered_map<c10::Device, c10::Device>& deviceMap =
+    const rpc::DeviceMap& deviceMap =
         {});
 
 // Send message after autograd checking

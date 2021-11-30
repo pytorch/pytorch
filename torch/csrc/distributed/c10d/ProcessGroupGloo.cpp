@@ -33,6 +33,7 @@
 #include <gloo/scatter.h>
 
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/ThreadLocalState.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
@@ -189,6 +190,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       TORCH_CHECK(false,
           "Cannot use ReduceOp.BXOR with non-integral dtype");
       break;
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -254,6 +259,10 @@ ReduceFunc toFunction(const ReduceOp& r) {
       return ReduceFunc(&bor<T>);
     case ReduceOp::BXOR:
       return ReduceFunc(&bxor<T>);
+    case ReduceOp::AVG:
+      TORCH_CHECK(false,
+          "Cannot use ReduceOp.AVG with Gloo");
+      break;
     case ReduceOp::UNUSED:
       break;
   }
@@ -405,6 +414,9 @@ const auto kLoopbackAddress = "127.0.0.1";
 
 // static
 void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
+  if(work->recordFunctionBeforeCallback_){
+    work->recordFunctionBeforeCallback_();
+  }
   try {
     work->run();
   } catch (...) {
@@ -461,13 +473,47 @@ void returnFutureWithOutput(
 }
 } // namespace
 
+inline void ProcessGroupGloo::AsyncWork::recordAsyncWorkProfilingInfo(
+    const char* profilingTitle,
+    const c10::optional<std::vector<at::Tensor>>& inputTensors) {
+  auto recordingFunction =
+      std::make_shared<at::RecordFunction>(at::RecordScope::USER_SCOPE);
+  if (recordingFunction->isActive()) {
+    std::function<void()> before_handler =
+        [inputTensors, profilingTitle, recordingFunction]() {
+      // The work will be started and completed by different threads.
+      recordingFunction->_setAsync();
+      std::vector<c10::IValue> inputs;
+      if (inputTensors) {
+        inputs.reserve(inputTensors->size());
+        for (const auto& tensor : *inputTensors) {
+          inputs.emplace_back(tensor);
+        }
+      }
+      recordingFunction->before(profilingTitle, inputs);
+    };
+    recordFunctionBeforeCallback_ = at::wrapPropagateTLSState(before_handler);
+    std::function<void()> end_handler = [recordingFunction]() {
+      recordingFunction->end();
+    };
+    recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
+  }
+}
+
 ProcessGroupGloo::AsyncWork::AsyncWork(
     std::vector<std::vector<at::Tensor>> outputTensors,
     const char* profilingTitle,
     const c10::optional<std::vector<at::Tensor>>& inputTensors)
-    : ProcessGroup::Work(-1, OpType::UNKNOWN, profilingTitle, inputTensors),
+    // Profiler: Pass nullptr as profilingTitle to parent constructor to
+    // replace default profiler implementation with async version that reports
+    // correct timestamps for work that is asynchronously executed.
+    : ProcessGroup::Work(-1, OpType::UNKNOWN, nullptr, inputTensors),
       outputTensors_(std::move(outputTensors)),
-      future_(createFutureAsOutput(outputTensors)) {}
+      future_(createFutureAsOutput(outputTensors)) {
+  if (profilingTitle != nullptr) {
+    recordAsyncWorkProfilingInfo(profilingTitle, inputTensors);
+  }
+}
 
 void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
   future_->setError(eptr);
@@ -885,7 +931,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::broadcast(
     std::vector<at::Tensor>& inputs,
     const BroadcastOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::broadcast: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::broadcast: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -1376,7 +1422,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce(
     std::vector<at::Tensor>& inputs,
     const AllreduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::allreduce: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allreduce: " + msg);
   };
 
   assertNonEmpty(invalidArgument, inputs);
@@ -1437,7 +1483,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const AllreduceCoalescedOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument(
+    TORCH_CHECK(false,
         "ProcessGroupGloo::allreduce_coalesced: " + msg);
   };
   assertNonEmpty(invalidArgument, tensors);
@@ -1606,7 +1652,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::reduce(
     std::vector<at::Tensor>& inputs,
     const ReduceOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::reduce: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::reduce: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -1783,7 +1829,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather(
     std::vector<at::Tensor>& inputs,
     const AllgatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::allgather: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::allgather: " + msg);
   };
 
   if (inputs.size() == 0) {
@@ -1917,7 +1963,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::allgather_coalesced(
     std::vector<at::Tensor>& input_list,
     const AllgatherOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument(
+    TORCH_CHECK(false,
         "ProcessGroupGloo::allgather_coalesced: " + msg);
   };
 
@@ -2114,7 +2160,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::gather(
     std::vector<at::Tensor>& inputs,
     const GatherOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::gather: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::gather: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2298,7 +2344,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::scatter(
     std::vector<std::vector<at::Tensor>>& inputs,
     const ScatterOptions& opts) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::scatter: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::scatter: " + msg);
   };
 
   assertRootRank(invalidArgument, opts.rootRank, size_);
@@ -2492,7 +2538,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupGloo::alltoall_base(
     std::vector<int64_t>& inputCounts,
     const AllToAllOptions& /* unused */) {
   static auto invalidArgument = [](const std::string& msg) {
-    throw std::invalid_argument("ProcessGroupGloo::alltoall_base: " + msg);
+    TORCH_CHECK(false, "ProcessGroupGloo::alltoall_base: " + msg);
   };
 
   TORCH_CHECK(
@@ -2695,7 +2741,7 @@ void ProcessGroupGloo::monitoredBarrier(
           "Rank ",
           rank,
           " successfully reached monitoredBarrier, but received errors while waiting",
-          " to be unblocked by rank 0. Please check rank 0 logs for faulty rank.");
+          " for send/recv from rank 0. Please check rank 0 logs for faulty rank.");
       logAndThrow(
           error, c10::str(error, "\n Original exception: \n", e.what()));
     }
@@ -2734,7 +2780,7 @@ void ProcessGroupGloo::monitoredBarrier(
             rankResponded = true;
           } catch (const std::exception& e) {
             const std::string error = c10::str(
-                "Rank ",
+                "[Rank 0]: Rank ",
                 work.first,
                 " failed to pass monitoredBarrier in ",
                 monitoredBarrierTimeout.count(),

@@ -10,7 +10,9 @@ namespace torch {
 namespace jit {
 
 bool insertableTensor(const at::Tensor& ten) {
-  return !ten.requires_grad();
+  // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+  // or gradients because we have no way of serializing them & are mutable
+  return !ten.requires_grad() && ten.has_storage();
 }
 
 bool insertableIValue(const IValue& ivalue) {
@@ -25,7 +27,7 @@ bool insertableIValue(const IValue& ivalue) {
   if (ivalue.isList() || ivalue.isTuple()) {
     c10::ArrayRef<IValue> elems;
     if (ivalue.isTuple()) {
-      elems = ivalue.toTuple()->elements();
+      elems = ivalue.toTupleRef().elements();
     } else {
       elems = ivalue.toListRef();
     }
@@ -65,8 +67,7 @@ c10::optional<Value*> tryInsertConstant(
   Node* n = g.create(prim::Constant);
   if (val.isTensor()) {
     at::Tensor ref = val.toTensor();
-    if (!ref.has_storage()) {
-      // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
+    if (!insertableTensor(val.toTensor())) {
       n->destroy();
       return c10::nullopt;
     }
@@ -122,9 +123,17 @@ c10::optional<Value*> tryInsertConstant(
       n->destroy();
       return c10::nullopt;
     };
-  } else if (
-      (val.isGenericDict() && insertableIValue(val)) || (val.isEnum()) ||
-      (val.isObject() && !val.toObjectRef().type()->is_module())) {
+  } else if (val.isObject()) {
+    const auto& ref = val.toObjectRef();
+    // see: [Constant Object Weak CompilationUnit Reference]
+    if (!ref.type()->is_module() && ref.is_weak_compilation_ref()) {
+      n->ival_(attr::value, val);
+      n->output()->setType(val.type());
+    } else {
+      n->destroy();
+      return c10::nullopt;
+    }
+  } else if ((val.isGenericDict() && insertableIValue(val)) || (val.isEnum())) {
     n->ival_(attr::value, val);
     n->output()->setType(val.type());
   } else {
@@ -144,20 +153,20 @@ c10::optional<IValue> toIValue(const Value* v) {
   }
   const Node* node = v->node();
   const TypePtr& type = v->type();
-  if (type->isSubtypeOf(TensorType::get())) {
+  if (type->isSubtypeOf(*TensorType::get())) {
     return node->t(attr::value);
-  } else if (type->isSubtypeOf(BoolType::get())) {
+  } else if (type->isSubtypeOf(*BoolType::get())) {
     return (bool)node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {
     return node->i(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::f) {
     return node->f(attr::value);
   } else if (
-      type->isSubtypeOf(NumberType::get()) &&
+      type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::c) {
     return node->c(attr::value);
   } else if (

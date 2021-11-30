@@ -116,8 +116,8 @@ TEST(SerializationTest, TypeTags) {
   for (auto item : items) {
     auto bytes = torch::pickle_save(item.value);
     auto loaded = torch::pickle_load(bytes);
-    ASSERT_TRUE(loaded.type()->isSubtypeOf(item.expected_type));
-    ASSERT_TRUE(item.expected_type->isSubtypeOf(loaded.type()));
+    ASSERT_TRUE(loaded.type()->isSubtypeOf(*item.expected_type));
+    ASSERT_TRUE(item.expected_type->isSubtypeOf(*loaded.type()));
   }
 }
 
@@ -130,7 +130,7 @@ TEST(SerializationTest, TestJitStream_CUDA) {
   model = torch::jit::load("saved_stream_model.pt");
 
   auto output = model.forward(inputs);
-  auto list_of_elements = output.toTuple()->elements();
+  const auto& list_of_elements = output.toTupleRef().elements();
   auto is_stream_s = list_of_elements[0].toBool();
 
   // a,b: These are the two input tensors

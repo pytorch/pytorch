@@ -20,7 +20,8 @@ import textwrap
 
 from typing import Dict, List, Any
 
-from tools.codegen.gen import parse_native_yaml, FileManager
+from tools.codegen.gen import parse_native_yaml
+from tools.codegen.utils import FileManager
 from tools.codegen.context import with_native_function
 from tools.codegen.model import BaseOperatorName, NativeFunction
 import tools.codegen.api.python as python

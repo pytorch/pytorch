@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 # flake8: noqa
 # TODO: enable linting check for this file
 

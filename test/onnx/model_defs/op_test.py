@@ -1,3 +1,5 @@
+# Owner(s): ["module: onnx"]
+
 import torch
 import torch.nn as nn
 
@@ -50,7 +52,7 @@ class PReluNet(nn.Module):
 class FakeQuantNet(nn.Module):
     def __init__(self):
         super(FakeQuantNet, self).__init__()
-        self.fake_quant = torch.quantization.FakeQuantize()
+        self.fake_quant = torch.ao.quantization.FakeQuantize()
         self.fake_quant.disable_observer()
 
     def forward(self, x):

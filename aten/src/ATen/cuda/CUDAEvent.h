@@ -32,7 +32,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   CUDAEvent(
       DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-    #ifndef __HIP_PLATFORM_HCC__
+    #if !defined(USE_ROCM)
       device_index_ = device_index;
       CUDAGuard guard(device_index_);
 
@@ -148,7 +148,7 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
   void ipc_handle(cudaIpcEventHandle_t * handle) {
-    #ifndef __HIP_PLATFORM_HCC__
+    #if !defined(USE_ROCM)
       if (!is_created_) {
         // this CUDAEvent object was initially constructed from flags but event_
         // is not created yet.

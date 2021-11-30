@@ -53,7 +53,6 @@ class SparseLengths8BitsRowwiseOp : public Operator<Context> {
         "the second dim of scale_bias has to be equal to 2");
     CAFFE_ENFORCE_EQ(1, indicesInput.dim(), "INDICES must be a vector");
     const IndexType* indices = indicesInput.template data<IndexType>();
-    int64_t dataToReduceSize = indicesInput.size(0);
 
     const int* lengths = lengthsInput.template data<int>();
     vector<int64_t> shape = dataInput.sizes().vec();

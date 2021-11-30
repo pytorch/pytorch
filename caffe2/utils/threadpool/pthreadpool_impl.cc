@@ -2,7 +2,7 @@
 #include "caffe2/utils/threadpool/pthreadpool-cpp.h"
 #include "caffe2/utils/threadpool/ThreadPool.h"
 
-#ifdef USE_PTHREADPOOL
+#if defined(USE_PTHREADPOOL) && !(defined(__XROS__))
 namespace caffe2 {
 namespace {
 static thread_local bool using_new_threadpool{false};
@@ -34,7 +34,7 @@ void legacy_pthreadpool_compute_1d(
     }
     return;
   }
-#ifdef USE_PTHREADPOOL
+#if defined(USE_PTHREADPOOL) && !(defined(__XROS__))
   if (caffe2::using_new_threadpool) {
     pthreadpool_parallelize_1d(threadpool, function, argument, range, 0u);
   } else {
@@ -76,7 +76,7 @@ legacy_pthreadpool_t legacy_pthreadpool_create(size_t threads_count) {
   std::mutex thread_pool_creation_mutex_;
   std::lock_guard<std::mutex> guard(thread_pool_creation_mutex_);
 
-  return reinterpret_cast<legacy_pthreadpool_t>(new caffe2::ThreadPool(threads_count));
+  return reinterpret_cast<legacy_pthreadpool_t>(caffe2::ThreadPool::createThreadPool(threads_count));
 }
 
 void legacy_pthreadpool_destroy(legacy_pthreadpool_t pthreadpool) {

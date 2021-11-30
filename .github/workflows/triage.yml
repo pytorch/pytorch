@@ -6,6 +6,7 @@ on:
 
 jobs:
   welcome:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-18.04
     strategy:
       fail-fast: false
@@ -83,8 +84,15 @@ jobs:
             const columnId = filteredColumns[0].id;
 
             // Create a project card for this new issue.
-            await github.projects.createCard({
-              column_id: columnId,
-              content_id: issue.data.id,
-              content_type: "Issue",
-            })
+            try {
+              await github.projects.createCard({
+                column_id: columnId,
+                content_id: issue.data.id,
+                content_type: "Issue",
+              })
+            } catch (err) {
+              if (err.status !== 422) {
+                throw err;
+              }
+              console.log("Unable to create card: already exists");
+            }

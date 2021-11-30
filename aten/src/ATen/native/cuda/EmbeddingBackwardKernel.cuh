@@ -1,18 +1,8 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/NativeFunctions.h>
-
-#include <ATen/AccumulateType.h>
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
-#include <THC/THCThrustAllocator.cuh>
-#include <THC/THCAtomics.cuh>
-
-#include <thrust/execution_policy.h>
-#include <thrust/unique.h>
-#include <thrust/device_vector.h>
 
 #pragma once
 

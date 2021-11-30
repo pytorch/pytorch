@@ -94,6 +94,16 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(state[0], state[1])
         self.training = state[2]
 
+    def __deepcopy__(self, memo):
+        new_instance = type(self).__new__(type(self))
+        torch.nn.Module.__init__(new_instance)
+        state = self.__getstate__()
+        new_instance.__setstate__(state)
+        return new_instance
+
+    def __copy__(self):
+        return self.__deepcopy__({})
+
     def __repr__(self):
         return self._weight_bias().__repr__()
 
@@ -242,10 +252,10 @@ class Linear(torch.nn.Module):
 
     @classmethod
     def from_float(cls, mod):
-        r"""Create a quantized module from a float module or qparams_dict
+        r"""Create a quantized module from an observed float module
 
         Args:
-            mod (Module): a float module, either produced by torch.quantization
+            mod (Module): a float module, either produced by torch.ao.quantization
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
@@ -277,4 +287,24 @@ class Linear(torch.nn.Module):
         qlinear.set_weight_bias(qweight, mod.bias)
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)
+        return qlinear
+
+    @classmethod
+    def from_reference(cls, ref_qlinear, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qlinear = cls(
+            ref_qlinear.in_features,
+            ref_qlinear.out_features)
+        qweight = ref_qlinear.get_quantized_weight()
+        qlinear.set_weight_bias(qweight, ref_qlinear.bias)
+
+        qlinear.scale = float(output_scale)
+        qlinear.zero_point = int(output_zero_point)
         return qlinear

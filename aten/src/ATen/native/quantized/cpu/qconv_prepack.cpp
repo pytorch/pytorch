@@ -91,7 +91,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
         !transpose,
         "Per Channel Quantization is currently disabled for transposed conv");
     zero_points.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    for (const auto i : c10::irange(output_channels)) {
       zero_points[i] = weight.q_per_channel_zero_points()[i].item<int32_t>();
     }
   } else {
@@ -120,11 +120,11 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const int inner_size =
       kernel_d * kernel_h * kernel_w * input_channels_per_group;
   for (const auto g : c10::irange(groups)) {
-    for (int i = 0; i < output_channels_per_group; ++i) {
+    for (const auto i : c10::irange(output_channels_per_group)) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       const int c = g * output_channels_per_group + i;
       int32_t sum = 0;
-      for (int j = 0; j < inner_size; ++j) {
+      for (const auto j : c10::irange(inner_size)) {
         sum += static_cast<int32_t>(weight_data_int8[c * inner_size + j]);
       }
       if (qtype == c10::kPerTensorAffine) {
@@ -140,7 +140,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
     scales = {static_cast<float>(weight.q_scale())};
   } else if (qtype == c10::kPerChannelAffine) {
     scales.resize(output_channels);
-    for (int i = 0; i < output_channels; ++i) {
+    for (const auto i : c10::irange(output_channels)) {
       scales[i] = weight.q_per_channel_scales()[i].item<float>();
     }
   }
@@ -225,8 +225,9 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // but PyTorch lays them out as {out_c, in_c/groups, kH, kW}
   // (or for ConvTranspose {in_c, out_c/groups, kH, kW})
   const auto out_ch = transpose ? weight.size(1) * groups : weight.size(0);
-  const uint32_t kernel_h = weight.size(2);
-  const uint32_t kernel_w = weight.size(3);
+  const uint32_t kernel_d = kSpatialDim == 3 ? weight.size(2) : 1;
+  const uint32_t kernel_h = weight.size(kSpatialDim);
+  const uint32_t kernel_w = weight.size(kSpatialDim + 1);
 
   at::Tensor bias_fp32;
   if (bias_in.has_value()) {
@@ -265,9 +266,13 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
       (transpose ? "True)." : "False).")
   );
 
-  auto weight_contig = weight.contiguous(c10::MemoryFormat::ChannelsLast);
+  auto weight_contig = weight.contiguous(
+      kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast
+                       : c10::MemoryFormat::ChannelsLast3d);
   const bool is_per_channel = weight_contig.qscheme() == at::kPerChannelAffine;
-
+  auto kernel_dim = kSpatialDim == 2
+      ? std::vector<int64_t>{kernel_h, kernel_w}
+      : std::vector<int64_t>{kernel_d, kernel_h, kernel_w};
   std::vector<uint8_t> w_zero_points;
   at::Tensor w_scales;
   std::tie(w_zero_points, w_scales) =
@@ -276,23 +281,21 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   // during the first invocation of operator run. Refer to qconv.cpp for more
   // details. TODO Update to actually call pre-pack here once bias is removed
   // from pre-packing step.
-  c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> ret_ptr =
-      c10::make_intrusive<PackedConvWeightsQnnp<kSpatialDim>>(
-          PackedConvWeightsQnnp<kSpatialDim>{
-              nullptr, /* PrePackConvWeights */
-              weight_contig, /* int8_t weight */
-              bias_fp32.contiguous(), /* fp32 bias */
-              stride,
-              padding,
-              output_padding,
-              dilation,
-              groups,
-              transpose,
-              c10::nullopt, /* input_scale */
-              {kernel_h, kernel_w},
-              w_scales,
-              std::move(w_zero_points),
-              is_per_channel});
+  auto ret_ptr = c10::intrusive_ptr<PackedConvWeightsQnnp<kSpatialDim>>::make(
+      nullptr, /* PrePackConvWeights */
+      weight_contig, /* int8_t weight */
+      bias_fp32.contiguous(), /* fp32 bias */
+      stride,
+      padding,
+      output_padding,
+      dilation,
+      groups,
+      transpose,
+      c10::nullopt, /* input_scale */
+      kernel_dim,
+      w_scales,
+      std::move(w_zero_points),
+      is_per_channel);
 
   return ret_ptr;
 }
@@ -327,7 +330,8 @@ class QConvPackWeightInt8 final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (int idx = 0; idx < kSpatialDim; ++idx) {
+    for (const auto idx : c10::irange(kSpatialDim)) {
+      (void)idx; //Suppress unused variable warning
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,
@@ -367,10 +371,6 @@ class QConvPackWeightInt8 final {
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
-      TORCH_CHECK(
-          kSpatialDim == 2,
-          "quantized::conv_prepack (qnnpack): QNNPACK only supports Conv1d "
-          "and Conv2d now.");
       return PackedConvWeightsQnnp<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);

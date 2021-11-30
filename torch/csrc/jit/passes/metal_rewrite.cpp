@@ -1,4 +1,5 @@
 #include <ATen/core/jit_type.h>
+#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
@@ -269,7 +270,7 @@ void metalFusePrePackedConvWithClamp(script::Module& module) {
 void metalInsertCopyOps(script::Module& module) {
   auto graph = module.get_method("forward").graph();
   auto&& outputs = graph->outputs();
-  for (size_t i = 0; i < outputs.size(); ++i) {
+  for (const auto i : c10::irange(outputs.size())) {
     Value* output = outputs[i];
     auto namedValue = NamedValue("", output);
     if (namedValue.type()->kind() == TypeKind::TensorType) {

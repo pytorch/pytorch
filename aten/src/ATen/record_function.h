@@ -27,6 +27,12 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   TORCHSCRIPT_FUNCTION,
   // Kernel Function dtype Tag
   KERNEL_FUNCTION_DTYPE,
+  // Torchbind custom class,
+  CUSTOM_CLASS,
+  // Generic Build Feature
+  BUILD_FEATURE,
+  // Kernel Function dtype Tag
+  LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())
   USER_SCOPE,
   NUM_SCOPES, // must be the last in the list
@@ -138,12 +144,12 @@ struct TORCH_API RecordFunction {
     return state_->outputs_;
   }
 
-  void setOutputs(std::vector<c10::IValue>&& outputs) const {
+  void setOutputs(std::vector<c10::IValue>&& outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = std::move(outputs);
   }
 
-  void setOutputs(c10::ArrayRef<c10::IValue> outputs) const {
+  void setOutputs(c10::ArrayRef<c10::IValue> outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = outputs.vec();
   }
@@ -252,7 +258,7 @@ struct TORCH_API RecordFunction {
 
   // Whether this RecordFunction runs any callbacks.
   bool isActive() const {
-    return state_ != nullptr;
+    return state_.has_value();
   }
 
   bool needsInputs() const {
@@ -263,6 +269,16 @@ struct TORCH_API RecordFunction {
   bool needsOutputs() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called needsOutputs() on inactive RecordFunction");
     return state_->needs_outputs;
+  }
+
+  int64_t debugHandle() const {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called debugHandle() on inactive RecordFunction");
+    return state_->debug_handle_;
+  }
+
+  void setDebugHandle(int64_t debug_handle) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setDebugHandle() on inactive RecordFunction");
+    state_->debug_handle_ = debug_handle;
   }
 
  private:
@@ -326,9 +342,15 @@ struct TORCH_API RecordFunction {
     // events can complete in different threads or follow a future-like pattern
     // of use.
     bool is_async_{false};
+
+    // Debug handles are used for lazy annotation of module hierarchy
+    // and callstack.
+    // This is specifically is useful for mobile runtime, where generated
+    // debug handles can be lazily symbolicated using debug information
+    int64_t debug_handle_{-1};
   };
 
-  std::unique_ptr<State> state_;
+  c10::optional<State> state_;
 };
 
 //
@@ -471,6 +493,26 @@ class TORCH_API RecordFunctionCallback {
 #define RECORD_USER_SCOPE_WITH_INPUTS(fn, inputs) \
   RECORD_FUNCTION_WITH_SCOPE( \
     at::RecordScope::USER_SCOPE, fn, inputs)
+
+// Helper macro to pass in debug handle that is used to
+// post process events
+#define RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(  \
+    scope, fn, debug_handle, inputs, ...)           \
+    at::RecordFunction guard(scope);                \
+    if (guard.isActive()) {                         \
+      guard.setDebugHandle(debug_handle);           \
+      if (guard.needsInputs()) {                    \
+        guard.before(fn, inputs, ##__VA_ARGS__);    \
+      } else {                                      \
+        guard.before(fn, ##__VA_ARGS__);            \
+      }                                             \
+    }
+
+// Helper macros to record LITE INTERPETER scope events with debug handles
+#define RECORD_EDGE_SCOPE_WITH_DEBUG_HANDLE_AND_INPUTS(             \
+    fn, debug_handle, inputs)                                       \
+    RECORD_WITH_SCOPE_DEBUG_HANDLE_AND_INPUTS(                      \
+        at::RecordScope::LITE_INTERPRETER, fn, debug_handle, inputs)
 
 // Notes:
 //  - two types of callbacks are provided: thread local and global

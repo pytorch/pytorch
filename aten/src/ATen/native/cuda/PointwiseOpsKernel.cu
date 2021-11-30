@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
@@ -5,11 +6,11 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/PointwiseOps.h>
-#include <THC/THCNumerics.cuh>
+#include <c10/core/Scalar.h>
 
 namespace at { namespace native {
 
-void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
+void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcmul_cuda", [&]() {
     // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
     // and do math in fp32 for better accuracy.
@@ -21,7 +22,7 @@ void addcmul_cuda_kernel(TensorIterator& iter, const Scalar& value) {
   });
 }
 
-void addcdiv_cuda_kernel(TensorIterator& iter, const Scalar& value) {
+void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "addcdiv_cuda", [&]() {
     // note(mkozuki): If scalar_t is fp16 or bfloat16, cast scalar to float
     // and do math in fp32 for better accuracy.

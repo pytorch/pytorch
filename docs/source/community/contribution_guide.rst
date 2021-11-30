@@ -200,8 +200,8 @@ Triaging issues
 ~~~~~~~~~~~~~~~
 
 If you feel that an issue could benefit from a particular tag or level
-of complexity comment on the issue and share your opinion. If you
-feel an issue isn't categorized properly comment and let the team know.
+of complexity, comment on the issue and share your opinion. If you
+feel an issue isn't categorized properly, comment and let the team know.
 
 About open source development
 -----------------------------

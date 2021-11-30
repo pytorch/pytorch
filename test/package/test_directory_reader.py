@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# Owner(s): ["oncall: package/deploy"]
+
 import os
 import zipfile
 from sys import version_info
@@ -61,7 +63,7 @@ class DirectoryReaderTest(PackageTestCase):
             importer = PackageImporter(Path(temp_dir) / Path(filename).name)
             dir_mod = importer.load_pickle("model", "model.pkl")
             input = torch.rand(1, 3, 224, 224)
-            self.assertTrue(torch.allclose(dir_mod(input), resnet(input)))
+            self.assertEqual(dir_mod(input), resnet(input))
 
     def test_loading_module(self):
         """

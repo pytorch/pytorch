@@ -40,9 +40,9 @@ class BlobTestNonDefaultConstructible {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(BlobTestFoo);
-CAFFE_KNOWN_TYPE(BlobTestBar);
-CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestFoo);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestBar);
+CAFFE_KNOWN_TYPE_NOEXPORT(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -1018,7 +1018,7 @@ class DummyTypeDeserializer : public BlobDeserializerBase {
 };
 } // namespace
 
-CAFFE_KNOWN_TYPE(DummyType);
+CAFFE_KNOWN_TYPE_NOEXPORT(DummyType);
 
 namespace {
 REGISTER_BLOB_SERIALIZER((TypeMeta::Id<DummyType>()), DummyTypeSerializer);

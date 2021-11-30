@@ -384,13 +384,16 @@ void PyTorchStreamWriter::writeRecord(
 }
 
 void PyTorchStreamWriter::writeEndOfFile() {
-  // Rewrites version info
-  std::string version = c10::to_string(version_);
-  version.push_back('\n');
-  if (version_ >= 0x6L) {
-    writeRecord(".data/version", version.c_str(), version.size());
-  } else {
-    writeRecord("version", version.c_str(), version.size());
+  auto allRecords = getAllWrittenRecords();
+  // If no ".data/version" or "version" record in the output model, rewrites version info
+  if(allRecords.find(".data/version") == allRecords.end() && allRecords.find("version") == allRecords.end()) {
+    std::string version = c10::to_string(version_);
+    version.push_back('\n');
+    if (version_ >= 0x6L) {
+      writeRecord(".data/version", version.c_str(), version.size());
+    } else {
+      writeRecord("version", version.c_str(), version.size());
+    }
   }
 
   AT_ASSERT(!finalized_);
