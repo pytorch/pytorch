@@ -44,6 +44,8 @@ SeenOpInfo = collections.namedtuple(
         # Python type of the seen op. For modules, this is type(mod). For
         # functions, this is the target function.
         'type',
+        # True if the type is a module, False otherwise (for functions/methods).
+        'type_is_module',
         # Note: FQN refers to the current module for modules and to the parent
         # module for functions
         'fqn',
