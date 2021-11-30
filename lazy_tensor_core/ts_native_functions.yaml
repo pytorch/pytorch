@@ -38,6 +38,7 @@ full_codegen:
   - leaky_relu
   - leaky_relu_backward
   - log2
+  - logdet
   - log_sigmoid_backward
   - log_sigmoid_forward
   - lt.Scalar
