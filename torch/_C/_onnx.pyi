@@ -3,7 +3,6 @@
 from enum import Enum
 
 PYTORCH_ONNX_CAFFE2_BUNDLE: bool
-IR_VERSION: int
 PRODUCER_VERSION: str
 
 class TensorProtoDataType(Enum):

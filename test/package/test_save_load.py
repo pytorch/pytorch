@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 import pickle
 from io import BytesIO
 from textwrap import dedent

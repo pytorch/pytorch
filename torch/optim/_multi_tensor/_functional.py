@@ -56,11 +56,14 @@ def adagrad(
                 alpha=minus_clr[i],
             )
     else:
+        grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
+        state_sums = [torch.view_as_real(x) if torch.is_complex(x) else x for x in state_sums]
         torch._foreach_addcmul_(state_sums, grads, grads, value=1)
         std = torch._foreach_add(torch._foreach_sqrt(state_sums), eps)
-        torch._foreach_addcdiv_(
-            params, torch._foreach_mul(grads, minus_clr), std
-        )
+        toAdd = torch._foreach_div(torch._foreach_mul(grads, minus_clr), std)
+        toAdd = [torch.view_as_complex(x) if torch.is_complex(params[i]) else x for i, x in enumerate(toAdd)]
+        torch._foreach_add_(params, toAdd)
+        state_sums = [torch.view_as_complex(x) if torch.is_complex(params[i]) else x for i, x in enumerate(state_sums)]
 
 
 def adamax(params: List[Tensor],

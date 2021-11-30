@@ -41,6 +41,7 @@ class NCCLTestBase {
 
     c10::intrusive_ptr<c10d::ProcessGroupNCCL::Options> opts = c10::make_intrusive<c10d::ProcessGroupNCCL::Options>();
     opts->timeout = pgTimeout_;
+    setenv("ENABLE_NCCL_HEALTH_CHECK", "1", /* overwrite */ 1);
     pg_ = std::unique_ptr<::c10d::ProcessGroupNCCL>(
         new ::c10d::ProcessGroupNCCL(store, rank, size, std::move(opts)));
   }
@@ -312,8 +313,7 @@ class ReduceScatterBaseNCCLTest : public NCCLTest {
       : NCCLTest(path, worldSize) {
         output_tensor_ = at::empty({1}, at::kCUDA);
         input_tensor_ = at::empty({worldSize}, at::kCUDA);
-        for(int i = 0; i < worldSize; i++)
-        {
+        for (const auto i : c10::irange(worldSize)) {
           input_tensor_[i] = i;
         }
       }

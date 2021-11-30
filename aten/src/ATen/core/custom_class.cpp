@@ -1,5 +1,5 @@
 #include <torch/custom_class.h>
-
+#include <ATen/record_function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/functional.h>
@@ -8,6 +8,14 @@
 #include <unordered_map>
 
 namespace torch {
+
+namespace detail {
+
+void record_custom_class(std::string name) {
+  RECORD_FUNCTION_WITH_SCOPE(at::RecordScope::CUSTOM_CLASS, name, {});
+}
+
+} // namespace detail
 
 std::unordered_map<std::string, at::ClassTypePtr>& customClasses() {
   static std::unordered_map<std::string, at::ClassTypePtr> customClasses;
@@ -25,8 +33,20 @@ void registerCustomClass(at::ClassTypePtr class_type) {
   customClasses()[name] = std::move(class_type);
 }
 
-at::ClassTypePtr getCustomClass(const std::string& name) {
-  return customClasses().count(name) ? customClasses()[name] : nullptr;
+at::ClassTypePtr getCustomClass(const std::string& class_name) {
+  auto ret = customClasses().count(class_name) ? customClasses()[class_name] : nullptr;
+  if (ret) {
+    RECORD_CUSTOM_CLASS(class_name);
+  }
+  return ret;
+}
+
+const std::unordered_set<std::string> getAllCustomClassesNames() {
+  std::unordered_set<std::string> ret;
+  for (const auto& kv: customClasses()) {
+    ret.insert(kv.first);
+  }
+  return ret;
 }
 
 bool isCustomClass(const c10::IValue& v) {

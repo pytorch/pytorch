@@ -5,11 +5,11 @@ from dataclasses import dataclass
 import textwrap
 
 from tools.codegen.context import method_with_native_function, native_function_manager
-from tools.codegen.utils import Target, mapMaybe
+from tools.codegen.utils import Target, mapMaybe, assert_never
 from tools.codegen.model import (DispatchKey, NativeFunction,
                                  NativeFunctionsGroup, SchemaKind,
                                  TensorOptionsArguments,
-                                 DeviceCheckType, Argument, assert_never,
+                                 DeviceCheckType, Argument,
                                  is_cuda_dispatch_key, BackendIndex,
                                  gets_generated_out_inplace_wrapper)
 from tools.codegen.api.types import (BaseCType, Binding, ConstRefCType,

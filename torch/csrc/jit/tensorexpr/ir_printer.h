@@ -39,6 +39,7 @@ class TORCH_API IRPrinter : public IRVisitor {
   void visit(CastPtr v) override;
   void visit(BitCastPtr v) override;
   void visit(VarPtr v) override;
+  void visit(BufPtr v) override;
   void visit(RampPtr v) override;
   void visit(LoadPtr v) override;
   void visit(BroadcastPtr v) override;

@@ -206,7 +206,6 @@ enum class DispatchKey : uint8_t {
   // up to the `VariableType` kernel. Thus we only add the extra dispatch
   // to view/inplace ops to minimize its perf impact to real models.
   ADInplaceOrView,
-
   // Note [Alias Dispatch Key : Autograd]
   // All backends are oblivious to autograd; autograd is handled as a
   // layer which happens on top of all backends. It inspects the autograd
@@ -274,6 +273,12 @@ enum class DispatchKey : uint8_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
+  // Alias and mutation removal.
+  // If some backends want to opt into only alias removal or only mutation
+  // removal,
+  // we can consider adding separate keys dedicated to those individual passes.
+  // See Note [Functionalization Pass In Core] for details.
+  Functionalize,
   FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
 
   // TESTING: This is intended to be a generic testing tensor type id.
