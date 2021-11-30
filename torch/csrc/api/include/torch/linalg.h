@@ -164,6 +164,14 @@ inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& othe
   return torch::linalg_solve_out(result, input, other);
 }
 
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular_out(result, input, other, upper, left, unitriangular);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
   return torch::linalg_svd(input, full_matrices);
 }
@@ -435,6 +443,18 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return detail::solve_out(result, input, other);
+}
+
+/// Computes a solution of a linear system AX = B for input = A and other = B whenever A is square
+/// upper or lower triangular and does not have zeros in the diagonal
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_triangular
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
 /// Computes the singular values and singular vectors
