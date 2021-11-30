@@ -4,6 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+import functools
 import os
 import pathlib
 import shutil
@@ -308,7 +309,6 @@ DISTRIBUTED_TESTS = [
     "distributed/test_c10d_common",
     "distributed/test_c10d_gloo",
     "distributed/test_c10d_nccl",
-    "distributed/test_jit_c10d",
     "distributed/test_c10d_spawn_gloo",
     "distributed/test_c10d_spawn_nccl",
     "distributed/test_store",
@@ -461,6 +461,13 @@ def test_cuda_primary_ctx(test_module, test_directory, options):
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
     )
 
+run_test_with_subprocess = functools.partial(run_test, extra_unittest_args=["--subprocess"])
+
+
+def get_run_test_with_subprocess_fn():
+    return lambda test_module, test_directory, options: run_test_with_subprocess(test_module, test_directory, options)
+
+
 
 def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     if use_ninja:
@@ -610,6 +617,8 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_no_ninja": test_cpp_extensions_aot_no_ninja,
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
+    "distributed/test_c10d_nccl": get_run_test_with_subprocess_fn(),
+    "distributed/test_c10d_gloo": get_run_test_with_subprocess_fn(),
 }
 
 

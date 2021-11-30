@@ -326,27 +326,30 @@ auto ${inp}_p = toNonOptPrimal(${inp});
 """)
 
 FW_DERIVATIVE_SETTER_TENSOR = CodeTemplate("""\
-if (${out_arg}_new_fw_grad.defined()) {
+if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value().defined()) {
   // The hardcoded 0 here will need to be updated once we support multiple levels.
-  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad, /* level */ 0, /* is_inplace_op */ ${is_inplace});
+  ${out_arg}._set_fw_grad(${out_arg}_new_fw_grad_opt.value(), /* level */ 0, /* is_inplace_op */ ${is_inplace});
 }
 """)
 
 FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
-TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
-for (auto i=0; i<${out_arg}.size(); ++i) {
-  if (${out_arg}_new_fw_grad[i].defined()) {
-  // The hardcoded 0 here will need to be updated once we support multiple levels.
-    ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
+if (${out_arg}_new_fw_grad_opt.has_value()) {
+  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value()
+  TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
+  for (auto i=0; i<${out_arg}.size(); ++i) {
+    if (${out_arg}_new_fw_grad[i].defined()) {
+      // The hardcoded 0 here will need to be updated once we support multiple levels.
+      ${out_arg}[i]._set_fw_grad(${out_arg}_new_fw_grad[i], /* level */ 0, /* is_inplace_op */ ${is_inplace});
+    }
   }
 }
 """)
 
 FW_DERIVATIVE_TEMPLATE = CodeTemplate("""\
+${fw_grad_opt_definition}
 if (${requires_fw_grad}) {
     ${unpacked_arguments}
-    auto ${out_arg}_new_fw_grad = ${formula};
-    ${fw_grad_setter}
+    ${out_arg}_new_fw_grad_opt = ${formula};
 }
 """)
 
@@ -890,6 +893,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
     def emit_fw_derivatives() -> List[str]:
         content: List[str] = []
+        fw_grad_setters: List[str] = []
         for derivative in fw_derivatives:
             res = derivative.var_name
             if f.func.name.name.inplace:
@@ -917,15 +921,26 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 is_inplace_str = "false"
 
             if isinstance(derivative.var_type, BaseType) and derivative.var_type.is_tensor_like():
+                # Is there a way to get from BaseType to BaseCType
+                opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res, is_inplace=is_inplace_str)
             elif isinstance(derivative.var_type, ListType) and derivative.var_type.is_tensor_like():
+                opt_res_grad_type = OptionalCType(ListCType(BaseCType(tensorT))).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res, is_inplace=is_inplace_str)
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
+
+            fw_grad_opt_definition = f"{opt_res_grad_type} {res}_new_fw_grad_opt = c10::nullopt;"
+
             # View ops create fw_grad that already is a view of the base's fw_grad so just use that
             content.append(FW_DERIVATIVE_TEMPLATE.substitute(
+                fw_grad_opt_definition=fw_grad_opt_definition,
                 requires_fw_grad=get_any_has_forward_grad_name(derivative.var_name), formula=derivative.formula, out_arg=res,
-                unpacked_arguments=unpacked_arguments, fw_grad_setter=fw_grad_setter))
+                unpacked_arguments=unpacked_arguments))
+            fw_grad_setters.append(fw_grad_setter)
+
+        # Set all the grads at the end to avoid: https://github.com/pytorch/pytorch/issues/67367
+        content.append('\n'.join(fw_grad_setters))
         return content
 
     def emit_forbid_fw_derivatives(is_out_fn: bool = False) -> str:
