@@ -47,14 +47,14 @@ c10::optional<torch::lazy::BackendDevice> GetOptionalDevice(const std::string& d
   if (device_str.empty()) {
     return c10::nullopt;
   }
-  return bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
+  return bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
 }
 
 torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   if (device_str.empty()) {
     return torch::lazy::BackendDevice();
   }
-  return bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
+  return bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
 }
 
 void PrepareToExit() {
@@ -83,7 +83,7 @@ std::vector<std::string> GetLtcDeviceStrings(
   std::vector<std::string> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
-    auto device = bridge::AtenDeviceToLtcDevice(c10::Device(device_str));
+    auto device = bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
     ltc_devices.emplace_back(device.toString());
   }
   return ltc_devices;
@@ -94,7 +94,7 @@ std::vector<torch::lazy::BackendDevice> GetLtcDevices(const std::vector<std::str
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
     ltc_devices.push_back(
-        bridge::AtenDeviceToLtcDevice(c10::Device(device_str)));
+        bridge::AtenDeviceToBackendDevice(c10::Device(device_str)));
   }
   return ltc_devices;
 }

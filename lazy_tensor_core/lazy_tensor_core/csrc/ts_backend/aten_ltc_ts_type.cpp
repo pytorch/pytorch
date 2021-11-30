@@ -88,6 +88,16 @@ at::Tensor CreateLtcTensor(const at::Tensor& tensor,
   return tensor;
 }
 
+c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::Device>& device) {
+  if (!device) {
+    return c10::nullopt;
+  }
+  if (device->type() != at::kLazy) {
+    return c10::nullopt;
+  }
+  return bridge::AtenDeviceToBackendDevice(*device);
+}
+
 }  // namespace
 
 at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {
@@ -235,7 +245,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
   CHECK(kernel_size.size() == 2 || kernel_size.size() == 3);
   const at::DeviceType device_type =
       torch::lazy::getBackend()->EagerFallbackDeviceType();
-  auto backend_device = bridge::GetSameBackendDeviceOrUseDefault(grad_output);
+  auto backend_device = bridge::GetBackendDevice(grad_output);
   if (transposed) {
     at::TensorOptions options = at::TensorOptions().device(device_type);
     auto&& x_result =
@@ -260,11 +270,11 @@ LazyNativeFunctions::convolution_backward_overrideable(
                   output_mask);
     return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
         CreateLtcTensor(std::get<0>(x_result),
-                                bridge::GetLtcDevice(grad_output)),
+                                bridge::GetBackendDevice(grad_output)),
         CreateLtcTensor(std::get<1>(x_result),
-                                bridge::GetLtcDevice(grad_output)),
+                                bridge::GetBackendDevice(grad_output)),
         CreateLtcTensor(std::get<2>(x_result),
-                                bridge::GetLtcDevice(grad_output)));
+                                bridge::GetBackendDevice(grad_output)));
   }
   auto&& x_result =
       kernel_size.size() == 2
@@ -278,11 +288,11 @@ LazyNativeFunctions::convolution_backward_overrideable(
                 output_mask);
   return std::tuple<at::Tensor, at::Tensor, at::Tensor>(
       CreateLtcTensor(std::get<0>(x_result),
-                              bridge::GetLtcDevice(grad_output)),
+                              bridge::GetBackendDevice(grad_output)),
       CreateLtcTensor(std::get<1>(x_result),
-                              bridge::GetLtcDevice(grad_output)),
+                              bridge::GetBackendDevice(grad_output)),
       CreateLtcTensor(std::get<2>(x_result),
-                              bridge::GetLtcDevice(grad_output)));
+                              bridge::GetBackendDevice(grad_output)));
 }
 
 at::Tensor LazyNativeFunctions::convolution_overrideable(
@@ -376,7 +386,7 @@ at::Tensor LazyNativeFunctions::empty(
                                   .pinned_memory(pin_memory)
                                   .dtype(dtype);
   auto x_result = at::empty(size, options, memory_format);
-  return CreateLtcTensor(x_result, bridge::GetLtcDevice(device));
+  return CreateLtcTensor(x_result, GetLtcDevice(device));
 }
 
 at::Tensor LazyNativeFunctions::empty_strided(

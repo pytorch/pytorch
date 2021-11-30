@@ -140,7 +140,7 @@ void ForEachDevice(const std::function<void(const torch::Device&)>& devfn) {
   // which is set by env. And the ordinal is always 0 given distributed training/
   // multi-device is not supported yet.
   auto device = torch::lazy::BackendDevice();
-  torch::Device torch_device = bridge::LtcDeviceToAtenDevice(device);
+  torch::Device torch_device = bridge::BackendDeviceToAtenDevice(device);
   devfn(torch_device);
 }
 
