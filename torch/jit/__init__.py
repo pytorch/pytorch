@@ -62,7 +62,8 @@ try:
     )
     _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
 except Exception as e:
-    warnings.warn(f"Couldn't load shape functions: {e}")
+    # not warning because of internal CI fail with
+    print(f"Couldn't load shape functions: {e}")
 
 # For backwards compatibility
 _fork = fork
