@@ -319,7 +319,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     }
 
     auto sym = Symbol::fromQualString(name + "::" + field);
-    return std::make_shared<BuiltinFunction>(sym, c10::nullopt, version);
+    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
   }
 
  private:
