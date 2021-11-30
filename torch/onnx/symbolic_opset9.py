@@ -18,6 +18,7 @@ from sys import maxsize as maxsize
 
 import math
 import warnings
+import re
 
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -1409,6 +1410,12 @@ def layer_norm(g, input, normalized_shape, weight, bias, eps, cudnn_enable):
 def instance_norm(g, input, weight, bias, running_mean, running_var, use_input_stats, momentum, eps, cudnn_enabled):
     sym_help.check_training_mode(use_input_stats, "instance_norm")
     channel_size = sym_help._get_tensor_dim_size(input, 1)
+    if channel_size is None:
+        match = re.search(r"strides=\[(\d*),\s?(\d*),\s?(\d*),\s?(\d*)\]", str(input))
+        strides_str = match.groups()
+        strides = [int(stride_str) for stride_str in strides_str]
+        channel_size = strides[0] // strides[1]
+
     if weight is None or sym_help._is_none(weight):
         if channel_size is None:
             raise RuntimeError("Unsupported: ONNX export of instance_norm for unknown "
