@@ -362,6 +362,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
+      "static_runtime::expand_dims_copy(Tensor input, int[] dims) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
       "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
@@ -470,6 +473,7 @@ void ReplaceWithCopy(
   const FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
 #endif
       OP_PAIR("aten::narrow", "aten::narrow_copy"),
       OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
