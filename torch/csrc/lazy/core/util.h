@@ -23,7 +23,7 @@ class Cleanup {
 
   explicit Cleanup(std::function<void(StatusType&&)>&& func)
       : func_(std::move(func)) {}
-  Cleanup(Cleanup&& ref)
+  Cleanup(Cleanup&& ref) noexcept
       : func_(std::move(ref.func_)), status_(std::move(ref.status_)) {}
   Cleanup(const Cleanup&) = delete;
 
@@ -63,8 +63,8 @@ using ExceptionCleanup = Cleanup<std::exception_ptr>;
 template <typename T>
 class MaybeRef {
  public:
-  MaybeRef(const T& ref) : ref_(ref) {}
-  MaybeRef(T&& value) : storage_(std::move(value)), ref_(*storage_) {}
+  /* implicit */ MaybeRef(const T& ref) : ref_(ref) {}
+  /* implicit */ MaybeRef(T&& value) : storage_(std::move(value)), ref_(*storage_) {}
 
   const T& Get() const { return ref_; }
   const T& operator*() const { return Get(); }

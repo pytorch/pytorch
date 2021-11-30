@@ -2,7 +2,7 @@
 
 #include <exception>
 
-#include "torch/csrc/lazy/core/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch {
 namespace lazy {

@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <string>
 
-#include "torch/csrc/lazy/core/hash.h"
-#include "c10/util/int128.h"
+#include <torch/csrc/lazy/core/hash.h>
+#include <c10/util/int128.h>
 
 namespace torch {
 namespace lazy {
