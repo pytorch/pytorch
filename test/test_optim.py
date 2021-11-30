@@ -539,6 +539,26 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
+    def test_Adam_complex(self):
+        import pdb
+        for optimizer in [optim.Adam]:
+            pdb.set_trace()
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.01)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.01, betas=(0.8,0.888))
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.01, betas=(0.8,0.888), eps=4e-08)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.01, betas=(0.8,0.888), eps=4e-08, weight_decay=1)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param],lr=0.01, betas=(0.8,0.888), eps=4e-08, weight_decay=1,amsgrad=True)
+            )
+
     # Test whether variance parameter is always real
     def test_complex_adam_variance(self):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
@@ -565,10 +585,10 @@ class TestOptim(TestCase):
                     lr=1e-3)
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1)
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1)
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=1, amsgrad=True)
+                lambda weight, bias: optimizer([weight, bias], lr=1e-3, weight_decay=0.1, amsgrad=True)
             )
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
