@@ -43,6 +43,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
             return (%7))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
+  g->set_op_version(2);
   ReplaceOpsWithUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
