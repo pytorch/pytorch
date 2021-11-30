@@ -1,6 +1,8 @@
 #ifndef THCP_CUDA_MODULE_INC
 #define THCP_CUDA_MODULE_INC
 
+#include <ATen/Context.h>
+
 extern THCState *state;
 
 void THCPModule_setDevice(int idx);

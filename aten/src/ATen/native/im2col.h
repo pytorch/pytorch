@@ -1,59 +1,14 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/Utils.h>
 #include <c10/util/irange.h>
-#include <ATen/native/DispatchStub.h>
+
+#include <algorithm>
 
 namespace at {
 namespace native {
-
-using contig_fn = void (*)(
-  Tensor& im,
-  const Tensor& col,
-  int64_t output_channels,
-  int64_t output_height, int64_t output_width,
-  int64_t input_height, int64_t input_width,
-  int64_t kH, int64_t kW,
-  int64_t pH, int64_t pW,
-  int64_t sH, int64_t sW,
-  int64_t dH, int64_t dW);
-
-using channels_last_fn = void (*)(
-    const Tensor& im,
-    const Tensor& col,
-    int64_t nbatch,
-    int64_t output_channels,
-    int64_t output_height, int64_t output_width,
-    int64_t input_height, int64_t input_width,
-    int64_t kH, int64_t kW,
-    int64_t pH, int64_t pW,
-    int64_t sH, int64_t sW,
-    int64_t dH, int64_t dW);
-
-DECLARE_DISPATCH(contig_fn, col2im_stub);
-DECLARE_DISPATCH(contig_fn, im2col_stub);
-DECLARE_DISPATCH(channels_last_fn, col2im_channels_last_stub);
-DECLARE_DISPATCH(channels_last_fn, im2col_channels_last_stub);
-
-// skip im2col or col2im on certain conditions
-static inline bool skip_transforming(
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation) {
-  TORCH_CHECK(
-      (kernel_size.size() == stride.size()) &&
-      (kernel_size.size() == padding.size()) &&
-      (kernel_size.size() == output_padding.size()) &&
-      (kernel_size.size() == dilation.size()));
-  bool res = true;
-  for (int64_t k = 0; k < kernel_size.size(); k++) {
-    res = res && (kernel_size[k] == 1) && (stride[k] == 1) && (padding[k] == 0)
-              && (output_padding[k] == 0) && (dilation[k] == 1);
-  }
-  return res;
-}
 
 template <typename T>
 static void im2col(
