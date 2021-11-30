@@ -69,10 +69,9 @@ if os.path.exists(shape_function_fp):
     try:
         _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
     except Exception as e:
-        warnings.warn(f"Couldn't load shape functions: {e}")
+        warnings.warn("Couldn't load shape functions")
 else:
-    warnings.warn(f"Couldn't find shape functions")
-    
+    warnings.warn("Couldn't find shape functions")
 
 
 # For backwards compatibility
