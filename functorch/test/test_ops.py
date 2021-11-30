@@ -474,7 +474,7 @@ class TestOperators(TestCase):
     # 2) tangent batched (batched grads) <--
     # 3) both batched (TODO)
     # The below tests (2) only.
-    @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvp', {
         xfail('nn.functional.dropout'),  # randomness
 
@@ -493,6 +493,9 @@ class TestOperators(TestCase):
         xfail('index_fill'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
+
+        # https://gist.github.com/zou3519/c42d032c0111c6b65235583d391bf7a3
+        xfail('nn.functional.linear'),
 
         # These are issues that should be fixed in core. See repro in core:
         # https://github.com/pytorch/functorch/pull/232#discussion_r751405155
@@ -530,11 +533,6 @@ class TestOperators(TestCase):
         xfail('linalg.cholesky'),
     })
     def test_vmapjvp(self, device, dtype, op):
-         # These are too annoying to put into the list above
-        if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
-            self.skipTest("Skipped! Expected failures")
-            return
-
         if is_inplace(op, op.get_op()):
             # TODO: test in-place
             self.skipTest("Skipped! NYI: inplace-testing not supported.")
