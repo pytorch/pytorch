@@ -1321,15 +1321,19 @@
 
 - name: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+  result: auto_linear
 
 - name: unsafe_split.Tensor(Tensor self, int split_size, int dim=0) -> Tensor[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
+  result: auto_linear
 
 - name: split_with_sizes(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+  result: auto_linear
 
 - name: unsafe_split_with_sizes(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]
   self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.options())
+  result: auto_linear
 
 - name: sqrt(Tensor self) -> Tensor
   self: grad / (2 * result.conj())
@@ -1460,6 +1464,10 @@
   self, A: triangular_solve_backward(grad_solution, grad_cloned_coefficient, self, A, solution, upper, transpose, unitriangular, grad_input_mask)
   solution: triangular_solve_jvp(solution, A_p, A_t, self_t, upper, transpose, unitriangular)
   cloned_coefficient: A_t
+
+- name: linalg_solve_triangular(Tensor self, Tensor B, *, bool upper, bool left=True, bool unitriangular=False) -> Tensor
+  self, B: linalg_solve_triangular_backward(grad, self, result, upper, left, unitriangular, grad_input_mask)
+  result: linalg_solve_triangular_forward_AD(self_t, B_t, self_p, result, upper, left, unitriangular)
 
 - name: tril(Tensor self, int diagonal=0) -> Tensor
   self: grad.tril(diagonal)
@@ -1606,6 +1614,7 @@
 - name: binary_cross_entropy_with_logits(Tensor self, Tensor target, Tensor? weight=None, Tensor? pos_weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_with_logits_backward(grad, self, target, weight, pos_weight, reduction)
   target: binary_cross_entropy_with_logits_target_backward(grad, self, target, weight, pos_weight, reduction)
+  result: binary_cross_entropy_with_logits_jvp(self_t, target_t, self_p, target_p, weight, pos_weight, reduction)
 
 - name: embedding(Tensor weight, Tensor indices, int padding_idx=-1, bool scale_grad_by_freq=False, bool sparse=False) -> Tensor
   indices: non_differentiable
@@ -1672,6 +1681,7 @@
 
 - name: relu(Tensor self) -> Tensor
   self: threshold_backward(grad, result, 0)
+  result: auto_element_wise
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
@@ -2107,6 +2117,7 @@
 - name: threshold_backward(Tensor grad_output, Tensor self, Scalar threshold) -> Tensor
   grad_output: threshold_backward(grad, self, threshold)
   self: zeros_like(grad)
+  result: zeros_like(self_t) + threshold_backward(grad_output_t, self_p, threshold)
 
 - name: upsample_linear1d_backward(Tensor grad_output, int[1] output_size, int[3] input_size, bool align_corners, float? scales=None) -> Tensor
   grad_output: upsample_linear1d(grad, output_size, align_corners, scales)
@@ -2334,6 +2345,7 @@
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
   tensors: "grad.defined() ? unbind(grad, dim) : std::vector<Tensor>(tensors.size())"
+  result: stack_jvp(tensors, dim)
 
 # fused RNN kernels
 
@@ -2412,6 +2424,11 @@
 
 - name: empty_like(Tensor self, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   self: non_differentiable
+  output_differentiability: [False]
+
+- name: _new_zeros_with_same_feature_meta(Tensor self, Tensor other, *, int self_num_batch_dims=0) -> Tensor
+  self: non_differentiable
+  other: non_differentiable
   output_differentiability: [False]
 
 - name: _test_warn_in_autograd(Tensor self) -> Tensor
