@@ -1,7 +1,7 @@
 import torch
 import torch.onnx.symbolic_helper as sym_help
 from torch.onnx.symbolic_helper import parse_args, _parse_arg, _unimplemented
-from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block
+from torch.onnx.utils import _add_block, _add_input_to_block, _add_output_to_block, _graph_at
 from sys import maxsize
 from torch.onnx.symbolic_opset9 import permute, _reshape_from_tensor
 import warnings
@@ -174,7 +174,7 @@ def unfold(g, input, dimension, size, step):
         from torch.onnx.symbolic_opset9 import unfold as _unfold
         return _unfold(g, input, dimension, const_size, const_step)
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
+        return _graph_at(g, "unfold", input, dimension_i=dimension, size_i=size, step_i=step)
 
     sizedim = sym_help._get_tensor_dim_size(input, dimension)
     if sizedim is not None:
