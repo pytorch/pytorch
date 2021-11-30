@@ -1006,6 +1006,69 @@ Miscellanea
    -  Annotations on local names within a function are not currently
       supported.
 
+
+-  Gotcha around ``training`` flag and submodules
+
+   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value.
+
+    ::
+
+        import torch
+        import torch.fx
+
+        class DropoutRepro(torch.nn.Module):
+          def forward(self, x):
+            return torch.nn.functional.dropout(x, training=self.training)
+
+
+        traced = torch.fx.symbolic_trace(DropoutRepro())
+        print(traced.code)
+        """
+        def forward(self, x):
+          dropout = torch.nn.functional.dropout(x, p = 0.5, training = True, inplace = False);  x = None
+          return dropout
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+        """
+        AssertionError: Tensor-likes are not close!
+
+        Mismatched elements: 15 / 15 (100.0%)
+        Greatest absolute difference: 1.6207983493804932 at index (0, 2) (up to 1e-05 allowed)
+        Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
+        """
+
+   - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
+
+    ::
+
+        class DropoutRepro2(torch.nn.Module):
+          def __init__(self):
+            super().__init__()
+            self.drop = torch.nn.Dropout()
+
+          def forward(self, x):
+            return self.drop(x)
+
+        traced = torch.fx.symbolic_trace(DropoutRepro2())
+        print(traced.code)
+        """
+        def forward(self, x):
+          drop = self.drop(x);  x = None
+          return drop
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+
+  - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
+
+
 API Reference
 -------------
 
