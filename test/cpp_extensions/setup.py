@@ -49,7 +49,8 @@ if torch.cuda.is_available() and (CUDA_HOME is not None or ROCM_HOME is not None
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
-# todo(mkozuki): Figure out the root cause
+# todo (mkozuki): Enable extension build on Windows.
+# see https://github.com/pytorch/pytorch/pull/67161#issuecomment-958062611
 if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
     cublas_extension = CUDAExtension(
         name='torch_test_cpp_extension.cublas_extension',
@@ -62,6 +63,12 @@ if (not IS_WINDOWS) and torch.cuda.is_available() and CUDA_HOME is not None:
         sources=['cusolver_extension.cpp']
     )
     ext_modules.append(cusolver_extension)
+
+    cusparse_extension = CUDAExtension(
+        name="torch_test_cpp_extension.cusparse_extension",
+        sources=["cusparse_extension.cpp"],
+    )
+    ext_modules.append(cusparse_extension)
 
 setup(
     name='torch_test_cpp_extension',
