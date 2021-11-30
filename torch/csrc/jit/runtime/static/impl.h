@@ -332,6 +332,12 @@ class TORCH_API StaticModule {
       value_to_same_storage_values_;
 
   FastSet<const Node*> node_is_optimizable_container_type_;
+
+  // Includes self if module_ != nullopt.
+  // Note that we might have num_inputs_ == 0 even if the schema has a `self`
+  // argument. In this case, `self` isn't used in the graph, but the schema
+  // includes it anyways to be consistent with the JIT interpreter.
+  size_t num_inputs_;
 };
 
 class TORCH_API StaticRuntime {
@@ -446,12 +452,18 @@ class TORCH_API StaticRuntime {
       const std::unordered_map<std::string, c10::IValue>& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
+  template <typename IValueList>
   void set_inputs(
-      const std::vector<c10::IValue>& args,
+      IValueList&& args,
       const std::unordered_map<std::string, c10::IValue>& kwargs);
-  void set_inputs(
-      std::vector<c10::IValue>&& args,
-      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
+  // depending on overload.
+  void set_arg(const size_t idx, std::vector<IValue>&& args);
+  void set_arg(const size_t idx, const std::vector<IValue>& args);
+
+  // Set Input(idx) to arg. Always copies. Used for kwargs.
+  void set_arg(const size_t idx, const IValue& arg);
 
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
