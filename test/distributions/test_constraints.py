@@ -12,6 +12,10 @@ EXAMPLES = [
     (constraints.positive_definite, False, [[2., 0], [2., 2]]),
     (constraints.symmetric, True, [[3., -5], [-5., 3]]),
     (constraints.positive_definite, False, [[3., -5], [-5., 3]]),
+    (constraints.symmetric, True, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.positive_definite, False, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.symmetric, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
+    (constraints.positive_definite, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
 ]
 
 CONSTRAINTS = [
