@@ -569,6 +569,8 @@ class MultiProcessTestCase(TestCase):
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
             torch._C._set_print_stack_traces_on_fatal_signal(True)
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
