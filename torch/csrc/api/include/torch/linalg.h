@@ -68,6 +68,14 @@ inline Tensor& householder_product_out(Tensor& result, const Tensor& input, cons
   return torch::linalg_householder_product_out(result, input, tau);
 }
 
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor(self, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot) {
+  return torch::linalg_lu_factor_out(LU, pivots, self, pivot);
+}
+
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, const Tensor& b, c10::optional<double> cond, c10::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
@@ -339,6 +347,17 @@ inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, const optiona
 // C10_DEPRECATED_MESSAGE("linalg_norm_out is deprecated, use norm_out instead.")
 inline Tensor& linalg_norm_out(Tensor& result, const Tensor& self, c10::string_view ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm_out(result, self, ord, opt_dim, keepdim, opt_dtype);
+}
+
+/// Computes the pivoted LU factorization
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.lu_factor
+inline std::tuple<Tensor, Tensor> lu_factor(const Tensor& input, const bool pivot=true) {
+  return detail::lu_factor(input, pivot);
+}
+
+inline std::tuple<Tensor&, Tensor&> lu_factor_out(Tensor& LU, Tensor& pivots, const Tensor& self, const bool pivot=true) {
+  return detail::lu_factor_out(LU, pivots, self, pivot);
 }
 
 inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {

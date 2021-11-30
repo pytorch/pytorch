@@ -119,7 +119,7 @@ DEFINE_DISPATCH(linalg_vector_norm_stub);
 // where info helps us identify singular matrices.
 static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Tensor>> _lu_det_P_diag_U(const Tensor& self) {
   Tensor pivs, lu, infos;
-  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors=*/false);
+  std::tie(lu, pivs, infos) = at::linalg_lu_factor_ex(self);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "Invalid argument passed to lu");
   auto n = self.size(-1);
   auto num_exchanges = (at::arange(1, n + 1, pivs.options()) != pivs)
@@ -135,7 +135,7 @@ static inline std::tuple<c10::ExclusivelyOwned<Tensor>, c10::ExclusivelyOwned<Te
 // det(A) = ([is P odd] * -2 + 1) * prod(diag(U))
 std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
   Tensor lu, pivs, infos;
-  std::tie(lu, pivs, infos) = at::_lu_with_info(self, /*pivot=*/true, /*check_errors*/false);
+  std::tie(lu, pivs, infos) = at::linalg_lu_factor_ex(self);
   TORCH_CHECK(infos.ge(0).all().item<uint8_t>(), "at::_det_lu_based_helper(): Invalid argument passed to LU");
 
   // find det(P)
