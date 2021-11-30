@@ -81,6 +81,8 @@ jit_core_headers = [
     "torch/csrc/jit/frontend/parse_string_literal.h",
     "torch/csrc/jit/frontend/schema_type_parser.h",
     "torch/csrc/jit/frontend/error_report.h",
+    "torch/csrc/jit/runtime/shape_functions.h",
+    "torch/csrc/jit/runtime/shape_functions_1.h",
     "torch/csrc/jit/frontend/tree.h",
     "torch/custom_class.h",
     "torch/custom_class_detail.h",
