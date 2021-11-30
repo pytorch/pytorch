@@ -12,8 +12,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
 
@@ -348,7 +348,7 @@ Vectorized<double> inline operator/(const Vectorized<double>& a, const Vectorize
 }
 
 // frac. Implement this here so we can use subtraction.
-Vectorized<double> Vectorized<double>::frac() const {
+inline Vectorized<double> Vectorized<double>::frac() const {
   return *this - this->trunc();
 }
 
@@ -408,27 +408,27 @@ Vectorized<double> inline operator^(const Vectorized<double>& a, const Vectorize
   return _mm512_xor_pd(a, b);
 }
 
-Vectorized<double> Vectorized<double>::eq(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::eq(const Vectorized<double>& other) const {
   return (*this == other) & Vectorized<double>(1.0);
 }
 
-Vectorized<double> Vectorized<double>::ne(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::ne(const Vectorized<double>& other) const {
   return (*this != other) & Vectorized<double>(1.0);
 }
 
-Vectorized<double> Vectorized<double>::gt(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::gt(const Vectorized<double>& other) const {
   return (*this > other) & Vectorized<double>(1.0);
 }
 
-Vectorized<double> Vectorized<double>::ge(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::ge(const Vectorized<double>& other) const {
   return (*this >= other) & Vectorized<double>(1.0);
 }
 
-Vectorized<double> Vectorized<double>::lt(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::lt(const Vectorized<double>& other) const {
   return (*this < other) & Vectorized<double>(1.0);
 }
 
-Vectorized<double> Vectorized<double>::le(const Vectorized<double>& other) const {
+inline Vectorized<double> Vectorized<double>::le(const Vectorized<double>& other) const {
   return (*this <= other) & Vectorized<double>(1.0);
 }
 
