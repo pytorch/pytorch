@@ -1647,7 +1647,7 @@ void parseArgs() {
           m_allocator_backend = kv[1];
           used_cudaMallocAsync = (kv[1].compare("cudaMallocAsync") == 0);
           if (used_cudaMallocAsync) {
-#if CUDA_VERSION > 11400
+#if CUDA_VERSION > 11040
             int version;
             C10_CUDA_CHECK(cudaDriverGetVersion(&version));
             TORCH_CHECK(version >= 11040,
@@ -1675,6 +1675,7 @@ void parseArgs() {
 
 // Public interface
 const char* allocatorBackend() {
+  // Static initializer is thread-safe
   static const std::string backend = []() {
                                        if (!parsed) {
                                          parseArgs();
@@ -1685,6 +1686,7 @@ const char* allocatorBackend() {
 }
 
 size_t maxSplitSize() {
+  // Static initializer is thread-safe
   static const size_t size = []() {
                                if (!parsed) {
                                  parseArgs();

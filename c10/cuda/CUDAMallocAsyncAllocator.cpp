@@ -15,7 +15,7 @@ namespace cuda {
 namespace CUDACachingAllocator {
 namespace CudaMallocAsync {
 
-#if CUDA_VERSION > 11400
+#if CUDA_VERSION > 11040
 // CUDA device allocator that uses cudaMallocAsync to implement
 // the same interface as CUDACachingAllocator.cpp.
 
@@ -592,7 +592,7 @@ void raw_delete(void* ptr) {
 }
 
 #else
-// CUDA_VERSION is < 11400
+// CUDA_VERSION is < 11040
 
 #define NOT_AVAILABLE(name) \
 TORCH_CHECK(false, \

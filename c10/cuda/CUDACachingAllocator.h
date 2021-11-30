@@ -157,7 +157,7 @@ CUDA_ALLOCATOR_BACKEND_INTERFACE
 // The following functions ARE meant to be called directly by clients.
 // They'll choose the appropriate backend based on the runtime value of
 // the PYTORCH_CUDA_ALLOC_CONF environment variable
-// (cf parseArgs in CUDACachingAllocatorConfig.cpp)
+// (cf parseArgs in CUDACachingAllocator.cpp)
 
 inline void* raw_alloc(size_t nbytes) {
   // Lean on the out-of-line call here as the surface at which we choose the allocator backend
