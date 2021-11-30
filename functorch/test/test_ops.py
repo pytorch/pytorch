@@ -230,28 +230,34 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
-        # These are issues that should be fixed in core. See repro in core:
-        # https://github.com/pytorch/functorch/pull/232#discussion_r751405155
+        # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
         xfail('minimum'),
         xfail('min', 'binary'),
         xfail('maximum'),
         xfail('max', 'binary'),
 
-        # Composite ops that do bad things
+        # The following don't have a forward-mode AD formula in PyTorch core
+        # (check derivatives.yaml).
+        xfail('var_mean'),
+        xfail('std_mean'),
+        # https://gist.github.com/zou3519/f62a167fb46cda01d7f238f61dd9ccf9
+        xfail('linalg.eigvalsh'),
+        # https://gist.github.com/zou3519/b86616d01ca375a4bd17403277f49225
+        xfail('nn.functional.dropout', device_type='cuda'),
+
+        # =============================================
+        # NB: The above failures also fail using PyTorch core's
+        #     forward-mode AD and vmap.
+        #     The failures below are functorch-specific issues
+        # =============================================
+
+        # Composite ops that do bad things. Need to be fixed in PyTorch core.
         # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
         xfail('linalg.inv'),
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
         xfail('tensor_split'),
-
-        # Supposed to support forward AD, but actually doesn't
-        xfail('linalg.eigvalsh'),
-        xfail('var_mean'),
-        xfail('std_mean'),
-
-        # fails on cuda
-        xfail('nn.functional.dropout', device_type='cuda'),
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
@@ -439,7 +445,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.poisson_nll_loss'),
         xfail('nn.functional.conv1d', device_type='cuda'),
         xfail('fft.rfft2'),
-        xfail('masked_select'),
         xfail('lu'),
         xfail('_masked.prod'), # calls aten::item
     })
@@ -498,32 +503,32 @@ class TestOperators(TestCase):
         xfail('maximum'),
         xfail('max', 'binary'),
 
-        # =============================================
-        # NB: The above failures also fail in core.
-        #     The failures below only fail in functorch
-        # =============================================
-
-        # Expected the output of forward differentiable view operations
-        # to have the tangent have the same layout as primal
-        xfail('reshape'),  # this is odd
-        xfail('linalg.tensorinv'),
-
-        # Composite ops that do bad things
-        # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
-        xfail('tensor_split'),
-        xfail('linalg.inv'),
-        xfail('linalg.matrix_power'),
-        xfail('linalg.cholesky'),
-
         # Apprently these support forward AD, but we get "Trying to use forward AD..."
         # These are cases where OpInfo has supports_forward_ad=True, but disables the test
         xfail('var_mean'),
         xfail('std_mean'),
         xfail('linalg.eigvalsh'),
 
-        # Other
+        # functorch doesn't support channels_last
+        # PyTorch core's vmap doesn't have a batching rule for `double`, if it 
+        # did it would also not support channels last, so I'm including this
+        # xfail "above the line".
         xfail('double', 'channels_last'),
-        xfail('masked_select'),
+
+        # =============================================
+        # NB: The above failures also fail in PyTorch core.
+        #     The failures below only fail in functorch
+        # =============================================
+
+        # Composite ops that do bad things. Need to be fixed in PyTorch core.
+        # RuntimeError: Cannot access data pointer of Tensor that doesn't have storage
+        xfail('tensor_split'),
+        xfail('linalg.inv'),
+        xfail('linalg.matrix_power'),
+        xfail('linalg.cholesky'),
+
+        # Other
+        xfail('nn.functional.pad', 'circular'),
     })
     def test_vmapjvp(self, device, dtype, op):
          # These are too annoying to put into the list above

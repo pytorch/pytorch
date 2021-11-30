@@ -136,6 +136,25 @@ std::tuple<Tensor,optional<int64_t>> _s_where_batch_rule(
   return std::make_tuple(at::where(condition_, self_, other_), 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    const Tensor& mask, optional<int64_t> mask_bdim) {
+  TORCH_CHECK(!mask_bdim.has_value(),
+      "vmap: Attempted to vmap over `mask` in torch.masked_select(self, mask) ",
+      "We cannot support this because for each batch this would return a ",
+      "differently shaped Tensor. "
+      "Please voice your support in https://github.com/pytorch/functorch/issues/256");
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  const auto batch_size = self_.size(0);
+  const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  const auto max_logical_rank = std::max(self_logical_rank, mask.dim());
+  self_ = maybePadToLogicalRank(self_, 0, max_logical_rank);
+
+  // masked_select returns a 1D tensor, so we have to reshape it into 2D
+  const auto result = at::masked_select(self_, mask).view({ batch_size, -1 });
+  return std::make_tuple(result, 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT(#op"."#overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
@@ -307,7 +326,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #undef SINGLE_ARG
 #undef LOGICAL_COMPARISON_POINTWISE
-
+  VMAP_SUPPORT("masked_select", masked_select_batch_rule);
 }
 
 }}
