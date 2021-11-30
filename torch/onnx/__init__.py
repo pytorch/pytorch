@@ -330,8 +330,6 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     as :func:`export`.
 
     Args:
-      f:  Deprecated and ignored. Will be removed in the next release of
-          PyTorch.
       add_node_names (bool, default True): Whether or not to set
           NodeProto.name. This makes no difference unless
           ``google_printer=True``.
@@ -344,12 +342,6 @@ def export_to_pretty_string(*args, **kwargs) -> str:
     """
     from torch.onnx import utils
     return utils.export_to_pretty_string(*args, **kwargs)
-
-
-def _export_to_pretty_string(*args, **kwargs):
-    from torch.onnx import utils
-    return utils._export_to_pretty_string(*args, **kwargs)
-
 
 def _optimize_trace(graph, operator_export_type):
     from torch.onnx import utils
