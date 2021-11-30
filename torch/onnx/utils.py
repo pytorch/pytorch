@@ -339,6 +339,10 @@ def _signature(model) -> inspect.Signature:
 def _decide_input_format(model, args):
     try:
         sig = _signature(model)
+    except ValueError as e:
+        warnings.warn("%s, skipping _decide_input_format" % e)
+        return args
+    try:
         ordered_list_keys = list(sig.parameters.keys())
         if isinstance(args[-1], dict):
             args_dict = args[-1]
@@ -355,8 +359,6 @@ def _decide_input_format(model, args):
                     else:
                         args.append(param.default)
             args = tuple(args)
-    except ValueError as e:
-        warnings.warn("%s, skipping _decide_input_format" % e)
     # Cases of models with no input args
     except IndexError:
         warnings.warn("No input args, skipping _decide_input_format")
@@ -413,24 +415,23 @@ def _get_param_count_list(method_graph, args_params):
 
 def _resolve_and_flatten_graph_inputs(model, args_params):
     sig = _signature(model)
-    ordered_list_keys = list(sig.parameters.keys())
+    param_keys = list(sig.parameters.keys())
     resolved_args = []  # type: ignore[var-annotated]
     if isinstance(model, torch.jit.ScriptModule) or isinstance(model, torch.jit.ScriptFunction):
         for i, var in enumerate(args_params):
             if var is None:
-                resolved_args += [sig.parameters[ordered_list_keys[i]].default]
+                resolved_args.append(sig.parameters[param_keys[i]].default)
             elif isinstance(var, tuple):
                 for offset, sub_var in enumerate(var):
                     if sub_var is None:
-                        resolved_args += [sig.parameters[ordered_list_keys[i]].default[offset]]
+                        resolved_args.append(sig.parameters[param_keys[i]].default[offset])
                     else:
-                        resolved_args += [sub_var]
+                        resolved_args.append(sub_var)
             else:
-                resolved_args += [var]
+                resolved_args.append(var)
     else:
         resolved_args = args_params
-    resolved_args, _ = torch.jit._flatten(resolved_args)
-    return resolved_args
+    return torch.jit._flatten(resolved_args)[0]
 
 
 def _create_jit_graph(model, args):
