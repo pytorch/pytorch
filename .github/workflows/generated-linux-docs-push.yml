@@ -363,7 +363,8 @@ jobs:
           # set credentials for https pushing
           echo "machine github.com" > ~/.netrc
           echo "login pytorchbot" >> ~/.netrc
-          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> ~/.netrc- uses: seemethere/upload-artifact-s3@v3
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> ~/.netrc
+      - uses: seemethere/upload-artifact-s3@v3
         name: Upload Python Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:

@@ -368,7 +368,7 @@ jobs:
           echo "machine github.com" > ~/.netrc
           echo "login pytorchbot" >> ~/.netrc
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> ~/.netrc
-{%- endif -%}
+{%- endif %}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload Python Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
