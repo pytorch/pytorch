@@ -1,6 +1,7 @@
 from .._src.operator_authoring import pointwise_operator
 from .._src.memory_efficient_op_authoring import memory_efficient_operator_authoring, torchscript_nvfuser_compile
-from .._src.python_key import nnc_jit, make_nnc, register_decomposition, pythonkey_decompose, decomposition_table
+from .._src.python_key import nnc_jit, make_nnc, pythonkey_decompose
+from .._src.decompositions import register_decomposition, decomposition_table
 from .._src.nnc_compile import nnc_compile, get_ops
 from .._src.aot_autograd import (
     compiled_function,
