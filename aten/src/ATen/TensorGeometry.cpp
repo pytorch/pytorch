@@ -1,10 +1,14 @@
 #include <ATen/TensorGeometry.h>
 
+#include <limits>
+#include <cstddef>
+
 namespace at {
 
 // See TensorGeometry.h on why this is useful now that we cache is_contiguous.
 bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides) {
-  int64_t dim = sizes.size();
+  assert(sizes.size() < std::size_t{std::numeric_limits<std::int64_t>::max()});
+  auto dim = static_cast<std::int64_t>(sizes.size());
   int64_t expected_stride = 1;
   bool contig_if_nonempty = true;
   for (int64_t i = dim - 1; i >= 0; i--) {
