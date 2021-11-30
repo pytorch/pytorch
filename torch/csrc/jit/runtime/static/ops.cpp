@@ -529,11 +529,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::abs, aten_abs, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::abs(in0_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::abs_out(in0_t, out_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::abs_out(in0_t, out_t);
   };
 });
 
@@ -549,11 +549,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::mul, aten_mul, [](Node* n) -> SROperator {
     const auto& in1_t = p_node->Input(1).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::mul(in0_t, in1_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::cpu::mul_out(out_t, in0_t, in1_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::cpu::mul_out(out_t, in0_t, in1_t);
   };
 });
 
@@ -571,11 +571,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
     const auto in4_s = p_node->Input(4).toScalar();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::addmm(in0_t, in1_t, in2_t, in3_s, in4_s);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::cpu::addmm_out(out_t, in0_t, in1_t, in2_t, in3_s, in4_s);
   };
 });
 
@@ -625,7 +625,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::bmm, aten_bmm, [](Node* n) -> SROperator {
       p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-
     fastResizeToZero(out_t);
     at::cpu::bmm_out(out_t, in0_t, in1_t);
   };
@@ -644,11 +643,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::nan_to_num, aten_nan_to_num, [](Node* n) -> SROp
     const auto in3_d = p_node->Input(3).toOptional<double>();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::nan_to_num(in0_t, in1_d, in2_d, in3_d);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::nan_to_num_out(in0_t, in1_d, in2_d, in3_d, out_t);
   };
 });
 
@@ -664,11 +663,11 @@ SROperator aten_stack(Node* n) {
     const auto dim = p_node->Input(1).toInt();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::_stack_out_cpu(inputs, dim, out_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::_stack_out_cpu(inputs, dim, out_t);
   };
 }
 
@@ -689,11 +688,11 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = at::native::_stack_cpu(inputs, dim);
-        } else {
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          at::native::_stack_out_cpu(inputs, dim, out_t);
+          return;
         }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::_stack_out_cpu(inputs, dim, out_t);
       };
     });
 
@@ -708,10 +707,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::leaky_relu, aten_leaky_relu, [](Node* n) -> SROp
     const auto in1_s = p_node->Input(1).toScalar();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::leaky_relu(in0_t, in1_s);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    at::cpu::leaky_relu_out(out_t, in0_t, in1_s);
   };
 });
 
@@ -730,11 +729,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::relu, aten_relu, [](Node* n) -> SROperator {
     if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::threshold_out(out_t, in0_t, 0, 0);
-    } else {
-      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      return;
     }
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    int64_t nn = in0_t.numel();
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
 
@@ -753,11 +752,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
     if (!te->checkInput<float>(in0_t)) {
       fastResizeToZero(out_t);
       at::cpu::tanh_out(out_t, in0_t);
-    } else {
-      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+      return;
     }
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    int64_t nn = in0_t.numel();
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
   };
 });
 
@@ -779,11 +778,11 @@ REGISTER_OPERATOR_FUNCTOR(
         if (!te->checkInput<float>(in0_t)) {
           fastResizeToZero(out_t);
           at::cpu::sigmoid_out(out_t, in0_t);
-        } else {
-          at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-          int64_t nn = in0_t.numel();
-          te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
+          return;
         }
+        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+        int64_t nn = in0_t.numel();
+        te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn});
       };
     });
 
@@ -813,12 +812,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
       const auto in1_d = p_node->Input(1).toOptional<double>();
       fastResizeToZero(out_t);
       at::native::logit_out(in0_t, in1_d, out_t);
-    } else {
-      at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
-      int64_t nn = in0_t.numel();
-      float c = clamp_value;
-      te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
+      return;
     }
+    at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+    int64_t nn = in0_t.numel();
+    float c = clamp_value;
+    te->call({out_t.data_ptr(), in0_t.data_ptr(), &nn, &c});
   };
 });
 
@@ -974,11 +973,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::narrow_copy, aten_narrow_copy, [](Node* n) -> SR
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) =
           at::native::narrow_copy_dense_cpu(self, dim, start, length);
-    } else {
-      auto& output = p_node->Output(0).toTensor();
-      fastResizeToZero(output);
-      at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
+      return;
     }
+    auto& output = p_node->Output(0).toTensor();
+    fastResizeToZero(output);
+    at::native::narrow_copy_dense_cpu_out(self, dim, start, length, output);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
@@ -993,11 +992,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
         at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::index(in0_t, in1_l);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::index_out(out_t, in0_t, in1_l);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::index_out(out_t, in0_t, in1_l);
   };
 });
 REGISTER_OPERATOR_FUNCTOR(aten::pow, aten_pow, [](Node* n) -> SROperator {
@@ -1193,14 +1192,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   if (n->inputs().size() != 2 && n->inputs().size() != 4) {
     return nullptr;
   }
-  if (!n->matches(torch::schema(
-          "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor")) &&
-      !n->matches(torch::schema(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-
   if (n->matches(torch::schema(
           "aten::sum(Tensor self, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
@@ -1350,10 +1341,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::repeat(self, repeats);
-    } else {
-      at::Tensor& output = p_node->Output(0).toTensor();
-      at::native::repeat_out(output, self, repeats);
+      return;
     }
+    at::Tensor& output = p_node->Output(0).toTensor();
+    at::native::repeat_out(output, self, repeats);
   };
 });
 
@@ -1366,12 +1357,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::sign(in0_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      at::cpu::sign_out(out_t, in0_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::cpu::sign_out(out_t, in0_t);
   };
 });
 
@@ -1399,12 +1389,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::div(in0_t, in1_t, rounding_mode);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
   };
 });
 
@@ -1417,12 +1406,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::log, aten_log, [](Node* n) -> SROperator {
     const auto& in0_t = p_node->Input(0).toTensor();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::log(in0_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      at::cpu::log_out(out_t, in0_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::cpu::log_out(out_t, in0_t);
   };
 });
 
@@ -1435,11 +1423,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
       const auto alpha = p_node->Input(2).toScalar();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = at::cpu::sub(in0_t, in1_t, alpha);
-      } else {
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
+        return;
       }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
     };
   }
   if (n->matches(torch::schema(
@@ -1451,11 +1439,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::sub, aten_sub, [](Node* n) -> SROperator {
       const auto alpha = p_node->Input(2).toScalar();
       if (p_node->Output(0).isNone()) {
         p_node->Output(0) = at::cpu::sub(in0_t, in1_t, alpha);
-      } else {
-        auto& out_t = p_node->Output(0).toTensor();
-        fastResizeToZero(out_t);
-        at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
+        return;
       }
+      auto& out_t = p_node->Output(0).toTensor();
+      fastResizeToZero(out_t);
+      at::cpu::sub_out(out_t, in0_t, in1_t, alpha);
     };
   }
   LogAndDumpSchema(n);
@@ -1477,11 +1465,11 @@ REGISTER_OPERATOR_FUNCTOR(
         const auto in1_s = p_node->Input(1).toScalar();
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = at::native::clamp_min(in0_t, in1_s);
-        } else {
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          at::native::clamp_min_out(in0_t, in1_s, out_t);
+          return;
         }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::clamp_min_out(in0_t, in1_s, out_t);
       };
     });
 
@@ -1497,15 +1485,15 @@ REGISTER_OPERATOR_FUNCTOR(aten::argmin, aten_argmin, [](Node* n) -> SROperator {
     const auto keepdim = p_node->Input(2).toBool();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::argmin(in0_t, dim, keepdim);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      if (in0_t.is_contiguous() && dim.has_value()) {
-        at::native::c2_argmin_out(out_t, in0_t, dim.value(), keepdim);
-        return;
-      }
-      at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    if (in0_t.is_contiguous() && dim.has_value()) {
+      at::native::c2_argmin_out(out_t, in0_t, dim.value(), keepdim);
+      return;
+    }
+    at::cpu::argmin_out(out_t, in0_t, dim, keepdim);
   };
 });
 
@@ -1521,14 +1509,13 @@ REGISTER_OPERATOR_FUNCTOR(aten::softmax, aten_softmax, [](Node* n) -> SROperator
     const auto& dtype = p_node->Input(2).toOptional<c10::ScalarType>();
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::softmax(in_t, dim, dtype);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-
-      auto half_to_float = in_t.scalar_type() == at::ScalarType::Half &&
-          dtype == at::ScalarType::Float;
-      at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    auto half_to_float = in_t.scalar_type() == at::ScalarType::Half &&
+        dtype == at::ScalarType::Float;
+    at::cpu::_softmax_out(out_t, in_t, dim, half_to_float);
   };
 });
 
@@ -1680,11 +1667,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::matmul, aten_matmul, [](Node* n) -> SROperator {
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::matmul(in0_t, in1_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::matmul_out(in0_t, in1_t, out_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::matmul_out(in0_t, in1_t, out_t);
   };
 });
 
@@ -1834,10 +1821,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::full, aten_full, [](Node* n) -> SROperator {
       const auto pin_memory = p_node->Input(5).toOptional<bool>();
       p_node->Output(0) =
           at::native::full(size, fill_value, dtype, layout, device, pin_memory);
-    } else {
-      p_node->Output(0) =
-          at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
+      return;
     }
+    p_node->Output(0) =
+        at::native::full_out(size, fill_value, p_node->Output(0).toTensor());
   };
 });
 
@@ -1881,11 +1868,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::linear, aten_linear, [](Node* n) -> SROperator {
 
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::native::linear(in0_t, in1_t, in2_t);
-    } else {
-      auto& out_t = p_node->Output(0).toTensor();
-      fastResizeToZero(out_t);
-      at::native::linear_out(out_t, in0_t, in1_t, in2_t);
+      return;
     }
+    auto& out_t = p_node->Output(0).toTensor();
+    fastResizeToZero(out_t);
+    at::native::linear_out(out_t, in0_t, in1_t, in2_t);
   };
 });
 
@@ -1952,7 +1939,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
       p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
       return;
     }
-
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
     at::native::_cat_out_cpu(inputs, dim, output);
@@ -1969,12 +1955,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
     const auto& input = p_node->Input(0).toTensor();
     const auto dim = p_node->Input(1).toInt();
     const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
-
     if (p_node->Output(0).isNone()) {
       p_node->Output(0) = at::cpu::cumsum(input, dim, dtype);
       return;
     }
-
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
     at::cpu::cumsum_out(output, input, dim, dtype);
@@ -1995,7 +1979,6 @@ REGISTER_OPERATOR_FUNCTOR(
           p_node->Output(0) = at::native::nonzero_cpu(input);
           return;
         }
-
         auto& output = p_node->Output(0).toTensor();
         fastResizeToZero(output);
         at::native::nonzero_out_cpu(input, output);
@@ -2031,13 +2014,13 @@ REGISTER_OPERATOR_FUNCTOR(
         auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
           p_node->Output(0) = at::cat(inputs, dim);
-        } else {
-          check_cat_no_zero_dim(inputs);
-          dim = legacy_cat_wrap_dim(dim, inputs);
-          auto& out_t = p_node->Output(0).toTensor();
-          fastResizeToZero(out_t);
-          at::native::_cat_out_cpu(inputs, dim, out_t);
+          return;
         }
+        check_cat_no_zero_dim(inputs);
+        dim = legacy_cat_wrap_dim(dim, inputs);
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::_cat_out_cpu(inputs, dim, out_t);
       };
     });
 
@@ -2121,11 +2104,11 @@ REGISTER_OPERATOR_FUNCTOR(
           if (p_node->Output(0).isNone()) {
             p_node->Output(0) =
                 at::cpu::remainder(self, p_node->Input(1).toTensor());
-          } else {
-            auto& out = p_node->Output(0).toTensor();
-            fastResizeToZero(out);
-            at::cpu::remainder_out(out, self, p_node->Input(1).toTensor());
+            return;
           }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::cpu::remainder_out(out, self, p_node->Input(1).toTensor());
         };
       }
       if (n->matches(torch::schema(
@@ -2135,11 +2118,11 @@ REGISTER_OPERATOR_FUNCTOR(
           if (p_node->Output(0).isNone()) {
             p_node->Output(0) =
                 at::native::remainder(self, p_node->Input(1).toScalar());
-          } else {
-            auto& out = p_node->Output(0).toTensor();
-            fastResizeToZero(out);
-            at::native::remainder_out(self, p_node->Input(1).toScalar(), out);
+            return;
           }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::remainder_out(self, p_node->Input(1).toScalar(), out);
         };
       }
 
