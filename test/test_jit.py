@@ -6579,6 +6579,15 @@ a")
         self.assertEqual(model1.forward(), script_model_1.forward())
         self.assertEqual(model2.forward(), script_model_2.forward())
 
+    def test_ternary_right_associative(self):
+        cu = torch.jit.CompilationUnit('''
+            def plus_123(x: int):
+                return x + 1 if x == 1 else x + 2 if x == 2 else x + 3
+        ''')
+        self.assertEqual(cu.plus_123(1), 2)
+        self.assertEqual(cu.plus_123(2), 4)
+        self.assertEqual(cu.plus_123(3), 6)
+
     def test_print(self):
         def func(x, y):
             q = (x + y).sigmoid()

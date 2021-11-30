@@ -125,13 +125,3 @@ TEST(TorchScriptTest, TestPickle) {
   double eps = 0.0001;
   ASSERT_TRUE(diff < eps && diff > -eps);
 }
-
-TEST(TorchScriptTest, TestTernaryIfRightAssociative) {
-  auto module = torch::jit::compile(R"JIT(
-      def plus_123(x: int):
-        return x + 1 if x == 1 else x + 2 if x == 2 else x + 3
-    )JIT");
-  ASSERT_EQ(2, module->run_method("plus_123", 1).toInt());
-  ASSERT_EQ(4, module->run_method("plus_123", 2).toInt());
-  ASSERT_EQ(6, module->run_method("plus_123", 3).toInt());
-}
