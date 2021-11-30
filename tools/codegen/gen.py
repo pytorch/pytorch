@@ -503,7 +503,11 @@ class ComputeUnboxingWrapper:
         sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
 
         def generate_defn(faithful: bool) -> str:
-            sig = sig_group.most_faithful_signature()
+            if faithful:
+                sig = sig_group.faithful_signature
+                assert sig is not None
+            else:
+                sig = sig_group.signature
 
             # escape double quote in schema, get rid of extra double quotes
             schema = json.dumps(sig.func.__str__())[1:-1]
@@ -519,11 +523,7 @@ OperatorGenerator(
 ),
 """
 
-        result = generate_defn(False)
-        if sig_group.faithful_signature is not None:
-            result += generate_defn(True)
-
-        return result
+        return generate_defn(False)
 
 
 # Generates ATenOpList.cpp, a runtime accessible list of all aten

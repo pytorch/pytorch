@@ -233,16 +233,16 @@ pack(stack, std::move(result_));
         assert self_arg is not None, "No self argument"
         arg_list = arg_connector.join(
             [arguments[a.name].val_name for a in sig.arguments() if a.name != self_arg.argument.name])
+        if arg_list:
+            arg_list = f"\n\t{arg_list}\n"
         function_call = f"""
-{ret_str}{arguments[self_arg.argument.name].val_name}.{sig.name()}(
-    {arg_list}
-);
+{ret_str}{arguments[self_arg.argument.name].val_name}.{sig.name()}({arg_list});
     """
     else:
         arg_list = arg_connector.join([arguments[a.name].val_name for a in sig.arguments()])
+        if arg_list:
+            arg_list = f"\n\t{arg_list}\n"
         function_call = f"""
-{ret_str}{namespace}::{sig.name()}(
-    {arg_list}
-);
+{ret_str}{namespace}::{sig.name()}({arg_list});
     """
     return (function_call + push_str).split('\n')
