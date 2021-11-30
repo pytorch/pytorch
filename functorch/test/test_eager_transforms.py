@@ -1071,7 +1071,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z['right'], tuple))
         self.assertEqual(z, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_inputs_pytree(self, device, jacapi):
         def f(a, b, c):
             a0, a1 = a
@@ -1095,6 +1095,21 @@ class TestJac(TestCase):
         result = jacapi(f )(*args)
         expected = (torch.tensor(1., device=device), torch.tensor(2., device=device))
         self.assertEqual(result, expected)
+
+    @jacrev_and_jacfwd
+    def test_dimensionality(self, device, jacapi):
+        def f(x):
+            return x
+
+        x = torch.randn([], device=device)
+        result = jacapi(f)(x)
+        self.assertEqual(result.dim(), 0)
+        self.assertEqual(result, torch.ones_like(x))
+
+        x = torch.randn([1], device=device)
+        result = jacapi(f)(x)
+        self.assertEqual(result.dim(), 2)
+        self.assertEqual(result, x.new_ones(1, 1))
 
     @FIXME_jacrev_only
     def test_multiple_inputs_outputs_pytree(self, device, jacapi):
@@ -1213,7 +1228,7 @@ class TestJac(TestCase):
     @jacrev_and_jacfwd
     def test_argnums_defaults_to_zero(self, device, jacapi):
         def f(x, y):
-            return x * 2 + y * 3 
+            return x * 2 + y * 3
 
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
