@@ -623,7 +623,6 @@ struct TORCH_API TensorType : public Type {
     return copy;
   }
 
-
   TensorTypePtr withDim(c10::optional<size_t> d) {
     auto copy = clone();
     // withDim is only used by the legacy executor

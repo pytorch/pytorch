@@ -818,6 +818,27 @@ void initPythonIRBindings(PyObject* module_) {
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
+          "device",
+          [](Type& t) -> py::object {
+            auto device =
+                t.shared_from_this()->expectRef<TensorType>().device();
+            if (!device) {
+              return py::none();
+            }
+            PyObject* thp_device = THPDevice_New(device.value());
+            return py::reinterpret_borrow<py::object>(thp_device);
+            // return toPyObject(device.value());
+          })
+      .def(
+          "with_device",
+          [](Type& t, py::object device) -> py::object {
+            at::Device c_device = python::detail::py_object_to_device(device);
+            if (auto ptt = t.expect<TensorType>()) {
+              return py::cast(ptt->withDevice(c_device));
+            }
+            return py::none();
+          })
+      .def(
           "dtype",
           [](Type& t) -> py::object {
             auto scalar_type =
