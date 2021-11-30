@@ -1268,7 +1268,6 @@ class TestJac(TestCase):
         with self.assertRaisesRegex(RuntimeError, "must be int"):
             z = jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
-    @unittest.expectedFailure
     def test_hessian_simple(self, device):
         def f(x):
             return x.sin()
