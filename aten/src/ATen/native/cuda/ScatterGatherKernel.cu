@@ -84,11 +84,11 @@ static void _launch_scatter_gather_kernel(int64_t N, const func_t& f) {
   const auto stream = at::cuda::getCurrentCUDAStream();
 
 #if defined(USE_ROCM)
-  if (nt == 64) {
-    _scatter_gather_elementwise_kernel<64, vt, func_t>
-        <<<grid, block, 0, stream>>>(N, f);
-  } else if (nt == 128) {
+  if (nt == 128) {
     _scatter_gather_elementwise_kernel<128, vt, func_t>
+        <<<grid, block, 0, stream>>>(N, f);
+  } else if (nt == 256) {
+    _scatter_gather_elementwise_kernel<256, vt, func_t>
         <<<grid, block, 0, stream>>>(N, f);
   }
 #else

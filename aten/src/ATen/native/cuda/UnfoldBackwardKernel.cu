@@ -51,11 +51,11 @@ static void _launch_unfold_backward_kernel(int total_n_elems, func_t f) {
   auto stream = at::cuda::getCurrentCUDAStream();
 
 #if defined(USE_ROCM)
-  if (n_threads == 64) {
-      _unfold_backward_elementwise_kernel<64, n_elems_per_thread, func_t>
-          <<<grid, block, 0, stream>>>(total_n_elems, f);
-    } else if (n_threads == 128) {
+  if (n_threads == 128) {
       _unfold_backward_elementwise_kernel<128, n_elems_per_thread, func_t>
+          <<<grid, block, 0, stream>>>(total_n_elems, f);
+    } else if (n_threads == 256) {
+      _unfold_backward_elementwise_kernel<256, n_elems_per_thread, func_t>
           <<<grid, block, 0, stream>>>(total_n_elems, f);
   }
 #else
