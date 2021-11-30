@@ -8,6 +8,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from string import Template
 from typing import (
     Any,
     BinaryIO,
@@ -19,10 +20,7 @@ from typing import (
     Set,
     Union,
     cast,
-    Tuple,
 )
-from string import Template
-import pdb
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -44,11 +42,16 @@ ActionHook = Callable[["PackageExporter", str], None]
 
 # list of modules which selectively interned by default. These are generally unstable
 #  modules which should not be externed due to lack of backwards compatibility
-DEFAULT_SELECTIVE_INTERN_LIST = {}
 
-DEFAULT_SELECTIVE_INTERN_LIST = {"torch":
-    ["torch.fb",
-    "torch.quantization"]}
+DEFAULT_SELECTIVE_INTERN_LIST = {
+    "torch": [
+        "torch.fb",
+        "torch.quantization",
+        "torch.fx",
+        "torch.testing._internal.quantization_torch_package_models",
+    ]
+}
+
 
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
@@ -69,8 +72,7 @@ class _ModuleProviderAction(Enum):
     # (`torch_package_importer`) that allows packaged code to access it. Don't
     # re-export this.
     SKIP = 6
-    SELECTIVE_INTERN = 7
-    SELECTIVE_EXTERN = 8
+    SELECTIVE_EXTERN = 7
 
 
 class PackagingErrorReason(Enum):
@@ -191,7 +193,7 @@ class PackageExporter:
     def __init__(
         self,
         f: Union[str, Path, BinaryIO],
-        importer: Union[Importer, Sequence[Importer]] = sys_importer
+        importer: Union[Importer, Sequence[Importer]] = sys_importer,
     ):
         """
         Create an exporter.
@@ -243,9 +245,16 @@ class PackageExporter:
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
         self._selective_interns: Dict[str, [str]] = {}
+        self._inverse_default_selective_intern_list = {}
         for (package_name, interned_packages) in DEFAULT_SELECTIVE_INTERN_LIST.items():
             if self._module_exists(package_name):
-                self._selective_intern(package_name, interned_packages, allow_empty=True)
+                self._selective_intern(
+                    package_name, interned_packages, allow_empty=True
+                )
+            for interned_package in interned_packages:
+                self._inverse_default_selective_intern_list[
+                    interned_package
+                ] = package_name
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -443,7 +452,6 @@ class PackageExporter:
             and self.dependency_graph.nodes[module_name].get("provided") is True
         ):
             return
-
         # Special case: PackageImporter provides a special module called
         # `torch_package_importer` that allows packaged modules to reference
         # their PackageImporter. We don't want to re-export this.
@@ -463,9 +471,7 @@ class PackageExporter:
             )
             return
 
-        is_selective_extern = self._check_if_selectively_externed(module_name)
-
-        if self._can_implicitly_extern(module_name) and not is_selective_extern:
+        if self._can_implicitly_extern(module_name):
             self.dependency_graph.add_node(
                 module_name, action=_ModuleProviderAction.EXTERN, provided=True
             )
@@ -486,24 +492,29 @@ class PackageExporter:
 
                 # If we are interning this module, we need to retrieve its
                 # dependencies and package those as well.
-                if action == _ModuleProviderAction.INTERN or action == _ModuleProviderAction.SELECTIVE_INTERN:
+                if action == _ModuleProviderAction.INTERN:
                     self._intern_module(module_name, dependencies)
                 if action == _ModuleProviderAction.SELECTIVE_EXTERN:
                     module_obj = self._import_module(module_name)
                     is_package = hasattr(module_obj, "__path__")
                     source = self._get_source_of_module(module_obj)
+
+                    assert is_package
+                    assert source
+
                     self.dependency_graph.add_node(
-                    module_name, action=_ModuleProviderAction.SELECTIVE_EXTERN, provided=True, source=source, is_package=is_package)
-                    for interned_module in self._selective_interns[module_name]:
-                        if interned_module not in self.dependency_graph:
-                            self._intern_module(interned_module, dependencies)
+                        module_name,
+                        action=_ModuleProviderAction.SELECTIVE_EXTERN,
+                        provided=True,
+                        source=source,
+                        is_package=is_package,
+                    )
                 return
 
         # No patterns have matched. Explicitly add this as an error.
         self.dependency_graph.add_node(
             module_name, error=PackagingErrorReason.NO_ACTION
         )
-        # pdb.set_trace()
 
     def save_module(self, module_name: str, dependencies=True):
         """Save the code for ``module`` into the package. Code for the module is resolved using the ``importers`` path to find the
@@ -705,40 +716,44 @@ class PackageExporter:
         self._intern_hooks[handle.id] = hook
         return handle
 
-    #TODO: can we replace interned_packages with an include/exclude and use a GlobGroup/pattern
+    # TODO: can we replace interned_packages with an include/exclude and use a GlobGroup/pattern
     # so things don't have to be so explicit
 
     def _selective_intern(
-        self,
-        package_name: str,
-        interned_packages: [str],
-        allow_empty: bool = True
+        self, package_name: str, interned_modules: [str], allow_empty: bool = True
     ):
-        """Specify extra modules not included in DEFAULT_SELECTIVE_INTERN_LIST that should be selectively interned that should be packaged.
-
+        """Specify extra modules not included in DEFAULT_SELECTIVE_INTERN_LIST that should be selectively interned
+            that should be packaged.
         Args:
-            include (Union[List[str], str]): A string e.g. "my_package.my_subpackage", or list of strings
-                for the names of the modules to be externed. This can also be a glob-style pattern, as described in :meth:`mock`.
+            package_name: name of selectively externed package which contains the interned modules
 
-            interned_packages: packages we are interning and expect to use in the source code that will be packaged
+            interned_modules: modules we are interning and expect to use in the source code that will be packaged
+                              and are submodules of package_name.
+
+
+            allow_empty (bool): An optional flag that specifies whether the intern modules specified by this call
+                to the ``intern`` method must be matched to some module during packaging. If an ``intern`` module glob
+                pattern is added with ``allow_empty=False``, and :meth:`close` is called (either explicitly or via ``__exit__``)
+                before any modules match that pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
 
         """
         assert self._module_exists(package_name), package_name
         if package_name not in self._selective_interns:
             self._selective_interns[package_name] = set()
-        self._selective_interns[package_name].update(interned_packages)
+        self._selective_interns[package_name].update(interned_modules)
         included_packages_in_pattern = []
 
         self.patterns[GlobGroup(include=package_name)] = _PatternInfo(
             _ModuleProviderAction.SELECTIVE_EXTERN, allow_empty
         )
-        interned_package_patterns = [f'{package}.**' for package in interned_packages]
+        interned_package_patterns = [f"{package}.**" for package in interned_modules]
         self.patterns[GlobGroup(include=interned_package_patterns)] = _PatternInfo(
-            _ModuleProviderAction.SELECTIVE_INTERN, allow_empty
+            _ModuleProviderAction.INTERN, allow_empty
         )
-        self.patterns[GlobGroup(include=f'{package_name}.*', exclude=interned_package_patterns)] = _PatternInfo(
-            _ModuleProviderAction.EXTERN, allow_empty
-        )
+        interned_package_patterns.append(package_name)
+        self.patterns[
+            GlobGroup(include=f"{package_name}.**", exclude=interned_package_patterns)
+        ] = _PatternInfo(_ModuleProviderAction.EXTERN, allow_empty)
 
     def intern(
         self,
@@ -1005,21 +1020,32 @@ class PackageExporter:
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
             elif action == _ModuleProviderAction.SELECTIVE_EXTERN:
-                # pdb.set_trace()
                 is_package = attrs["is_package"]
                 source = attrs["source"]
-                # pdb.set_trace()
-                if is_package and source:
-                    selective_extern_template_file = str(Path(__file__).parent / "_selective_extern.py")
-                    selective_extern_file_template = Template(_read_file(selective_extern_template_file))
+                selective_extern_template_file = str(
+                    Path(__file__).parent / "_selective_extern.py"
+                )
+                selective_extern_file_template = Template(
+                    _read_file(selective_extern_template_file)
+                )
 
-                    matches = self._selective_interns[module_name]
-                    original_init = self._get_source_of_module(self._import_module(module_name))
-                    assert original_init
-                    interned_modules = ", ".join(f"\"{match[len(module_name) + 1:]}\"" for match in matches)
-                    source = "\n\n".join([original_init, selective_extern_file_template.substitute(interned_modules=interned_modules, package_name=f"\"{module_name}\"")])
-                    self._write_source_string(module_name, source, is_package)
-
+                matches = self._selective_interns[module_name]
+                original_init = self._get_source_of_module(
+                    self._import_module(module_name)
+                )
+                assert original_init
+                interned_modules = ", ".join(
+                    f'"{match[len(module_name) + 1:]}"' for match in matches
+                )
+                source = "\n\n".join(
+                    [
+                        selective_extern_file_template.substitute(
+                            interned_modules=interned_modules,
+                            package_name=f'"{module_name}"',
+                        )
+                    ]
+                )
+                self._write_source_string(module_name, source, is_package)
 
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
                 self._write_mock_file()
@@ -1057,13 +1083,6 @@ class PackageExporter:
         resource = _normalize_path(resource)
         return f"{package_path}/{resource}"
 
-    def _check_if_selectively_interned(self, module_name: str) -> bool:
-        for pattern, pattern_info in self.patterns.items():
-            if pattern_info.action == _ModuleProviderAction.SELECTIVE_INTERN:
-                if pattern.matches(module_name):
-                    return True
-        return False
-
     def _check_if_selectively_externed(self, module_name: str) -> bool:
         for pattern, pattern_info in self.patterns.items():
             if pattern_info.action == _ModuleProviderAction.SELECTIVE_EXTERN:
@@ -1075,9 +1094,8 @@ class PackageExporter:
         top_level_package_name = module_name.partition(".")[0]
         if self._check_if_selectively_externed(module_name):
             return False
-        return (top_level_package_name == "torch") or (
-            top_level_package_name not in _DISALLOWED_MODULES
-            and is_stdlib_module(top_level_package_name)
+        return top_level_package_name not in _DISALLOWED_MODULES and is_stdlib_module(
+            top_level_package_name
         )
 
     def dependency_graph_string(self) -> str:
@@ -1159,7 +1177,8 @@ class PackageExporter:
 
 # even though these are in the standard library, we do not allow them to be
 # automatically externed since they offer a lot of system level access
-_DISALLOWED_MODULES = ["sys", "io"]
+# _DISALLOWED_MODULES = ["sys", "io"]
+_DISALLOWED_MODULES = ["io"]
 
 _MOCK_IMPL = """\
 from _mock import MockedObject

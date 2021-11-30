@@ -89,7 +89,10 @@ class PackageImporter(Importer):
                     f"package '{file_or_buffer}' needs the external module '{extern_module}' "
                     f"but that module has been disallowed"
                 )
-            self._add_extern(extern_module)
+            if extern_module in self.selective_extern_packages:
+                self._add_selective_extern(extern_module)
+            else:
+                self._add_extern(extern_module)
 
         for fname in self.zip_reader.get_all_records():
             self._add_file(fname)
@@ -303,7 +306,7 @@ class PackageImporter(Importer):
                 .decode("utf-8")
                 .splitlines(keepends=False)
             )
-        except:
+        except BaseException:
             return []
 
     def _make_module(
@@ -364,11 +367,16 @@ class PackageImporter(Importer):
                     name=name,
                 )
             cur = cur.children[atom]
-            if isinstance(cur, _ExternNode):
+            if isinstance(cur, (_ExternNode, _SelectiveExternNode)):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
 
-        return self._make_module(name, cur.source_file, isinstance(cur,(_SelectiveInternNode, _PackageNode)), parent)  # type: ignore[attr-defined]
+        return self._make_module(
+            name,
+            cur.source_file,
+            isinstance(cur, (_SelectiveInternNode, _PackageNode)),
+            parent,
+        )  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -554,18 +562,23 @@ class PackageImporter(Importer):
         else:
             return f"{name.replace('.', '/')}"
 
+    # TODO: properly assign SELECTIVE_EXTERN Nodes
     def _get_or_create_package(
         self, atoms: List[str]
-    ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode]":
+    ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode, _SelectiveExternNode]":
         cur = self.root
-        if len(atoms) == 1 and atoms[0] in self.selective_extern_packages and atoms[0] not in cur.children:
+        if (
+            len(atoms) == 1
+            and atoms[0] in self.selective_extern_packages
+            and atoms[0] not in cur.children
+        ):
             node = cur.children[atoms[0]] = _SelectiveInternNode()
             return node
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
             if node is None:
                 node = cur.children[atom] = _PackageNode(None)
-            if isinstance(node, _ExternNode):
+            if isinstance(node, (_ExternNode, _SelectiveExternNode)):
                 return node
             if isinstance(node, _ModuleNode):
                 name = ".".join(atoms[:i])
@@ -586,11 +599,11 @@ class PackageImporter(Importer):
         if len(prefix) > 1 and prefix[0] == ".data":
             return
         package = self._get_or_create_package(prefix)
-        # if isinstance(package, _ExternNode):
-        #     raise ImportError(
-        #         f"inconsistent module structure. package contains a module file {filename}"
-        #         f" that is a subpackage of a module marked external."
-        #     )
+        if isinstance(package, _ExternNode):
+            raise ImportError(
+                f"inconsistent module structure. package contains a module file {filename}"
+                f" that is a subpackage of a module marked external."
+            )
         if last == "__init__.py":
             package.source_file = filename
         elif last.endswith(".py"):
@@ -603,6 +616,13 @@ class PackageImporter(Importer):
         if isinstance(package, _ExternNode):
             return  # the shorter extern covers this extern case
         package.children[last] = _ExternNode()
+
+    def _add_selective_extern(self, selective_extern_name: str):
+        *prefix, last = selective_extern_name.split(".")
+        package = self._get_or_create_package(prefix)
+        if isinstance(package, _SelectiveExternNode):
+            return  # the shorter extern covers this extern case
+        package.children[last] = _SelectiveExternNode()
 
 
 _NEEDS_LOADING = object()
@@ -628,12 +648,20 @@ class _ModuleNode(_PathNode):
 
     def __init__(self, source_file: str):
         self.source_file = source_file
+
     def __repr__(self):
         return f"Module[{self.source_file}]"
 
+
 class _ExternNode(_PathNode):
     def __repr__(self):
-        return f"Extern"
+        return "Extern"
+
+
+class _SelectiveExternNode(_PathNode):
+    def __repr__(self):
+        return "Selective Extern"
+
 
 class _SelectiveInternNode(_PathNode):
     def __init__(self, source_file: Optional[str] = None):
@@ -641,7 +669,7 @@ class _SelectiveInternNode(_PathNode):
         self.children: Dict[str, _PathNode] = {}
 
     def __repr__(self):
-        return f"SelectiveIntern"
+        return "SelectiveIntern"
 
 
 # A private global registry of all modules that have been package-imported.
