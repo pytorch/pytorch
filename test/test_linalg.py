@@ -5772,7 +5772,7 @@ class TestLinalg(TestCase):
                 torch.linalg.householder_product(reflectors, tau)
 
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_linalg_lu_factor_and_lu(self, device, dtype):
@@ -5830,8 +5830,8 @@ class TestLinalg(TestCase):
             # This is also a bug in cuSOLVER < 11.3
             if (dtype == torch.double
                and singular
-               and torch.version.cuda is not None
-               and torch.version.cuda.split('.') >= ["11", "3"]):
+               and (torch.version.cuda is None or
+                    torch.version.cuda.split('.') >= ["11", "3"])):
                 A = torch.ones(batch + ms, dtype=dtype, device=device)
                 run_test(A, pivot, singular, fn)
 
@@ -7295,7 +7295,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
 
     @skipCUDAIf(torch.version.cuda is not None
                 and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
-    @skipCUDAIfNoMagma
+    @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_det_logdet_slogdet(self, device, dtype):
