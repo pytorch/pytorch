@@ -21,12 +21,9 @@
 #undef THPStorageClass
 #undef THPStorageType
 
-#undef THWStorage
-#undef THWStorage_
 #undef THWTensor
 #undef THWTensor_
 
-#undef THWStoragePtr
 #undef THPStoragePtr
 #undef THWTensorPtr
 #undef THPTensorPtr
@@ -48,5 +45,3 @@
 
 #undef THHostTensor
 #undef THHostTensor_
-#undef THHostStorage
-#undef THHostStorage_

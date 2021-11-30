@@ -224,12 +224,9 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
-    @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
+    @ops([_fn for _fn in unary_ufuncs if _fn.domain != (None, None)],
+         allowed_dtypes=floating_types_and(torch.bfloat16, torch.half))
     def test_float_domains(self, device, dtype, op):
-        if not op.supports_dtype(dtype, torch.device(device).type):
-            raise unittest.SkipTest('unsupported dtype')
-
         eps = (1e-5, 1e-3, 1e-1, 1, 2, 10, 20, 50, 100)
 
         low, high = op.domain

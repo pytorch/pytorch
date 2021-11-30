@@ -7,7 +7,7 @@
 
 /**** creation methods ****/
 
-THCTensor *THCTensor_(newWithStorage1d)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset,
+THCTensor *THCTensor_(newWithStorage1d)(THCState *state, c10::StorageImpl *storage, ptrdiff_t storageOffset,
                                int64_t size0, int64_t stride0)
 {
   c10::raw::intrusive_ptr::incref(storage);
