@@ -294,7 +294,7 @@ class CallbackManager {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
-          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+          rec_fn.state_.emplace(scope);
         }
         rec_fn.state_->sorted_active_tls_handles_.push_back(cb.handle);
       }
@@ -312,7 +312,7 @@ class CallbackManager {
           found_needs_ids = true;
         }
         if (!rec_fn.state_) {
-          rec_fn.state_ = std::make_unique<RecordFunction::State>(scope);
+          rec_fn.state_.emplace(scope);
         }
         rec_fn.state_->sorted_active_global_handles_.push_back(cb.handle);
       }
