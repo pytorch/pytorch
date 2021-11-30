@@ -566,6 +566,9 @@ void Reducer::autograd_hook(size_t index) {
     return;
   }
 
+  auto param_name = param_names_.find(index);
+  std::string n = param_name != param_names_.end() ? param_name->second : "";
+  if (process_group_->getRank() == 0 ) LOG(INFO) << "HOOK FIRED FOR IDX: " << index << " with param name: " << n;
   grad_ready_order_indices_.push_back(index);
 
   // See Note [Skip allreducing local_used_map_dev]
@@ -1192,6 +1195,9 @@ void Reducer::populate_bucket_views_out(
 
 void Reducer::prepare_for_forward() {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (process_group_->getRank()==0) {
+    LOG(INFO) << "PREP FOR FORWARD";
+  }
   num_iterations_++;
   if (should_collect_runtime_stats()) {
     record_forward_compute_start_time();

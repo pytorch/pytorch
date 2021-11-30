@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import timedelta
 from itertools import product
 from unittest import mock
@@ -48,6 +48,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     sandcastle_skip,
+    instantiate_parametrized_tests,
+    parametrize,
     sandcastle_skip_if,
 )
 from torch.utils.checkpoint import checkpoint
@@ -2024,25 +2026,47 @@ class DistributedDataParallelTest(
     # Most of the tests are referred to
     # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
-        def __init__(self):
+        def __init__(self, use_reentrant=True):
             super().__init__()
             self.l1 = nn.Linear(20, 20)
             self.l2 = nn.Linear(20, 20)
+            self.use_reentrant = use_reentrant
 
         def forward(self, inp):
             x = self.l1(inp)
-            x = checkpoint(self.l2, x)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
             return x
 
     class CheckpointTwiceModule(CheckpointOnceModule):
-        def __init__(self):
-            super().__init__()
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
 
         def forward(self, inp):
             x = self.l1(inp)
-            x = checkpoint(self.l2, x)
-            x = checkpoint(self.l2, x)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
+            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
             return x
+
+
+    class DynamicCheckpointTwiceModule(CheckpointTwiceModule):
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+            self.count = 0
+
+        def forward(self, inp):
+            if self.count % 2:
+                x = checkpoint(self.l1, inp, use_reentrant=self.use_reentrant)
+            else:
+                x = checkpoint(self.l2, inp, use_reentrant=self.use_reentrant)
+
+            self.count += 1
+            return x
+
+    class DynamicCheckpointTwiceModuleWeightSharing(DynamicCheckpointTwiceModule):
+        def __init__(self, use_reentrant=True):
+            super().__init__(use_reentrant=use_reentrant)
+            self.l1.weight = self.l2.weight
+
 
     def _prepare_dummy_data(self):
         ddp_bs = 16
@@ -2054,10 +2078,10 @@ class DistributedDataParallelTest(
         ddp_target = target[offset : offset + ddp_bs]
         return input, ddp_input, target, ddp_target
 
-    def _train_model(self, model, input_var, target, loss, run_checkpoint=False):
+    def _train_model(self, model, input_var, target, loss, run_checkpoint=False, use_reentrant=True):
         model.train()
         if run_checkpoint:
-            output = checkpoint(model, input_var)
+            output = checkpoint(model, input_var, use_reentrant=use_reentrant)
         else:
             output = model(input_var)
         l = loss(output, target)
@@ -2071,6 +2095,8 @@ class DistributedDataParallelTest(
         find_unused_parameters=False,
         static_graph=False,
         run_checkpoint=False,
+        use_reentrant=True,
+        allow_none_grads=False,
     ):
         # to reprodce the same training results
         torch.cuda.set_device(self.rank)
@@ -2092,27 +2118,30 @@ class DistributedDataParallelTest(
         )
         input, ddp_input, target, ddp_target = self._prepare_dummy_data()
         loss = nn.MSELoss()
-        for i in range(5):
+        n_iters = 5
+        for i in range(n_iters):
             model.zero_grad(set_to_none=False)
             ddp_model.zero_grad(set_to_none=False)
-            self._train_model(model, input, target, loss, run_checkpoint=run_checkpoint)
+            self._train_model(model, input, target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant)
             self._train_model(
-                ddp_model, ddp_input, ddp_target, loss, run_checkpoint=run_checkpoint
+                ddp_model, ddp_input, ddp_target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant
             )
             for i, j in zip(model.parameters(), ddp_model.parameters()):
-                self.assertTrue(i.grad is not None)
-                self.assertTrue(j.grad is not None)
+                if not allow_none_grads:
+                    self.assertTrue(i.grad is not None)
+                    self.assertTrue(j.grad is not None)
                 self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
     # DDP works as expect when layer is checkpointed only once
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_once(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_once(self, use_reentrant):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view, static_graph in product((False, True), (False, True)):
             self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(),
+                self.CheckpointOnceModule(use_reentrant=use_reentrant),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
                 static_graph=static_graph,
@@ -2121,16 +2150,21 @@ class DistributedDataParallelTest(
     # DDP will fail when there are unused_parameters in the model
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_unused_params(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_unused_params(self, use_reentrant):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected to mark a variable ready only once.",
-            ):
+            err_ctx = (
+                suppress() if not use_reentrant else
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to mark a variable ready only once."
+                )
+            )
+            with err_ctx:
                 model = self._test_ddp_checkpointing(
-                    self.CheckpointOnceModule(),
+                    self.CheckpointOnceModule(use_reentrant=use_reentrant),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     find_unused_parameters=True,
@@ -2138,7 +2172,7 @@ class DistributedDataParallelTest(
                 )
             # test passes when static_graph is true
             model = self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(),
+                self.CheckpointOnceModule(use_reentrant=use_reentrant),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
                 find_unused_parameters=True,
@@ -2148,31 +2182,73 @@ class DistributedDataParallelTest(
     # DDP will fail when the same layer is checkponted twice
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_twice(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_twice(self, use_reentrant):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Expected to mark a variable ready only once.",
-            ):
+            err_ctx = (
+                suppress() if not use_reentrant else
+                self.assertRaisesRegex(
+                    RuntimeError,
+                    "Expected to mark a variable ready only once."
+                )
+            )
+            with err_ctx:
                 model = self._test_ddp_checkpointing(
-                    self.CheckpointTwiceModule(),
+                    self.CheckpointTwiceModule(use_reentrant=use_reentrant),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     static_graph=False,
                 )
             model = self._test_ddp_checkpointing(
-                self.CheckpointTwiceModule(),
+                self.CheckpointTwiceModule(use_reentrant=use_reentrant),
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
                 static_graph=True,
             )
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [False])
+    def test_ddp_dynamic_checkpoint(self, use_reentrant):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.DynamicCheckpointTwiceModule(use_reentrant=use_reentrant),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=False,
+                find_unused_parameters=True,
+                # Grads can be none sometimes due to dynamic module not using
+                # all params.
+                allow_none_grads=True
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_reentrant", [False])
+    def test_ddp_dynamic_checkpoint_weight_sharing(self, use_reentrant):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.DynamicCheckpointTwiceModuleWeightSharing(use_reentrant=use_reentrant),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=False,
+                find_unused_parameters=True,
+                # Grads can be none sometimes due to dynamic module not using
+                # all params.
+                allow_none_grads=True
+            )
+
     # DDP works as expected if there is weight sharing among layers
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_weight_sharing(self):
+    @parametrize("use_reentrant", [True, False])
+    def test_ddp_checkpointing_weight_sharing(self, use_reentrant):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         torch.cuda.set_device(self.rank)
@@ -2186,8 +2262,9 @@ class DistributedDataParallelTest(
                 model,
                 process_group=process_group,
                 use_bucket_view=use_bucket_view,
-                static_graph=static_graph,
+                static_graph=True,
                 run_checkpoint=True,
+                use_reentrant=use_reentrant,
             )
 
 
@@ -2671,6 +2748,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
+
+instantiate_parametrized_tests(DistributedDataParallelTest)
 
 if __name__ == "__main__":
     assert (

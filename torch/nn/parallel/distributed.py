@@ -881,7 +881,13 @@ class DistributedDataParallel(Module, Joinable):
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            # When non-reentrant checkpointing us used, check if we are
+            # recomputing the forward pass and if so, bypass logic that we
+            # bypass when torch.is_grad_enabled is False. Traditional reentrant
+            # backward checkpointing does not run into this issue
+            ckpt_recomputing = hasattr(self, '_recomputing') and self._recomputing
+            print(f"Recomputing: {ckpt_recomputing}")
+            if not ckpt_recomputing and torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
                 self.reducer.prepare_for_forward()
@@ -900,7 +906,7 @@ class DistributedDataParallel(Module, Joinable):
             # call _rebuild_buckets before the peak memory usage increases
             # during forward computation.
             # This should be called only once during whole training period.
-            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+            if not ckpt_recomputing and torch.is_grad_enabled() and self.reducer._rebuild_buckets():
                 logging.info("Reducer buckets have been rebuilt in this iteration.")
                 self._has_rebuilt_buckets = True
 
@@ -925,7 +931,7 @@ class DistributedDataParallel(Module, Joinable):
             if self._check_sync_bufs_post_fwd():
                 self._sync_buffers()
 
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            if not ckpt_recomputing and torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.require_forward_param_sync = True
                 # We'll return the output object verbatim since it is a freeform
                 # object. We need to find any tensors in this object, though,
