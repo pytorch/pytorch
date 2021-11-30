@@ -194,7 +194,7 @@ def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool
     return wrapper_cls(module, **wrap_overrides)
 
 
-def recursive_wrap(
+def _recursive_wrap(
     module: nn.Module,
     auto_wrap_policy: Callable,
     wrapper_cls: Callable,
@@ -227,7 +227,7 @@ def recursive_wrap(
         total_wrapped_params = 0
         # Iterate through the children, recursively wrap if necessary
         for name, child in module.named_children():
-            wrapped_child, num_wrapped_params = recursive_wrap(
+            wrapped_child, num_wrapped_params = _recursive_wrap(
                 module=child, auto_wrap_policy=auto_wrap_policy, wrapper_cls=wrapper_cls, **kwargs
             )
             setattr(module, name, wrapped_child)
@@ -349,7 +349,7 @@ class ConfigAutoWrap:
         if auto_wrap_policy is None:
             auto_wrap_policy = ConfigAutoWrap.auto_wrap_policy
 
-        return recursive_wrap(
+        return _recursive_wrap(
             module=module,
             auto_wrap_policy=auto_wrap_policy,
             wrapper_cls=ConfigAutoWrap.wrapper_cls,

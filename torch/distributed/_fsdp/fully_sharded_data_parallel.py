@@ -24,7 +24,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
-from .wrap import recursive_wrap
+from .wrap import _recursive_wrap
 
 from .utils import (
     _apply_to_tensors,
@@ -123,7 +123,7 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
-            recursive_wrap(
+            _recursive_wrap(
                 module,
                 auto_wrap_policy=fsdp_auto_wrap_policy,
                 wrapper_cls=FullyShardedDataParallel,
