@@ -86,7 +86,6 @@ class TensorPipeAgent(RpcAgent):
         name: str,
         worker_id: int,
         world_size: int,
-        pg: ProcessGroup,
         opts: _TensorPipeRpcBackendOptionsBase,
         reverse_device_maps: Dict[str, Dict[torch.device, torch.device]],
         devices: List[torch.device],

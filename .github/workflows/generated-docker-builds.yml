@@ -16,10 +16,15 @@ concurrency:
   group: docker-builds-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+env:
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  AWS_DEFAULT_REGION: us-east-1
+
 jobs:
 
   docker-build:
     runs-on: linux.2xlarge
+    timeout-minutes: 240
     strategy:
       matrix:
         include:
@@ -27,6 +32,8 @@ jobs:
               docker_image_short_name: 'pytorch-linux-bionic-cuda10.2-cudnn7-py3.6-clang9'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7'
               docker_image_short_name: 'pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7'
+            - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7'
+              docker_image_short_name: 'pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-py3.6-clang9'
               docker_image_short_name: 'pytorch-linux-bionic-py3.6-clang9'
             - docker_image_base: '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-rocm4.1-py3.6'
@@ -75,12 +82,10 @@ jobs:
           AWS_RETRY_MODE: standard
           AWS_MAX_ATTEMPTS: 5
         run: |
-          aws ecr get-login --no-include-email --region us-east-1 > /tmp/ecr-login.sh
-          bash /tmp/ecr-login.sh
-          rm /tmp/ecr-login.sh
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
+          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
+              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
       - name: Chown workspace
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
@@ -143,8 +148,6 @@ jobs:
         run: .github/scripts/wait_for_ssh_to_drain.sh
       - name: Chown workspace
         if: always()
-        env:
-          ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .

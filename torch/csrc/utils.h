@@ -138,7 +138,6 @@ void THPUtils_addPyMethodDefs(std::vector<PyMethodDef>& vector, PyMethodDef* met
 
 int THPUtils_getCallable(PyObject *arg, PyObject **result);
 
-#define THWStoragePtr TH_CONCAT_3(TH,Real,StoragePtr)
 #define THWTensorPtr  TH_CONCAT_3(TH,Real,TensorPtr)
 #define THPStoragePtr TH_CONCAT_3(THP,Real,StoragePtr)
 #define THPTensorPtr  TH_CONCAT_3(THP,Real,TensorPtr)
@@ -150,27 +149,9 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateAllTypes.h>
+#include <TH/THGenerateByteType.h>
 
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateComplexTypes.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateHalfType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBFloat16Type.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateBoolType.h>
-
-#include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateQTypes.h>
-
-THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
-bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
-bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
 template<typename _real, typename = void>
@@ -197,5 +178,10 @@ bool maybeThrowBackCompatKeepdimWarn(char *func);
 #ifdef USE_CUDA
 std::vector<c10::optional<at::cuda::CUDAStream>> THPUtils_PySequence_to_CUDAStreamList(PyObject *obj);
 #endif
+
+void storage_copy(at::Storage dst, at::Storage src, bool non_blocking=false);
+void storage_fill(at::Storage self, uint8_t value);
+void storage_set(at::Storage self, ptrdiff_t idx, uint8_t value);
+uint8_t storage_get(at::Storage self, ptrdiff_t idx);
 
 #endif
