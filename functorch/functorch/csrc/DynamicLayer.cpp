@@ -209,7 +209,7 @@ static Tensor unwrapIfDead(const Tensor& tensor) {
   return wrapped->value();
 }
 
-static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
+void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func) {
   TORCH_INTERNAL_ASSERT(begin >= 0);
   TORCH_INTERNAL_ASSERT(end >= 0);

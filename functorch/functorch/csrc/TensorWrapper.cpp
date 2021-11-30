@@ -163,28 +163,6 @@ TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor) {
   return (TensorWrapper*)(tensor.unsafeGetTensorImpl());
 }
 
-static void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
-    std::function<Tensor(const Tensor&)> func) {
-  TORCH_INTERNAL_ASSERT(begin >= 0);
-  TORCH_INTERNAL_ASSERT(end >= 0);
-  TORCH_INTERNAL_ASSERT(begin <= end);
-  for (int64_t idx = begin; idx < end; idx++) {
-    auto ivalue = args[idx];
-    if (ivalue.isTensorList()) {
-      TORCH_INTERNAL_ASSERT(false, "NYI: TensorList");
-    }
-    if (!ivalue.isTensor()) {
-      continue;
-    }
-    Tensor value = ivalue.toTensor();
-    Tensor replacement = func(value);
-    args[idx] = replacement; // TODO: std::move?
-    if (ivalue.toTensor().defined()) {
-      TORCH_INTERNAL_ASSERT(args[idx].toTensor().defined());
-    }
-  }
-}
-
 void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto args_size = op.schema().arguments().size();
   int64_t unwrapped_count = 0;
