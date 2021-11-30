@@ -141,7 +141,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.13.5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -165,7 +165,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.13.5
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes

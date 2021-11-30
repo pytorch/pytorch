@@ -337,6 +337,7 @@ Module import_ir_module(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  std::cout << "VERSION: " << reader->version() << std::endl;
   ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
   return deserializer.deserialize(device, extra_files);
 }
