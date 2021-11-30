@@ -49,6 +49,7 @@
 // where & and * represent the C-style address-of and indirection operations.
 
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>
@@ -171,6 +172,28 @@ TORCH_META_FUNC2(scatter, value_reduce)
 TORCH_META_FUNC(scatter_add)
 (const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
   scatter_meta_impl(*this, self, dim, index, src, "add");
+}
+
+TORCH_META_FUNC(_scatter_reduce)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size) {
+
+  TORCH_CHECK(dim >= -self.dim() && dim < self.dim(),
+      "Expected `dim` to be in range ", -self.dim(), " to ", self.dim() - 1, " (got ", dim, ")");
+
+  auto sizes = self.sizes().vec();
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  if (output_size.has_value())
+    sizes[dim] = output_size.value();
+  else
+    sizes[dim] = index.numel() > 0 ? index.max().item<int64_t>() + 1: 0;
+
+  set_output(sizes, self.options());
 }
 
 } // namespace meta
@@ -1259,6 +1282,61 @@ TORCH_IMPL_FUNC(scatter_add)
   } else {
     scatter_add_stub(self.device().type(), mut_out, dim, index, src);
   }
+}
+
+TORCH_IMPL_FUNC(_scatter_reduce_structured_cpu)
+(const Tensor& self,
+ int64_t dim,
+ const Tensor& index,
+ const c10::string_view reduce,
+ const c10::optional<int64_t> output_size,
+ const Tensor& out) {
+
+  // TODO: Add documentation.
+
+  TORCH_CHECK(self.dim() == index.dim(),
+      "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
+  for (int64_t i = 0; i < self.dim(); i++) {
+    TORCH_CHECK(self.size(i) == index.size(i),
+        "Shape mismatch between `self` (got ", self.sizes(), ") and `index` (got ", index.sizes(), ")");
+  }
+
+  TORCH_CHECK(reduce == "sum", "`reduce` argument must be 'sum'");
+
+  // TODO: We currently expect contiguous memory layout.
+  TORCH_CHECK(self.is_contiguous(), "`self` needs to be contiguous");
+  TORCH_CHECK(index.is_contiguous(), "`index` needs to be contiguous");
+  TORCH_CHECK(out.is_contiguous(), "`out` needs to be contiguous");
+
+  dim = dim < 0 ? dim + self.dim() : dim;
+
+  out.zero_();
+
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "_scatter_reduce", [&] {
+    auto self_data = self.data_ptr<scalar_t>();
+    auto index_data = index.data_ptr<int64_t>();
+    auto out_data = out.data_ptr<scalar_t>();
+
+    int64_t offset1 = 1, offset2 = 1;
+    for (int64_t d = 0; d < dim; d++)
+      offset1 *= self.size(d);
+    for (int64_t d = dim + 1; d < self.dim(); d++)
+      offset2 *= self.size(d);
+
+    scalar_t value;
+    int64_t dim_index;
+    for (int64_t i = 0; i < offset1; i++) {
+      for (int64_t j = 0; j < self.size(dim); j++) {
+        for (int64_t k = 0; k < offset2; k++) {
+          value = self_data[i * self.stride(dim) * self.size(dim) + j * self.stride(dim) + k];
+          dim_index = index_data[i * index.stride(dim) * index.size(dim) + j * index.stride(dim) + k];
+          TORCH_CHECK(dim_index >= 0 && dim_index < out.size(dim),
+              "Expected `index` values to be in range ", 0, " to ", out.size(dim), " (got ", dim_index, ")");
+          out_data[i * out.stride(dim) * out.size(dim) + dim_index * out.stride(dim) + k] += value;
+        }
+      }
+    }
+  });
 }
 
 Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & source) {

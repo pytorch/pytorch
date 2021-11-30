@@ -63,6 +63,7 @@ if(INTERN_BUILD_ATEN_OPS)
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
   # Generate the headers wrapped by our operator
+  file(GLOB_RECURSE all_python "${PROJECT_SOURCE_DIR}/tools/codegen/*.py")
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/contrib/aten/aten_op.h
   COMMAND
   "${PYTHON_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
@@ -71,7 +72,7 @@ if(INTERN_BUILD_ATEN_OPS)
     --yaml_dir=${CMAKE_CURRENT_BINARY_DIR}/../aten/src/ATen
     --install_dir=${CMAKE_CURRENT_BINARY_DIR}/contrib/aten
   DEPENDS
-  ATEN_CPU_FILES_GEN_TARGET
+  ${all_python}
   ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/gen_op.py
   ${CMAKE_CURRENT_SOURCE_DIR}/contrib/aten/aten_op_template.h)
@@ -175,12 +176,47 @@ endif()
 
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
+  set(Caffe2_GPU_SRCS_CU
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDABlas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASolver.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASparseBlas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CublasHandlePool.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CusolverDnHandlePool.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Activation.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Blas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Equal.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/IndexKernel.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ReduceOps.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ScanKernels.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sort.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sorting.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorModeKernel.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorShapeCUDA.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorTopK.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCStorage.cpp"
+      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCTensor.cpp"
+
+      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterCUDA.cpp"
+      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterQuantizedCUDA.cpp"
+      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCUDA.cpp"
+      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCsrCUDA.cpp"
+   )
+
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES ".*aten.*\\.cu")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
-      list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
+      list(APPEND Caffe2_GPU_SRCS_CU "${tmp}")
     else()
-      list(APPEND Caffe2_GPU_SRCS_CPP ${tmp})
+      # Exclude special cases listed above that need to link to torch_cuda_cu
+      if(NOT "${tmp}" IN_LIST Caffe2_GPU_SRCS_CU)
+        list(APPEND Caffe2_GPU_SRCS_CPP "${tmp}")
+      endif()
     endif()
   endforeach()
 
@@ -404,6 +440,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     )
 
@@ -428,7 +465,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     ${TORCH_GENERATED_CODE}
     COMMAND
     "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
-      --declarations-path "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --nn-path "aten/src"
       $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -436,7 +472,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       --force_schema_registration
     DEPENDS
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
-    "${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml"
     "${TOOLS_PATH}/autograd/templates/VariableType.h"
     "${TOOLS_PATH}/autograd/templates/VariableType.cpp"
     "${TOOLS_PATH}/autograd/templates/ADInplaceOrViewType.cpp"
@@ -450,6 +485,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
@@ -958,11 +994,13 @@ if(USE_CUDA OR USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/block_sync_default.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/broadcast.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/fp16_support.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/bf16_support.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/grid_reduction.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/helpers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/random_numbers.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/tensor.cu
     ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/welford.cu
+    ${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/runtime/warp.cu
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh
     ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/detail/UnpackRaw.cuh
   )
