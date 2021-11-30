@@ -22,7 +22,7 @@ using NodeIdMap = std::unordered_map<const Node*, size_t>;
 struct AttrTag {
   std::string name;
   std::string value;
-  std::string::size_type pos;
+  std::string::size_type pos = 0;
 };
 
 std::string::size_type SkipTagSeparator(
@@ -42,8 +42,8 @@ c10::optional<AttrTag> ParseAttrTag(
   }
 
   std::string::size_type vpos = match[1].second - node_string.begin() + 1;
-  int nested_open = -1;
-  int nested_close = -1;
+  char nested_open = -1;
+  char nested_close = -1;
   size_t nest_count = 1;
   AttrTag tag;
   tag.name = match[1].str();
@@ -257,16 +257,12 @@ std::string DumpUtil::PostOrderToText(
 std::string DumpUtil::ToBackend(
     c10::ArrayRef<Value> values,
     const BackendDevice& device) {
-  return std::string();
-  /*
-    // TODO: enable after lowering context is merged
     auto lowering_ctx = LoweringContext::Create("IrToBackend", device);
     for (auto& ir_value : values) {
       lowering_ctx->AddResult(ir_value);
     }
     auto computation = lowering_ctx->Build();
     return getBackend()->GetComputationBackendText(computation);
-  */
 }
 
 } // namespace lazy
