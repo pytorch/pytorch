@@ -61,14 +61,40 @@ void AdaptiveLogSoftmaxWithLossImpl::reset_parameters() {
 }
 
 ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Tensor& target) {
-  TORCH_CHECK(input.size(0) == target.size(0),
-      "Input and target should have the same size in the batch dimension.");
+  auto targ_dim = target.dim();
+
+  TORCH_CHECK(
+    targ_dim == 1 || targ_dim == 0,
+    "0D or 1D target tensor expected, multi-target not supported");
+
+  if (targ_dim == 1) {
+    TORCH_CHECK(
+      input.dim() == 2,
+      "1D target tensor expects 2D input tensors, but found inputs with sizes ",
+      input.sizes(),
+      ".");
+  } else {
+    TORCH_CHECK(
+      input.dim() == 1,
+      "0D target tensor expects 1D input tensors, but found inputs with sizes ",
+      input.sizes(),
+      ".");
+  }
+
+  Tensor new_input, new_target;
+  if (targ_dim == 0) {
+    Tensor new_input = input.unsqueeze(0);
+    Tensor new_target = target.unsqueeze(0);
+  } else {
+    Tensor new_input = input;
+    Tensor new_target = target;
+  }
 
   int64_t used_rows = 0;
   const int64_t batch_size = target.size(0);
 
-  Tensor output = input.new_zeros(batch_size);
-  Tensor gather_inds = target.new_empty(batch_size);
+  Tensor output = new_input.new_zeros(batch_size);
+  Tensor gather_inds = new_target.new_empty(batch_size);
 
   auto cutoff_values = cutoffs;
   cutoff_values.insert(cutoff_values.begin(), 0);
@@ -77,7 +103,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
     int64_t low_idx = cutoff_values[i];
     int64_t high_idx = cutoff_values[i + 1];
 
-    const Tensor target_mask = (target >= low_idx) * (target < high_idx);
+    const Tensor target_mask = (new_target >= low_idx) * (new_target < high_idx);
     const Tensor row_indices = target_mask.nonzero().squeeze();
 
     if (row_indices.numel() == 0) {
@@ -85,10 +111,10 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
     }
 
     if (i == 0) {
-      gather_inds.index_copy_(0, row_indices, target.index({target_mask}));
+      gather_inds.index_copy_(0, row_indices, new_target.index({target_mask}));
     } else {
-      Tensor relative_target = target.index({target_mask}) - low_idx;
-      Tensor input_subset = input.index_select(0, row_indices);
+      Tensor relative_target = new_target.index({target_mask}) - low_idx;
+      Tensor input_subset = new_input.index_select(0, row_indices);
 
       const Tensor cluster_output = tail[i - 1]->as<Sequential>()->forward(input_subset);
       int64_t cluster_index = shortlist_size + i - 1;
@@ -106,13 +132,17 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input, const Ten
   TORCH_CHECK(
     used_rows == batch_size,
     "Target values should be in [0, ", options.n_classes() - 1, "], "
-    "but values in range [", target.min().item().toDouble(), ", ", target.max().item().toDouble(), "] "
+    "but values in range [", new_target.min().item().toDouble(), ", ", new_target.max().item().toDouble(), "] "
     "were found. ");
 
-  const Tensor head_output = head(input);
+  const Tensor head_output = head(new_input);
   const Tensor head_logprob = F::log_softmax(head_output, 1);
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
+
+  if (targ_dim == 0) {
+    output = output.squeeze(0);
+  }
 
   return ASMoutput(output, loss);
 }

@@ -93,9 +93,9 @@ class AdaptiveLogSoftmaxWithLoss(Module):
               log likelihood loss
 
     Shape:
-        - input: :math:`(N, \texttt{in\_features})`
+        - input: :math:`(N, \texttt{in\_features})` or :math:`(\texttt{in\_features})`
         - target: :math:`(N)` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
-        - output1: :math:`(N)`
+        - output1: :math:`(N)` or :math:`()`
         - output2: ``Scalar``
 
     .. _Zipf's law: https://en.wikipedia.org/wiki/Zipf%27s_law
@@ -167,15 +167,35 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             h2o.reset_parameters()
 
     def forward(self, input: Tensor, target: Tensor) -> _ASMoutput:
-        if input.size(0) != target.size(0):
-            raise RuntimeError('Input and target should have the same size '
-                               'in the batch dimension.')
+        targ_dim = target.dim()
+
+        if targ_dim == 1:
+            if input.size(0) != target.size(0):
+                raise RuntimeError('Input and target should have the same size '
+                                   'in the batch dimension.')
+            if input.dim() != 2:
+                raise RuntimeError('1D target tensor expects 2D input tensors, ' 
+                                   'but found inputs with size', input.size())
+        elif targ_dim == 0:
+            if input.dim() != 1:
+                raise RuntimeError('0D target tensor expects 1D input tensors, ' 
+                                   'but found inputs with size', input.size())
+        else:
+            raise RuntimeError('0D or 1D target tensor expected, ' 
+                               'multi-target not supported')
+
+        if targ_dim == 0:
+            new_input = input.unsqueeze(0)
+            new_target = target.unsqueeze(0)
+        else:
+            new_input = input
+            new_target = target
 
         used_rows = 0
-        batch_size = target.size(0)
+        batch_size = new_target.size(0)
 
-        output = input.new_zeros(batch_size)
-        gather_inds = target.new_empty(batch_size)
+        output = new_input.new_zeros(batch_size)
+        gather_inds = new_target.new_empty(batch_size)
 
         cutoff_values = [0] + self.cutoffs
         for i in range(len(cutoff_values) - 1):
@@ -183,18 +203,18 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             low_idx = cutoff_values[i]
             high_idx = cutoff_values[i + 1]
 
-            target_mask = (target >= low_idx) & (target < high_idx)
+            target_mask = (new_target >= low_idx) & (new_target < high_idx)
             row_indices = target_mask.nonzero().squeeze()
 
             if row_indices.numel() == 0:
                 continue
 
             if i == 0:
-                gather_inds.index_copy_(0, row_indices, target[target_mask])
+                gather_inds.index_copy_(0, row_indices, new_target[target_mask])
 
             else:
-                relative_target = target[target_mask] - low_idx
-                input_subset = input.index_select(0, row_indices)
+                relative_target = new_target[target_mask] - low_idx
+                input_subset = new_input.index_select(0, row_indices)
 
                 cluster_output = self.tail[i - 1](input_subset)
                 cluster_index = self.shortlist_size + i - 1
@@ -211,13 +231,16 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             raise RuntimeError("Target values should be in [0, {}], "
                                "but values in range [{}, {}] "
                                "were found. ".format(self.n_classes - 1,
-                                                     target.min().item(),
-                                                     target.max().item()))
+                                                     new_target.min().item(),
+                                                     new_target.max().item()))
 
-        head_output = self.head(input)
+        head_output = self.head(new_input)
         head_logprob = log_softmax(head_output, dim=1)
         output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
         loss = (-output).mean()
+
+        if targ_dim == 0:
+            output = output.squeeze(0)
 
         return _ASMoutput(output, loss)
 
