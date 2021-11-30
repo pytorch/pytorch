@@ -886,7 +886,6 @@ class DistributedDataParallel(Module, Joinable):
             # bypass when torch.is_grad_enabled is False. Traditional reentrant
             # backward checkpointing does not run into this issue
             ckpt_recomputing = hasattr(self, '_recomputing') and self._recomputing
-            print(f"Recomputing: {ckpt_recomputing}")
             if not ckpt_recomputing and torch.is_grad_enabled() and self.require_backward_grad_sync:
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
