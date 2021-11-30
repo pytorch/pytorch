@@ -11,19 +11,19 @@
 
 namespace at { namespace native {
 
-template<typename scalar_t>
-struct CompareLEFunctor {
-  __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-    return a <= b;
-  }
-};
+// template<typename scalar_t>
+// struct CompareLEFunctor {
+//   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
+//     return a <= b;
+//   }
+// };
 
-void le_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "le_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareLEFunctor<scalar_t>());
-  });
-}
+// void le_kernel_cuda(TensorIteratorBase& iter) {
+//   AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "le_cuda", [&]() {
+//     gpu_kernel_with_scalars(iter, CompareLEFunctor<scalar_t>());
+//   });
+// }
 
-REGISTER_DISPATCH(le_stub, &le_kernel_cuda);
+// REGISTER_DISPATCH(le_stub, &le_kernel_cuda);
 
 }} // namespace at::native
