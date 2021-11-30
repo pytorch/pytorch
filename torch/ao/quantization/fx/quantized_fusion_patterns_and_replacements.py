@@ -85,11 +85,11 @@ def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
             x = qbinary_oprelu(x, num)
             return x
 
-    return copy.deepcopy([
+    return [
         (BinaryOpReLUPattern(), BinaryOpReLUReplacement()),
         (BinaryOpScalarReLU1Pattern(), BinaryOpScalarReLUReplacement()),
         (BinaryOpScalarReLU2Pattern(), BinaryOpScalarReLUReplacement()),
-    ])
+    ]
 
 def get_binary_op_frelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
 
@@ -144,14 +144,14 @@ def get_binary_op_frelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
     def binary_op_scalar_relu_replacement(x, num, scale, zero_point):
         return qbinary_oprelu(x, num)
 
-    return copy.deepcopy([
+    return [
         (binary_op_relu_inplace_pattern, binary_op_relu_replacement),
         (binary_op_relu_non_inplace_pattern, binary_op_relu_replacement),
         (binary_op_scalar_relu_1_inplace_pattern, binary_op_scalar_relu_replacement),
         (binary_op_scalar_relu_1_non_inplace_pattern, binary_op_scalar_relu_replacement),
         (binary_op_scalar_relu_2_inplace_pattern, binary_op_scalar_relu_replacement),
         (binary_op_scalar_relu_2_non_inplace_pattern, binary_op_scalar_relu_replacement),
-    ])
+    ]
 
 
 def get_binary_op_pttn_and_rplcmnt(binary_op, qbinary_op):
@@ -179,14 +179,18 @@ def get_binary_op_pttn_and_rplcmnt(binary_op, qbinary_op):
         x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
         return x
 
-    def binary_op_scalar_replacement(x, num, scale, zero_point):
+    def binary_op_scalar_1_replacement(x, num, scale, zero_point):
         x = qbinary_op(x, num)
+        return x
+
+    def binary_op_scalar_2_replacement(x, num, scale, zero_point):
+        x = qbinary_op(num, x)
         return x
 
     return [
         (binary_op_pattern, binary_op_replacement),
-        (binary_op_scalar_1_pattern, binary_op_scalar_replacement),
-        (binary_op_scalar_2_pattern, binary_op_scalar_replacement),
+        (binary_op_scalar_1_pattern, binary_op_scalar_1_replacement),
+        (binary_op_scalar_2_pattern, binary_op_scalar_2_replacement),
     ]
 
 def get_binary_op_pattern_and_replacements():
