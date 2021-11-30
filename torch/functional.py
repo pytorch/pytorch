@@ -1808,7 +1808,7 @@ def unravel_index(
         >>> torch.unravel_index(indices, shape, as_tuple=True)
         (tensor([3, 6, 6]), tensor([4, 5, 1]))
     """
-    def _helper_type_check(inp: Union[Sequence, Tensor], name: str):
+    def _helper_type_check(inp: Union[int, Sequence, Tensor], name: str):
         # `indices` is expected to be a tensor, while `shape` can be a sequence/int/tensor
         if name == "shape" and isinstance(inp, Sequence):
             for dim in inp:
@@ -1818,7 +1818,7 @@ def unravel_index(
                     raise ValueError("Negative values in shape are not allowed.")
         elif name == "shape" and isinstance(inp, int):
             if inp < 0:
-                raise valueError("Negative values in shape are not allowed.")
+                raise ValueError("Negative values in shape are not allowed.")
         elif isinstance(inp, Tensor):
             if inp.dtype not in integral_types():
                 raise TypeError(f"Expected {name} to be an integral tensor, but found dtype: {inp.dtype}")
@@ -1834,29 +1834,32 @@ def unravel_index(
 
     # Convert to a tensor, with the same properties as that of indices
     if isinstance(shape, Sequence):
-        shape = indices.new_tensor(shape)
+        shape_tensor: Tensor = indices.new_tensor(shape)
     elif isinstance(shape, int) or (isinstance(shape, Tensor) and shape.ndim == 0):
-        shape = indices.new_tensor((shape,))
+        shape_tensor = indices.new_tensor((shape,))
+    else:
+        shape_tensor = shape
 
     # By this time, shape tensor will have dim = 1 if it was passed as scalar (see if-elif above)
-    assert shape.ndim == 1, f"Expected dimension of shape tensor to be <= 1, but got tensor with dim: {shape.ndim}"
+    assert shape_tensor.ndim == 1, "Expected dimension of shape tensor to be <= 1, "
+    f"but got the tensor with dim: {shape_tensor.ndim}."
 
     # In case no indices passed, return an empty tensor with number of elements = shape.numel()
     if indices.numel() == 0:
         # If both indices.numel() == 0 and shape.numel() == 0, short-circuit to return itself
-        shape_numel = shape.numel()
+        shape_numel = shape_tensor.numel()
         if shape_numel == 0:
             raise ValueError("Got indices and shape as empty tensors, expected non-empty tensors.")
         else:
             output = [indices.new_tensor([]) for _ in range(shape_numel)]
             return tuple(output) if as_tuple else torch.stack(output, dim=1)
 
-    if torch.max(indices) >= torch.prod(shape):
+    if torch.max(indices) >= torch.prod(shape_tensor):
         raise ValueError("Target shape should cover all source indices.")
 
-    coefs = shape[1:].flipud().cumprod(dim=0).flipud()
+    coefs = shape_tensor[1:].flipud().cumprod(dim=0).flipud()
     coefs = torch.cat((coefs, coefs.new_tensor((1,))), dim=0)
-    coords = torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape
+    coords = torch.div(indices[..., None], coefs, rounding_mode='trunc') % shape_tensor
 
     if as_tuple:
         return tuple(coords[..., i] for i in range(coords.size(-1)))
