@@ -309,6 +309,7 @@ void LazyTensor::SetSubView(ViewInfo view_info) const {
 void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
   if (data()->view != nullptr) {
     data()->view = data()->view->CreateSubView(view_info.shape, view_info);
+    data()->generation += 1;
     return;
   }
   // This node is not a view. Since this function is meant to modify a view
