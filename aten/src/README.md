@@ -17,7 +17,7 @@ multiple variants of the library, summarized here:
 PyTorch employs reference counting in order to permit tensors to provide
 differing views on a common underlying storage.  For example, when you call
 view() on a Tensor, a new THTensor is allocated with differing dimensions,
-but it shares the same THStorage with the original tensor.
+but it shares the same c10::StorageImpl with the original tensor.
 
 Unfortunately, this means we are in the business of manually tracking reference
 counts inside our C library code.  Fortunately, for most of our library code implementing
@@ -63,9 +63,9 @@ of freeing it.  If that function holds on to a pointer to the object, it
 will `retain` it itself.
 
 ```
-  THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
+  THByteStorage *inferred_size = THByteStorage_newInferSize(size, numel);
   THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, NULL);
-  THLongStorage_free(inferred_size);
+  c10::raw::intrusive_ptr::decref(inferred_size);
 ```
 
 Sometimes, you have a tensor in hand which you'd like to use directly, but
