@@ -487,3 +487,79 @@ class TestSubgraphRewriter(JitTestCase):
         ref_outs = comparison_fn(x)
         test_outs = traced.forward(x)
         self.assertEqual(ref_outs, test_outs)
+
+    def test_match_node_with_primitive_type_values(self):
+        def f(x):
+            x = x + 3
+            return x
+
+        def pattern(x, num):
+            x = x + num
+            return x
+
+        def replacement(x, num):
+            x = x - num
+            return x
+
+        def comparison(x):
+            x = x - 3
+            return x
+
+        traced = symbolic_trace(f)
+        comparison_fn = symbolic_trace(comparison)
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, pattern, replacement)
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
+
+    def test_match_attrs(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.tensor([3])
+
+            def forward(self, x):
+                return x + self.attr
+
+        class Pattern(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.tensor([])
+
+            def forward(self, x):
+                return x + self.attr
+
+        class Replacement(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.tensor([])
+
+            def forward(self, x):
+                return x - self.attr
+
+        class Comparison(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.tensor([3])
+
+            def forward(self, x):
+                return x - self.attr
+
+        traced = symbolic_trace(M())
+        comparison_fn = symbolic_trace(Comparison())
+
+        x = torch.randn(3, 4)
+
+        subgraph_rewriter.replace_pattern(traced, Pattern(), Replacement())
+
+        traced.graph.lint()
+
+        ref_outs = comparison_fn(x)
+        test_outs = traced.forward(x)
+        self.assertEqual(ref_outs, test_outs)
