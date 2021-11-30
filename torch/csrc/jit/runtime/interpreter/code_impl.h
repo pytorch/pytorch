@@ -772,7 +772,7 @@ struct CodeImpl {
     return size;
   }
 
-  void assert_stack_size(
+  inline void assert_stack_size(
       int32_t instruction_index,
       size_t init_size,
       size_t actual_size) const {
