@@ -7294,7 +7294,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
     @skipCUDAIf(torch.version.cuda is not None
-                and torch.version.cuda.split(".") < ("11", "3"), "There's a bug in cuSOLVER < 11.3")
+                and torch.version.cuda.split(".") < ["11", "3"], "There's a bug in cuSOLVER < 11.3")
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.double)
