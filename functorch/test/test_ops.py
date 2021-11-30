@@ -662,7 +662,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
-        xfail('slice_scatter'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above

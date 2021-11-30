@@ -3191,7 +3191,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('randint_like'),
         xfail('searchsorted'),
         xfail('short', 'channels_last'),
-        xfail('slice_scatter'),
         xfail('unique_consecutive'),
         xfail('unique'),
         xfail('nn.functional.conv1d'),
