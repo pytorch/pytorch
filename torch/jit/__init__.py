@@ -56,14 +56,24 @@ import warnings
 from importlib.machinery import SourceFileLoader
 
 import os
-try:
+# for OSS builds, headers get deposited here
+shape_function_fp = (
+    f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
+)
+if not os.path.exists(shape_function_fp):
+    # for internal build headers get deposited here
     shape_function_fp = (
-        f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
+        f"{os.path.dirname(os.path.realpath(torch.__file__))}/csrc/jit/runtime/shape_functions.h"
     )
-    _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
-except Exception as e:
-    # not warning because of internal CI fail with
-    print(f"Couldn't load shape functions: {e}")
+if os.path.exists(shape_function_fp):
+    try:
+        _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
+    except Exception as e:
+        warnings.warn(f"Couldn't load shape functions: {e}")
+else:
+    warnings.warn(f"Couldn't find shape functions")
+    
+
 
 # For backwards compatibility
 _fork = fork
