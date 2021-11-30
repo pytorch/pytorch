@@ -139,29 +139,33 @@ void CUDAGraph::capture_end() {
 
   c10::cuda::CUDACachingAllocator::notifyCaptureEnded(capture_dev_, id_);
 
-  // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
-  // who prefer not to report error message through these arguments moving forward
-  // (they prefer return value, or errors on api calls internal to the capture)
-
+  // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
+  // between replays.
+  // If Pytorch compiles and runs with a CUDA 11.4+ toolkit, there's a chance the allocator backend
+  // is cudaMallocAsync.
+  // cudaMallocAsync is generally graph-safe, but if some tensors are not freed between replays,
+  // the graph's internal bookkeeping requires that we instantiate with
+  // cudaGraphInstantiateFlagAutoFreeOnLaunch. See
+  // cudaGraphLaunch
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
+  // cudaGraphInstantiateWithFlags
+  // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
+#if CUDA_VERSION >= 11400
   int version;
   AT_CUDA_CHECK(cudaDriverGetVersion(&version));
   if (version < 11040) {
+#endif
+    // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
+    // who prefer not to report error message through these arguments moving forward
+    // (they prefer return value, or errors on api calls internal to the capture)
     AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
+#if CUDA_VERSION >= 11400
   } else {
-    // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not
-    // freed between replays.
-    // For CUDA 11.4+, there's a chance the allocator backend is cudaMallocAsync.
-    // cudaMallocAsync is generally graph-safe, but if some tensors are not freed
-    // between replays, the graph's internal bookkeeping requires that we instantiate with
-    // cudaGraphInstantiateFlagAutoFreeOnLaunch. See
-    // cudaGraphLaunch
-    // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
-    // cudaGraphInstantiateWithFlags
-    // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
   }
+#endif
 
   has_graph_exec_ = true;
 
