@@ -459,6 +459,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 nonlocal cur_module
                 old_module = cur_module
                 cur_module = self
+                nonlocal global_disable_torch_function_override
                 try:
                     parent_module = module_stack[-1] if len(module_stack) else None
                     module_stack.append(self)
@@ -482,7 +483,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # If we are in this hook, `cur_module` is a leaf module.
                         # Therefore, we do not need to override any of its
                         # children. Disabling the overrides for performance.
-                        nonlocal global_disable_torch_function_override
                         old_global_disable_torch_function_override = \
                             global_disable_torch_function_override
                         global_disable_torch_function_override = True
@@ -512,7 +512,18 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         # forward
                         output = orig_module_call(self, *args, **kwargs)
                         # after hooks
+
+                        # For the sake of performance, we assume no overrides
+                        # are needed for quantizing/dequantizing things
+                        old_global_disable_torch_function_override = \
+                            global_disable_torch_function_override
+                        global_disable_torch_function_override = True
+
                         output = cur_qstate.outputs_convert_hook(output)
+
+                        global_disable_torch_function_override = \
+                            old_global_disable_torch_function_override
+
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
