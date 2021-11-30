@@ -71,7 +71,13 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input) {
 
   auto leading_dimension =
       is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
+
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
+#else
+  TORCH_INTERNAL_ASSERT(is_column_major, "Expected column major input.");
+  auto order = CUSPARSE_ORDER_COL;
+#endif
 
   void* values_ptr = input.data_ptr();
 
