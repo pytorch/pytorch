@@ -937,11 +937,24 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
       if (!input->isCompleteTensor()) {
         auto bufHandle =
             bindSymbolicShapeInput(input, "t" + input_name_map_[input]);
-        bufs_.emplace(input, bufHandle.node());
+
+        std::vector<DimArg> inputTensorDims;
+        for (size_t i = 0; i < bufHandle.dims().size(); i++) {
+          inputTensorDims.emplace_back(
+              DimArg(bufHandle.dims()[i], "i" + c10::to_string(i)));
+        }
+        result = Compute(
+            "input" + c10::to_string(bufs_.size() + 1),
+            inputTensorDims,
+            [&](const std::vector<VarHandle>& axes) {
+              return bufHandle.load(axes);
+            });
+        //         bufs_.emplace(input, bufHandle.node());
+        bufs_.emplace(input, result.buf()); // bufHandle.node());
         bufferArgs_.emplace_back(bufHandle);
         break;
       }
-      if (isContiguous(input) && !outputs_set.count(input)) {
+      if (false && isContiguous(input) && !outputs_set.count(input)) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
             toExprHandles(*tt->sizes().concrete_sizes()),

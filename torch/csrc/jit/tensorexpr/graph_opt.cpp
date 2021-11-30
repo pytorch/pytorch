@@ -448,6 +448,26 @@ bool tryTrimmingGraph(const std::shared_ptr<Graph>& graph) {
   return changed;
 }
 
+std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
+  for (auto v : graph->outputs()) {
+    auto& t = v->type();
+    if (t->kind() == TypeKind::TensorType) {
+      auto tt = t->cast<TensorType>();
+      if (!tt->scalarType() || !c10::isQIntType(*tt->scalarType())) {
+        continue;
+      }
+      std::cerr << "NODE: " << *v->node() << "\n";
+      std::cerr << "TYPE: " << *tt << "\n";
+      Node* deq =
+          graph->create(c10::Symbol::fromQualString("aten::dequantize"), {v});
+      graph->appendNode(deq);
+      deq->output()->setType(tt->withScalarType(c10::kFloat));
+      v->replaceAllUsesAfterNodeWith(deq, deq->output());
+    }
+  }
+  return graph;
+}
+
 std::shared_ptr<Graph> trimGraph(const std::shared_ptr<Graph>& graph) {
   bool changed = true;
   int max_iters = 1000;
@@ -458,6 +478,7 @@ std::shared_ptr<Graph> trimGraph(const std::shared_ptr<Graph>& graph) {
     changed = tryTrimmingGraph(graph);
     EliminateDeadCode(graph->block());
   }
+  dequantizeResults(graph);
   return graph;
 }
 
