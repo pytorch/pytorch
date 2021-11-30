@@ -1,5 +1,5 @@
 from functools import wraps, partial
-from itertools import product, chain
+from itertools import product, chain, islice
 import itertools
 import collections
 import copy
@@ -2497,15 +2497,20 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
     return list(generator())
 
 
-def clone_sample(sample, requires_grad=False, **kwargs):
+def clone_sample(sample, **kwargs):
 
     def clone_tensor(t):
-        return t.detach().clone().requires_grad_(requires_grad)
+        if isinstance(t, torch.Tensor):
+            return t.detach().clone().requires_grad_(t.requires_grad)
+        else:
+            return t
+
+    sample_kwargs = kwargs if kwargs else sample.kwargs
 
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=kwargs if kwargs else sample.kwargs
+        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items()))
     )
 
 
@@ -2519,26 +2524,46 @@ def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwa
             # NOTE: since svd_lowrank relies on non rank-revealing SVD,
             # it inherits the problem of unstable behavior with repeated
             # singular values including zeros.
-            # Since we want to avoid repeated zeros as singular values,
-            # we can only use k and k + 1 values for q.
+            # Since we want to avoid (repeated) zeros as singular values,
+            # we can only use k for q.
             # This issues could be resolved with using a rank-revealing SVD
             # which does not include "zero" singular values.
-            for q in (k, min(k + 1, min(m, n))):
-                op_kwargs = {
-                    'q': q,
-                    'M': None
-                }
-                sample.kwargs = op_kwargs
+            op_kwargs = {
+                'q': k,
+                'M': None
+            }
 
-                # without M specified
-                yield clone_sample(sample, requires_grad)
+            # without M specified
+            yield clone_sample(sample, **op_kwargs)
 
-                # now with M
-                # TODO: fix bug in the documentation for svd_lowrank:
-                # M has to be (*, m, n), and not (*, 1, n) as written
-                # in the documentation
-                op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
-                yield clone_sample(sample, requires_grad, **op_kwargs)
+            # now with M
+            # TODO: fix bug in the documentation for svd_lowrank:
+            # M has to be (*, m, n), and not (*, 1, n) as written
+            # in the documentation
+            op_kwargs['M'] = make_tensor((*batch, m, n), device, dtype, requires_grad=requires_grad)
+            yield clone_sample(sample, **op_kwargs)
+
+    return list(generator())
+
+
+def chunk_iter(iterable, size):
+    it = iter(iterable)
+    while True:
+        chunk = tuple(islice(it, size))
+        if not chunk:
+            break
+        yield chunk
+
+
+def sample_inputs_pca_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
+
+    def generator():
+        samples = sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad, **kwargs)
+        for s1, s2 in chunk_iter(samples, 2):
+            del s1.kwargs['M']
+            del s2.kwargs['M']
+            yield s1
+            yield s2
 
     return list(generator())
 
