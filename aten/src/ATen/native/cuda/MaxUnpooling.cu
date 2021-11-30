@@ -125,7 +125,7 @@ Tensor& max_unpooling2d_forward_out_cuda(const Tensor& self_,
       "Input to max_unpooling2d should be a 3d or 4d Tensor, but got tensor with dimension: ", self_.ndimension());
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
-      "Shape of indices (", indices_.sizes(), ") should match shape of input (", self_.sizes(), ")");
+      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
   TORCH_CHECK(
       output_size.size() == 2,
       "There should be exactly two elements (width, height) in output_size, but got ", output_size.size(), " elements.");
@@ -218,7 +218,7 @@ static void max_unpooling3d_shape_check(
       "There should be exactly three elements (depth, height, width) in padding, but got: ", padding.size(), " elements.");
   TORCH_CHECK(
       input.sizes() == indices.sizes(),
-      "Shape of indices (", indices.sizes(), ") should match shape of input (", input.sizes(), ")");
+      "Expected shape of indices to be: ", input.sizes(), " but got: ", indices.sizes());
 
   for (int64_t i = 1; i < input.ndimension(); ++i) {
     TORCH_CHECK(input.size(i) > 0, fn_name,
@@ -384,7 +384,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
   TORCH_CHECK(grad_input.is_contiguous(), "grad_input must be contiguous");
   TORCH_CHECK(
       indices_.scalar_type() == at::ScalarType::Long,
-      "elements in indices should be type int64 but got tyoe: ", indices_.scalar_type());
+      "elements in indices should be type int64 but got type: ", indices_.scalar_type());
   TensorArg grad_input_arg{grad_input, "grad_input", 1},
       grad_output_arg{grad_output_, "grad_output_", 2},
       self_arg{self_, "self_", 3}, indices_arg{indices_, "indices_", 4};
@@ -399,7 +399,7 @@ at::Tensor& max_unpooling2d_backward_out_cuda(const Tensor& grad_output_,
 
   TORCH_CHECK(
       self_.sizes() == indices_.sizes(),
-      "Input shape (", self_.sizes(), ") must match indices shape (", indices_.sizes(), ")");
+      "Expected shape of indices to be: ", self_.sizes(), " but got: ", indices_.sizes());
 
   TORCH_CHECK(output_size.size() == 2, "output_size must have two elements, got size: ", output_size.size());
 
