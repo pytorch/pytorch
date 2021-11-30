@@ -1,15 +1,14 @@
 import torch
 import sys
 
-model = torch.load("bt.pt")
+model = torch.load("btq.pt")
 
-ii = model._generate_bundled_inputs_for_forward()
+ii = model.get_all_bundled_inputs_for_forward()
 print([x.dtype for x in list(*ii)])
 print([x.size() for x in list(*ii)])
 
 model.eval()
 model = torch.jit.freeze(model)
-model._c.dump(attrs=False, params=False)
 
 def prepare_graph(g, inputs, dynamic_dims):
   # Before:
@@ -49,6 +48,19 @@ def prepare_graph(g, inputs, dynamic_dims):
   #   return (%tensors.1)
   torch._C._jit_pass_lower_all_tuples(g)
   torch._C._te.remove_graph_output(g, 1)
+
+  input_pattern = """
+  graph(%a, %scale, %zero, %XXX):
+      %q = aten::quantize_per_tensor(%a, %scale, %zero, %XXX)
+      %ql = prim::ListConstruct(%q)
+      %r = quantized::cat(%ql, %zero, %scale, %zero)
+      return (%r)"""
+  replacement_pattern = """
+  graph(%a, %scale, %zero, %XXX):
+      %q = aten::quantize_per_tensor(%a, %scale, %zero, %XXX)
+      return (%q)"""
+  torch._C._jit_pass_custom_pattern_based_rewrite_graph(input_pattern, replacement_pattern, g)
+
   torch._C._jit_pass_dce(g)
 
   # Second, replace the list of two elements with a tuple of two elements and then replace returning a tuple with simply returning two tensors.
@@ -75,9 +87,12 @@ def prepare_graph(g, inputs, dynamic_dims):
   #   graph(%x : Long(SS(-1), 20, SS(-2), 40))
   #     ...
   sym_indices = torch._C._te.make_shapes_symbolic(g, dynamic_dims)
+  torch._C._jit_pass_lower_all_tuples(g)
 
   # Print the final graph
   print(g)
+
+#   g = torch._C._te.trim_graph(g)
   return g, sym_indices
 
 g = model.graph
@@ -85,6 +100,7 @@ g, sym_indices = prepare_graph(g, ii, [115])
 
 print(sym_indices)
 print(g)
+torch._C._jit_set_te_must_use_llvm_cpu(False)
 
 # Now, compile it with NNC!
 # If 'aot' was passed as an argument, just produce asm without running it.
@@ -106,8 +122,16 @@ else:
   extended_inputs = tuple(list(*ii) + [115])
   nnc_res = kernel.run(tuple(extended_inputs))
   ref_res = model(*tuple(*ii))[0]
+  graph_res = torch._C._jit_interpret_graph(g, tuple(extended_inputs))
 
   # Compare results with the reference
-  for i in range(2):
+  for i in range(len(graph_res)):
+    exp = nnc_res[i]
+    ref = ref_res[i]
+    if exp.dtype == torch.quint8:
+        exp.dequantize()
+        ref.dequantize()
+
     assert(torch.allclose(nnc_res[i], ref_res[i], rtol=1e-5, atol=1e-5))
+    assert(torch.allclose(graph_res[i], nnc_res[i], rtol=1e-5, atol=1e-5))
   print("SUCCESS!")
