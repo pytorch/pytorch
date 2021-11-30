@@ -37,8 +37,6 @@ namespace at { namespace native {
 
 #else // AT_ROCM_ENABLED()
 
-#include <aten/src/THH/THH.h>
-
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/miopen/Descriptors.h>
 #include <ATen/miopen/Types.h>
