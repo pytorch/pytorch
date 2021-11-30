@@ -540,7 +540,6 @@ class TestOptim(TestCase):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
     def test_Adam_complex(self):
-        import pdb
         for optimizer in [optim.Adam]:
             self._test_complex_optimizer(
                 lambda param: optimizer([param], lr=0.01)
