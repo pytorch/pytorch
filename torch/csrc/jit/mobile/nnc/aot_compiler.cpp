@@ -37,13 +37,13 @@ std::vector<int64_t> getConstSizes(const BufPtr b) {
 }
 
 std::vector<mobile::nnc::InputSpec> toInputSpecs(
-    const std::vector<std::vector<int64_t>>& inputSizes) {
+    const std::vector<std::vector<int64_t>>& inputSizes,
+    const std::vector<at::ScalarType>& inputTypes) {
   std::vector<mobile::nnc::InputSpec> specs;
-  for (const auto& sizes : inputSizes) {
+  for (int i = 0; i < inputSizes.size(); ++i) {
     mobile::nnc::InputSpec spec;
-    spec.sizes_ = sizes;
-    // TODO: Use user specified input type. For now using Long for BI model
-    spec.dtype_ = c10::ScalarType::Long;
+    spec.sizes_ = inputSizes[i];
+    spec.dtype_ = inputTypes[i];
     specs.emplace_back(std::move(spec));
   }
   return specs;
@@ -52,10 +52,11 @@ std::vector<mobile::nnc::InputSpec> toInputSpecs(
 std::unique_ptr<Function> compileMethod(
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel,
     const std::string& method_name,
-    const std::vector<std::vector<int64_t>>& sizes) {
+    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<at::ScalarType>& types) {
   auto func = std::make_unique<Function>();
   func->set_name(method_name);
-  func->set_input_specs(toInputSpecs(sizes));
+  func->set_input_specs(toInputSpecs(sizes, types));
 
   auto params = c10::impl::GenericList(c10::AnyType::get());
   auto const_descriptors = kernel->getConstantDescriptors();
@@ -110,15 +111,21 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& g,
     const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<at::ScalarType>& types,
     const std::string& kernel_func_name) {
   GRAPH_DEBUG("Input sizes ", sizes);
+  GRAPH_DEBUG("Input types ", types);
   GRAPH_DEBUG("Method name ", method_name);
+  GRAPH_DEBUG("Kernel func name ", kernel_func_name);
+
+  CAFFE_ENFORCE(
+      sizes.size() == types.size(),
+      "Number of input sizes and input types should be the same");
 
   std::vector<at::IValue> example_values;
   std::vector<c10::optional<at::Tensor>> example_inputs;
-  for (const auto& size : sizes) {
-    // TODO: Use user specified input type. For now using Long for BI model
-    auto example_input = at::rand(size).to(at::dtype(at::kLong));
+  for (int i = 0; i < sizes.size(); ++i) {
+    auto example_input = at::rand(sizes[i]).to(at::dtype(types[i]));
     example_values.emplace_back(example_input);
     example_inputs.emplace_back(example_input);
   }
@@ -141,7 +148,7 @@ std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
 
   const std::string compiled_assembly = kernel->getCodeText();
 
-  auto func = compileMethod(kernel, method_name, sizes);
+  auto func = compileMethod(kernel, method_name, sizes, types);
   return std::make_pair(std::move(func), compiled_assembly);
 }
 
