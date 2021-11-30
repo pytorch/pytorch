@@ -175,7 +175,7 @@ concurrency:
 
 {%- macro ciflow_should_run_job(ciflow_config) %}
   !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
+    runs-on: linux.large
     timeout-minutes: !{{ timeout_minutes }}
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
