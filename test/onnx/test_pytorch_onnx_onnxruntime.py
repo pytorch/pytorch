@@ -152,12 +152,10 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
     with torch.no_grad():
-        if isinstance(input, torch.Tensor):
+        if isinstance(input, (torch.Tensor, dict)):
             input = (input,)
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
-        if isinstance(input, dict):
-            input = (input,)
         input_args = copy.deepcopy(input)
         input_kwargs = {}
         if dict_check and isinstance(input_args[-1], dict):
@@ -190,7 +188,9 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         if flatten:
             input_copy, _ = torch.jit._flatten(input_copy)
-
+        elif input_copy[-1] == {}:
+            # Handle empty kwargs (normally removed by flatten).
+            input_copy = input_copy[:-1]
         ort_outs = run_ort(ort_sess, input_copy)
         ort_compare_with_pytorch(ort_outs, output, rtol, atol)
 
