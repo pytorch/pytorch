@@ -62,7 +62,7 @@ class Wishart(Distribution):
             event_shape = scale_tril.shape[-2:]
             self.scale_tril = scale_tril
             self.df = torch.tensor(
-                [self.scale_tril.shape[-1] if df is None else df],
+                self.scale_tril.shape[-1] if df is None else df,
                 dtype=scale_tril.dtype
             )
         elif covariance_matrix is not None:
@@ -72,7 +72,7 @@ class Wishart(Distribution):
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix
             self.df = torch.tensor(
-                [self.covariance_matrix.shape[-1] if df is None else df],
+                self.covariance_matrix.shape[-1] if df is None else df,
                 dtype=covariance_matrix.dtype
             )
         else:
@@ -82,7 +82,7 @@ class Wishart(Distribution):
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
             self.df = torch.tensor(
-                [self.precision_matrix.shape[-1] if df is None else df],
+                self.precision_matrix.shape[-1] if df is None else df,
                 dtype=precision_matrix.dtype
             )
 
