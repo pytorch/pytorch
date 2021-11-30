@@ -58,7 +58,7 @@ class TestParamMutation(FSDPTest):
             if i > 0:
                 with self.assertRaisesRegex(
                     AssertionError,
-                    "Parameter storage is changed outside FSDP, this use case is not supported",
+                    "Parameter storage is changed after first iteration outside FSDP, this use case is not supported",
                 ):
                     out = model(in_data)
                 return
