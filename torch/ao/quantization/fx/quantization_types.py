@@ -1,5 +1,4 @@
-from typing import Any, Callable, Tuple, Union
-from ..utils import Pattern
+from typing import Any
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
