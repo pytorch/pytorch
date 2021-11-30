@@ -138,6 +138,7 @@ def _result_distribute_with_col_rearrange(
         )
 
     # distribute the outputs using all2all.
+    results = [tensor.contiguous() for tensor in results]
     output = torch.cat(
         all_to_all(output_tensor_list, results, group=pg)
     )
