@@ -52,28 +52,6 @@ from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 
 
-import warnings
-from importlib.machinery import SourceFileLoader
-
-import os
-# for OSS builds, headers get deposited here
-shape_function_fp = (
-    f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
-)
-if not os.path.exists(shape_function_fp):
-    # for internal build headers get deposited here
-    shape_function_fp = (
-        f"{os.path.dirname(os.path.realpath(torch.__file__))}/csrc/jit/runtime/shape_functions.h"
-    )
-if os.path.exists(shape_function_fp):
-    try:
-        _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
-    except Exception as e:
-        warnings.warn("Couldn't load shape functions")
-else:
-    warnings.warn("Couldn't find shape functions")
-
-
 # For backwards compatibility
 _fork = fork
 _wait = wait
