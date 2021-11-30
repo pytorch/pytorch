@@ -1,5 +1,5 @@
-#include "CodegenFunctions.h"
-#include "Functions.h"
+#include <ATen/CodegenFunctions.h>
+#include <ATen/Functions.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/core/functional.h>
