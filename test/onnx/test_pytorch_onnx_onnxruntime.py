@@ -113,17 +113,16 @@ def inline_flatten_list(inputs, res_list):
     return res_list
 
 
-def unpack_to_numpy(value):
+def unpack_to_numpy(values):
     value_unpacked = []
-    for value_ in value:
-        value_unpacked.extend(unpack_quantized_tensor(value_))
-    value_final = [to_numpy(v) for v in value_unpacked]
-    return value_final
+    for value in values:
+        value_unpacked.extend(unpack_quantized_tensor(value))
+    return [to_numpy(v) for v in value_unpacked]
 
 
-def run_ort(ort_sess, input):
+def run_ort(ort_sess, inputs):
     input = unpack_to_numpy(flatten_tuples(input))
-    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(input))
+    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -1090,17 +1089,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_input_names_with_optional_args_script(self):
-        class NoOptionalModel(torch.nn.Module):
-            def forward(self, input):
-                return input
-
-        # Without empty optional arguments dictionary
-        x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,), input_names=["input_x"])
-        # With empty optional arguments dictionary
-        y = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (y, {}))
-
         class MixedModel(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
                 if y is not None:
@@ -6773,7 +6761,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()  # Functional module not scriptable
+    @skipScriptTest()  # TODO(https://msdata.visualstudio.com/Vienna/_workitems/edit/1532305)
     def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
