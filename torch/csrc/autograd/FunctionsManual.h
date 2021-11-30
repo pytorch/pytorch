@@ -132,6 +132,7 @@ Tensor binary_cross_entropy_target_backward(
   const c10::optional<Tensor>& weight,
   int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(const at::Tensor& grad_output, const at::Tensor& self, const at::Tensor& target, const c10::optional<at::Tensor>& weight, const c10::optional<at::Tensor>& pos_weight, int64_t reduction);
+at::Tensor binary_cross_entropy_with_logits_jvp(const Tensor& input_t, const Tensor& target_t, const Tensor& input_p, const Tensor& target_p, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& pos_weight_opt, int64_t reduction);
 at::Tensor log_sigmoid_double_backward(const at::Tensor & grad, const at::Tensor & input);
 at::Tensor softmax_double_backward(const at::Tensor & grad, const at::Tensor & grad_output, int dim, const at::Tensor & output);
 at::Tensor binary_cross_entropy_double_backward(const at::Tensor & grad_output, const at::Tensor & grad, const at::Tensor & input, const at::Tensor & target, const c10::optional<at::Tensor>& weight, int64_t reduction);
@@ -193,6 +194,22 @@ Tensor triangular_solve_jvp(
   const bool transpose,
   const bool unitriangular
 );
+Tensor linalg_solve_triangular_forward_AD(
+    const Tensor& A_t,
+    const Tensor& B_t,
+    const Tensor& A,
+    const Tensor& X,
+    const bool upper,
+    const bool left,
+    const bool unitriangular);
+std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
+    const Tensor& grad,
+    const Tensor& A,
+    const Tensor& X,
+    const bool upper,
+    const bool left,
+    const bool unitriangular,
+    std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, std::array<bool, 3> grad_mask);
@@ -362,6 +379,7 @@ Tensor _lu_with_info_jvp(
 );
 
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
+Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
