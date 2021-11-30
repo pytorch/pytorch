@@ -102,6 +102,7 @@ module_tests = [
     dict(
         module_name='Linear',
         constructor_args=(10, 8),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LinearOptions(10, 8)',
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
@@ -111,6 +112,7 @@ module_tests = [
     dict(
         module_name='Linear',
         constructor_args=(10, 8, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LinearOptions(10, 8).bias(false)',
         input_size=(4, 10),
         desc='no_bias',
@@ -287,6 +289,7 @@ module_tests = [
     ),
     dict(
         module_name='PReLU',
+        constructor_kwargs=dict(dtype=torch.double),
         input_size=(2, 3, 4),
         reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
         desc='1d',
@@ -294,6 +297,7 @@ module_tests = [
     dict(
         module_name='PReLU',
         constructor_args=(3,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
         input_size=(2, 3, 4),
         desc='1d_multiparam',
@@ -301,6 +305,7 @@ module_tests = [
     ),
     dict(
         module_name='PReLU',
+        constructor_kwargs=dict(dtype=torch.double),
         input_size=(2, 3, 4, 5),
         desc='2d',
         reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
@@ -308,6 +313,7 @@ module_tests = [
     dict(
         module_name='PReLU',
         constructor_args=(3,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
         input_size=(2, 3, 4, 5),
         desc='2d_multiparam',
@@ -316,12 +322,14 @@ module_tests = [
     dict(
         module_name='PReLU',
         input_size=(2, 3, 4, 5, 6),
+        constructor_kwargs=dict(dtype=torch.double),
         reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
         desc='3d',
     ),
     dict(
         module_name='PReLU',
         constructor_args=(3,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::PReLUOptions().num_parameters(3)',
         input_size=(2, 3, 4, 5, 6),
         desc='3d_multiparam',
@@ -1394,6 +1402,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(10)',
         input_size=(4, 10),
         cudnn=True,
@@ -1403,6 +1412,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(5,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(5)',
         input_size=(4, 5, 3),
         cudnn=True,
@@ -1412,6 +1422,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, None),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(10).eps(1e-3).momentum(c10::nullopt)',
         input_size=(4, 10),
         cudnn=True,
@@ -1421,6 +1432,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(10).eps(1e-3).momentum(0.3).affine(false)',
         input_size=(4, 10),
         cudnn=True,
@@ -1430,6 +1442,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, True, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::BatchNorm1dOptions(10)
                                 .eps(1e-3).momentum(0.3).affine(true).track_running_stats(false)''',
         input_size=(4, 10),
@@ -1440,6 +1453,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(5, 1e-3, 0.3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(5).eps(1e-3).momentum(0.3).affine(false)',
         input_size=(4, 5, 3),
         cudnn=True,
@@ -1449,6 +1463,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm1d',
         constructor_args=(5, 1e-3, 0.3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm1dOptions(5).eps(1e-3).momentum(0.3).affine(false)',
         input_size=(0, 5, 9),
         cudnn=True,
@@ -1458,6 +1473,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm2dOptions(3)',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1466,6 +1482,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, None),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm2dOptions(3).eps(1e-3).momentum(c10::nullopt)',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1475,6 +1492,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm2dOptions(3).eps(1e-3).momentum(0.8)',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1484,6 +1502,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm2dOptions(3).eps(1e-3).momentum(0.8).affine(false)',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1493,6 +1512,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8, True, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::BatchNorm2dOptions(3)
                                 .eps(1e-3).momentum(0.8).affine(true).track_running_stats(false)''',
         input_size=(2, 3, 6, 6),
@@ -1503,6 +1523,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm2d',
         constructor_args=(5, 1e-3, 0.3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm2dOptions(5).eps(1e-3).momentum(0.3).affine(false)',
         input_size=(0, 5, 2, 2),
         cudnn=True,
@@ -1512,6 +1533,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3,),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm3dOptions(3)',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
@@ -1520,6 +1542,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, None),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm3dOptions(3).eps(1e-3).momentum(c10::nullopt)',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
@@ -1529,6 +1552,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm3dOptions(3).eps(1e-3).momentum(0.7)',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
@@ -1538,6 +1562,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm3dOptions(3).eps(1e-3).momentum(0.7).affine(false)',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
@@ -1547,6 +1572,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(3, 1e-3, 0.7, True, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::BatchNorm3dOptions(3)
                                 .eps(1e-3).momentum(0.7).affine(true).track_running_stats(false)''',
         input_size=(2, 3, 4, 4, 4),
@@ -1557,6 +1583,7 @@ new_module_tests = [
     dict(
         module_name='BatchNorm3d',
         constructor_args=(5, 1e-3, 0.3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::BatchNorm3dOptions(5).eps(1e-3).momentum(0.3).affine(false)',
         input_size=(0, 5, 2, 2, 2),
         cudnn=True,
@@ -1566,6 +1593,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm1d',
         constructor_args=(3, 1e-3, 0.3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::InstanceNorm1dOptions(3).eps(1e-3).momentum(0.3)',
         input_size=(4, 3, 15),
         cudnn=True,
@@ -1574,6 +1602,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm1d',
         constructor_args=(3, 1e-3, 0.3, False, True),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::InstanceNorm1dOptions(3)
                                 .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(4, 3, 15),
@@ -1584,6 +1613,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::InstanceNorm2dOptions(3).eps(1e-3).momentum(0.3)',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1592,6 +1622,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm2d',
         constructor_args=(3, 1e-3, 0.3, False, True),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::InstanceNorm2dOptions(3)
                                 .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(2, 3, 6, 6),
@@ -1602,6 +1633,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm3d',
         constructor_args=(3, 1e-3, 0.3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::InstanceNorm3dOptions(3).eps(1e-3).momentum(0.3)',
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
@@ -1610,6 +1642,7 @@ new_module_tests = [
     dict(
         module_name='InstanceNorm3d',
         constructor_args=(3, 1e-3, 0.3, False, True),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::InstanceNorm3dOptions(3)
                                 .eps(1e-3).momentum(0.3).affine(false).track_running_stats(true)''',
         input_size=(2, 3, 4, 4, 4),
@@ -1620,6 +1653,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([5], 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(4, 5, 5),
         cudnn=True,
@@ -1630,6 +1664,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([5], 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3).elementwise_affine(false)',
         input_size=(4, 5, 5),
         cudnn=True,
@@ -1640,6 +1675,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([2, 2, 5], 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({2, 2, 5}).eps(1e-3)',
         input_size=(4, 2, 2, 5),
         cudnn=True,
@@ -1650,6 +1686,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([2, 2, 5], 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({2, 2, 5}).eps(1e-3).elementwise_affine(false)',
         input_size=(4, 2, 2, 5),
         cudnn=True,
@@ -1660,6 +1697,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([56, 56, 56], 1e-5, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({56, 56, 56}).eps(1e-5).elementwise_affine(false)',
         input_size=(4, 56, 56, 56),
         cudnn=True,
@@ -1671,6 +1709,7 @@ new_module_tests = [
     dict(
         module_name='LayerNorm',
         constructor_args=([5], 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LayerNormOptions({5}).eps(1e-3)',
         input_size=(0, 5),
         cudnn=True,
@@ -1681,6 +1720,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 6).eps(1e-3)',
         input_size=(4, 6, 5),
         cudnn=True,
@@ -1691,6 +1731,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 12, 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 12).eps(1e-3)',
         input_size=(4, 12),
         cudnn=True,
@@ -1701,6 +1742,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(1, 6, 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(1, 6).eps(1e-3)',
         input_size=(150, 6),
         cudnn=True,
@@ -1712,6 +1754,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(5, 5, 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(5, 5).eps(1e-3).affine(false)',
         input_size=(4, 5, 5),
         cudnn=True,
@@ -1722,6 +1765,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(1, 10, 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(1, 10).eps(1e-3).affine(false)',
         input_size=(4, 10),
         cudnn=True,
@@ -1732,6 +1776,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 6).eps(1e-3)',
         input_size=(4, 6, 2, 3),
         cudnn=True,
@@ -1742,6 +1787,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 6, 1e-3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 6).eps(1e-3)',
         input_size=(4, 6, 28, 28),
         cudnn=True,
@@ -1753,6 +1799,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 51, 1e-5, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 51).eps(1e-5).affine(false)',
         input_size=(2, 51, 28, 28),
         cudnn=True,
@@ -1764,6 +1811,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(3, 3, 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(3, 3).eps(1e-3).affine(false)',
         input_size=(4, 3, 2, 3),
         cudnn=True,
@@ -1774,6 +1822,7 @@ new_module_tests = [
     dict(
         module_name='GroupNorm',
         constructor_args=(1, 3, 1e-3, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::GroupNormOptions(1, 3).eps(1e-3).affine(false)',
         input_size=(4, 3, 2, 3),
         cudnn=True,
@@ -1784,6 +1833,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1793,6 +1843,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3, 2),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(2)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1803,6 +1854,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3, 1, 1),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).stride(1).padding(1)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1813,6 +1865,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 5, 1, 2),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 5).stride(1).padding(2)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1823,6 +1876,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 4, 3, 1, 1),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 3).stride(1).padding(1)',
         input_size=(1, 4, 1),
         cudnn=True,
@@ -1833,6 +1887,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 4, 5, 1, 2),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 4, 5).stride(1).padding(2)',
         input_size=(1, 4, 1),
         cudnn=True,
@@ -1843,6 +1898,7 @@ new_module_tests = [
     dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3)',
         input_size=(0, 4, 10),
         cudnn=True,
@@ -1852,7 +1908,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_dilated',
-        constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2),
+        constructor=lambda: nn.Conv1d(4, 5, kernel_size=3, dilation=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).dilation(2)',
         input_size=(2, 4, 10),
         with_tf32=True,
@@ -1860,7 +1916,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_groups',
-        constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2),
+        constructor=lambda: nn.Conv1d(4, 6, kernel_size=3, groups=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 6, 3).groups(2)',
         input_size=(2, 4, 6),
         cudnn=True,
@@ -1869,7 +1925,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_pad_valid',
-        constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid"),
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="valid", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kValid)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1878,7 +1934,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_pad_same',
-        constructor=lambda: nn.Conv1d(4, 5, 3, padding="same"),
+        constructor=lambda: nn.Conv1d(4, 5, 3, padding="same", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1887,7 +1943,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_pad_same2',
-        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same"),
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 4).padding(torch::kSame)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1896,7 +1952,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv1d_pad_same_dilated',
-        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2),
+        constructor=lambda: nn.Conv1d(4, 5, 4, padding="same", dilation=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv1dOptions(4, 5, 3).padding(torch::kSame).dilation(2)',
         input_size=(2, 4, 10),
         cudnn=True,
@@ -1905,7 +1961,8 @@ new_module_tests = [
     ),
     dict(
         fullname='ConvTranspose1d',
-        constructor=lambda: nn.ConvTranspose1d(3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,)),
+        constructor=lambda: nn.ConvTranspose1d(
+            3, 4, kernel_size=3, stride=(3,), padding=1, output_padding=(1,), dtype=torch.double),
         cpp_constructor_args='torch::nn::ConvTranspose1dOptions(3, 4, 3).stride(3).padding(1).output_padding(1)',
         cudnn=True,
         input_size=(1, 3, 7),
@@ -1915,6 +1972,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
                                 .stride(2).padding(1).output_padding(1).groups(1).bias(false)''',
         input_size=(1, 3, 6),
@@ -1926,6 +1984,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose1d',
         constructor_args=(3, 4, 3, 2, 1, 1, 1, True, 2),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(3, 4, 3)
                                 .stride(2).padding(1).output_padding(1).groups(1).bias(true).dilation(2)''',
         input_size=(1, 3, 6),
@@ -1936,7 +1995,8 @@ new_module_tests = [
     ),
     dict(
         fullname='ConvTranspose1d_groups',
-        constructor=lambda: nn.ConvTranspose1d(4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2),
+        constructor=lambda: nn.ConvTranspose1d(
+            4, 6, 3, stride=(3,), padding=1, output_padding=(1,), groups=2, dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose1dOptions(4, 6, 3)
                                 .stride(3).padding(1).output_padding(1).groups(2)''',
         cudnn=True,
@@ -1967,6 +2027,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
         input_size=(2, 3, 7, 5),
         cudnn=True,
@@ -1977,6 +2038,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3), (2, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2})',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1988,6 +2050,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 3), (2, 2), (1, 1)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 3}).stride({2, 2}).padding({1, 1})',
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -1999,6 +2062,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 2, (3, 3), (2, 2), (1, 1), (2, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 2, {3, 3}).stride({2, 2}).padding({1, 1}).dilation({2, 2})',
         input_size=(2, 3, 8, 8),
         cudnn=True,
@@ -2010,6 +2074,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2), 1, 0, 1, 1, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::Conv2dOptions(3, 4, {3, 2})
                                 .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
         input_size=(2, 3, 6, 5),
@@ -2021,6 +2086,7 @@ new_module_tests = [
     dict(
         module_name='Conv2d',
         constructor_args=(3, 4, (3, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(3, 4, {3, 2})',
         input_size=(0, 3, 7, 5),
         cudnn=True,
@@ -2030,7 +2096,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_groups',
-        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
         input_size=(2, 4, 6, 5),
         cudnn=True,
@@ -2040,7 +2106,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_groups_thnn',
-        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2),
+        constructor=lambda: nn.Conv2d(4, 6, (3, 2), groups=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 6, {3, 2}).groups(2)',
         input_size=(2, 4, 6, 5),
         check_with_long_tensor=True,
@@ -2049,7 +2115,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_pad_valid',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid"),
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="valid", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kValid)',
         input_size=(2, 2, 6, 5),
         cudnn=True,
@@ -2058,7 +2124,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_pad_same',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same"),
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame)',
         input_size=(2, 2, 6, 5),
         cudnn=True,
@@ -2067,7 +2133,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_pad_same_dilated',
-        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2),
+        constructor=lambda: nn.Conv2d(2, 4, (3, 4), padding="same", dilation=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(2, 4, {3, 4}).padding(torch::kSame).dilation(2)',
         input_size=(2, 2, 6, 5),
         cudnn=True,
@@ -2077,6 +2143,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (3, 2), 1, (1, 1)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
                                 .stride({3, 2}).padding(1).output_padding({1, 1})''',
         cudnn=True,
@@ -2088,6 +2155,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False, (2, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
                                 .stride({2, 3})
                                 .padding(1)
@@ -2105,6 +2173,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose2d',
         constructor_args=(3, 4, 3, (2, 3), 1, (1, 1), 1, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose2dOptions(3, 4, 3)
                                 .stride({2, 3}).padding(1).output_padding({1, 1}).groups(1).bias(false)''',
         input_size=(1, 3, 6, 7),
@@ -2116,7 +2185,7 @@ new_module_tests = [
     ),
     dict(
         fullname='ConvTranspose2d_groups',
-        constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2),
+        constructor=lambda: nn.ConvTranspose2d(2, 4, (2, 3), groups=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::ConvTranspose2dOptions(2, 4, {2, 3}).groups(2)',
         input_size=(1, 2, 4, 5),
         cudnn=True,
@@ -2126,7 +2195,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_depthwise',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4),
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), groups=4, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
@@ -2134,7 +2203,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_depthwise_with_multiplier',
-        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4),
+        constructor=lambda: nn.Conv2d(4, 8, (3, 3), groups=4, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 8, {3, 3}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
@@ -2142,7 +2211,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_depthwise_strided',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4),
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), stride=(2, 2), groups=4, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).stride({2, 2}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
@@ -2150,7 +2219,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_depthwise_padded',
-        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4),
+        constructor=lambda: nn.Conv2d(4, 4, (3, 3), padding=(1, 1), groups=4, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {3, 3}).padding({1, 1}).groups(4)',
         input_size=(2, 4, 6, 6),
         with_tf32=True,
@@ -2158,7 +2227,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv2d_depthwise_dilated',
-        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4),
+        constructor=lambda: nn.Conv2d(4, 4, (2, 2), dilation=(2, 2), groups=4, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv2dOptions(4, 4, {2, 2}).dilation({2, 2}).groups(4)',
         input_size=(2, 4, 5, 5),
         with_tf32=True,
@@ -2527,6 +2596,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(2, 3, (2, 3, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(2, 3, {2, 3, 2})',
         input_size=(1, 2, 4, 5, 4),
         cudnn=True,
@@ -2537,6 +2607,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(2, 3, (2, 3, 4), 1, 0, 1, 1, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
                                 .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
         input_size=(1, 2, 3, 4, 5),
@@ -2549,6 +2620,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(2, 3, (1, 1, 1), 1, 0, 1, 1, False),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::Conv3dOptions(2, 3, {2, 3, 4})
                                 .stride(1).padding(0).dilation(1).groups(1).bias(false)''',
         input_size=(1, 2, 3, 4, 5),
@@ -2561,6 +2633,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
@@ -2572,6 +2645,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, 2, 2, 1),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).stride(2).padding(1)',
         input_size=(2, 3, 5, 5, 5),
         cudnn=True,
@@ -2583,6 +2657,7 @@ new_module_tests = [
     dict(
         module_name='Conv3d',
         constructor_args=(3, 4, (2, 3, 4)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4})',
         input_size=(0, 3, 3, 4, 5),
         cudnn=True,
@@ -2592,7 +2667,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_groups',
-        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2),
+        constructor=lambda: nn.Conv3d(2, 4, kernel_size=3, groups=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(2, 4, 3).groups(2)',
         input_size=(1, 2, 4, 5, 4),
         cudnn=True,
@@ -2602,7 +2677,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_dilated',
-        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2),
+        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
@@ -2610,7 +2685,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_dilated_strided',
-        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2),
+        constructor=lambda: nn.Conv3d(3, 4, kernel_size=2, dilation=2, stride=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, 2).dilation(2).stride(2)',
         input_size=(2, 3, 5, 5, 5),
         with_tf32=True,
@@ -2618,7 +2693,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_pad_valid',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid"),
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="valid", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kValid)',
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
@@ -2627,7 +2702,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_pad_same',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same"),
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame)',
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
@@ -2636,7 +2711,7 @@ new_module_tests = [
     ),
     dict(
         fullname='Conv3d_pad_same_dilated',
-        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2),
+        constructor=lambda: nn.Conv3d(3, 4, (2, 3, 4), padding="same", dilation=2, dtype=torch.double),
         cpp_constructor_args='torch::nn::Conv3dOptions(3, 4, {2, 3, 4}).padding(torch::kSame).dilation(2)',
         input_size=(2, 3, 6, 5, 4),
         cudnn=True,
@@ -2646,6 +2721,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})',
         cudnn=True,
         input_size=(1, 2, 4, 5, 4),
@@ -2655,6 +2731,7 @@ new_module_tests = [
     dict(
         module_name='ConvTranspose3d',
         constructor_args=(2, 3, (2, 3, 2), 1, 0, 0, 1, True, (2, 2, 2)),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::ConvTranspose3dOptions(2, 3, {2, 3, 2})
                                 .stride(1).padding(0).output_padding(0).groups(1).bias(true).dilation({2, 2, 2})''',
         cudnn=True,
@@ -3899,6 +3976,7 @@ new_module_tests = [
     ),
     dict(
         module_name='PReLU',
+        constructor_kwargs=dict(dtype=torch.double),
         input_size=(),
         reference_fn=lambda i, p, _: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
         desc='scalar',
@@ -4040,6 +4118,7 @@ new_module_tests = [
     dict(
         module_name='TransformerEncoderLayer',
         constructor_args=(4, 2, 16, 0.0),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
                                 .dim_feedforward(16)
                                 .dropout(0.0)''',
@@ -4055,6 +4134,7 @@ new_module_tests = [
     dict(
         module_name='TransformerEncoderLayer',
         constructor_args=(4, 2, 8, 0.0, F.gelu),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::TransformerEncoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
@@ -4068,10 +4148,11 @@ new_module_tests = [
     dict(
         module_name='TransformerDecoderLayer',
         constructor_args=(4, 2, 8, 0.0),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)''',
-        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        input_fn=lambda: (torch.rand(3, 3, 4, dtype=torch.double), torch.rand(2, 3, 4, dtype=torch.double)),
         check_gradgrad=False,
         desc='relu_activation',
         with_tf32=True,
@@ -4080,11 +4161,12 @@ new_module_tests = [
     dict(
         module_name='TransformerDecoderLayer',
         constructor_args=(4, 2, 8, 0.0, F.gelu),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::TransformerDecoderLayerOptions(4, 2)
                                 .dim_feedforward(8)
                                 .dropout(0.0)
                                 .activation(torch::kGELU)''',
-        input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4)),
+        input_fn=lambda: (torch.rand(3, 3, 4, dtype=torch.double), torch.rand(2, 3, 4, dtype=torch.double)),
         check_gradgrad=False,
         desc='gelu_activation',
         with_tf32=True,
@@ -4093,6 +4175,7 @@ new_module_tests = [
     dict(
         module_name='Transformer',
         constructor_args=(4, 2, 2, 2, 8, 0.0, F.relu),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='''torch::nn::TransformerOptions()
                                 .d_model(4)
                                 .nhead(2)
@@ -4101,7 +4184,10 @@ new_module_tests = [
                                 .dim_feedforward(8)
                                 .dropout(0.0)
                                 .activation(torch::kReLU)''',
-        input_fn=lambda:(torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+        input_fn=lambda:(
+            torch.rand(3, 3, 4, dtype=torch.double),
+            torch.rand(2, 3, 4, dtype=torch.double),
+            torch.rand(3, 3, dtype=torch.double)),
         check_gradgrad=False,
         desc='multilayer_coder',
         with_tf32=True,
@@ -4110,8 +4196,9 @@ new_module_tests = [
     dict(
         module_name='Linear',
         constructor_args=(3, 5),
+        constructor_kwargs=dict(dtype=torch.double),
         cpp_constructor_args='torch::nn::LinearOptions(3, 5)',
-        input_fn=lambda: torch.rand(3),
+        input_fn=lambda: torch.rand(3, dtype=torch.double),
         reference_fn=lambda i, p, _: torch.mm(i.view(1, -1), p[0].t()).view(-1) + p[1],
         desc="no_batch_dim",
         with_tf32=True,
@@ -4156,6 +4243,7 @@ for padding_mode, cpp_padding_mode in zip(
             dict(
                 module_name='Conv{}d'.format(d),
                 constructor_args=(2, 3, 3, 2, padding, 1, 1, True, padding_mode),
+                constructor_kwargs=dict(dtype=torch.double),
                 cpp_constructor_args='''torch::nn::Conv{}dOptions(2, 3, 3)
                                         .stride(2)
                                         .padding({})
@@ -4187,6 +4275,7 @@ non_linear_activations_extra_info: Dict[str, dict] = {
     # For RRelu, test that compare CPU and GPU results fail because RNG
     # is different between CPU and GPU
     'RReLU': {'test_cuda': False},
+    'PReLU': {'constructor_kwargs': dict(dtype=torch.double)},
 }
 for non_linear_activation in non_linear_activations_no_batch:
     activation_test_info = dict(
@@ -4676,7 +4765,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
+        constructor_args_fn=lambda: (torch.rand(10, dtype=torch.double),),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
@@ -4687,7 +4776,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, 2),
+        constructor_args_fn=lambda: (torch.rand(10, dtype=torch.double), None, 2),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(2)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
@@ -4698,7 +4787,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), None, -1),
+        constructor_args_fn=lambda: (torch.rand(10, dtype=torch.double), None, -1),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(10)).ignore_index(-1)',
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.empty(15).uniform_().mul(10 + 1).floor().long() - 1,
@@ -4758,7 +4847,7 @@ criterion_tests = [
     ),
     dict(
         module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
+        constructor_args_fn=lambda: (torch.rand(10, dtype=torch.double),),
         cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(10))',
         input_size=(15, 10),
         target_fn=lambda: torch.empty(15).uniform_().mul(10).floor().long(),
@@ -4965,7 +5054,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
+        constructor_args_fn=lambda: (torch.rand(3, dtype=torch.double),),
         cpp_constructor_args='torch::nn::NLLLossOptions().weight(torch::rand(3))',
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
@@ -5017,7 +5106,7 @@ criterion_tests = [
     ),
     dict(
         module_name='CrossEntropyLoss',
-        constructor_args_fn=lambda: (torch.rand(3),),
+        constructor_args_fn=lambda: (torch.rand(3, dtype=torch.double),),
         cpp_constructor_args='torch::nn::CrossEntropyLossOptions().weight(torch::rand(3))',
         input_size=(2, 3, 5, 5),
         target=torch.rand(2, 5, 5).mul(3).floor().long(),
@@ -5213,7 +5302,7 @@ criterion_tests = [
     ),
     dict(
         fullname='CrossEntropyLoss_2d_indices_target_smoothing_weight',
-        constructor_args_fn=lambda: (torch.rand(10).abs(),),
+        constructor_args_fn=lambda: (torch.rand(10, dtype=torch.double).abs(),),
         constructor=lambda weight: nn.CrossEntropyLoss(weight, label_smoothing=0.15),
         cpp_constructor_args='torch::nn::CrossEntropyLossOptions().label_smoothing(0.15).weight(torch::rand(10).abs())',
         input_size=(15, 10),

@@ -158,7 +158,7 @@ class TestRemoveMutation(JitTestCase):
         FileCheck().check('aten::fill_').run(graph)
 
         def normal():
-            return torch.rand(2, 1, 3, 4).normal_()
+            return torch.rand(2, 1, 3, 4, dtype=torch.double).normal_()
 
         fn = torch.jit.script(normal)
         graph = fn.graph

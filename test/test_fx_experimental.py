@@ -948,7 +948,12 @@ terrible spacing
             else:
                 args = test_params["constructor_args"]
 
-            mod = constructor(*args)
+            if "constructor_kwargs" not in test_params:
+                kwargs = {}
+            else:
+                kwargs = test_params["constructor_kwargs"]
+
+            mod = constructor(*args, **kwargs)
             # Skip modules that are not standard `torch.nn`
             # instances, including functionals. (functionals
             # are tested in test_normalize_args)
@@ -956,7 +961,7 @@ terrible spacing
                 continue
 
             if "input_fn" not in test_params:
-                inputs = torch.randn(test_params["input_size"])
+                inputs = torch.randn(test_params["input_size"], dtype=torch.double)
             else:
                 inputs = test_params["input_fn"]()
 

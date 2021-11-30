@@ -32,11 +32,11 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 class MnistNet(nn.Module):
     def __init__(self):
         super(MnistNet, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        self.conv1 = nn.Conv2d(1, 10, kernel_size=5, dtype=torch.double)
+        self.conv2 = nn.Conv2d(10, 20, kernel_size=5, dtype=torch.double)
         self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
+        self.fc1 = nn.Linear(320, 50, dtype=torch.double)
+        self.fc2 = nn.Linear(50, 10, dtype=torch.double)
 
     def forward(self, x):
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
@@ -55,23 +55,23 @@ class TestModels(JitTestCase):
                 super(DCGANGenerator, self).__init__()
                 self.main = nn.Sequential(
                     # input is Z, going into a convolution
-                    nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
-                    nn.BatchNorm2d(ngf * 8),
+                    nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ngf * 8, dtype=torch.double),
                     nn.ReLU(True),
                     # state size. (ngf*8) x 4 x 4
-                    nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ngf * 4),
+                    nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ngf * 4, dtype=torch.double),
                     nn.ReLU(True),
                     # state size. (ngf*4) x 8 x 8
-                    nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ngf * 2),
+                    nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ngf * 2, dtype=torch.double),
                     nn.ReLU(True),
                     # state size. (ngf*2) x 16 x 16
-                    nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ngf),
+                    nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ngf, dtype=torch.double),
                     nn.ReLU(True),
                     # state size. (ngf) x 32 x 32
-                    nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+                    nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False, dtype=torch.double),
                     nn.Tanh()
                     # state size. (nc) x 64 x 64
                 )
@@ -84,22 +84,22 @@ class TestModels(JitTestCase):
                 super(DCGANDiscriminator, self).__init__()
                 self.main = nn.Sequential(
                     # input is (nc) x 64 x 64
-                    nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+                    nn.Conv2d(nc, ndf, 4, 2, 1, bias=False, dtype=torch.double),
                     nn.LeakyReLU(0.2, inplace=True),
                     # state size. (ndf) x 32 x 32
-                    nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ndf * 2),
+                    nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ndf * 2, dtype=torch.double),
                     nn.LeakyReLU(0.2, inplace=True),
                     # state size. (ndf*2) x 16 x 16
-                    nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ndf * 4),
+                    nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ndf * 4, dtype=torch.double),
                     nn.LeakyReLU(0.2, inplace=True),
                     # state size. (ndf*4) x 8 x 8
-                    nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
-                    nn.BatchNorm2d(ndf * 8),
+                    nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False, dtype=torch.double),
+                    nn.BatchNorm2d(ndf * 8, dtype=torch.double),
                     nn.LeakyReLU(0.2, inplace=True),
                     # state size. (ndf*8) x 4 x 4
-                    nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
+                    nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False, dtype=torch.double),
                     nn.Sigmoid()
                 )
 
@@ -108,9 +108,9 @@ class TestModels(JitTestCase):
 
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
         self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
-                        (torch.rand(bs, nz, 1, 1, device=device),),
+                        (torch.rand(bs, nz, 1, 1, device=device, dtype=torch.double),),
                         export_import=check_export_import)
-        example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
+        example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device, dtype=torch.double))
         self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
                         export_import=check_export_import)
 
@@ -236,8 +236,10 @@ class TestModels(JitTestCase):
     def _test_mnist(self, device, check_export_import=True):
         # eval() is present because dropout makes this nondeterministic
         with enable_profiling_mode_for_profiling_tests():
-            self.checkTrace(MnistNet().to(device).eval(), (torch.rand(5, 1, 28, 28, device=device),),
-                            export_import=check_export_import)
+            self.checkTrace(
+                MnistNet().to(device).eval(),
+                (torch.rand(5, 1, 28, 28, device=device, dtype=torch.double),),
+                export_import=check_export_import)
 
     def test_mnist(self):
         self._test_mnist(self, device='cpu')
@@ -251,13 +253,13 @@ class TestModels(JitTestCase):
     def test_mnist_training_leaks_no_memory_cuda(self):
         net = MnistNet().cuda()
         # MnistNet uses dropout, don't check its trace
-        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda')],
+        traced_net = torch.jit.trace(net, [torch.randn(5, 1, 28, 28, device='cuda', dtype=torch.double)],
                                      check_trace=False)
 
         def train(iters):
             for _ in range(iters):
                 # Get some fake data
-                inp = torch.randn(5, 1, 28, 28, device='cuda')
+                inp = torch.randn(5, 1, 28, 28, device='cuda', dtype=torch.double)
                 out = traced_net(inp)
 
                 # Here's some fake loss

@@ -945,7 +945,7 @@ class TestTracer(JitTestCase):
             def __init__(self, num_features, num_layers):
                 super(Model, self).__init__()
                 self.num_layers = num_layers
-                layers = [[nn.Linear(num_features, num_features), nn.Sigmoid()]
+                layers = [[nn.Linear(num_features, num_features, dtype=torch.double), nn.Sigmoid()]
                           for _ in range(num_layers)]
                 self.submodule = nn.Sequential(*chain(*layers))
 
@@ -955,7 +955,7 @@ class TestTracer(JitTestCase):
                 return x
 
         model = Model(5, 3)
-        x = torch.randn(2, 5)
+        x = torch.randn(2, 5, dtype=torch.double)
         traced_model = torch.jit.trace(model, x)
 
         # We're missing some attributes these modules had initially. Make sure we can

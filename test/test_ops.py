@@ -25,6 +25,8 @@ from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.composite_compliance import _check_composite_compliance
 
+assert torch.get_default_dtype() == torch.float32
+
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
 _variant_ops = partial(ops, dtypes=OpDTypes.supported,

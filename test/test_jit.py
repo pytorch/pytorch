@@ -138,6 +138,8 @@ import unittest
 import warnings
 import zipfile
 
+assert torch.get_default_dtype() == torch.float32
+
 
 def canonical(graph):
     return torch._C._jit_pass_canonicalize(graph).str(False)
@@ -1510,8 +1512,8 @@ graph(%Ra, %Rb):
         def broadcast(a, b):
             return a + b
 
-        x = torch.randn(3, 1, 5, requires_grad=True)
-        y = torch.randn(4, 1, 8, 5, requires_grad=True)
+        x = torch.randn(3, 1, 5, requires_grad=True, dtype=torch.double)
+        y = torch.randn(4, 1, 8, 5, requires_grad=True, dtype=torch.double)
 
         graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_complete_shape_analysis(graph, (x, y), False)
@@ -1794,11 +1796,11 @@ graph(%Ra, %Rb):
 
         def fn_out(real, img, out):
             return torch.complex(real, img, out=out)
-        self.checkScript(fn, (torch.rand(3, 4), torch.rand(3, 4), ))
-        self.checkScript(fn, (torch.ones(5, 1, 4), torch.ones(5, 1, 4), ))
-        self.checkScript(fn, (torch.zeros(1, 6), torch.ones(6, 1), ))
-        self.checkScript(fn, (torch.zeros(1, 6), torch.zeros(6, 1), ))
-        self.checkScript(fn, (torch.empty(3, 4), torch.empty(3, 4), ))
+        self.checkScript(fn, (torch.rand(3, 4, dtype=torch.double), torch.rand(3, 4, dtype=torch.double), ))
+        self.checkScript(fn, (torch.ones(5, 1, 4, dtype=torch.double), torch.ones(5, 1, 4, dtype=torch.double), ))
+        self.checkScript(fn, (torch.zeros(1, 6, dtype=torch.double), torch.ones(6, 1, dtype=torch.double), ))
+        self.checkScript(fn, (torch.zeros(1, 6, dtype=torch.double), torch.zeros(6, 1, dtype=torch.double), ))
+        self.checkScript(fn, (torch.empty(3, 4, dtype=torch.double), torch.empty(3, 4, dtype=torch.double), ))
 
         real = torch.tensor([1, 2], dtype=torch.float32)
         img = torch.tensor([3, 4], dtype=torch.float32)
@@ -1810,33 +1812,33 @@ graph(%Ra, %Rb):
         out = torch.empty([5, 2], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.ones([1, 2])
-        img = torch.ones([1, 2])
+        real = torch.ones([1, 2], dtype=torch.double)
+        img = torch.ones([1, 2], dtype=torch.double)
         out = torch.empty([1, 2], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.ones([3, 8, 7])
-        img = torch.ones([3, 8, 7])
+        real = torch.ones([3, 8, 7], dtype=torch.double)
+        img = torch.ones([3, 8, 7], dtype=torch.double)
         out = torch.empty([3, 8, 7], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.empty([3, 2, 6])
-        img = torch.empty([3, 2, 6])
+        real = torch.empty([3, 2, 6], dtype=torch.double)
+        img = torch.empty([3, 2, 6], dtype=torch.double)
         out = torch.empty([3, 2, 6], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.zeros([1, 3])
-        img = torch.empty([3, 1])
+        real = torch.zeros([1, 3], dtype=torch.double)
+        img = torch.empty([3, 1], dtype=torch.double)
         out = torch.empty([3, 3], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.ones([2, 5])
-        img = torch.empty([2, 1])
+        real = torch.ones([2, 5], dtype=torch.double)
+        img = torch.empty([2, 1], dtype=torch.double)
         out = torch.empty([2, 5], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
-        real = torch.ones([2, 5])
-        img = torch.zeros([2, 1])
+        real = torch.ones([2, 5], dtype=torch.double)
+        img = torch.zeros([2, 1], dtype=torch.double)
         out = torch.empty([2, 5], dtype=torch.complex128)
         self.checkScript(fn_out, (real, img, out, ))
 
@@ -3111,8 +3113,8 @@ class TestScript(JitTestCase):
 
         with enable_profiling_mode_for_profiling_tests():
             with num_profiled_runs(2):
-                test_not_const(torch.rand([1, 2]))
-                test_not_const(torch.rand([2, 2]))
+                test_not_const(torch.rand([1, 2], dtype=torch.double))
+                test_not_const(torch.rand([2, 2], dtype=torch.double))
 
                 graph_str = torch.jit.last_executed_optimized_graph()
                 FileCheck().check("profiled_type=Double(*, 2, strides=[2, 1], requires_grad=0, device=cpu").run(graph_str)
@@ -5574,7 +5576,7 @@ a")
             T = x.size(2)
             return x.view(T, B, C)
 
-        x = torch.randn(3, 1, 5, requires_grad=True)
+        x = torch.randn(3, 1, 5, requires_grad=True, dtype=torch.double)
         fn = torch.jit.script(fn)
         graph = _propagate_shapes(fn.graph, (x,), False)
         self.assertTrue(next(graph.outputs()).type().scalarType() == 'Double')
@@ -6611,8 +6613,8 @@ a")
             w = -q
             return w * w
 
-        x = torch.arange(4., requires_grad=True)
-        y = torch.arange(0., 8, 2, requires_grad=True)
+        x = torch.arange(4., requires_grad=True, dtype=torch.double)
+        y = torch.arange(0., 8, 2, requires_grad=True, dtype=torch.double)
         self.checkScript(func, [x, y], optimize=True, capture_output=True)
 
     def test_format(self):
@@ -7202,7 +7204,7 @@ a")
         ops = ['tensor', 'as_tensor']
         inputs = ['[1]', '[False]', '[2.5]', '0.5', '1', 'False', '[[1]]', 'torch.jit.annotate(List[List[int]], [])']
         expected_shape = ["Long(*, device=cpu)", "Bool(*, device=cpu)",
-                          "Double(*, device=cpu)", "Double(device=cpu)",
+                          "Float(*, device=cpu)", "Float(device=cpu)",
                           "Long(device=cpu)", "Bool(device=cpu)", "Long(*, *, device=cpu)"]
 
         for op in ops:
@@ -9119,7 +9121,7 @@ dedent """
         class SubSubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(SubSubMod, self).__init__()
-                self.register_buffer('buf', torch.ones(3, 4) * 3)
+                self.register_buffer('buf', torch.ones(3, 4, dtype=torch.double) * 3)
 
             @torch.jit.script_method
             def _pack(self):
@@ -9136,7 +9138,7 @@ dedent """
         class SubMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(SubMod, self).__init__()
-                self.register_buffer('buf', torch.ones(3, 4) * 2)
+                self.register_buffer('buf', torch.ones(3, 4, dtype=torch.double) * 2)
                 self.ssm = SubSubMod()
 
             @torch.jit.script_method
@@ -9155,7 +9157,7 @@ dedent """
             def __init__(self):
                 super(Mod, self).__init__()
                 self.submod = SubMod()
-                self.register_buffer('buf', torch.ones(3, 4) * 1)
+                self.register_buffer('buf', torch.ones(3, 4, dtype=torch.double) * 1)
 
             @torch.jit.script_method
             def _pack(self):
@@ -9170,11 +9172,11 @@ dedent """
                 return self.submod(x + self.buf)
 
         m = Mod()
-        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4, dtype=torch.double)), torch.ones(3, 4, dtype=torch.double) * 6)
         m.apply(lambda s: s._pack())
-        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.zeros(3, 4))
+        torch.testing.assert_close(m(torch.zeros(3, 4, dtype=torch.double)), torch.zeros(3, 4, dtype=torch.double))
         m.apply(lambda s: s._unpack())
-        torch.testing.assert_close(m(torch.zeros(3, 4)), torch.ones(3, 4) * 6)
+        torch.testing.assert_close(m(torch.zeros(3, 4, dtype=torch.double)), torch.ones(3, 4, dtype=torch.double) * 6)
 
     def test_torch_any(self):
         def fn(x):
@@ -10003,7 +10005,7 @@ dedent """
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self, mod):
                 super(ScriptMod, self).__init__()
-                x = torch.zeros(1, 3)
+                x = torch.zeros(1, 3, dtype=torch.double)
                 mod_fn = lambda : mod(x)  # noqa: E731
                 self.mod = torch.jit.trace(mod_fn, tuple())
 
@@ -10599,7 +10601,7 @@ dedent """
         def foo(x, y):
             return torch.index_select(x, index=y, dim=1)
 
-        a = torch.zeros(2, 2)
+        a = torch.zeros(2, 2, dtype=torch.double)
         b = torch.zeros(4, dtype=torch.long)
         torch._C._jit_pass_complete_shape_analysis(foo.graph, (a, b), False)
         FileCheck().check("Double(2, 4, strides=[4, 1], requires_grad=0, device=cpu)").run(str(foo.graph))
@@ -10935,7 +10937,7 @@ dedent """
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "the original version of test_rand")
     def test_rand(self):
         def test_rand():
-            a = torch.rand([3, 4])
+            a = torch.rand([3, 4], dtype=torch.double)
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
@@ -10950,7 +10952,7 @@ dedent """
 
         @torch.jit.script
         def randint():
-            return torch.randint(0, 5, [1, 2])
+            return torch.randint(0, 5, [1, 2], dtype=torch.double)
         out = randint()
         self.assertEqual(out.dtype, torch.double)
         # although the type should be int here, testing that the runtime dtype
@@ -11015,7 +11017,7 @@ dedent """
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "the profiling version of test_rand")
     def test_rand_profiling(self):
         def test_rand():
-            a = torch.rand([3, 4])
+            a = torch.rand([3, 4], dtype=torch.double)
             return a + 1.0 - a
 
         # Testing shape analysis correctly setting type
@@ -11034,7 +11036,7 @@ dedent """
 
         @torch.jit.script
         def randint():
-            return torch.randint(0, 5, [1, 2])
+            return torch.randint(0, 5, [1, 2], dtype=torch.double)
 
         # although the type should be int here, testing that the runtime dtype
         # and shape analysis dtype is the same.
@@ -16093,7 +16095,7 @@ class TestJitAutocast(JitTestCase):
     def setUp(self):
         super(TestJitAutocast, self).setUp()
         self.models = [MnistNet()]
-        self.inputs = [torch.randn(5, 1, 28, 28, device='cpu')]
+        self.inputs = [torch.randn(5, 1, 28, 28, device='cpu', dtype=torch.double)]
 
     def tearDown(self):
         super(TestJitAutocast, self).tearDown()
@@ -16259,6 +16261,11 @@ def add_nn_module_test(*args, **kwargs):
         else:
             constructor_args = kwargs.get('constructor_args', ())
 
+        if 'constructor_kwargs_fn' in kwargs:
+            constructor_kwargs = kwargs['constructor_kwargs_fn']()
+        else:
+            constructor_kwargs = kwargs.get('constructor_kwargs', {})
+
         def create_script_module(*args, **kwargs):
             """Construct a script module that passes arguments through to self.submodule"""
             formals, tensors, actuals = get_script_args(args)
@@ -16278,7 +16285,7 @@ def add_nn_module_test(*args, **kwargs):
 
                 def __init__(self):
                     super(TheModule, self).__init__()
-                    self.submodule = nn_module(*constructor_args)
+                    self.submodule = nn_module(*constructor_args, **constructor_kwargs)
 
             def make_module(script):
                 module = TheModule()
@@ -16296,7 +16303,7 @@ def add_nn_module_test(*args, **kwargs):
         # Construct a normal nn module to stay consistent with create_script_module
         # and make use of a single global rng_state in module initialization
         def create_nn_module(*args, **kwargs):
-            module = nn_module(*constructor_args)
+            module = nn_module(*constructor_args, **constructor_kwargs)
             return module(*args)
 
         # Set up inputs from tuple of sizes or constructor fn

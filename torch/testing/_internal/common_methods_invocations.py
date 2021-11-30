@@ -1296,8 +1296,8 @@ def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad):
 
         with torch.no_grad():
             n = size[-1]
-            a = make_arg(size[:-2] + (n, rank)) / 10
-            b = make_arg(size[:-2] + (rank, n)) / 10
+            a = make_arg(size[:-2] + (n, rank), dtype=torch.double) / 10
+            b = make_arg(size[:-2] + (rank, n), dtype=torch.double) / 10
 
             x = a @ b
             lu, pivs = x.lu()
@@ -5452,10 +5452,23 @@ def sample_inputs_fmod_remainder(op_info, device, dtype, requires_grad, *, autod
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     if autodiffed:
-        samples = (
-            ((S, S, S), 1.5, False),
-            ((), 1.5, False),
-        )
+        if dtype.is_floating_point or dtype.is_complex:
+            samples = (
+                ((S, S, S), 1.5, False),
+                ((), 1.5, False),
+            )
+        else:
+            # NOTE: Given an integer tensor and a non-tensor number, fmod and
+            # remainder return a tensor of the default dtype, according to
+            # torch.get_default_dtype(). OpInfo tests used to have
+            # torch.double as the default dtype, but it has been changed back
+            # to torch.float32. In order to make fmod and remainder still
+            # return a tensor of dtype double, which is required for the tests
+            # to pass, the second argument must be a tensor of dtype double
+            samples = (
+                ((S, S, S), torch.tensor(1.5, dtype=torch.double), False),
+                ((), torch.tensor(1.5, dtype=torch.double), False),
+            )
     else:
         cases = (
             ((S, S, S), (), False),
@@ -7458,7 +7471,7 @@ def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwa
     ]
 
     return [
-        SampleInput(make(shape), args=(make(shape),), kwargs=kwargs) for shape, kwargs in shapes_and_kwargs
+        SampleInput(make(shape), args=(make(shape, dtype=torch.double),), kwargs=kwargs) for shape, kwargs in shapes_and_kwargs
     ]
 
 def sample_inputs_pixel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
