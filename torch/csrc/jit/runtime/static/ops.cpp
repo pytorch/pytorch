@@ -15,6 +15,8 @@
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <ATen/native/quantized/cpu/qembeddingbag_prepack.h>
+#include <ATen/quantized/QTensorImpl.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -364,6 +366,14 @@ void where_out(
   });
 }
 
+at::Tensor& dequantize_copy_out(Tensor& out, const Tensor& self) {
+  if (C10_UNLIKELY(!self.is_quantized())) {
+    // fallback to dequantize_cpu equivalent case: make sure out is at::kFloat
+    DCHECK(out.scalar_type() == kFloat);
+    return at::native::to_copy_out(out, self, false, false, c10::nullopt);
+  }
+  return get_qtensorimpl(self)->quantizer()->dequantize_out(out, self);
+}
 } // namespace native
 } // namespace at
 
@@ -1114,6 +1124,31 @@ REGISTER_OPERATOR_FUNCTOR(
         fastResizeToZero(out_t);
         at::native::to_copy_out(
             out_t, self, non_blocking, copy_strides, memory_format);
+      };
+    });
+
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::dequantize_copy,
+    aten_dequantize_copy,
+    [](Node* n) -> SROperator {
+      if (!n->matches(torch::schema(
+              "static_runtime::dequantize_copy.self(Tensor self) -> Tensor"))) {
+        // please implement static runtime support for aten::dequantize with
+        // TensorList
+        LogAndDumpSchema(n);
+        return nullptr;
+      }
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) =
+              create_empty_from(self, at::kFloat, self.suggest_memory_format());
+        }
+
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        at::native::dequantize_copy_out(out_t, self);
       };
     });
 
