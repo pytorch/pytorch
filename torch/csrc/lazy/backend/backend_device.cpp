@@ -42,14 +42,14 @@ std::ostream& operator<<(std::ostream& os, const BackendDevice& device) {
 }
 
 // TODO(whc) refactor this: we need to support non-zero default ordinal for torch/XLA.
-BackendDevice AtenDeviceToBackendDevice(const c10::Device& device) {
-  CHECK_EQ(device.type(), at::kLazy) << device;
+BackendDevice atenDeviceToBackendDevice(const c10::Device& device) {
+  TORCH_CHECK(device.type() == at::kLazy, device);
   int64_t ordinal = device.has_index() ? device.index() : 0;
   return BackendDevice(getBackend()->GetDefaultDeviceType(), ordinal);
 }
 
 // TODO(whc) refactor this: we need to support non 1 on 1 mapping for torch/XLA.
-c10::Device BackendDeviceToAtenDevice(const BackendDevice& device) {
+c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
   return c10::Device(at::kLazy, device.ordinal());
 }
 

@@ -52,8 +52,8 @@ class TORCH_API BackendDevice {
 TORCH_API std::ostream& operator<<(std::ostream& os, const BackendDevice& device);
 
 // Helpers for converting a c10::Device to BackendDevice and vice versa.
-BackendDevice AtenDeviceToBackendDevice(const c10::Device& device);
-c10::Device BackendDeviceToAtenDevice(const BackendDevice& device);
+TORCH_API BackendDevice atenDeviceToBackendDevice(const c10::Device& device);
+TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 
 }  // namespace lazy
 }  // namespace torch
