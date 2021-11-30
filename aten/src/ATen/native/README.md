@@ -517,7 +517,7 @@ Here're steps to follow to decide the right dispatch keyword:
 
       You're done. This op will be called in inference for all backends.
 
-      Note: to support training you're required to add a autograd formula,
+      Note: to support training you're required to add an autograd formula,
       or it'll error out in backward pass when calling with a Tensor has requires_grad=True.
 
     - No: ops in this category are mainly using `_out` boilerplate where its out version doesn't have a derivative
