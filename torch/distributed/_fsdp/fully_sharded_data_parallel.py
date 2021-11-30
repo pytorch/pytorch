@@ -382,7 +382,7 @@ class FullyShardedDataParallel(nn.Module):
         # set the _local_shard again.
         if hasattr(p, "_local_shard"):
             assert p.data_ptr() == p._local_shard.data_ptr(), (  # type: ignore[attr-defined]
-                "Parameter storage is changed outside FSDP, this use case "
+                "Parameter storage is changed after first iteration outside FSDP, this use case "
                 "is not supported right now as parameter may be mutated and "
                 "is pointed to a non-sharded tensor or an invalid shard."
             )

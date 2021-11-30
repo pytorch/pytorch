@@ -4,7 +4,7 @@ import sys
 
 import torch
 from torch import distributed as dist
-from torch.distributed._fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed._fsdp import FullyShardedDataParallel as FSDP, CPUOffload
 from torch.nn import Linear, Module
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim import SGD
@@ -13,7 +13,12 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_full_params,
 )
-from torch.testing._internal.common_utils import TEST_WITH_DEV_DBG_ASAN, run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
+)
 
 
 if not dist.is_available():
@@ -29,14 +34,14 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class Model(Module):
-    def __init__(self, wrap_fsdp):
+    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
         super().__init__()
         # keep everything deterministic for model initialization
         torch.manual_seed(0)
-        self.inner = Linear(4, 4)
+        self.inner = Linear(2, 2).cuda()
         if wrap_fsdp:
-            self.inner = FSDP(self.inner)
-        self.outer = Linear(4, 5)
+            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
+        self.outer = Linear(2, 2).cuda()
 
     def forward(self, x):
         y = self.inner(x)
@@ -48,19 +53,19 @@ class Model(Module):
 # Only run one step for comparision, as usually grad scaler is needed to avoid NaN value
 # after first step.
 class TestPureFP16(FSDPTest):
-    def _dist_train(self, wrap_fsdp):
+    def _dist_train(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
         # keep everything deterministic for input data
         torch.manual_seed(0)
 
-        model = Model(wrap_fsdp).cuda()
+        model = Model(wrap_fsdp, cpu_offload)
         if wrap_fsdp:
-            model = FSDP(model)
+            model = FSDP(model, cpu_offload=cpu_offload)
         else:
             model = DistributedDataParallel(model, device_ids=[self.rank])
         model.half()
         optim = SGD(model.parameters(), lr=0.1)
 
-        in_data = torch.rand(64, 4).cuda().half()
+        in_data = torch.rand(16, 2).cuda().half()
         in_data.requires_grad = True
         for _ in range(1):
             out = model(in_data)
@@ -74,15 +79,21 @@ class TestPureFP16(FSDPTest):
         return list(model.parameters())
 
     @skip_if_lt_x_gpu(2)
-    def test_pure_fp16(self):
+    @parametrize(
+        "cpu_offload",
+        [CPUOffload(offload_params=True), CPUOffload(offload_params=False)],
+    )
+    def test_pure_fp16(self, cpu_offload):
         # DDP
         ddp_state = self._dist_train(wrap_fsdp=False)
 
         # FSDP
-        fsdp_state = self._dist_train(wrap_fsdp=True)
+        fsdp_state = self._dist_train(wrap_fsdp=True, cpu_offload=cpu_offload)
 
         self.assertEqual(ddp_state, fsdp_state)
 
+
+instantiate_parametrized_tests(TestPureFP16)
 
 if __name__ == "__main__":
     run_tests()
