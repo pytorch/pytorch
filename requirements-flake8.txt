@@ -4,6 +4,6 @@ flake8-comprehensions==3.3.0
 flake8-executable==2.0.4
 git+https://github.com/malfet/flake8-coding.git
 flake8-pyi==20.5.0
-mccabe
+mccabe==0.6.1
 pycodestyle==2.6.0
 pyflakes==2.2.0
