@@ -44,7 +44,6 @@ void GroupNormKernelImplInternal(
   const bool beta_null = beta_data == nullptr;
   const int64_t inner_size = D * HxW;
 
-  using Vec = vec::Vectorized<T>;
   at::parallel_for(0, N * G, 1, [&](int64_t start, int64_t end) {
     for (const auto i : c10::irange(start, end)) {
       const T* X_ptr = X_data + i * inner_size;

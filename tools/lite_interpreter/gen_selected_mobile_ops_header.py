@@ -7,6 +7,13 @@ from tools.codegen.code_template import CodeTemplate
 
 import yaml
 
+# Safely load fast C Yaml loader/dumper if they are available
+try:
+    from yaml import CSafeLoader as Loader
+except ImportError:
+    from yaml import SafeLoader as Loader  # type: ignore[misc]
+
+
 if_condition_template_str = """if (kernel_tag_sv.compare("$kernel_tag_name") == 0) {
   return $dtype_checks;
 }"""
@@ -77,6 +84,7 @@ def write_selected_mobile_ops(
 ) -> None:
     root_ops = extract_root_operators(selective_builder)
     custom_classes = selective_builder.custom_classes
+    build_features = selective_builder.build_features
     with open(output_file_path, "wb") as out_file:
         body_parts = [selected_mobile_ops_preamble]
         # This condition checks if we are in selective build.
@@ -86,6 +94,7 @@ def write_selected_mobile_ops(
             # This condition checks if we are in tracing based selective build
             if selective_builder.include_all_non_op_selectives is False:
                 body_parts.append("#define TORCH_CUSTOM_CLASS_ALLOWLIST " + (";".join(sorted(custom_classes))) + ";\n\n")
+                body_parts.append("#define TORCH_BUILD_FEATURE_ALLOWLIST " + (";".join(sorted(build_features))) + ";\n\n")
 
         body_parts.append(get_selected_kernel_dtypes_code(selective_builder))
         header_contents = "".join(body_parts)
@@ -127,7 +136,7 @@ def main() -> None:
     print("Loading yaml file: ", model_file_name)
     loaded_model = {}
     with open(model_file_name, "rb") as model_file:
-        loaded_model = yaml.load(model_file)
+        loaded_model = yaml.load(model_file, Loader=Loader)
 
 
     root_operators_set = set(loaded_model)
