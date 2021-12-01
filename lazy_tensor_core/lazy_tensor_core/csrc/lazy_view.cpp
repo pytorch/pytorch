@@ -16,7 +16,7 @@
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/resize.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
-#include "lazy_tensor_core/csrc/view_ops/unselect.h"
+#include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/update_slice.h"
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
@@ -74,7 +74,7 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
     const ViewInfo& view_info = update_data.view_infos[i - 1];
     switch (view_info.view_type) {
       case ViewInfo::Type::kSelect:
-        result = torch::lazy::MakeNode<ir::ops::Unselect>(
+        result = torch::lazy::MakeNode<ir::ops::SelectViewUpdate>(
             tmp_values[i - 1], result, view_info.select->dim,
             view_info.select->start, view_info.select->end,
             view_info.select->stride);

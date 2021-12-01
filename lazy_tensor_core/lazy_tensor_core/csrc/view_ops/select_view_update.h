@@ -6,10 +6,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class Unselect : public torch::lazy::TsNode {
+class SelectViewUpdate : public torch::lazy::TsNode {
  public:
-  Unselect(const torch::lazy::Value& target, const torch::lazy::Value& source,
-           int64_t dim, int64_t start, int64_t end, int64_t stride);
+  SelectViewUpdate(const torch::lazy::Value& target,
+                   const torch::lazy::Value& source, int64_t dim, int64_t start,
+                   int64_t end, int64_t stride);
 
   std::string ToString() const override;
 

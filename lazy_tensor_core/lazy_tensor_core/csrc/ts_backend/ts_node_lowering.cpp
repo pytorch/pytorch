@@ -25,7 +25,7 @@
 #include "lazy_tensor_core/csrc/view_ops/narrow.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
-#include "lazy_tensor_core/csrc/view_ops/unselect.h"
+#include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/update_slice.h"
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
@@ -85,10 +85,10 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
           node, *torch_lazy_tensors::ir::ops::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_unselect) {
-      return LowerUnselect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Unselect>(
-              node, *torch_lazy_tensors::ir::ops::ltc_unselect));
+    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select_view_update) {
+      return LowerSelectViewUpdate(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::SelectViewUpdate>(
+              node, *torch_lazy_tensors::ir::ops::ltc_select_view_update));
     }
     if (node->op() == *torch_lazy_tensors::ir::ops::ltc_update_slice) {
       return LowerUpdateSlice(
@@ -390,8 +390,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return expand_out;
   }
 
-  TSOpVector LowerNarrow(
-      const torch_lazy_tensors::ir::ops::Narrow* node) {
+  TSOpVector LowerNarrow(const torch_lazy_tensors::ir::ops::Narrow* node) {
     const torch::lazy::Output& input = node->operand(0);
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
@@ -468,7 +467,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(stack, arguments);
   }
 
-  TSOpVector LowerUnselect(const torch_lazy_tensors::ir::ops::Unselect* node) {
+  TSOpVector LowerSelectViewUpdate(
+      const torch_lazy_tensors::ir::ops::SelectViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     int64_t step = torch_lazy_tensors::ir::ops::Select::GetStride(
