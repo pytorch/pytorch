@@ -14,7 +14,7 @@ import sys
 import time
 import torch
 from torch import nn
-from torch.jit import fuser
+from torch.jit import fuser, optimized_execution
 from os.path import abspath
 from scipy.stats import ttest_ind
 
@@ -173,12 +173,6 @@ def call_model_with(model, inputs):
     elif isistance(inputs, torch.Tensor):
         return model(inputs)
     raise RuntimeError("invalid example inputs ", inputs)
-"""
-# TODO(whc)
-#  see why to_cpu is _so much slower_, given cuda is also copying to cpu
-# - bert to_cpu amortized v unamortized huge delta... why?
-# - hf-bart, shows wait_device_ops method is way off from reality.  why?
-"""
 
 class CudaSync:
     def __init__(self, sync_every_iter=False):
@@ -355,6 +349,8 @@ def check_results(name, correct_result, lazy_result, device):
     return torch.allclose(correct_result, lazy_result)
 
 def check_fuser(args):
+    if args.fuser == 'noopt':
+        return
     if args.fuser is None:
         args.fuser = 'fuser1' if args.device == 'cpu' else 'fuser2'
     if args.device == 'cpu':
@@ -372,7 +368,7 @@ if __name__ == "__main__" :
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
     parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
-    parser.add_argument("--fuser", type=str, choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
+    parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
     args = parser.parse_args()
@@ -403,7 +399,15 @@ if __name__ == "__main__" :
                 continue
             lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs)
 
-            with fuser(args.fuser): 
+            with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
+                if args.fuser == 'noopt':
+                    # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
+                    # _and_ disable fusers to get no-optimization
+                    torch._C._jit_override_can_fuse_on_cpu(False)
+                    torch._C._jit_override_can_fuse_on_gpu(False)
+                    torch._C._jit_set_texpr_fuser_enabled(False)
+                    torch._C._jit_set_nvfuser_enabled(False)
+
                 # using LazySync
                 lazy_compute_experiment(f"amortized {args.inner_loop_repeat}x", results, args, model, example_inputs, lazy_model, lazy_inputs)
                 lazy_compute_experiment("unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True)
