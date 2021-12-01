@@ -257,12 +257,12 @@ std::string DumpUtil::PostOrderToText(
 std::string DumpUtil::ToBackend(
     c10::ArrayRef<Value> values,
     const BackendDevice& device) {
-    auto lowering_ctx = LoweringContext::Create("IrToBackend", device);
-    for (auto& ir_value : values) {
-      lowering_ctx->AddResult(ir_value);
-    }
-    auto computation = lowering_ctx->Build();
-    return getBackend()->GetComputationBackendText(computation);
+  auto lowering_ctx = LoweringContext::Create("IrToBackend", device);
+  for (auto& ir_value : values) {
+    lowering_ctx->AddResult(ir_value);
+  }
+  auto computation = lowering_ctx->Build();
+  return getBackend()->GetComputationBackendText(computation);
 }
 
 } // namespace lazy

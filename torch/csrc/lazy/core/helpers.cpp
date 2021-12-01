@@ -116,7 +116,7 @@ Shape GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2) {
 }
 
 std::vector<std::string> StrSplit(c10::string_view text, char delim) {
-  size_t start;
+  size_t start = 0;
   size_t end = 0;
 
   std::vector<std::string> tokens;
