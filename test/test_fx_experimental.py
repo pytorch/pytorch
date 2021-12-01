@@ -1531,6 +1531,9 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
         }
 
         # Unsupported input types

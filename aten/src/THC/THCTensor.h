@@ -2,7 +2,6 @@
 #define THC_TENSOR_INC
 
 #include <TH/THTensor.h>
-#include <THC/THCStorage.h>
 #include <THC/THCGeneral.h>
 
 #define THCTensor_(NAME)   TH_CONCAT_4(TH,CReal,Tensor_,NAME)
