@@ -515,6 +515,9 @@ def get_module_hook_type(
     parent_module: Optional[torch.nn.Module],
     cur_module: torch.nn.Module,
 ) -> HookType:
+    cached_hook_type = getattr(cur_module, '_auto_quant_module_hook_type', None)
+    if cached_hook_type is not None:
+        return cached_hook_type
     parent_module_has_qstate = parent_module is not None and \
         '_modules' in parent_module.__dict__ and \
         '_auto_quant_state' in parent_module.__dict__['_modules']
@@ -532,13 +535,15 @@ def get_module_hook_type(
     needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
 
     if needs_op_hooks:
-        return HookType.OP_HOOKS
+        result = HookType.OP_HOOKS
     elif needs_io_hooks:
-        return HookType.MODULE_IO_HOOKS
+        result = HookType.MODULE_IO_HOOKS
     elif needs_arg_dequants:
-        return HookType.ARG_DEQUANTS
+        result = HookType.ARG_DEQUANTS
     else:
-        return HookType.NONE
+        result = HookType.NONE
+    cur_module._auto_quant_module_hook_type = result  # type: ignore[assignment]
+    return result
 
 def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
     """
