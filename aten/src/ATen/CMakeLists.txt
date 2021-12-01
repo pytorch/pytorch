@@ -208,9 +208,13 @@ if(USE_CUDA)
 
   append_filelist("aten_cuda_cu_source_list" ATen_CUDA_CU_SRCS)
   append_filelist("aten_cuda_with_sort_by_key_source_list" ATen_CUDA_SRCS_W_SORT_BY_KEY)
+  append_filelist("aten_cuda_cu_with_sort_by_key_source_list" ATen_CUDA_CU_SRCS_W_SORT_BY_KEY)
 
-  exclude(ATen_CUDA_CPP_SRCS "${ATen_CUDA_CPP_SRCS}" ${ATen_CUDA_CU_SRCS})
-  exclude(ATen_CUDA_CU_SRCS "${ATen_CUDA_CU_SRCS}" ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
+  exclude(ATen_CUDA_CPP_SRCS "${ATen_CUDA_CPP_SRCS}"
+      ${ATen_CUDA_CU_SRCS}
+      ${ATen_CUDA_SRCS_W_SORT_BY_KEY} ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
+  exclude(ATen_CUDA_CU_SRCS "${ATen_CUDA_CU_SRCS}"
+      ${ATen_CUDA_SRCS_W_SORT_BY_KEY} ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
 endif()
 
 if(USE_ROCM)
@@ -527,6 +531,7 @@ set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_CU_SRCS ${ATen_CUDA_CU_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_CPP_SRCS ${ATen_CUDA_CPP_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
+set(ATen_CUDA_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY} PARENT_SCOPE)
 set(ATen_NVRTC_STUB_SRCS ${ATen_NVRTC_STUB_SRCS} PARENT_SCOPE)
 set(ATen_HIP_SRCS ${ATen_HIP_SRCS} PARENT_SCOPE)
 set(ATen_QUANTIZED_SRCS ${ATen_QUANTIZED_SRCS} PARENT_SCOPE)
