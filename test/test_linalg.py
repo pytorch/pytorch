@@ -8075,7 +8075,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertEqual(c, cn)
 
         # case 8: dims=0
-        a = torch.linalg.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
+        zero = torch.tensor(0., dtype=dtype, device=device)
+        a = torch.linalg.tensordot(zero, zero, 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
 
