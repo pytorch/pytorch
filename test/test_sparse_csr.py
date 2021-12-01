@@ -3,10 +3,11 @@
 import torch
 import random
 import itertools
+import unittest
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes, floating_and_complex_types, make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TestCase, run_tests, load_tests, coalescedonoff)
+    (TEST_WITH_ROCM, TEST_SCIPY, TestCase, run_tests, load_tests, coalescedonoff)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse)
@@ -14,6 +15,9 @@ from torch.testing._internal.common_methods_invocations import (sparse_csr_unary
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
+
+if TEST_SCIPY:
+    import scipy.sparse as sp
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -574,6 +578,50 @@ class TestSparseCSR(TestCase):
             err_msg = "size mismatch, got"
             with self.assertRaisesRegex(RuntimeError, err_msg):
                 csr.matmul(bad_vec)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_block_addmm(self, device, dtype):
+        def run_test(c, a, b, op_b, op_c, *, alpha=None, beta=None):
+            if dtype.is_complex:
+                alpha = random.random() + 0.3j if alpha is None else alpha
+                beta = random.random() + 0.6j if beta is None else beta
+            else:
+                alpha = random.random() if alpha is None else alpha
+                beta = random.random() if beta is None else beta
+
+            if op_b and a.shape == b.shape:
+                b = b.mH
+
+            actual = torch.addmm(c, a, b, alpha=alpha, beta=beta)
+
+            out = torch.empty_like(c if op_c and a.shape == b.shape else c.mH)
+            torch.addmm(c, a, b, alpha=alpha, beta=beta, out=out)
+
+            a_bsr = sp.bsr_matrix(
+                (
+                    a.values().cpu().numpy(),
+                    a.col_indices().cpu().numpy(),
+                    a.crow_indices().cpu().numpy(),
+                ),
+                shape=a.shape,
+            )
+            expected = alpha * (a_bsr * b.cpu().numpy()) + beta * c.cpu().numpy()
+            self.assertEqual(actual, out)
+            self.assertEqual(actual, expected)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, n, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=3), [1, 2, 3], [True, False]):
+                nnz = random.randint(0, m * k)
+                a = self.genSparseCSRTensor((m, k), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, k * block_size))
+                b = make_tensor((k * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                c = make_tensor((m * block_size, n * block_size), dtype=dtype, device=device, noncontiguous=noncontiguous)
+                for op_b, op_c in itertools.product([True, False], repeat=2):
+                    run_test(c, a, b, op_b, op_c)
+
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.double)
