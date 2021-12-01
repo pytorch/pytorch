@@ -155,32 +155,31 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
       auto new_tensor_type = tensorTypeInCurrentExecutionContext(t);
 
       std::lock_guard<std::mutex> lock(this->mutex_);
-      if (profiling_count_ <= 0) {
-        return;
-      }
-      GRAPH_DEBUG(
-          "In run ",
-          frame_id,
-          " annotating %",
-          pno->debugName(),
-          " with ",
-          *new_tensor_type);
-
-      if (pn->hasRun()) {
-        const auto& existing_tensor_type =
-            pn->ty(attr::profiled_type)->expectRef<TensorType>();
+      if (profiling_count_ > 0) {
         GRAPH_DEBUG(
-            "Existing type for %",
+            "In run ",
+            frame_id,
+            " annotating %",
             pno->debugName(),
-            ": ",
-            existing_tensor_type);
-        auto merged_type =
-            new_tensor_type->merge(std::move(existing_tensor_type));
-        GRAPH_DEBUG("Merged type for %", pno->debugName(), ": ", *merged_type);
-        pn->ty_(attr::profiled_type, std::move(merged_type));
-      } else {
-        pn->setHasRun(true);
-        pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+            " with ",
+            *new_tensor_type);
+
+        if (pn->hasRun()) {
+          const auto& existing_tensor_type =
+              pn->ty(attr::profiled_type)->expectRef<TensorType>();
+          GRAPH_DEBUG(
+              "Existing type for %",
+              pno->debugName(),
+              ": ",
+              existing_tensor_type);
+          auto merged_type =
+              new_tensor_type->merge(std::move(existing_tensor_type));
+          GRAPH_DEBUG("Merged type for %", pno->debugName(), ": ", *merged_type);
+          pn->ty_(attr::profiled_type, std::move(merged_type));
+        } else {
+          pn->setHasRun(true);
+          pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+        }
       }
     }
     // passing t through
