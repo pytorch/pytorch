@@ -1604,9 +1604,9 @@ void initJitScriptBindings(PyObject* module) {
       "_compile_graph_to_code_table",
       [](const std::string& name, const std::shared_ptr<Graph>& graph) {
         CompilationOptions options;
-        auto jitFunc = std::make_unique<GraphFunction>(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(*jitFunc, options);
-        return convertMobileFunctionToCodeTable(mobileFunc.get(), options);
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
       });
 
   m.def(
@@ -1721,8 +1721,12 @@ void initJitScriptBindings(PyObject* module) {
     populate_upgraders_map(content);
   });
 
-  m.def("get_upgraders_map_size", []() -> int {
+  m.def("get_upgraders_map_size", []() {
     return get_upgraders_map_size();
+  });
+
+  m.def("dump_upgraders_map", []() {
+    return dump_upgraders_map();
   });
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);

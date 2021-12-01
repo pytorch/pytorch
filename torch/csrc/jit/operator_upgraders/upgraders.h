@@ -1,30 +1,25 @@
 #pragma once
-#include <atomic>
+#include <c10/macros/Export.h>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
 namespace torch {
 namespace jit {
 
-#define IS_IN_POPULATION_PHASE ([] { \
-    static std::atomic<bool> first_time(true); \
-    return first_time.exchange(false); } ())
+struct UpgradersMap {
+    static std::unordered_map<std::string, std::string> content;
+    static std::mutex *lock;
+    static bool isPopulated;
+};
 
-static std::unordered_map<std::string, std::string> upgraders_graph;
+TORCH_API void populate_upgraders_map(const std::unordered_map<std::string, std::string>& content);
 
-void populate_upgraders_map(std::unordered_map<std::string, std::string> content) {
-    // make sure we populate the map only once
-    if (!IS_IN_POPULATION_PHASE) return;
+TORCH_API int get_upgraders_map_size();
 
-    for (const auto& entry: content) {
-        upgraders_graph.insert(entry);
-    }
-}
-
-int get_upgraders_map_size() {
-    return upgraders_graph.size();
-}
+// this is used for testing, so copying is not a perf issue
+TORCH_API std::unordered_map<std::string, std::string> dump_upgraders_map();
 
 } // namespace jit
 } // namespace torch
