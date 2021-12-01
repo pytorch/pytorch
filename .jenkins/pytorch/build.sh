@@ -327,12 +327,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
   pushd lazy_tensor_core/
   ./scripts/apply_patches.sh
-  python setup.py install
+  DEBUG=1 python setup.py install
 
-  rm -f lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h
-  rm -f lazy_tensor_core/csrc/ts_backend/RegisterAutogradLazy.cpp
-  rm -f lazy_tensor_core/csrc/ts_backend/RegisterLazy.cpp
-  rm -rf lazy_tensors/computation_client/
   assert_git_not_dirty
   popd
 fi
