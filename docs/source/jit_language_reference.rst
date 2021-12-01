@@ -124,7 +124,7 @@ TorchScript does not support all features and types of the :mod:`typing` module.
 are more fundamental things that are unlikely to be added in the future while others
 may be added if there is enough user demand to make it a priority.
 
-These types and features from the :mod:`typing` module are unavailble in TorchScript.
+These types and features from the :mod:`typing` module are unavailable in TorchScript.
 
 .. csv-table::
    :header: "Item", "Description"
@@ -143,7 +143,7 @@ These types and features from the :mod:`typing` module are unavailble in TorchSc
    "NewType", "Unlikely to be implemented"
    "Generics", "Unlikely to be implemented"
 
-Any other functionality from the :any:`typing` module not explitily listed in this documentation is unsupported.
+Any other functionality from the :any:`typing` module not explicitly listed in this documentation is unsupported.
 
 Default Types
 ^^^^^^^^^^^^^
@@ -732,9 +732,9 @@ Break and Continue
 
     for i in range(5):
         if i == 1:
-        continue
+            continue
         if i == 3:
-        break
+            break
         print(i)
 
 Return
@@ -887,7 +887,7 @@ available in TorchScript can be used as module attributes. Tensor attributes are
 semantically the same as buffers. The type of empty lists and dictionaries and ``None``
 values cannot be inferred and must be specified via
 `PEP 526-style <https://www.python.org/dev/peps/pep-0526/#class-and-instance-variable-annotations>`_ class annotations.
-If a type cannot be inferred and is not explicilty annotated, it will not be added as an attribute
+If a type cannot be inferred and is not explicitly annotated, it will not be added as an attribute
 to the resulting :class:`ScriptModule`.
 
 Example:

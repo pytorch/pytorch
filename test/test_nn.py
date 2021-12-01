@@ -6683,6 +6683,20 @@ class TestNN(NNTestCase):
         bad_input = torch.randn(3, 1)
         test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_native_dropout_corner_case(self):
+        for train in [True, False]:
+            for p in [0.0, 1.0]:
+                for device in ["cuda", "cpu"]:
+                    x = torch.randn(5).to(device=device).requires_grad_()
+                    x_ref = x.detach().requires_grad_()
+                    o = torch.native_dropout(x, p, train)[0]
+                    o_ref = torch.dropout(x_ref, p, train)
+                    o.sum().backward()
+                    o_ref.sum().backward()
+                    assert(o.equal(o_ref))
+                    assert(x.grad.equal(x_ref.grad))
+
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))
@@ -9145,6 +9159,13 @@ class TestNN(NNTestCase):
 
             self.assertEqual(output_sig.grad, output_logits.grad)
 
+    def test_bce_with_logits_has_correct_forward_grad(self):
+        output = torch.randn(3, 5, requires_grad=True)
+        target = torch.randn(3, 5)
+        for reduction in ('sum', 'mean', 'none'):
+            gradcheck(lambda self, target: nn.BCEWithLogitsLoss(reduction=reduction)(self, target),
+                      (output, target), check_forward_ad=True)
+
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = torch.zeros(3, 1, requires_grad=True)
         target = torch.zeros(3, 1)
@@ -11198,6 +11219,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
             fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
             fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
+
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
+        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
+            fold(torch.randn(1, 12, 12))
 
     def test_unfold_invalid_arg(self):
         # input wrong dimension
@@ -15573,7 +15598,7 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.float, torch.half)
+    @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
