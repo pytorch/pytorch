@@ -362,6 +362,8 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
+      "static_runtime::expand_dims_copy(Tensor input, int[] dims) -> Tensor",
+  m.def(torch::schema(
       "static_runtime::to_maybe_copy_out.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> (Tensor, bool)",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
@@ -391,6 +393,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       c10::AliasAnalysisKind::CONSERVATIVE));
   m.def(torch::schema(
       "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::dequantize_copy.self(Tensor self) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::select_tensor(Tensor(a) a, Tensor(b) b, bool use_b) -> Tensor(a|b)",
@@ -614,18 +619,32 @@ void ReplaceWithCopy(
   const FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
 #endif
       OP_PAIR("aten::narrow", "aten::narrow_copy"),
       OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
       OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
 
+  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 1> supported_schema = {
+      {torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+       fromQualString("static_runtime::dequantize_copy")}};
+
+  auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
+    for (auto& schema : supported_schema) {
+      if (node->matches(schema.first)) {
+        out_matched_symbol = schema.second;
+        return true;
+      }
+    }
+    return false;
+  };
   bool has_inplace_ops = HasInplaceOp(graph, db);
   std::vector<std::pair<Node*, Node*>> replacement;
   for (auto* n : graph->nodes()) {
     c10::Symbol new_symbol;
     if (supported.count(n->kind()) && opIsRegistered(supported.at(n->kind()))) {
       new_symbol = supported.at(n->kind());
-    } else {
+    } else if (!match_schema(n, new_symbol)) {
       continue;
     }
     DCHECK(n->outputs().size() == 1);
