@@ -664,6 +664,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.narrow_copy: lambda input, dim, start, length: -1,
         torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
+        torch.native_dropout : lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2: -1,
@@ -983,6 +984,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.trapz: lambda y, x=None, dim=-1: -1,
         torch.trapezoid: lambda y, x=None, dim=-1: -1,
         torch.triangular_solve: lambda input, A, upper=True, transpose=False, unitriangular=False: -1,
+        torch.linalg.solve_triangular: lambda input, B, upper, left=True, unitriangular=False: -1,
         torch.tril: lambda input, diagonal=0, out=None: -1,
         torch.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False,
 

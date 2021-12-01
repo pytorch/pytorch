@@ -680,7 +680,7 @@ Violating any of these will likely cause a runtime error:
   :meth:`CUDAGraph.capture_end<torch.cuda.CUDAGraph.capture_end>` calls.
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
-* Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
+* Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
