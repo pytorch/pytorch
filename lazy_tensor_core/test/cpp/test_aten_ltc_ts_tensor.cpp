@@ -6497,6 +6497,7 @@ TEST_F(AtenLtcTsTensorTest, TestTransposeInPlace) {
     torch::Tensor xla_input = CopyToDevice(input, device);
     torch::Tensor output = input.t_();
     torch::Tensor xla_output = xla_input.t_();
+    EXPECT_EQ(xla_output.sizes(), output.sizes());
     AllClose(output, xla_output);
     AllClose(input, xla_input);
   });
