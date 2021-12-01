@@ -121,8 +121,22 @@ def unpack_to_numpy(values):
 
 
 def run_ort(ort_sess, inputs):
-    input = unpack_to_numpy(flatten_tuples(input))
-    ort_inputs = dict((ort_sess.get_inputs()[i].name, input) for i, input in enumerate(inputs))
+    input = unpack_to_numpy(flatten_tuples(inputs))
+    ort_inputs = {}
+    kw_inputs = {}
+    if isinstance(inputs[-1], dict):
+        kw_inputs = inputs[-1]
+        inputs = inputs[:-1]
+    for input_name, input in kw_inputs.items():
+        ort_inputs[input_name] = to_numpy(input)
+    inputs = to_numpy(inputs)
+    ort_sess_inputs = ort_sess.get_inputs()
+    for i, input in enumerate(inputs):
+        input_name = ort_sess_inputs[i].name
+        if input_name in ort_inputs:
+            raise ValueError(
+                f"got too many positional inputs. inputs: {inputs}. kw_inputs: {kw_inputs}")
+        ort_inputs[input_name] = input
     ort_outs = ort_sess.run(None, ort_inputs)
     return inline_flatten_list(ort_outs, [])
 
@@ -330,11 +344,14 @@ class TestONNXRuntime(unittest.TestCase):
             scripting_remained_onnx_input_idx = remained_onnx_input_idx
             tracing_remained_onnx_input_idx = remained_onnx_input_idx
 
-        if self.is_script_test_enabled and not isinstance(model, torch.jit.ScriptModule):
-            script_model = torch.jit.script(model)
+        is_script = isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction))
+
+        if self.is_script_test_enabled:
+            script_model = model if is_script else torch.jit.script(model)
             _run_test(script_model, scripting_remained_onnx_input_idx, flatten=False)
 
-        _run_test(model, tracing_remained_onnx_input_idx)
+        if not is_script:
+            _run_test(model, tracing_remained_onnx_input_idx)
 
     def run_model_test_with_external_data(self, model, input, rtol=0.001, atol=1e-7,
                                           do_constant_folding=True, dynamic_axes=None,
@@ -958,8 +975,9 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(IdentityModel(), (torch.randn(2, 3), {}))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_optional_inputs_with_mixed_optionals(self):
-        class MixedModel(torch.nn.Module):
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_mixed_optional_default_none(self):
+        class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
                 if y is not None:
                     return x + y
@@ -970,18 +988,19 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(MixedModel(), (x, y, None))
-        self.run_test(MixedModel(), (x, None, z))
-        # With optional arguments dictionary
-        self.run_test(MixedModel(), (x, {"y": y, "z": None}))
-        self.run_test(MixedModel(), (x, {"y": None, "z": z}))
-        self.run_test(MixedModel(), (x, {"z": z}))
-        self.run_test(MixedModel(), (x, {"y": y}))
+        model = Model()
+        # Without kwargs dict.
+        self.run_test(model, (x, y, None))
+        self.run_test(model, (x, None, z))
+        # With kwargs dict.
+        self.run_test(model, (x, {"y": y, "z": None}))
+        self.run_test(model, (x, {"y": None, "z": z}))
+        self.run_test(model, (x, {"z": z}))
+        self.run_test(model, (x, {"y": y}))
 
     @skipIfUnsupportedMinOpsetVersion(15)
-    def test_optional_inputs_with_mixed_optionals_script(self):
-        class MixedModel(torch.nn.Module):
+    def test_mixed_optional_default_tensor(self):
+        class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
                 if y is not None:
                     return x + y
@@ -992,145 +1011,69 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(MixedModel(), (x, y, None))
-        self.run_test(MixedModel(), (x, None, z))
-        # With optional arguments dictionary
-        # TODO: This fails. The input flattening doesn't work.
-        self.run_test(MixedModel(), (x, {"y": y, "z": None}))
-        self.run_test(MixedModel(), (x, {"y": None, "z": z}))
-        self.run_test(MixedModel(), (x, {"y": y}))
+        model = Model()
+        # Without kwargs dict.
+        self.run_test(model, (x, y, None))
+        self.run_test(model, (x, None, z))
+
+        # With kwargs dict.
+        # Requires input_names to be set so that we can feed the inputs properly into ORT.
+
+        # TODO: Export default values as ONNX initializers, then this should not raise.
+        # Default values are accessible via FunctionSchema.
+        with self.assertRaisesRegex(ValueError, "Model requires 3 inputs. Input Feed contains 2"):
+            self.run_test(model, (x, {"y": y}), input_names=("x", "y"))
+
+        # Setting any input to None in tracing means that
+        # input doesn't exist at all in the exported model, so input_names doesn't match.
+        # Thus the remaining tests only work in scripting.
+        script_model = torch.jit.script(model)
+        self.run_test(script_model, (x, {"y": y, "z": None}), input_names=("x", "y", "z"))
+        self.run_test(script_model, (x, {"y": None, "z": z}), input_names=("x", "y", "z"))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_optional_inputs_with_all_optionals(self):
-        class AllOptionalModel(torch.nn.Module):
-            def forward(self, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
-                if y is not None:
-                    return y
-                if z is not None:
-                    return z
-
-        y = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(AllOptionalModel(), (y, None))
-        # With optional arguments dictionary
-        self.run_test(AllOptionalModel(), {"y": y, "z": None})
-
     @skipIfUnsupportedMinOpsetVersion(15)
-    def test_optional_inputs_with_all_optionals_script(self):
-        class AllOptionalModel(torch.nn.Module):
-            def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
+    def test_all_optional_default_none(self):
+        class Model(torch.nn.Module):
+            def forward(self, x: Optional[Tensor] = None, y: Optional[Tensor] = None):
+                if x is not None:
+                    return x
                 if y is not None:
                     return y
-                elif z is not None:
-                    return z
                 else:
                     return torch.tensor(-1.)
 
-        y = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(AllOptionalModel(), (y, None))
-        # With optional arguments dictionary
-        self.run_test(AllOptionalModel(), {"y": y, "z": None})
-
-    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_input_names_with_optional_args(self):
-        class NoOptionalModel(torch.nn.Module):
-            def forward(self, input):
-                return input
-
-        # Without empty optional arguments dictionary
         x = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (x,), input_names=["input_x"])
-        # With empty optional arguments dictionary
-        y = torch.randn(2, 3)
-        self.run_test(NoOptionalModel(), (y, {}))
-
-        class MixedModel(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
-                if y is not None:
-                    return x + y
-                if z is not None:
-                    return x + z
-                return x
-
-        x = torch.randn(2, 3)
-        y = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(MixedModel(), (x, y, None), input_names=["input_x", "input_y"])
-        self.run_test(MixedModel(), (x, None, z), input_names=["input_x", "input_z"])
-
-        # With optional arguments dictionary
-        self.run_test(MixedModel(), (x, {"y": y, "z": None}), input_names=["input_x", "input_y"])
-        self.run_test(MixedModel(), (x, {"y": None, "z": z}), input_names=["input_x", "input_z"])
-
-        class AllOptionalModel(torch.nn.Module):
-            def forward(self, y: Optional[Tensor] = None, z: Optional[Tensor] = None):
-                if y is not None:
-                    return y
-                if z is not None:
-                    return z
-
-        y = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(AllOptionalModel(), (y, None), input_names=["input_y"])
-        self.run_test(AllOptionalModel(), (None, z), input_names=["input_z"])
-        # With optional arguments dictionary
-        self.run_test(AllOptionalModel(), {"y": y, "z": None}, input_names=["input_y"])
-        self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
+        model = Model()
+        self.run_test(model, (x, None))
+        self.run_test(model, ({"x": x, "y": None},),
+                      # y disappears in tracing.
+                      input_names=("x",))
 
     @skipIfUnsupportedMinOpsetVersion(15)
-    def test_input_names_with_optional_args_script(self):
-        class MixedModel(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
-                if y is not None:
-                    return x + y
-                if z is not None:
-                    return x + z
-                return x
-
-        x = torch.randn(2, 3)
-        y = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(MixedModel(), (x, y, None), input_names=["input_x", "input_y"])
-        self.run_test(MixedModel(), (x, None, z), input_names=["input_x", "input_z"])
-
-        # With optional arguments dictionary
-        self.run_test(MixedModel(), (x, {"y": y, "z": None}), input_names=["input_x", "input_y"])
-        self.run_test(MixedModel(), (x, {"y": None, "z": z}), input_names=["input_x", "input_z"])
-
-        class AllOptionalModel(torch.nn.Module):
-            def forward(self, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
-                if y is not None:
-                    return y
-                if z is not None:
-                    return z
-                else:
-                    return torch.tensor(-1)
-
-        y = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        # Without optional arguments dictionary
-        self.run_test(AllOptionalModel(), (y, None), input_names=["input_y"])
-        self.run_test(AllOptionalModel(), (None, z), input_names=["input_z"])
-        # With optional arguments dictionary
-        self.run_test(AllOptionalModel(), {"y": y, "z": None}, input_names=["input_y"])
-        self.run_test(AllOptionalModel(), {"y": None, "z": z}, input_names=["input_z"])
-
-    def test_input_as_output(self):
+    def test_all_optional_default_tensor(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
-                return x, y
+            def forward(self, x: Optional[Tensor] = torch.ones(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)):
+                if x is not None:
+                    return x
+                elif y is not None:
+                    return y
+                else:
+                    return torch.tensor(-1.)
 
         x = torch.randn(2, 3)
-        y = torch.randn(3, 4)
-        self.run_test(Model(), (x, y), input_names=["x", "y"], output_names=["x_out", "y_out"])
+        model = Model()
+        self.run_test(model, (x, None))
+        self.run_test(
+            # Because otherwise y would get erased during tracing.
+            torch.jit.script(model),
+            ({"x": x, "y": None},),
+            # So that we can feed the inputs properly into ORT.
+            input_names=("x", "y"))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_none_as_input(self):
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_mixed_optional(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Optional[Tensor]):
                 if y is not None:
@@ -1138,21 +1081,13 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(2, 3)
-        self.run_test(Model(), (x, None))
-
-    @skipIfUnsupportedMinOpsetVersion(15)
-    def test_none_as_input_script(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3)):
-                if y is not None:
-                    return x + y
-                return x
-
-        x = torch.randn(2, 3)
-        self.run_test(Model(), (x, None))
+        model = Model()
+        self.run_test(model, (x, None))
+        self.run_test(model, (x, x))
 
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_none_as_tuple_input(self):
+    @skipIfUnsupportedMinOpsetVersion(15)
+    def test_tuple_of_optional(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]]):
                 if y[0] is not None:
@@ -1162,51 +1097,22 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(2, 3)
-        y = torch.randn(2, 3)
-        self.run_test(Model(), (x, (None, y)))
-
-    @skipIfUnsupportedMinOpsetVersion(15)  # pending ORT implementation
-    def test_none_as_tuple_input_scripting(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
-                u, v = y
-                if u is not None:
-                    return x + u
-                if v is not None:
-                    return x + v
-                return x
-
-        x = torch.randn(2, 3)
-        y = torch.randn(2, 3)
-        self.run_test(Model(), (x, (None, y)))
-
-    @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
-    def test_none_as_named_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y=None, z=None):
-                if y is not None:
-                    return x + y
-                if z is not None:
-                    return x + z
-                return x
-
-        x = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        self.run_test(Model(), (x, None, z))
+        y_1 = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y_1)))
 
     @skipIfUnsupportedMinOpsetVersion(15)
-    def test_none_as_named_input_scripting(self):
+    def test_tuple_of_optional_default_tensor(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: Optional[Tensor] = torch.ones(2, 3), z: Optional[Tensor] = torch.zeros(2, 3)):
-                if y is not None:
-                    return x + y
-                if z is not None:
-                    return x + z
+            def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
+                if y[0] is not None:
+                    return x + y[0]
+                if y[1] is not None:
+                    return x + y[1]
                 return x
 
         x = torch.randn(2, 3)
-        z = torch.randn(2, 3)
-        self.run_test(Model(), (x, None, z))
+        y_1 = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y_1)))
 
     def test_primitive_input_integer(self):
         class Model(torch.nn.Module):
