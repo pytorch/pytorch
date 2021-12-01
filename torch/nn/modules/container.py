@@ -604,7 +604,7 @@ class ParameterDict(Module):
         return iter(self._parameters.keys())
 
     def __reversed__(self) -> Iterator[str]:
-        return reversed(self._parameters)
+        return reversed(list(self._parameters.keys()))
 
     def copy(self) -> 'ParameterDict':
         """Returns a copy of this :class:`~torch.nn.ParameterDict` instance.
