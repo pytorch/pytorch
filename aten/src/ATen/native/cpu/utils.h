@@ -6,7 +6,7 @@
 namespace at {
 namespace native {
 
-namespace {
+inline namespace CPU_CAPABILITY {
 
 template <typename T>
 inline T data_index_init(T offset) {
