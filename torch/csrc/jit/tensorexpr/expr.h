@@ -184,6 +184,11 @@ class TORCH_API Var : public ExprNode<Var> {
   std::string name_hint_;
 };
 
+std::vector<ExprPtr> make_contiguous_strides(
+    const std::vector<ExprHandle>& dims);
+std::vector<ExprPtr> make_channels_last_strides(
+    const std::vector<ExprHandle>& dims);
+
 class TORCH_API Buf : public ExprNode<Buf> {
  public:
   static ExprHandle make(
@@ -212,12 +217,14 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
+      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr)
       : Buf(alloc<Var>(name_hint, kHandle),
             dims,
             dtype,
             initializer,
+            strides,
             qscale,
             qzero) {}
 
@@ -226,16 +233,9 @@ class TORCH_API Buf : public ExprNode<Buf> {
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
+      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
-      ExprPtr qzero = nullptr)
-      : ExprNodeBase(dtype, kPrimitive),
-        base_handle_(var),
-        dims_(std::move(dims)),
-        initializer_(std::move(initializer)),
-        qscale_(std::move(qscale)),
-        qzero_(std::move(qzero)) {
-    TORCH_CHECK(var);
-  }
+      ExprPtr qzero = nullptr);
 
   size_t ndim() const {
     return dims_.size();
@@ -251,7 +251,15 @@ class TORCH_API Buf : public ExprNode<Buf> {
   }
   void set_dims(std::vector<ExprPtr> dims) {
     dims_ = dims;
-  };
+  }
+
+  std::vector<ExprPtr> strides() const {
+    return strides_;
+  }
+
+  void set_strides(std::vector<ExprPtr> strides) {
+    strides_ = strides;
+  }
 
   ExprPtr initializer() const {
     return initializer_;
@@ -285,6 +293,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
  private:
   VarPtr base_handle_;
   std::vector<ExprPtr> dims_;
+  std::vector<ExprPtr> strides_;
   ExprPtr initializer_;
   // qscale_ and qzero_ are used only for quantized dtypes Bufs: kQUInt8, kQInt8
   ExprPtr qscale_;

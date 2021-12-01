@@ -23,6 +23,8 @@ from setuptools.command.build_ext import build_ext
 from pkg_resources import packaging  # type: ignore[attr-defined]
 
 IS_WINDOWS = sys.platform == 'win32'
+IS_MACOS = sys.platform.startswith('darwin')
+IS_LINUX = sys.platform.startswith('linux')
 LIB_EXT = '.pyd' if IS_WINDOWS else '.so'
 EXEC_EXT = '.exe' if IS_WINDOWS else ''
 CLIB_PREFIX = '' if IS_WINDOWS else 'lib'
@@ -221,7 +223,7 @@ def _is_binary_build() -> bool:
 
 def _accepted_compilers_for_platform() -> List[str]:
     # gnu-c++ and gnu-cc are the conda gcc compilers
-    return ['clang++', 'clang'] if sys.platform.startswith('darwin') else ['g++', 'gcc', 'gnu-c++', 'gnu-cc']
+    return ['clang++', 'clang'] if IS_MACOS else ['g++', 'gcc', 'gnu-c++', 'gnu-cc']
 
 
 def get_default_build_root() -> str:
@@ -260,7 +262,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
         return True
     # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
-    if sys.platform.startswith('linux'):
+    if IS_LINUX:
         # Check for 'gcc' or 'g++'
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
@@ -268,7 +270,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
             return False
         compiler_path = os.path.realpath(results[0].strip())
         return any(name in compiler_path for name in _accepted_compilers_for_platform())
-    if sys.platform.startswith('darwin'):
+    if IS_MACOS:
         # Check for 'clang' or 'clang++'
         return version_string.startswith("Apple clang")
     return False
@@ -299,11 +301,11 @@ def check_compiler_abi_compatibility(compiler) -> bool:
             platform=sys.platform))
         return False
 
-    if sys.platform.startswith('darwin'):
+    if IS_MACOS:
         # There is no particular minimum version we need for clang, so we're good here.
         return True
     try:
-        if sys.platform.startswith('linux'):
+        if IS_LINUX:
             minimum_required_version = MINIMUM_GCC_VERSION
             versionstr = subprocess.check_output([compiler, '-dumpfullversion', '-dumpversion'])
             version = versionstr.decode(*SUBPROCESS_DECODE_ARGS).strip().split('.')
@@ -311,7 +313,7 @@ def check_compiler_abi_compatibility(compiler) -> bool:
             minimum_required_version = MINIMUM_MSVC_VERSION
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
             match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
-            version = (0, 0, 0) if match is None else match.groups()
+            version = ['0', '0', '0'] if match is None else list(match.groups())
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn(f'Error checking compiler version for {compiler}: {error}')
@@ -1865,7 +1867,7 @@ def _write_ninja_file_to_build_library(path,
     ldflags = ([] if is_standalone else [SHARED_FLAG]) + extra_ldflags
 
     # The darwin linker needs explicit consent to ignore unresolved symbols.
-    if sys.platform.startswith('darwin'):
+    if IS_MACOS:
         ldflags.append('-undefined dynamic_lookup')
     elif IS_WINDOWS:
         ldflags = _nt_quote_args(ldflags)

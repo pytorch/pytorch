@@ -111,17 +111,24 @@ Context::Context(const Adapter& adapter)
               adapter.compute_queue_family_index),
           &VK_DELETER(Device)),
       queue_(acquire_queue(device(), adapter.compute_queue_family_index)),
-      command_(gpu()),
       shader_(gpu()),
       pipeline_(gpu()),
+#ifdef MAKE_VULKAN_THREADSAFE
+      threadcontext_(gpu()) {
+#else
+      command_(gpu()),
       descriptor_(gpu()),
       resource_(gpu()) {
+#endif /* MAKE_VULKAN_THREADSAFE */
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
       "Invalid Vulkan device!");
 }
 
 Context::~Context() {
+#ifdef MAKE_VULKAN_THREADSAFE
+  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
+#else
   try {
     flush();
   }
@@ -135,6 +142,7 @@ Context::~Context() {
         "Vulkan: Context destructor raised an exception! "
         "Error: Unknown");
   }
+#endif /* MAKE_VULKAN_THREADSAFE */
 }
 
 void Context::flush() {

@@ -16,7 +16,7 @@ void THTensor_free(THTensor *self)
   c10::raw::intrusive_ptr::decref(self);
 }
 
-void THTensor_setStorage(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
+void THTensor_setStorage(THTensor *self, c10::StorageImpl *storage_, ptrdiff_t storageOffset_, at::IntArrayRef size_, at::IntArrayRef stride_) {
   c10::raw::intrusive_ptr::incref(storage_);
   THTensor_wrap(self).set_(at::Storage(c10::intrusive_ptr<at::StorageImpl>::reclaim(storage_)), storageOffset_, size_, stride_);
 }

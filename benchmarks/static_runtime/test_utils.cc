@@ -7,6 +7,8 @@
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
+#include <torch/csrc/jit/runtime/static/passes.h>
 #include <memory>
 #include <unordered_map>
 
@@ -174,6 +176,31 @@ void compareResults(
 
 } // namespace
 
+at::Tensor getTensor(const at::IValue& ival) {
+  if (ival.isTensor()) {
+    return ival.toTensor();
+  } else if (ival.isTensorList()) {
+    auto tensor_vec = ival.toTensorVector();
+    TORCH_CHECK(tensor_vec.size() == 1);
+    return tensor_vec[0];
+  } else if (ival.isTuple()) {
+    auto tuple = ival.toTuple();
+    auto ivalue_vec = tuple->elements();
+    TORCH_CHECK(ivalue_vec.size() == 1);
+    return ivalue_vec[0].toTensor();
+  } else {
+    CAFFE_THROW("Unknown input IValue");
+  }
+}
+
+Node* getNodeWithKind(const StaticModule& smodule, const std::string& kind) {
+  return smodule.findNodeWithKindForTesting(kind);
+}
+
+bool hasNodeWithKind(const StaticModule& smodule, const std::string& kind) {
+  return getNodeWithKind(smodule, kind) != nullptr;
+}
+
 std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> vmap;
@@ -186,7 +213,8 @@ void testStaticRuntime(
     const std::vector<IValue>& args,
     const std::vector<IValue>& args2,
     const bool use_allclose,
-    const bool use_equalnan) {
+    const bool use_equalnan,
+    const bool check_resize) {
   auto test_context = makeTestContext(source);
 
   std::vector<IValue> args_tensors, args_copy;
@@ -205,6 +233,10 @@ void testStaticRuntime(
       if (!enable_out_variant && manage_output_tensors) {
         continue;
       }
+      // run static runtime three times
+      // 1st run: collect allocation profiles (args)
+      // 2nd run: exercise memory planner and resizing with args2
+      // 3rd run: run with args again
       StaticModuleOptions opts{
           .cleanup_activations = true,
           .enable_out_variant = enable_out_variant,
@@ -214,7 +246,7 @@ void testStaticRuntime(
       StaticRuntime runtime(smodule);
       auto actual = runtime(args, {});
       if (actual.isTensor()) {
-        EXPECT_GE(smodule.nodes().size(), 2)
+        EXPECT_GE(smodule.num_nodes(), 2)
             << "If we only have one node, the output of the op we are testing is "
             << "not being managed by the memory planner! A failure here "
             << "can typically be fixed by clone()ing the output of the test script.";
@@ -227,7 +259,12 @@ void testStaticRuntime(
         runtime.deallocateOutputTensors();
         runtime.checkOutputTensorMemoryLeaks();
       }
+
       if (!args2.empty()) {
+        auto* memory_planner = runtime.get_memory_planner();
+        size_t managed_bytes =
+            memory_planner ? memory_planner->total_managed() : 0;
+
         // Run static runtime again with inputs of a different shape.
         expect = test_context->getExpected(args2);
         actual = runtime(args2, {});
@@ -238,6 +275,15 @@ void testStaticRuntime(
           runtime.deallocateOutputTensors();
           runtime.checkOutputTensorMemoryLeaks();
         }
+
+        size_t new_managed_bytes =
+            memory_planner ? memory_planner->total_managed() : 0;
+        if (check_resize && new_managed_bytes > 0) {
+          VLOG(1) << "managed_bytes: " << managed_bytes
+                  << ", new_managed_bytes: " << new_managed_bytes;
+          EXPECT_TRUE(new_managed_bytes > managed_bytes);
+        }
+
         // Run static runtime again with an input of the shape observed during
         // the profile run.
         expect = test_context->getExpected(args);
@@ -274,19 +320,14 @@ void testStaticRuntime(
   }
 
   // make sure inputs were not modified
+  VLOG(2) << "Printing out input tensors";
   compareTensorLists(args_tensors, args_copy, use_allclose, use_equalnan);
 }
 
 bool hasProcessedNodeWithName(
     torch::jit::StaticModule& smodule,
     const char* name) {
-  for (torch::jit::ProcessedNode& pnode : smodule.runtime().nodes()) {
-    auto op_name = pnode.node()->kind().toQualString();
-    if (strcmp(op_name, name) == 0) {
-      return true;
-    }
-  }
-  return false;
+  return smodule.findNodeWithKindForTesting(name) != nullptr;
 }
 
 } // namespace test

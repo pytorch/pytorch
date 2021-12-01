@@ -820,7 +820,8 @@ void ProcessReduceNode(Node* n) {
         axes_vector[idx] += rank_0;
       }
     }
-    int64_t keepdims = 0;
+    // ONNX keepdims defaults to 1 when not set.
+    int64_t keepdims = 1;
     if (n->hasAttributeS("keepdims")) {
       keepdims = n->i(attr::keepdims);
     }
@@ -2105,6 +2106,7 @@ void ONNXShapeTypeInference(
   ConstantValueMap::ClearMaps();
   SetGraphInputTypeReliable(graph.get());
   ONNXShapeTypeInference(graph->block(), params_dict, opset_version);
+  ConstantValueMap::ClearMaps();
 }
 
 } // namespace jit

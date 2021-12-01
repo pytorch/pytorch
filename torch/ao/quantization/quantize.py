@@ -23,7 +23,8 @@ from torch.ao.quantization.qconfig import (
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
-    float_qparams_weight_only_qconfig_4bit)
+    float_qparams_weight_only_qconfig_4bit,
+    activation_is_memoryless)
 
 def is_activation_post_process(module):
     return (isinstance(module, torch.ao.quantization.ObserverBase) or
@@ -89,10 +90,20 @@ def _observer_forward_hook(self, input, output):
     """
     return self.activation_post_process(output)
 
-def register_activation_post_process_hook(module):
+def _observer_forward_pre_hook(self, input):
+    r"""Forward pre hook that calls observer on the output
+    """
+    return self.activation_post_process(input[0])
+
+def register_activation_post_process_hook(module, pre_hook=False):
     assert hasattr(module, 'activation_post_process'), \
-        'Expect activation_post_process attribut already attached to the module'
-    return module.register_forward_hook(_observer_forward_hook)
+        'Expect activation_post_process attribute already attached to the module'
+    if pre_hook:
+        handle = module.register_forward_pre_hook(_observer_forward_pre_hook)
+        module._forward_pre_hooks.move_to_end(handle.id, last=False)
+    else:
+        handle = module.register_forward_hook(_observer_forward_hook)
+        module._forward_hooks.move_to_end(handle.id, last=False)
 
 def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=None, device=None, custom_module_class_mapping=None):
     r"""Add observer for the leaf child of the module.
@@ -134,7 +145,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
 
     def insert_activation_post_process(m, special_act_post_process=None):
         """ Adds an activation post process module and register
-        a post hook that calls the module
+        a pre or post hook that calls the module
         """
         # We don't insert observer/fake_quantize for DeQuantStub
         if needs_observation(m) and not isinstance(m, DeQuantStub):
@@ -143,8 +154,7 @@ def add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=No
                 m.qconfig, device, special_act_post_process))
             # Register observer as the first entry in the hook list
             # All post forward hooks are preserved and will be executed after the observer before convert
-            handle = register_activation_post_process_hook(m)
-            m._forward_hooks.move_to_end(handle.id, last=False)
+            register_activation_post_process_hook(m, pre_hook=activation_is_memoryless(m.qconfig))
 
     for name, child in module.named_children():
         if type(child) in [nnq.FloatFunctional, nnq.QFunctional]:
@@ -265,13 +275,19 @@ def _remove_activation_post_process(module):
        is_activation_post_process(module.activation_post_process):
         delattr(module, 'activation_post_process')
 
-    # remove activation_post_proceess hook
-    handle_ids_to_remove = set()
-    for handle_id, hook_fn in module._forward_hooks.items():
-        if hook_fn is _observer_forward_hook:
-            handle_ids_to_remove.add(handle_id)
-    for handle_id in handle_ids_to_remove:
-        module._forward_hooks.pop(handle_id)
+    # remove activation_post_proceess pre and post hooks
+    def remove_hooks(pre_hook=False):
+        hook_map = module._forward_pre_hooks if pre_hook else module._forward_hooks
+        observer_hook = _observer_forward_pre_hook if pre_hook else _observer_forward_hook
+        handle_ids_to_remove = set()
+        for handle_id, hook_fn in hook_map.items():
+            if hook_fn is observer_hook:
+                handle_ids_to_remove.add(handle_id)
+        for handle_id in handle_ids_to_remove:
+            hook_map.pop(handle_id)
+
+    remove_hooks(pre_hook=True)
+    remove_hooks(pre_hook=False)
 
 # TODO: rename to something more general
 def _remove_qconfig(module):

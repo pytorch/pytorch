@@ -68,6 +68,7 @@ void call_setup_methods() {
   // Typically, failures show up in CopyKernel.cpp, so enumerating
   // common dtypes that may show up.
   const auto all_dtypes_for_copy = {
+      at::kBool,
       at::kByte,
       at::kFloat,
       at::kInt,
@@ -78,6 +79,7 @@ void call_setup_methods() {
   for (const auto dtype : all_dtypes_for_copy) {
     auto tensor1 = at::empty({10}, dtype);
     tensor1.copy_(at::zeros({10}, at::kFloat));
+    tensor1.copy_(at::zeros({10}, at::kBool));
   }
 
   torch::zeros({0, 0}, torch::ScalarType::Float);
@@ -259,11 +261,12 @@ TracerResult trace_run(const std::string& input_module_path) {
   torch::jit::mobile::OperatorCallTracer op_tracer;
   torch::jit::mobile::KernelDTypeTracer kdtype_tracer;
   torch::jit::mobile::CustomClassTracer custom_class_tracer;
+  torch::jit::mobile::BuildFeatureTracer build_feature_tracer;
 
   call_setup_methods();
 
   std::set<std::string> root_ops, traced_operators, enabled_backends,
-      loaded_classes;
+      loaded_classes, build_features;
   torch::jit::mobile::KernelDTypeTracer::kernel_tags_type called_kernel_tags;
 
   using torch::jit::MobileModuleLoadOptions;
@@ -283,11 +286,15 @@ TracerResult trace_run(const std::string& input_module_path) {
   loaded_classes.insert(
       custom_class_tracer.getLoadedClasses().begin(),
       custom_class_tracer.getLoadedClasses().end());
+  build_features.insert(
+      build_feature_tracer.getBuildFeatures().begin(),
+      build_feature_tracer.getBuildFeatures().end());
   TracerResult tracer_result = {
       root_ops,
       traced_operators,
       called_kernel_tags,
       loaded_classes,
+      build_features,
       enabled_backends};
 
   return tracer_result;

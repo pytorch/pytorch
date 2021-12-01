@@ -250,6 +250,13 @@ There is also another situation in which we use annotations, namely views.
   - `transpose(Tensor(a) self, int dim0, int dim1) -> Tensor(a)`
     An alias to the memory represented by `self` may be also returned, however it is not mutated.
 
+When a Tensor views are contained in a Tensor list, we need to represent that the output list
+contains Tensors that alias the input.
+  - `func: chunk(Tensor(a -> *) self, int chunks, int dim=0) -> Tensor(a)[]`
+We assume lists contain memory which aliases the heap, so in order to correctly set up the aliasing
+relationship between the output and input, we annotate that the input Tensor enters the wildcard set `(a -> *)`.
+For more details, see the JIT [README](https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/OVERVIEW.md#aliasing-and-mutation-annotations-in-functionschema).
+
 We have some asserts to check whether a developer uses these annotations correctly and throw asserts
 if she doesn't. For example, any out function must use the `(a!)` annotation as described above.
  If this causes a lot of confusion please add @cpuhrsch to your PR.
@@ -345,6 +352,36 @@ added if applicable), so that it's still available for other backends to use.
 
 If you implemented a native function in C++ and want to find out which dispatch keyword
 should be used in native_functions.yaml, please [follow steps in dispatch keywords](#choosing-the-right-dispatch-keyword)
+
+### CompositeImplicitAutograd Compliance
+
+Functions registered as CompositeImplicitAutograd MUST work for most, if not
+all, backends. This means that we impose a set of constraints that make it more
+difficult to write a CompositeImplicitAutograd function than writing regular
+PyTorch code.
+
+If you wish to do something that is banned (you may wish to do this for perf
+reasons), please write a backwards formula for your operator so it is no longer
+CompositeImplicitAutograd or hide parts of the operator in a new operator
+that is not CompositeImplicitAutograd.
+
+CompositeImplicitAutograd operators must not:
+- call `resize_` or moral equivalents. These are tricky to handle for
+many backends, like vmap and meta.
+- call `out=` operations. These are impossible to handle for vmap and can cause
+dispatch-to-python objects to lose their subclassing.
+- Change the metadata of a Tensor without performing dispatches. Examples of these
+operations are directly accessing the TensorImpl API to modify the
+sizes/strides/metadata of a Tensor.
+- In the same vein as the last point, `data_ptr` access or `item` access are not
+allowed. These operations do not go through the dispatcher.
+- `copy_` is a marginal case. If you're able to rewrite your operation without
+`copy_` you should definitely do so; this should be trivial if you're not copy-ing
+into a view. Otherwise, it is fine to leave the code as-is.
+
+We have CompositeImplicitAutograd compliance tests in `test/test_ops.py`. These
+tests aren't perfect (it's pretty difficult to check for all of the above) so if
+something looks wrong please shout.
 
 ### `device_guard`
 
@@ -535,6 +572,7 @@ The generated bindings are either exposed as methods on python_variable or funct
 the torch._C._nn (marked with `python_module: nn`),
 torch._C._fft (marked with `python_module: fft`),
 torch._C._linalg (marked with `python_module: linalg`) objects,
+torch._C._sparse (marked with `python_module: sparse`) objects,
 or torch._C._special (marked with `python_module: special`) objects.
 
 ### Undefined tensor conventions
