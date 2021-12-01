@@ -826,6 +826,8 @@ class TestDecompositionOpInfo(TestCase):
             assert torch.allclose(a, b, rtol=rtol, atol=atol), msg
 
         # We check the correctness of each decomposition right after running it.
+        # So, when we encounter a decomposition, we run the function normally, and then run the decomposition, and ensure they're identical.
+        # The way this is implemented, there could .... technically be an exponential blow up, but it's probably fine for now.
         class DecompositionTensor(torch.Tensor):
             elem: torch.Tensor
 
