@@ -444,7 +444,9 @@ class TORCH_API StaticRuntime {
       const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
-  void set_inputs(const std::vector<c10::IValue>& args, const KeywordArgs& kwargs);
+  void set_inputs(
+      const std::vector<c10::IValue>& args,
+      const KeywordArgs& kwargs);
   void set_inputs(std::vector<c10::IValue>&& args, const KeywordArgs& kwargs);
 
   void verify_and_correct_memory_overlap(ProcessedNode& n);

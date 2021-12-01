@@ -1292,7 +1292,9 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
 }
 
 template <typename IValueList>
-c10::IValue StaticRuntime::run_impl(IValueList&& args, const KeywordArgs& kwargs) {
+c10::IValue StaticRuntime::run_impl(
+    IValueList&& args,
+    const KeywordArgs& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
