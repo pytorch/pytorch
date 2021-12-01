@@ -9,7 +9,7 @@
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
 
-namespace at { namespace native {
+namespace at { namespace native { namespace {
 template<typename scalar_t>
 struct CompareFunctor{
   CompareFunctor(const int op): op_(op) {TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op_>=0 && op_ <= 3);}
@@ -27,6 +27,7 @@ struct CompareFunctor{
     }
   }
 };
+}
 
 
 void ge_kernel_cuda(TensorIteratorBase& iter) {
