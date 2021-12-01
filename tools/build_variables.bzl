@@ -367,6 +367,7 @@ core_sources_full = core_sources_full_mobile + [
 
 lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
