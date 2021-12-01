@@ -207,7 +207,8 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -225,6 +226,11 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         else:
             raise AttributeError
 
+    def __getstate__(self):
+        if IterableDataset.getstate_hook is not None:
+            return IterableDataset.getstate_hook(self)
+        return self.__dict__
+
     def __reduce_ex__(self, *args, **kwargs):
         if IterableDataset.reduce_ex_hook is not None:
             try:
@@ -232,6 +238,12 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             except NotImplementedError:
                 pass
         return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_getstate_hook(cls, hook_fn):
+        if IterableDataset.getstate_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing getstate_hook")
+        IterableDataset.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):

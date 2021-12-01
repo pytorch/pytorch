@@ -1,3 +1,5 @@
+#include <ATen/Utils.h>
+#include <c10/core/TensorImpl.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/profiler_edge.h>
@@ -51,6 +53,10 @@ std::vector<std::tuple<std::string, int64_t>> parseMethodHandle(
     result.push_back(std::make_tuple(instruction, debug_handle));
   }
   return result;
+}
+
+float* float_data_ptr(const at::Tensor& t) {
+  return t.unsafeGetTensorImpl()->data_ptr_impl<float>();
 }
 } // namespace
 
@@ -109,10 +115,27 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto sub = instruction.substr(15);
           // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
           const_val = stod(sub);
-        } else if (instruction == "aten::add") {
-          output_list.emplace_back(x.add(h, const_val));
-        } else if (instruction == "aten::sub") {
-          output_list.emplace_back(x.sub(h, const_val));
+        } else if (instruction == "aten::add" || instruction == "aten::sub") {
+          TORCH_CHECK(x.sizes() == h.sizes());
+          if (x.dim() > 1 || (x.dim() == 1 && x.size(0) > 1)) {
+            TORCH_WARN(
+                "Only the first elements of the tensors are added or subbed.");
+          }
+          TORCH_CHECK(
+              (x.scalar_type() == c10::ScalarType::Float &&
+               h.scalar_type() == c10::ScalarType::Float),
+              "Only float tensors are compatible for add and sub.");
+          auto y = at::detail::empty_cpu(
+              x.sizes(), c10::ScalarType::Float, {}, {}, {}, c10::nullopt);
+          auto x_ptr = float_data_ptr(x);
+          auto h_ptr = float_data_ptr(h);
+          auto y_ptr = float_data_ptr(y);
+          if (instruction == "aten::add") {
+            y_ptr[0] = x_ptr[0] + h_ptr[0];
+          } else {
+            y_ptr[0] = x_ptr[0] - h_ptr[0];
+          }
+          output_list.emplace_back(y);
         } else {
           TORCH_CHECK(
               false,

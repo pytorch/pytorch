@@ -56,7 +56,6 @@ class TRTModule(torch.nn.Module):
         self.output_names = output_names
         self.cuda_graph_batch_size = cuda_graph_batch_size
         self.initialized = False
-        self.to_tuple = lambda d: (d.to_tuple() if hasattr(d, "to_tuple") else tuple(d))
 
         if engine:
             self._initialize()
@@ -90,7 +89,7 @@ class TRTModule(torch.nn.Module):
             for idx in self.input_binding_indices_in_order
         ]
         self.input_shapes: Sequence[Sequence[int]] = [
-            self.to_tuple(self.engine.get_binding_shape(idx))
+            tuple(self.engine.get_binding_shape(idx))
             for idx in self.input_binding_indices_in_order
         ]
         self.output_dtypes: Sequence[torch.dtype] = [
@@ -185,7 +184,7 @@ class TRTModule(torch.nn.Module):
 
                     if not self.engine.has_implicit_batch_dimension:
                         self.context.set_binding_shape(
-                            idx, self.to_tuple(contiguous_inputs[i].shape)
+                            idx, tuple(contiguous_inputs[i].shape)
                         )
                     else:
                         assert (
@@ -201,7 +200,7 @@ class TRTModule(torch.nn.Module):
                     if self.engine.has_implicit_batch_dimension:
                         shape = (batch_size,) + self.output_shapes[i]
                     else:
-                        shape = self.to_tuple(self.context.get_binding_shape(idx))
+                        shape = tuple(self.context.get_binding_shape(idx))
 
                     output = torch.empty(  # type: ignore[call-overload]
                         size=shape,
@@ -215,7 +214,7 @@ class TRTModule(torch.nn.Module):
                     if self.engine.has_implicit_batch_dimension:
                         shape = (batch_size,) + self.hidden_output_shapes[i]
                     else:
-                        shape = self.to_tuple(self.context.get_binding_shape(idx))
+                        shape = tuple(self.context.get_binding_shape(idx))
 
                     output = torch.empty(  # type: ignore[call-overload]
                         size=shape,

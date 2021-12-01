@@ -21,6 +21,7 @@ env:
   COMPACT_JOB_NAME: macos-10-15-py3-lite-interpreter-x86-64
   IN_CI: 1
   IS_GHA: 1
+  PYTORCH_RETRY_TEST_CASES: 1
 
   # Set xcode xcode version to 12
   DEVELOPER_DIR: /Applications/Xcode_12.app/Contents/Developer
