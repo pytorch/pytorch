@@ -54,8 +54,6 @@ cc_library(
         "include/oneapi/dnnl/dnnl_version.h",
     ],
     copts = [
-        "-DUSE_AVX",
-        "-DUSE_AVX2",
         "-DDNNL_DLL",
         "-DDNNL_DLL_EXPORTS",
         "-DDNNL_ENABLE_CONCURRENT_EXEC",
