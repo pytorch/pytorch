@@ -108,7 +108,7 @@ void fuseFrozenConvAddReluImpl(std::shared_ptr<Graph>& graph) {
 }
 
 auto dummyInitializer = []() {
-  _fuseFrozenConvAddReluImpl = fuseFrozenConvAddReluImpl;
+  getFuseFrozenConvAddReluImpl() = &fuseFrozenConvAddReluImpl;
   return true;
 }();
 
