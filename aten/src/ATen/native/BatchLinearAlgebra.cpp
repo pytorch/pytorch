@@ -1657,7 +1657,7 @@ TORCH_IMPL_FUNC(linalg_lu_factor_ex_out)(const Tensor& A,
 std::tuple<Tensor&, Tensor&> linalg_lu_factor_out(const Tensor& A, bool pivot, Tensor& LU, Tensor& pivots) {
   auto info = at::empty({0}, A.options().dtype(kInt));
   // We pass check_errors as we want to use lu_factor rather than lu_factor_ex in the errors
-  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*chech_errors=*/false);
+  at::linalg_lu_factor_ex_out(LU, pivots, info, A, pivot, /*check_errors=*/false);
   if (A.dim() > 2) {
     batchCheckErrors(info, "torch.linalg.lu_factor");
   } else {
