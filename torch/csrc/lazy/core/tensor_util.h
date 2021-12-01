@@ -9,21 +9,21 @@
 namespace torch {
 namespace lazy {
 
-std::vector<int64_t> ComputeArrayStrides(c10::ArrayRef<int64_t> sizes);
+TORCH_API std::vector<int64_t> ComputeArrayStrides(
+    c10::ArrayRef<int64_t> sizes);
 
-std::vector<at::Tensor> DataHandlesToTensors(
+TORCH_API std::vector<at::Tensor> DataHandlesToTensors(
     c10::ArrayRef<BackendDataPtr> data_handles,
     at::ScalarType dest_element_type);
 
 // Uploads an ATEN tensor data to the device and fetches the corresponding
 // device data handle.
-BackendDataPtr TensorToDataHandle(
-    const at::Tensor& tensor,
-    const BackendDevice& device);
+TORCH_API BackendDataPtr
+TensorToDataHandle(const at::Tensor& tensor, const BackendDevice& device);
 
 // Retrieves the device data handles by parallel uploading data onto the
 // corresponding devices.
-std::vector<BackendDataPtr> CreateTensorsData(
+TORCH_API std::vector<BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<BackendDevice>& devices);
 
@@ -62,7 +62,7 @@ at::Scalar MakeIntScalar(T value) {
 // hits, but it can prevent the compiler to perform optimizations. So tensor
 // values which are within a given set, are routed to constant scalars if this
 // API returns true.
-bool IsSpecialScalar(const at::Scalar& value);
+TORCH_API bool IsSpecialScalar(const at::Scalar& value);
 
 } // namespace lazy
 } // namespace torch
