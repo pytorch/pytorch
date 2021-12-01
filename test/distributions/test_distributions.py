@@ -60,7 +60,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  OneHotCategorical, OneHotCategoricalStraightThrough,
                                  Pareto, Poisson, RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 VonMises, Weibull, constraints, kl_divergence)
+                                 VonMises, Weibull, Wishart, constraints, kl_divergence)
 from torch.distributions.constraint_registry import transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -472,6 +472,28 @@ EXAMPLES = [
             'concentration': torch.randn(1).abs().requires_grad_()
         }
     ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[2.0, 0.3], [0.3, 0.25]], requires_grad=True),
+            'df': torch.randn(5, requires_grad=True),
+        },
+        {
+            'precision_matrix': torch.tensor([[2.0, 0.1, 0.0],
+                                              [0.1, 0.25, 0.0],
+                                              [0.0, 0.0, 0.3]], requires_grad=True),
+            'df': torch.randn(2, requires_grad=True),
+        },
+        {
+            'scale_tril': torch.tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                        [[2.0, 0.0], [0.3, 0.25]],
+                                        [[5.0, 0.0], [-0.5, 1.5]]], requires_grad=True),
+            'df': torch.randn(5, 3, requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
+            'df': torch.tensor([1.0]),
+        },
+    ]),
     Example(MixtureSameFamily, [
         {
             'mixture_distribution': Categorical(torch.rand(5, requires_grad=True)),
@@ -737,6 +759,16 @@ BAD_EXAMPLES = [
         {
             'scale': torch.tensor([1.0], requires_grad=True),
             'concentration': torch.tensor([-1.0], requires_grad=True)
+        }
+    ]),
+    Example(Wishart, [
+        {
+            'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([1.], requires_grad=True),
+        },
+        {
+            'covariance_matrix': torch.tensor([[1.0, 1.0], [0.0, -2.0]], requires_grad=True),
+            'df': torch.tensor([3.], requires_grad=True),
         }
     ]),
     Example(ContinuousBernoulli, [
