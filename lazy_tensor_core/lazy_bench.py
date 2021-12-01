@@ -371,7 +371,7 @@ if __name__ == "__main__" :
     parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
     parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
-    parser.add_argument("--inner_loop_repeat", type=int, default=6, help="repeat the computation this many times per sample")
+    parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
@@ -405,14 +405,18 @@ if __name__ == "__main__" :
 
             with fuser(args.fuser): 
                 # using LazySync
-                lazy_compute_experiment("amortized", results, args, model, example_inputs, lazy_model, lazy_inputs)
+                lazy_compute_experiment(f"amortized {args.inner_loop_repeat}x", results, args, model, example_inputs, lazy_model, lazy_inputs)
                 lazy_compute_experiment("unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True)
 
+                """Alternate ways of synchronizing for timing- calling .to() on output tensors -
+                   Used initially to corroborate the results of timing via mark_step.  Should be debuged further as calling .to() appears
+                   to penalize lazy more than cuda, possibly due to ineffiencies in how we implement the .to operator.
+                """
                 # using to_cpu sync
-                lazy_compute_experiment("to_cpu amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cpu')
-                lazy_compute_experiment("to_cpu unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cpu')
+                # lazy_compute_experiment("to_cpu amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cpu')
+                # lazy_compute_experiment("to_cpu unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cpu')
 
-                if device == 'cuda':
+                # if device == 'cuda':
                     # using to_cuda sync
-                    lazy_compute_experiment("to_cuda amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
-                    lazy_compute_experiment("to_cuda unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
+                    # lazy_compute_experiment("to_cuda amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
+                    # lazy_compute_experiment("to_cuda unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
