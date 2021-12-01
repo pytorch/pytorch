@@ -7054,17 +7054,11 @@ a")
             x[0] >>= 1
             return x
 
-        def checkScriptCloneInput(func, inp):
-            cu = torch.jit.CompilationUnit(inspect.getsource(func))
-            script_fn = getattr(cu, func.__name__)
-            input_clone = inp.clone()
-            self.assertEqual(func(inp), script_fn(input_clone))
-
-        checkScriptCloneInput(bitwise_or, torch.tensor([0]))
-        checkScriptCloneInput(bitwise_and, torch.tensor([1]))
-        checkScriptCloneInput(bitwise_xor, torch.tensor([1]))
-        checkScriptCloneInput(lshift, torch.tensor([0b101]))
-        checkScriptCloneInput(rshift, torch.tensor([0b101]))
+        self.checkScriptCloneInput(bitwise_or, (torch.tensor([0]),))
+        self.checkScriptCloneInput(bitwise_and, (torch.tensor([1]),))
+        self.checkScriptCloneInput(bitwise_xor, (torch.tensor([1]),))
+        self.checkScriptCloneInput(lshift, (torch.tensor([0b101]),))
+        self.checkScriptCloneInput(rshift, (torch.tensor([0b101]),))
 
     def test_nested_select_assign(self):
         class SubSubModule(torch.nn.Module):

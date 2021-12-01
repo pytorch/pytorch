@@ -26,6 +26,7 @@ from functools import reduce
 from io import StringIO
 from collections import defaultdict
 
+import copy
 import importlib.util
 import inspect
 import io
@@ -521,6 +522,12 @@ class JitTestCase(JitCommonTestCase):
                 self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
                 self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
                 return scripted_fn
+
+    def checkScriptCloneInput(self, func, inputs):
+        cu = torch.jit.CompilationUnit(inspect.getsource(func))
+        script_fn = getattr(cu, func.__name__)
+        input_clone = [copy.deepcopy(i) for i in inputs]
+        self.assertEqual(func(*inputs), script_fn(*input_clone))
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    drop=None, allow_unused=False, verbose=False,
