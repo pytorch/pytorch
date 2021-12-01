@@ -240,10 +240,18 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+          PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
+          if [[ $TEST_CONFIG != 'xla' ]]; then
+            # shellcheck disable=SC2089
+            PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -265,12 +273,13 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            ${PROXY_ENV} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
