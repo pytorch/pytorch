@@ -144,12 +144,12 @@ struct TORCH_API RecordFunction {
     return state_->outputs_;
   }
 
-  void setOutputs(std::vector<c10::IValue>&& outputs) const {
+  void setOutputs(std::vector<c10::IValue>&& outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = std::move(outputs);
   }
 
-  void setOutputs(c10::ArrayRef<c10::IValue> outputs) const {
+  void setOutputs(c10::ArrayRef<c10::IValue> outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = outputs.vec();
   }
@@ -258,7 +258,7 @@ struct TORCH_API RecordFunction {
 
   // Whether this RecordFunction runs any callbacks.
   bool isActive() const {
-    return state_ != nullptr;
+    return state_.has_value();
   }
 
   bool needsInputs() const {
@@ -350,7 +350,7 @@ struct TORCH_API RecordFunction {
     int64_t debug_handle_{-1};
   };
 
-  std::unique_ptr<State> state_;
+  c10::optional<State> state_;
 };
 
 //
