@@ -161,7 +161,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         # Generate native function impls that build IR nodes
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
-            'includes': [f'#include "{path}"' for path in [
+            'includes': [f'#include <{path}>' for path in [
                 tensor_class_hdr,
                 "ATen/MetaFunctions.h",
                 "torch/csrc/lazy/core/shape.h",
@@ -185,14 +185,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # Generate headers for shape/dtype funcs for non-meta kernels
         fm.write_with_template(f'{backend_dispatch_key}ShapeInference.h', 'ShapeInference.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                "ATen/Tensor.h",
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
-                "ATen/Tensor.h",
+                "torch/csrc/lazy/core/ir.h",
+                "torch/csrc/lazy/core/shape.h",
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/core/shape.h",
             ]],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
@@ -207,12 +207,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
+                "torch/csrc/lazy/core/hash.h",
+                "torch/csrc/lazy/core/ir.h",
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "torch/csrc/lazy/core/hash.h",
-                "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/ts_backend/ts_node_lowering.h",
                 "lazy_tensor_core/csrc/ops/scalar.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],
