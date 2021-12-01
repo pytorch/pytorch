@@ -237,9 +237,12 @@ def generate_qconfig_map(
 
         elif node.op == "call_method":
             module_path, module_type = node_name_to_scope[node.name]
+            # first use node.target (string) to get the qconfig
+            qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+                qconfig_dict, node.target, module_path, global_qconfig)
             # use the qconfig of the module that the node belongs to
             qconfig = maybe_adjust_qconfig_for_module_type_or_name(
-                qconfig_dict, module_type, module_path, global_qconfig)
+                qconfig_dict, module_type, module_path, qconfig)
             # Currently call_method does not support modifying qconfig
             # by order, we can add this later if it is needed.
             qconfig_with_device_check = add_module_to_qconfig_obs_ctr(qconfig, modules.get(node.target, None))
