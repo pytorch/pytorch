@@ -31,7 +31,6 @@ from torch.ao.quantization.fx.match_utils import (
 from torch.ao.quantization import (
     QuantType,
     quant_type_to_str,
-    default_embedding_qat_qconfig,
 )
 
 from torch.ao.quantization import (
