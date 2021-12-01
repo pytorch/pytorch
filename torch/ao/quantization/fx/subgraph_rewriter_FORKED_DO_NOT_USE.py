@@ -47,7 +47,7 @@ class _SubgraphMatcher:
         if isinstance(pn, (tuple, list)):
             if not isinstance(gn, type(pn)):
                 return False
-            return all(self._match_nodes(a1, a2) for a1, a2 in zip(pn, gn))
+            return all(self._match_nodes(a1, a2) for a1, a2 in zip(pn, gn))  # type: ignore[call-overload]
         elif isinstance(pn, dict):
             if not isinstance(gn, dict):
                 return False
@@ -105,7 +105,7 @@ class _SubgraphMatcher:
             # arguments
             # also allows us to match a Node with a primitive type value
             match_found = (len(pn.args) == len(gn.args)
-                           and all(self._match_nodes(pn_, gn_) for pn_, gn_
+                           and all(self._match_nodes(pn_, gn_) for pn_, gn_  # type: ignore[arg-type]
                                    in zip(pn.args, gn.args)))
         if not match_found:
             self.nodes_map.pop(pn)
@@ -443,7 +443,7 @@ def replace_pattern(gm: GraphModule, pattern: Callable, replacement: Callable) -
                 # Update all anchor inputs to the new nodes
                 rn = outputs_map[pn]
                 for pn_input, rn_input in zip(pn.args, rn.args):
-                    gn_input = match.nodes_map[pn_input]
+                    gn_input = match.nodes_map[pn_input]  # type: ignore[index]
                     rn_input_in_original_graph = val_map[rn_input]
                     gn_input.replace_all_uses_with(rn_input_in_original_graph)
                     # We store the updated node point in case other nodes want to use it
