@@ -6999,7 +6999,7 @@ def sample_inputs_tensorinv(op_info, device, dtype, requires_grad, **kwargs):
 
     return samples
 
-def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     shapes_and_kwargs = [
@@ -7015,6 +7015,37 @@ def sample_inputs_mse_loss(op_info, device, dtype, requires_grad, **kwargs):
         SampleInput(_make_tensor(shape), args=(_make_tensor(shape),), kwargs=kwargs)
         for shape, kwargs in shapes_and_kwargs
     ]
+
+def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
+    sample_inputs = sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    if not dtype.is_complex:
+        return sample_inputs
+
+    make = partial(make_tensor, (), device=device, requires_grad=requires_grad)
+    float_dtype = torch.float64
+
+    sample_inputs.extend(
+        [
+            SampleInput(make(dtype=dtype), args=(make(dtype=float_dtype),)),
+            SampleInput(make(dtype=float_dtype), args=(make(dtype=dtype),)),
+        ]
+    )
+
+    return sample_inputs
+
+def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
+    sample_inputs = sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs)
+
+    make = partial(make_tensor, (S, S), device=device, dtype=dtype, requires_grad=requires_grad)
+    sample_inputs.extend(
+        [
+            SampleInput(make(low=0, high=2), args=(make(low=-2, high=0),), kwargs=dict(beta=5)),
+            SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
+        ]
+    )
+
+    return sample_inputs
 
 def sample_inputs_grid_sample(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -7612,14 +7643,34 @@ def reference_one_hot(a: np.ndarray, num_classes: int = -1) -> np.ndarray:
     return one_hot.reshape(*a.shape, -1)
 
 
-def reference_mse_loss(input, target, reduction="mean"):
-    se = (input - target) ** 2
-    if reduction == "mean":
-        return np.mean(se)
-    elif reduction == "sum":
-        return np.sum(se)
-    else:  # reduction == "none"
-        return se
+def loss_reference_reduction_wrapper(fn):
+    def wrapper(input, target, *, size_average=None, reduce=None, reduction="mean", **other_kwargs):
+        if size_average is not None or reduce is not None:
+            raise RuntimeError(
+                "The keyword arguments 'size_average' and 'reduce' are deprecated and not supported by this wrapper"
+            )
+        output = fn(input, target, **other_kwargs)
+        if reduction == "mean":
+            return np.mean(output)
+        elif reduction == "sum":
+            return np.sum(output)
+        else:  # reduction == "none"
+            return output
+
+    return wrapper
+
+
+@loss_reference_reduction_wrapper
+def reference_smooth_l1_loss(input, target, beta=1.0):
+    diff = input - target
+    abs_diff = np.abs(diff)
+    above_threshold = abs_diff >= beta
+
+    loss = np.empty_like(input)
+    loss[above_threshold] = abs_diff[above_threshold] - 0.5 * beta
+    loss[~above_threshold] = diff[~above_threshold] ** 2 / (2 * beta)
+
+    return loss
 
 
 def wrapper_set_seed(op, input, *args, **kwargs):
@@ -13082,8 +13133,8 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.mse_loss",
-        ref=reference_mse_loss,
-        sample_inputs_func=sample_inputs_mse_loss,
+        ref=loss_reference_reduction_wrapper(lambda input, target: (input - target) ** 2),
+        sample_inputs_func=sample_inputs_loss,
         supports_out=False,
         dtypes=floating_types_and(torch.float16),
         backward_dtypesIfCPU=floating_types(),
@@ -13815,6 +13866,43 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
+    ),
+    OpInfo(
+        "nn.functional.l1_loss",
+        ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        sample_inputs_func=sample_inputs_l1_loss,
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        skips=(
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
+            # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+                dtypes=(torch.float32,),
+            ),
+        ),
+    ),
+    OpInfo(
+        "nn.functional.smooth_l1_loss",
+        ref=reference_smooth_l1_loss,
+        sample_inputs_func=sample_inputs_smooth_l1_loss,
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCPU=floating_types_and(),
+        dtypesIfCUDA=floating_types_and(torch.float16),
+        backward_dtypesIfCUDA=floating_types_and(torch.float16),
+        supports_out=False,
+        skips=(
+            # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
+            # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ),
     )
 ]
 
