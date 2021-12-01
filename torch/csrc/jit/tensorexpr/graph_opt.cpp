@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
 namespace torch {
@@ -142,7 +143,7 @@ void moveCatOpToEnd(Node* cat, std::shared_ptr<Graph> subgraph) {
       buildErrorMessage("Graph node is not aten::cat."));
   if (cat->output()->uses().size() == 1) {
     auto use = cat->output()->uses().front();
-    if (use.user->isMemberOf(supported_eltwise_set()) &&
+    if (get_tensorexpr_elementwise_set().contains(use.user) &&
         numTensorInputs(use.user) == 1) {
       if (!doesCatPromoteTypes(cat)) {
         TORCH_INTERNAL_ASSERT(
