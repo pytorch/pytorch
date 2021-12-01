@@ -254,16 +254,14 @@ std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(
   std::shared_ptr<mobile::Code> mobileCode = compileGraphToMobileCode(
       function.name(), function.graph(), options, debug_handle);
   const auto& schema = function.getSchema();
-  auto mobile_func = std::make_unique<mobile::Function>(
+  return std::make_unique<mobile::Function>(
       function.qualname(), mobileCode, schema);
-
-  return mobile_func;
 }
 
 IValue convertMobileFunctionToCodeTable(
-    const mobile::Function* func,
+    const mobile::Function& func,
     const CompilationOptions& compilation_options) {
-  const std::shared_ptr<mobile::Code> code = func->get_code();
+  const std::shared_ptr<mobile::Code> code = func.get_code();
   std::vector<IValue> instructions;
   instructions.reserve(code->instructions_.size());
   for (Instruction ins : code->instructions_) {
