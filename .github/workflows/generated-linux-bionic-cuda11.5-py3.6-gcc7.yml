@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-xenial-cuda11.3-py3.6-gcc7
+name: linux-bionic-cuda11.5-py3.6-gcc7
 
 on:
   pull_request:
@@ -13,8 +13,8 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-xenial-cuda11.3-py3.6-gcc7
-  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+  BUILD_ENVIRONMENT: linux-bionic-cuda11.5-py3.6-gcc7
+  DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
   TORCH_CUDA_ARCH_LIST: 5.2
@@ -32,7 +32,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: linux-xenial-cuda11.3-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-bionic-cuda11.5-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -61,7 +61,7 @@ jobs:
     needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: linux-xenial-cuda11.3-py3.6-gcc7-build
+      JOB_BASE_NAME: linux-bionic-cuda11.5-py3.6-gcc7-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -300,7 +300,7 @@ jobs:
     timeout-minutes: 240
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: linux-xenial-cuda11.3-py3.6-gcc7-test
+      JOB_BASE_NAME: linux-bionic-cuda11.5-py3.6-gcc7-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
@@ -495,7 +495,7 @@ jobs:
         env:
           AWS_DEFAULT_REGION: us-east-1
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-xenial-cuda11.3-py3.6-gcc7-test
+          JOB_BASE_NAME: linux-bionic-cuda11.5-py3.6-gcc7-test
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
