@@ -90,11 +90,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::GenericSlice>(
               node, *torch_lazy_tensors::ir::ops::ltc_generic_slice));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select) {
-      return LowerSelect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
-              node, *torch_lazy_tensors::ir::ops::ltc_select));
-    }
     if (node->op() == *torch_lazy_tensors::ir::ops::ltc_unselect) {
       return LowerUnselect(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Unselect>(
@@ -158,6 +153,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerRepeat(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Repeat>(
               node, torch::lazy::OpKind(at::aten::repeat)));
+    }
+    if (node->op().op == at::aten::select) {
+      return LowerSelect(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
+              node, torch::lazy::OpKind(at::aten::select)));
     }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(

@@ -22,7 +22,6 @@ const OpKindWrapper ltc_not_supported("lazy_tensors::not_supported");
 const OpKindWrapper ltc_replication_pad("lazy_tensors::replication_pad");
 const OpKindWrapper ltc_replication_pad_backward(
     "lazy_tensors::replication_pad_backward");
-const OpKindWrapper ltc_select("lazy_tensors::select");
 const OpKindWrapper ltc_tensor_data("lazy_tensors::tensor_data");
 const OpKindWrapper ltc_unselect("lazy_tensors::unselect");
 const OpKindWrapper ltc_update_slice("lazy_tensors::update_slice");
