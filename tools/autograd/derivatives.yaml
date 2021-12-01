@@ -1727,15 +1727,6 @@
   self: leaky_relu_backward(grad, result, negative_slope, true)
   result: auto_element_wise
 
-- name: logical_not(Tensor self) -> Tensor
-  output_differentiability: [False]
-
-- name: logical_xor(Tensor self, Tensor other) -> Tensor
-  output_differentiability: [False]
-
-- name: logical_and(Tensor self, Tensor other) -> Tensor
-  output_differentiability: [False]
-
 - name: log_sigmoid_forward(Tensor self) -> (Tensor output, Tensor buffer)
   self: log_sigmoid_backward(grad, self, buffer)
 
