@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+from typing import Any, Dict, NamedTuple, Optional, Set, Tuple, List, Callable, Union
 from enum import Enum
 
 aten = torch.ops.aten
@@ -71,6 +72,24 @@ def huber_loss_backward_decomposition(grad_output: Tensor, self: Tensor, target:
     norm = 1./self.numel() if reduction == Reduction.MEAN.value else 1.
     x = self - target
     return aten.where(x < -delta, -norm * grad_output * delta, aten.where(x > delta, norm * grad_output * delta, norm * x * grad_output))
+
+@register_decomposition(aten.slice_backward)
+def slice_backward_decomposition(grad_output: Tensor, input_sizes: List[int], dim: int, start: int, end: int, step:int):
+    grad_input = aten.new_zeros(grad_output, input_sizes)
+    return aten.slice_scatter(grad_input, grad_output, dim, start, end, step)
+
+@register_decomposition(aten.select_backward)
+def select_backward_decomposition(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
+    grad_input = aten.new_zeros(grad_output, input_sizes)
+    return aten.select_scatter(grad_input, grad_output, dim, index)
+
+# Currently not numerically identical for bfloat16
+# @register_decomposition(aten._softmax_backward_data)
+# def _softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
+#     grad_input = output * (grad_output - aten.sum(grad_output * output, dim=dim, keepdim=True))
+#     import pdb; pdb.set_trace()
+#     print(grad_input - aten._softmax_backward_data(grad_output, output.elem, dim, input_dtype))
+#     return grad_input
 
 # @register_decomposition(aten._fused_dropout)
 # def _fused_dropout_decomposition(input, p, generator=None):
