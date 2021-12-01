@@ -1,4 +1,5 @@
 from typing import Any
+from ..utils import Pattern
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
