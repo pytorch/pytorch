@@ -3202,8 +3202,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
-        xfail('nn.functional.pixel_shuffle'),
-        xfail('nn.functional.pixel_unshuffle'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         def test():
