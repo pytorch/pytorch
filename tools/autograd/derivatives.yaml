@@ -350,6 +350,10 @@
   self: cholesky_backward(grad, upper, L)
   L: cholesky_jvp(self_t, L, upper)
 
+- name: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
+  self: cholesky_backward(grad, upper, result)
+  result: cholesky_jvp(self_t, result, upper)
+
 - name: cholesky_solve(Tensor self, Tensor input2, bool upper=False) -> Tensor
   self, input2: cholesky_solve_backward(grad, self, input2, result, upper)
   result: cholesky_solve_jvp(result, input2_p, input2_t, self_t, upper)
@@ -758,6 +762,10 @@
 - name: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
   self: -at::matmul(inverse.mH(), at::matmul(grad, inverse.mH()))
   inverse: -at::matmul(at::matmul(inverse, self_t), inverse)
+
+- name: linalg_inv(Tensor self) -> Tensor
+  self: -at::matmul(result.mH(), at::matmul(grad, result.mH()))
+  result: -at::matmul(at::matmul(result, self_t), result)
 
 - name: linalg_pinv.atol_rtol_tensor(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False) -> Tensor
   self: pinv_backward(grad, result, self)

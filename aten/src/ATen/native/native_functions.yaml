@@ -10755,10 +10755,14 @@
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CPU, CUDA: linalg_cholesky
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    CPU, CUDA: linalg_cholesky_out
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg
@@ -10898,10 +10902,14 @@
 - func: linalg_inv(Tensor self) -> Tensor
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_inv
 
 - func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: linalg_inv_out
 
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method
