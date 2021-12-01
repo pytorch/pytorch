@@ -1,8 +1,6 @@
 #include <ATen/core/ivalue.h>
-#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
@@ -72,9 +70,7 @@ void parseInstructions(
     const std::string& function_name,
     c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
-    mobile::Function* function,
-    bool use_upgrader,
-    uint64_t operator_version) {
+    mobile::Function* function) {
   c10::List<int64_t> debug_handles_list;
   if (!debug_handles_m_tuple.empty()) {
     const std::string& debug_info_function_name =
@@ -112,42 +108,6 @@ void parseInstructions(
     OpCode op_code = opCodeCache.parse(*ins_item[0].toString());
     int X = ins_item[1].toInt();
     int N = ins_item[2].toInt();
-
-    if (use_upgrader && op_code == OpCode::OP) {
-      std::string op_name = function->get_code()->op_names_[X].name;
-
-      std::string operator_name = function->get_code()->op_names_[X].name +
-          (function->get_code()->op_names_[X].overload_name.empty()
-               ? ""
-               : "." + function->get_code()->op_names_[X].overload_name);
-      auto it = kOperatorVersionMap.find(operator_name);
-      // Find out if there is an upgrader for this operator
-      if (it != kOperatorVersionMap.end()) {
-        auto upgrader_list = it->second;
-        // Loop all upgraders for this operator, and find out if there exists a
-        // valid upgrader. Use iteration here instead of other faster search
-        // algorithm, because the number of upgrader per operator will be just a
-        // few and tend to keep the code light-weight from binary size concern.
-        for (const auto& upgrader : upgrader_list) {
-          if (operator_version <= upgrader.max_version &&
-              operator_version >= upgrader.min_version) {
-            auto func_name = function->get_code()
-                                 ->functions_[upgrader.index]
-                                 ->qualname()
-                                 .qualifiedName();
-            // If there exists a valid upgrader, change the instruction OP to
-            // CALL, and the index will point to the according upgrader
-            // function. All upgrader function are available in
-            // function->get_code()->functions_. It's a vector of function
-            // pointer and they are initialized in the same order as the global
-            // vector kUpgraderBytecode.
-            op_code = OpCode::CALL;
-            X = upgrader.index;
-            break;
-          }
-        }
-      }
-    }
     if (!debug_handles_list.empty()) {
       int64_t debug_handle = debug_handles_list[j];
       function->append_instruction(op_code, X, N, debug_handle);
