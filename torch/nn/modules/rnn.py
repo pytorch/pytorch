@@ -1,7 +1,7 @@
 import math
 import warnings
 import numbers
-from typing import List, Tuple, Optional, overload, Union, cast
+from typing import List, Tuple, Optional, overload
 
 import torch
 from torch import Tensor
@@ -236,48 +236,6 @@ class RNNBase(Module):
             return hx
         return apply_permutation(hx, permutation)
 
-    def forward(self,
-                input: Union[Tensor, PackedSequence],
-                hx: Optional[Tensor] = None) -> Tuple[Union[Tensor, PackedSequence], Tensor]:
-        is_packed = isinstance(input, PackedSequence)
-        if is_packed:
-            input, batch_sizes, sorted_indices, unsorted_indices = input
-            max_batch_size = int(batch_sizes[0])
-        else:
-            input = cast(Tensor, input)
-            batch_sizes = None
-            max_batch_size = input.size(0) if self.batch_first else input.size(1)
-            sorted_indices = None
-            unsorted_indices = None
-        if hx is None:
-            input = cast(Tensor, input)
-            num_directions = 2 if self.bidirectional else 1
-            hx = torch.zeros(self.num_layers * num_directions,
-                             max_batch_size, self.hidden_size,
-                             dtype=input.dtype, device=input.device)
-        else:
-            # Each batch of the hidden state should match the input sequence that
-            # the user believes he/she is passing in.
-            hx = self.permute_hidden(hx, sorted_indices)
-
-        assert hx is not None
-        input = cast(Tensor, input)
-        self.check_forward_args(input, hx, batch_sizes)
-        _impl = _rnn_impls[self.mode]
-        if batch_sizes is None:
-            result = _impl(input, hx, self._flat_weights, self.bias, self.num_layers,
-                           self.dropout, self.training, self.bidirectional, self.batch_first)
-        else:
-            result = _impl(input, batch_sizes, hx, self._flat_weights, self.bias,
-                           self.num_layers, self.dropout, self.training, self.bidirectional)
-
-        output: Union[Tensor, PackedSequence]
-        output = result[0]
-        hidden = result[1]
-
-        if is_packed:
-            output = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
-        return output, self.permute_hidden(hidden, unsorted_indices)
 
     def extra_repr(self) -> str:
         s = '{input_size}, {hidden_size}'
@@ -454,6 +412,66 @@ class RNN(RNNBase):
             raise ValueError("Unknown nonlinearity '{}'".format(self.nonlinearity))
         super(RNN, self).__init__(mode, *args, **kwargs)
 
+    @overload
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input: Tensor, hx: Optional[Tensor] = None) -> Tuple[Tensor, Tensor]:
+        pass
+
+    @overload
+    @torch._jit_internal._overload_method  # noqa: F811
+    def forward(self, input: PackedSequence, hx: Optional[Tensor] = None) -> Tuple[PackedSequence, Tensor]:
+        pass
+
+    def forward(self, input, hx=None):  # noqa: F811
+        orig_input = input
+        if isinstance(orig_input, PackedSequence):
+            input, batch_sizes, sorted_indices, unsorted_indices = input
+            max_batch_size = int(batch_sizes[0])
+        else:
+            batch_sizes = None
+            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            sorted_indices = None
+            unsorted_indices = None
+
+        if hx is None:
+            num_directions = 2 if self.bidirectional else 1
+            hx = torch.zeros(self.num_layers * num_directions,
+                             max_batch_size, self.hidden_size,
+                             dtype=input.dtype, device=input.device)
+        else:
+            # Each batch of the hidden state should match the input sequence that
+            # the user believes he/she is passing in.
+            hx = self.permute_hidden(hx, sorted_indices)
+
+        assert hx is not None
+        self.check_forward_args(input, hx, batch_sizes)
+        assert self.mode == 'RNN_TANH' or self.mode == 'RNN_RELU'
+        if batch_sizes is None:
+            if self.mode == 'RNN_TANH':
+                result = _VF.rnn_tanh(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                      self.dropout, self.training, self.bidirectional,
+                                      self.batch_first)
+            else:
+                result = _VF.rnn_relu(input, hx, self._flat_weights, self.bias, self.num_layers,
+                                      self.dropout, self.training, self.bidirectional,
+                                      self.batch_first)
+        else:
+            if self.mode == 'RNN_TANH':
+                result = _VF.rnn_tanh(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                      self.num_layers, self.dropout, self.training,
+                                      self.bidirectional)
+            else:
+                result = _VF.rnn_relu(input, batch_sizes, hx, self._flat_weights, self.bias,
+                                      self.num_layers, self.dropout, self.training,
+                                      self.bidirectional)
+
+        output = result[0]
+        hidden = result[1]
+
+        if isinstance(orig_input, PackedSequence):
+            output_packed = PackedSequence(output, batch_sizes, sorted_indices, unsorted_indices)
+            return output_packed, self.permute_hidden(hidden, unsorted_indices)
+        return output, self.permute_hidden(hidden, unsorted_indices)
 
 # XXX: LSTM and GRU implementation is different from RNNBase, this is because:
 # 1. we want to support nn.LSTM and nn.GRU in TorchScript and TorchScript in

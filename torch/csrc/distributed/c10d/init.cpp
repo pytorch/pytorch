@@ -18,7 +18,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/frontend_cuda.hpp>
 #endif
 
 #ifdef USE_C10D_MPI
@@ -30,7 +29,6 @@
 #include <pybind11/chrono.h>
 
 #include <c10d/comm.hpp>
-#include <c10d/frontend.hpp>
 #include <c10d/logger.hpp>
 #include <c10d/reducer.hpp>
 
@@ -232,10 +230,6 @@ void _register_builtin_comm_hook(
 
 PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
-  ::c10d::initCustomClassBindings();
-#ifdef USE_C10D_NCCL
-  ::c10d::initCustomClassBindingsNccl();
-#endif
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
   if (!c10d_module) {
@@ -911,7 +905,7 @@ Example::
       )")
       .def(
           py::init([](const std::string& host,
-                      ::c10d::PortType port,
+                      uint16_t port,
                       int worldSize,
                       bool isServer,
                       std::chrono::milliseconds timeout,
@@ -1298,6 +1292,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 #endif
 
 #ifdef USE_C10D_GLOO
+  static const std::string GLOO_SOCKET_IFNAME_ENV = "GLOO_SOCKET_IFNAME";
+
   auto processGroupGloo =
       intrusive_ptr_no_gil_destructor_class_<::c10d::ProcessGroupGloo>(
           module, "ProcessGroupGloo", processGroup);
@@ -1348,9 +1344,9 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
             auto options = ::c10d::ProcessGroupGloo::Options::create();
 
             // Use interfaces listed in "GLOO_SOCKET_IFNAME", if set.
-            char* ifnameEnv = getenv(::c10d::GLOO_SOCKET_IFNAME_ENV.c_str());
-            if (ifnameEnv) {
-              for (const auto& iface : ::c10d::split(',', ifnameEnv)) {
+            char* ifnameEnv = getenv(GLOO_SOCKET_IFNAME_ENV.c_str());
+            if (ifnameEnv && strlen(ifnameEnv) > 1) {
+              for (const auto& iface : split(',', ifnameEnv)) {
                 options->devices.push_back(
                     ::c10d::ProcessGroupGloo::createDeviceForInterface(iface));
               }
@@ -1390,7 +1386,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               }),
               py::arg("pg"),
               py::arg("gloo_pg"),
-              py::call_guard<py::gil_scoped_release>());
+              py::call_guard<py::gil_scoped_release>())
+         .def_property_readonly(
+              "wrapped_pg", &::c10d::ProcessGroupWrapper::getWrappedPg
+         );
 #endif
 
 #ifdef USE_C10D_NCCL
@@ -1692,6 +1691,7 @@ static PyMethodDef methods[] = { // NOLINT
 PyMethodDef* python_functions() {
   return methods;
 }
+
 } // namespace c10d
 } // namespace distributed
 } // namespace torch

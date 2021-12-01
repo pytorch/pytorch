@@ -12,6 +12,7 @@ import time
 import unittest
 import uuid
 import warnings
+import operator
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -4116,14 +4117,14 @@ class TestAutograd(TestCase):
         # multiple inputs and outputs with non-tensors inputs
         def fn1(a: torch.Tensor, b: int):
             return a.clone(), a + 1
-        gradcheck(fn1, (x, 1), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
-                  check_undefined_grad=False)
+        gradcheck(fn1, (x, 1), check_forward_ad=True, check_backward_ad=False, check_batched_grad=False,
+                  check_undefined_grad=False, check_batched_forward_grad=True)
 
         # unrelated inputs: tangent for c is None
         def fn2(a: torch.Tensor, c: torch.Tensor):
             return a.clone()
-        gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=True,
-                  check_undefined_grad=False)
+        gradcheck(fn2, (x, x.clone()), check_forward_ad=True, check_backward_ad=False, check_batched_grad=False,
+                  check_undefined_grad=False, check_batched_forward_grad=True)
 
         class Fn(Function):
             @staticmethod
@@ -4141,7 +4142,7 @@ class TestAutograd(TestCase):
 
         msg = "vmap: We do not yet support calling random operations inside of vmap"
         with self.assertRaisesRegex(RuntimeError, msg):
-            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_grad=True, check_batched_forward_grad=True)
+            gradcheck(Fn.apply, (x,), check_forward_ad=True, check_batched_forward_grad=True)
 
     def test_version_counter(self):
         x = torch.randn(1, 2)
@@ -6497,10 +6498,14 @@ class TestAutogradFunctional(TestCase):
     def test_jacobian_create_graph_vectorize(self):
         self._test_jacobian_create_graph(vectorize=True)
 
-    def _check_jacobian_vectorize_correctness(self, f, inputs):
+    def _check_jacobian_vectorize_correctness(self, f, inputs, test_forward_ad=True):
         expected = autogradF.jacobian(f, inputs, vectorize=False)
-        result = autogradF.jacobian(f, inputs, vectorize=True)
-        self.assertEqual(result, expected)
+        result_backward_mode = autogradF.jacobian(f, inputs, vectorize=True)
+        self.assertEqual(result_backward_mode, expected)
+
+        if test_forward_ad:
+            result_forward_mode = autogradF.jacobian(f, inputs, strategy="forward-mode", vectorize=True)
+            self.assertEqual(result_forward_mode, expected)
 
     def test_jacobian_vectorize_correctness_simple(self):
         def f(x):
@@ -6572,12 +6577,17 @@ class TestAutogradFunctional(TestCase):
 
         x = torch.randn(3)
         y = torch.randn(3)
-        self._check_jacobian_vectorize_correctness(f, (x, y))
+        # The Jacobian computed using forward AD has the dtype of the output
+        # but the Jacobian computed with reverse AD has dtype of input
+        self._check_jacobian_vectorize_correctness(f, (x, y), test_forward_ad=False)
 
     def _check_hessian_vectorize_correctness(self, f, inputs):
         expected = autogradF.hessian(f, inputs, vectorize=False)
         result = autogradF.hessian(f, inputs, vectorize=True)
         self.assertEqual(result, expected)
+
+        result_forward_mode = autogradF.hessian(f, inputs, outer_jacobian_strategy="forward-mode", vectorize=True)
+        self.assertEqual(result_forward_mode, expected)
 
     def test_hessian_vectorize_correctness_simple(self):
         def f(x):
@@ -6606,7 +6616,7 @@ class TestAutogradFunctional(TestCase):
 
         # output unrelated to all inputs
         def f(x, y):
-            return torch.randn([])
+            return torch.ones([])
 
         x = torch.randn(2)
         y = torch.randn(3)
@@ -7198,8 +7208,57 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
     def test_out_of_place_basic(self):
         a = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
         b = torch.rand(4, 4, dtype=torch.double, requires_grad=True)
-        self.assertTrue(gradcheck(torch.sin, a))
-        self.assertTrue(gradcheck(torch.add, (a, b)))
+        self.assertTrue(gradcheck(torch.sin, a, check_forward_ad=True, check_batched_grad=True,
+                                  check_batched_forward_grad=True))
+        self.assertTrue(gradcheck(torch.add, (a, b), check_forward_ad=True, check_batched_grad=True,
+                                  check_batched_forward_grad=True))
+
+    def test_out_of_place_not_same_layout(self):
+        input = torch.zeros([2, 2]).transpose(0, 1)
+        tangent = torch.zeros([2, 2, 2])
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                x = fwAD.make_dual(input, tangent)
+                return fwAD.unpack_dual(x)[1]
+        x_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertIsNot(x_tangent, tangent)
+
+    def test_inplace_on_view_same_layout(self):
+        input = torch.zeros([2, 2])
+        tangent = torch.zeros([2, 2, 2])
+        base = torch.zeros([2, 2])
+        view = base.view_as(base)
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                x = fwAD.make_dual(input, tangent)
+                view.copy_(x)
+                return fwAD.unpack_dual(x)[1], fwAD.unpack_dual(view)[1], fwAD.unpack_dual(view._base)[1]
+        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
+        self.assertIs(view_tangent, base_tangent)
+        self.assertIs(x_tangent, tangent)
+        self.assertIs(view_tangent, tangent)
+
+
+    def test_inplace_on_view_not_same_layout(self):
+        input = torch.zeros([2, 2])
+        tangent = torch.zeros([2, 2, 2])
+        view = torch.zeros([2, 2]).transpose(0, 1)
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                x = fwAD.make_dual(input, tangent)
+                view.copy_(x)
+                return fwAD.unpack_dual(x)[1], fwAD.unpack_dual(view)[1], fwAD.unpack_dual(view._base)[1]
+        x_tangent, view_tangent, base_tangent = torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
+        self.assertIs(view_tangent._base, base_tangent)
+        self.assertIs(x_tangent, tangent)
+        self.assertIsNot(view_tangent, tangent)
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
@@ -7290,6 +7349,16 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "Nested forward mode AD is not supported at the moment"):
                 nest_level = fwAD.enter_dual_level()
 
+    def test_set_fw_grad_having_own_fw_grad_at_same_level(self):
+        foo = torch.rand(2)
+        bar = torch.rand(2)
+        baz = torch.rand(2)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(foo, bar)
+            with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
+                fwAD.make_dual(baz, dual)
+
     def test_print(self):
         with fwAD.dual_level() as level:
             a = torch.rand(3)
@@ -7312,6 +7381,12 @@ class TestAutogradForwardMode(TestCase):
             baz_primal, baz_tangent = fwAD.unpack_dual(baz)
             self.assertEqual(baz_primal, foo)
             self.assertIs(baz_tangent, bar)
+
+            # Check unpacked dual is returned as a named tuple
+            # NB: Every invocation of unpack_dual returns a new tensor view
+            self.assertIsNot(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertEqual(baz_primal, fwAD.unpack_dual(baz).primal)
+            self.assertIs(baz_tangent, fwAD.unpack_dual(baz).tangent)
 
             # Check that packing/unpacking did not change the input
             foo_primal, foo_tangent = fwAD.unpack_dual(foo)
@@ -7560,6 +7635,64 @@ class TestAutogradForwardMode(TestCase):
 
             # No differentiable outputs, shouldn't error
             eq = foo == bar
+
+    def test_create_new_zeros_with_same_meta(self):
+        new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
+
+        def check(a, b):
+            def assert_same_meta(t, target):
+                for num_bdim in range(t.dim()):
+                    result = new_zeroes_fn(t, target, self_num_batch_dims=num_bdim)
+
+                    self.assertEqual(result.dim(), target.dim() + num_bdim)
+
+                    # Check size/strides match for feature dims only
+                    for i in range(num_bdim, result.dim()):
+                        self.assertEqual(result.size()[i], target.size()[i - num_bdim])
+                        self.assertEqual(result.stride()[i], target.stride()[i - num_bdim])
+
+                    # Check that we generate strides reasonably
+                    if target.is_contiguous():
+                        self.assertTrue(result.is_contiguous())
+
+                    self.assertEqual(result.storage_offset(), target.storage_offset())
+
+                    prod_of_t_bdims = reduce(operator.mul, t.size()[:num_bdim], 1)
+                    self.assertEqual(len(result.storage()), len(target.storage()) * prod_of_t_bdims)
+
+                    # TensorOptions is same
+                    self.assertEqual(result.dtype, target.dtype)
+
+            assert_same_meta(a, b)
+            assert_same_meta(b, a)
+
+        a = torch.randn(5, dtype=torch.float)
+        b = torch.randn(2, 3, 4, dtype=torch.double)
+        check(a, b)
+
+        # non-contiguous case
+        a = torch.randn(2, 3, 4).transpose(0, 1).contiguous().transpose(0, 1)
+        b = torch.randn(2, 3, 4)
+        check(a, b)
+
+        a = torch.randn(5).narrow(0, 1, 2)
+        b = torch.randn(2)
+        check(a, b)
+
+        # tensor is not a view, but still does not index entirety of storage
+        a = torch.randn(5).resize_(4)
+        b = torch.randn(4)
+        check(a, b)
+
+        # Zero-numel tensors
+        a = torch.randn(1, 0, 2)
+        b = torch.randn(1, 2)
+        check(a, b)
+
+        # Scalar tensor
+        a = torch.tensor(1.)
+        b = torch.randn(1, 2)
+        check(a, b)
 
     def test_backward_graph_destruction(self):
         def fn():
