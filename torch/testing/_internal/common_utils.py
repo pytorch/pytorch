@@ -2107,11 +2107,16 @@ class TestCase(expecttest.TestCase):
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
-        # Check with hasattr as not all Test classes have attribute `device_type`.
-        # Eg. `TestJoin` in test_join.py
+        # Verifies that an exception with the type expected_exception and message
+        # matching the regular expression defined by expected_regex is thrown.
+        # If the test is instantiated for a non-native device type (like XLA)
+        # then the message is not validated.
+
+        # Checks whether the test is instantiated for a device type by testing
+        # if the test class has defined the device_type attribute and,
+        # if so, tests whether the instantiated device type is native or not
         if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:
-            # As the non Native devices are not expected to throw the same error message as Native,
-            # we set expected_regex to empty string which matches with any message thrown.
+            # empty string matches any string
             expected_regex = ''
 
         if self._ignore_not_implemented_error:

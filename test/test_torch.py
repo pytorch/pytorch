@@ -8189,17 +8189,23 @@ else:
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @skipXLA
     def test_skip_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
         # Verify that self.assertRaisesRegex only checks the Error and ignores
         # message for non-native devices.
