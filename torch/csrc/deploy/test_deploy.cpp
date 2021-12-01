@@ -12,15 +12,14 @@
 #include <iostream>
 #include <string>
 
-int main(int argc, char* argv[]) {
-  ::testing::InitGoogleTest(&argc, argv);
-  int rc = RUN_ALL_TESTS();
-  return rc;
-}
+namespace torch {
+namespace deploy {
+const char* exePath = nullptr;
 
 void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   // Test
-  torch::deploy::InterpreterManager m(1);
+
+  torch::deploy::InterpreterManager m(exePath, 1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   auto model = p.loadPickle("model", "model.pkl");
   at::IValue eg;
@@ -48,7 +47,7 @@ const char* path(const char* envname, const char* path) {
 }
 
 TEST(TorchpyTest, LoadLibrary) {
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
   torch::deploy::Package p = m.loadPackage(
       path("LOAD_LIBRARY", "torch/csrc/deploy/example/generated/load_library"));
   auto model = p.loadPickle("fn", "fn.pkl");
@@ -56,12 +55,12 @@ TEST(TorchpyTest, LoadLibrary) {
 }
 
 TEST(TorchpyTest, InitTwice) {
-  { torch::deploy::InterpreterManager m(2); }
-  { torch::deploy::InterpreterManager m(1); }
+  { torch::deploy::InterpreterManager m(exePath, 2); }
+  { torch::deploy::InterpreterManager m(exePath, 1); }
 }
 
 TEST(TorchpyTest, DifferentInterps) {
-  torch::deploy::InterpreterManager m(2);
+  torch::deploy::InterpreterManager m(exePath, 2);
   m.registerModuleSource("check_none", "check = id(None)\n");
   int64_t id0 = 0, id1 = 0;
   {
@@ -86,7 +85,7 @@ TEST(TorchpyTest, ResNet) {
 }
 
 TEST(TorchpyTest, Movable) {
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
   torch::deploy::ReplicatedObj obj;
   {
     auto I = m.acquireOne();
@@ -98,7 +97,7 @@ TEST(TorchpyTest, Movable) {
 }
 
 TEST(TorchpyTest, MultiSerialSimpleModel) {
-  torch::deploy::InterpreterManager manager(3);
+  torch::deploy::InterpreterManager manager(exePath, 3);
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   auto model = p.loadPickle("model", "model.pkl");
   auto ref_model = torch::jit::load(path("SIMPLE_JIT", simple_jit));
@@ -140,7 +139,7 @@ TEST(TorchpyTest, MultiSerialSimpleModel) {
 
 TEST(TorchpyTest, ThreadedSimpleModel) {
   size_t nthreads = 3;
-  torch::deploy::InterpreterManager manager(nthreads);
+  torch::deploy::InterpreterManager manager(exePath, nthreads);
 
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   auto model = p.loadPickle("model", "model.pkl");
@@ -177,7 +176,7 @@ TEST(TorchpyTest, ThreadedSimpleModel) {
 }
 
 TEST(TorchpyTest, ErrorsReplicatingObj) {
-  torch::deploy::InterpreterManager manager(4);
+  torch::deploy::InterpreterManager manager(exePath, 4);
   torch::deploy::Package p = manager.loadPackage(path("SIMPLE", simple));
   auto replicatedObj = p.loadPickle("model", "model.pkl");
   // Acquire two different interpreters
@@ -200,7 +199,7 @@ TEST(TorchpyTest, ErrorsReplicatingObj) {
 
 TEST(TorchpyTest, ThrowsSafely) {
   // See explanation in deploy.h
-  torch::deploy::InterpreterManager manager(3);
+  torch::deploy::InterpreterManager manager(exePath, 3);
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   EXPECT_THROW(manager.loadPackage("some garbage path"), c10::Error);
 
@@ -214,7 +213,7 @@ TEST(TorchpyTest, ThrowsSafely) {
 }
 
 TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
 
   torch::deploy::Package p = m.loadPackage(path("SIMPLE", simple));
   auto I = p.acquireSession();
@@ -223,7 +222,7 @@ TEST(TorchpyTest, AcquireMultipleSessionsInTheSamePackage) {
 }
 
 TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
 
   torch::deploy::Package p = m.loadPackage(path("SIMPLE", simple));
   auto I = p.acquireSession();
@@ -235,7 +234,7 @@ TEST(TorchpyTest, AcquireMultipleSessionsInDifferentPackages) {
 
 TEST(TorchpyTest, TensorSharingNotAllowed) {
   size_t nthreads = 2;
-  torch::deploy::InterpreterManager m(nthreads);
+  torch::deploy::InterpreterManager m(exePath, nthreads);
   // generate a tensor from one interpreter
   auto I0 = m.allInstances()[0].acquireSession();
   auto I1 = m.allInstances()[1].acquireSession();
@@ -252,7 +251,7 @@ TEST(TorchpyTest, TaggingRace) {
   // runtime
   constexpr int64_t trials = 4;
   constexpr int64_t nthreads = 16;
-  torch::deploy::InterpreterManager m(nthreads);
+  torch::deploy::InterpreterManager m(exePath, nthreads);
   for (const auto n : c10::irange(trials)) {
     (void)n;
     at::Tensor t = torch::empty(2);
@@ -277,18 +276,18 @@ TEST(TorchpyTest, TaggingRace) {
 TEST(TorchpyTest, DisarmHook) {
   at::Tensor t = torch::empty(2);
   {
-    torch::deploy::InterpreterManager m(1);
+    torch::deploy::InterpreterManager m(exePath, 1);
     auto I = m.acquireOne();
     I.fromIValue(t);
   } // unload the old interpreter
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
   auto I = m.acquireOne();
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_THROW(I.fromIValue(t), c10::Error); // NOT a segfault
 }
 
 TEST(TorchpyTest, RegisterModule) {
-  torch::deploy::InterpreterManager m(2);
+  torch::deploy::InterpreterManager m(exePath, 2);
   m.registerModuleSource("foomodule", "def add1(x): return x + 1\n");
   for (const auto& interp : m.allInstances()) {
     auto I = interp.acquireSession();
@@ -298,7 +297,7 @@ TEST(TorchpyTest, RegisterModule) {
 
 TEST(TorchpyTest, FxModule) {
   size_t nthreads = 3;
-  torch::deploy::InterpreterManager manager(nthreads);
+  torch::deploy::InterpreterManager manager(exePath, nthreads);
   torch::deploy::Package p = manager.loadPackage(path(
       "SIMPLE_LEAF_FX", "torch/csrc/deploy/example/generated/simple_leaf_fx"));
   auto model = p.loadPickle("model", "model.pkl");
@@ -325,7 +324,7 @@ TEST(TorchpyTest, FxModule) {
 
 // Moving a tensor between interpreters should share the underlying storage.
 TEST(TorchpyTest, TensorSerializationSharing) {
-  torch::deploy::InterpreterManager manager(2);
+  torch::deploy::InterpreterManager manager(exePath, 2);
   manager.registerModuleSource("test_module", R"PYTHON(
 import torch
 
@@ -349,7 +348,7 @@ def get_tensor():
 #ifdef TEST_CUSTOM_LIBRARY
 thread_local int in_another_module = 5;
 TEST(TorchpyTest, SharedLibraryLoad) {
-  torch::deploy::InterpreterManager manager(2);
+  torch::deploy::InterpreterManager manager(exePath, 2);
   auto no_args = at::ArrayRef<torch::deploy::Obj>();
   for (auto& interp : manager.allInstances()) {
     auto I = interp.acquireSession();
@@ -418,7 +417,7 @@ TEST(TorchpyTest, UsesDistributed) {
   const auto model_filename = path(
       "USES_DISTRIBUTED",
       "torch/csrc/deploy/example/generated/uses_distributed");
-  torch::deploy::InterpreterManager m(1);
+  torch::deploy::InterpreterManager m(exePath, 1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   {
     auto I = p.acquireSession();
@@ -427,7 +426,7 @@ TEST(TorchpyTest, UsesDistributed) {
 }
 
 TEST(TorchpyTest, Autograd) {
-  torch::deploy::InterpreterManager m(2);
+  torch::deploy::InterpreterManager m(exePath, 2);
   m.registerModuleSource("autograd_test", R"PYTHON(
 import torch
 
@@ -457,7 +456,7 @@ result = torch.Tensor([1,2,3])
 // test case.
 #if HAS_NUMPY
 TEST(TorchpyTest, TestNumpy) {
-  torch::deploy::InterpreterManager m(2);
+  torch::deploy::InterpreterManager m(exePath, 2);
   auto noArgs = at::ArrayRef<torch::deploy::Obj>();
   auto I = m.acquireOne();
   auto mat35 = I.global("numpy", "random").attr("rand")({3, 5});
@@ -473,7 +472,7 @@ TEST(TorchpyTest, TestNumpy) {
 TEST(TorchpyTest, TestPyYAML) {
   const std::string kDocument = "a: 1\n";
 
-  torch::deploy::InterpreterManager m(2);
+  torch::deploy::InterpreterManager m(exePath, 2);
   auto I = m.acquireOne();
 
   auto load = I.global("yaml", "load")({kDocument});
@@ -483,3 +482,12 @@ TEST(TorchpyTest, TestPyYAML) {
   EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
 }
 #endif
+} // namespace deploy
+} // namespace torch
+
+int main(int argc, char* argv[]) {
+  torch::deploy::exePath = argv[0];
+  ::testing::InitGoogleTest(&argc, argv);
+  int rc = RUN_ALL_TESTS();
+  return rc;
+}

@@ -1,14 +1,15 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/deploy/deploy.h>
+#include <torch/csrc/deploy/elf_file.h>
 #include <torch/cuda.h>
+#include <cstdio>
 
 #include <dlfcn.h>
 #include <libgen.h>
 #include <unistd.h>
 
-struct InterpreterSymbol {
-  const char* startSym;
-  const char* endSym;
+struct ExeSection {
+  const char* sectionName;
   bool customLoader;
 };
 
@@ -21,49 +22,45 @@ struct InterpreterSymbol {
 namespace torch {
 namespace deploy {
 
-const std::initializer_list<InterpreterSymbol> kInterpreterSearchPath = {
-    {"_binary_libtorch_deployinterpreter_all_so_start",
-     "_binary_libtorch_deployinterpreter_all_so_end",
-     true},
-    {"_binary_libtorch_deployinterpreter_cuda_so_start",
-     "_binary_libtorch_deployinterpreter_cuda_so_end",
-     false},
-    {"_binary_libtorch_deployinterpreter_cpu_so_start",
-     "_binary_libtorch_deployinterpreter_cpu_so_end",
-     false},
+const std::initializer_list<ExeSection> kInterpreterSearchPath = {
+    {".torch_deploy_payload.interpreter_all", true},
+    {".torch_deploy_payload.interpreter_cuda", false},
+    {".torch_deploy_payload.interpreter_cpu", false},
 };
 
-static bool writeDeployInterpreter(FILE* dst) {
+static bool writeDeployInterpreter(FILE* dst, std::string exePath) {
   TORCH_INTERNAL_ASSERT(dst);
-  const char* libStart = nullptr;
-  const char* libEnd = nullptr;
+  const char* payloadStart = nullptr;
+  size_t size = 0;
   bool customLoader = false;
+  ElfFile elfFile(exePath.c_str());
   for (const auto& s : kInterpreterSearchPath) {
-    libStart = (const char*)dlsym(nullptr, s.startSym);
-    if (libStart) {
-      libEnd = (const char*)dlsym(nullptr, s.endSym);
+    at::optional<Section> payloadSection = elfFile.findSection(s.sectionName);
+    if (payloadSection != at::nullopt) {
+      payloadStart = payloadSection->start;
       customLoader = s.customLoader;
+      size = payloadSection->len;
+      TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
       break;
     }
   }
   TORCH_CHECK(
-      libStart != nullptr && libEnd != nullptr,
+      payloadStart != nullptr,
       "torch::deploy requires a build-time dependency on embedded_interpreter or embedded_interpreter_cuda, neither of which were found.  torch::cuda::is_available()=",
       torch::cuda::is_available());
-
-  size_t size = libEnd - libStart;
-  size_t written = fwrite(libStart, 1, size, dst);
+  size_t written = fwrite(payloadStart, 1, size, dst);
   TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
   return customLoader;
 }
 
 InterpreterManager::InterpreterManager(
+    std::string exePath,
     size_t nInterp,
     std::shared_ptr<Environment> env)
-    : resources_(nInterp) {
+    : resources_(nInterp), _exePath(std::move(exePath)) {
   TORCH_DEPLOY_TRY
   for (const auto i : c10::irange(nInterp)) {
-    instances_.emplace_back(this, env);
+    instances_.emplace_back(this, env, _exePath);
     auto I = instances_.back().acquireSession();
     // make torch.version.interp be the interpreter id
     // can be used for balancing work across GPUs
@@ -193,8 +190,12 @@ static dlopen_t find_real_dlopen() {
 
 Interpreter::Interpreter(
     InterpreterManager* manager,
-    std::shared_ptr<Environment> env)
-    : handle_(nullptr), manager_(manager), env_(env) {
+    std::shared_ptr<Environment> env,
+    std::string exePath)
+    : handle_(nullptr),
+      manager_(manager),
+      env_(env),
+      exePath_(std::move(exePath)) {
   // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
   char libraryName[] = "/tmp/torch_deployXXXXXX";
   int fd = mkstemp(libraryName);
@@ -202,7 +203,34 @@ Interpreter::Interpreter(
   libraryName_ = libraryName;
   FILE* dst = fdopen(fd, "wb");
 
-  customLoader_ = writeDeployInterpreter(dst);
+  // Inline Start
+  customLoader_ = writeDeployInterpreter(dst, std::move(exePath_));
+  // TORCH_INTERNAL_ASSERT(dst);
+  // const char* payloadStart = nullptr;
+  // size_t size = 0;
+  // bool customLoader_ = false;
+  // ElfFile elfFile(exePath_.c_str());
+  // for (const auto& s : kInterpreterSearchPath) {
+  //   auto payloadSection = elfFile.findSection(s.sectionName);
+  //   if (payloadSection.has_value()) {
+  //     payloadStart = payloadSection->start;
+  //     customLoader_ = s.customLoader;
+  //     size = payloadSection->len;
+  //     TORCH_CHECK(payloadSection.has_value(), "Missing the payload section");
+  //     break;
+  //   }
+  // }
+  // TORCH_CHECK(
+  //     payloadStart != nullptr,
+  //     "torch::deploy requires a build-time dependency on embedded_interpreter
+  //     \
+  //     or embedded_interpreter_cuda, neither of which were found. \
+  //     torch::cuda::is_available()=",
+  //     torch::cuda::is_available());
+  // size_t written = fwrite(payloadStart, 1, size, dst);
+  // TORCH_INTERNAL_ASSERT(size == written, "expected written == size");
+  // Inline End
+
   fclose(dst);
   int flags = RTLD_LOCAL | RTLD_LAZY;
   if (customLoader_) {
@@ -223,7 +251,7 @@ Interpreter::Interpreter(
   // note: if you want better debugging symbols for things inside
   // new_intepreter_impl, comment out this line so that the so lasts long enough
   // for the debugger to see it.
-  unlink(libraryName_.c_str());
+  // unlink(libraryName_.c_str());
 
   if (customLoader_) {
     // when using the custom loader we need to link python symbols against

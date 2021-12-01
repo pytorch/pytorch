@@ -60,9 +60,13 @@ class TORCH_API Interpreter {
   bool customLoader_ = false;
   InterpreterManager* manager_; // optional if managed by one
   std::shared_ptr<Environment> env_;
+  std::string exePath_;
 
  public:
-  Interpreter(InterpreterManager* manager, std::shared_ptr<Environment> env);
+  Interpreter(
+      InterpreterManager* manager,
+      std::shared_ptr<Environment> env,
+      std::string exePath);
   InterpreterSession acquireSession() const {
     TORCH_DEPLOY_TRY
     return InterpreterSession(pImpl_->acquireSession(), manager_);
@@ -112,6 +116,7 @@ struct TORCH_API LoadBalancer {
 
 struct TORCH_API InterpreterManager {
   explicit InterpreterManager(
+      std::string exePath,
       size_t nInterp = 2,
       std::shared_ptr<Environment> env = std::make_shared<NoopEnvironment>());
 
@@ -163,6 +168,7 @@ struct TORCH_API InterpreterManager {
   std::vector<Interpreter> instances_;
   LoadBalancer resources_;
   std::unordered_map<std::string, std::string> registeredModuleSource_;
+  std::string _exePath;
 };
 
 struct TORCH_API ReplicatedObjImpl {
