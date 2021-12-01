@@ -107,7 +107,6 @@ def sharded_linear(types, args, kwargs, pg):
 
     local_shard = weight.local_shards()[0].tensor
     local_shard_t = local_shard.t().contiguous()
-    local_shard.retain_grad()
     sharding_dim = weight._sharding_spec.dim
     world_size = dist.get_world_size(pg)
     rank = dist.get_rank(pg)
