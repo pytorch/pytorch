@@ -12,16 +12,18 @@ from torch.testing._internal.common_dtype import floating_and_complex_types_and,
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
-     TEST_WITH_ASAN, IS_WINDOWS)
+     TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCPU,
+     onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal.composite_compliance import _check_composite_compliance
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -198,9 +200,12 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
+    # This test runs in double and complex double precision because
+    # NumPy does computation internally using double precision for many functions
+    # resulting in possible equality check failures.
     @onlyNativeDeviceTypes
     @suppress_warnings
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_reference_testing(self, device, dtype, op):
         sample_inputs = op.sample_inputs(device, dtype)
         for sample_input in sample_inputs:
@@ -566,6 +571,24 @@ class TestCommon(TestCase):
         if len(inplace_ops) > 0:
             inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
+
+    # Checks if the operator (if it is composite) is written to support most
+    # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
+    # in aten/src/ATen/native/README.md for more details
+    #
+    # NB: onlyCPU because CompositeImplicitAutograd ops go through the same
+    # codepath on all devices. Ideally we'd use a meta device here but coverage
+    # for that is not good yet.
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_composite_compliance(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            _check_composite_compliance(op, args, kwargs)
 
 
 # gradcheck requires double precision
