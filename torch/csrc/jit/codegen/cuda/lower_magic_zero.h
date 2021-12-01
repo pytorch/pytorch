@@ -10,11 +10,19 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-//! Insert magic zero definition at the beginning of the kernel. Insert magic
+//! Insert magic zero definition at the begining of the kernel. Insert magic
 //! zero update after every (outer most) loop nest with a compile time extent.
 //!
 //! This will make sure nvrtc does not aggressively save predicate and indices.
 std::vector<kir::Expr*> insertMagicZero(const std::vector<kir::Expr*>& exprs);
+
+//! Check if val is a reference to the magic zero variable
+bool isMagicZero(kir::Val* val);
+
+//! Check if val is protected with magic zero.
+//!
+//! Specifically, this returns true if val is defined as "x + magic_zero".
+bool isProtectedWithMagicZero(kir::Val* val);
 
 } // namespace cuda
 } // namespace fuser

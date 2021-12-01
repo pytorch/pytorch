@@ -314,6 +314,7 @@ def broadcast(
 
     return a, b
 
+
 def add_binary_elementwise_layer(
     network: trt.INetworkDefinition,
     lhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
@@ -413,6 +414,8 @@ def add_activation_layer(
     operation_type: trt.ActivationType,
     target: Target,
     name: str,
+    alpha: Optional[Any] = None,
+    beta: Optional[Any] = None,
 ) -> trt.tensorrt.ITensor:
     """
     Add a TensorRT Activation layer to `network`.
@@ -425,6 +428,10 @@ def add_activation_layer(
             operation.
         target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
+        alpha (Optional[Any]): If not None, we will use it to set the alpha
+            attribute of the created TensorRT activation layer.
+        beta (Optional[Any]): If not None, we will use it to set the beta
+            attribute of the created TensorRT activation layer.
 
     Returns:
         The output of TensorRT Activation layer.
@@ -435,6 +442,10 @@ def add_activation_layer(
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
+    if alpha:
+        layer.alpha = alpha
+    if beta:
+        layer.beta = beta
     set_layer_name(layer, target, name)
     return layer.get_output(0)
 
