@@ -3,6 +3,7 @@ import sys
 log_file_path = sys.argv[1]
 
 with open(log_file_path) as f:
+    logging.info("Data Load Logging")
     lines = f.readlines()
 
 for line in lines:
@@ -15,3 +16,4 @@ for line in lines:
     ]
     if all([keyword not in line for keyword in ignored_keywords]):
         print(line)
+
