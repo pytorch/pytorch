@@ -42,7 +42,7 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         self.weight_qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
         assert self.weight_qscheme in [None, torch.per_tensor_affine, torch.per_channel_affine], \
-            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized linear module")
+            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized conv module")
         if self.weight_qscheme is not None:
             self.register_buffer(
                 "weight_scale",
@@ -74,6 +74,15 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
             self.weight, self.weight_qscheme,
             self.weight_dtype, self.weight_scale, self.weight_zero_point, self.weight_axis)
 
+    def get_quantized_weight(self):
+        # suppress mypy warning
+        assert isinstance(self.weight_scale, torch.Tensor)
+        assert isinstance(self.weight_zero_point, torch.Tensor)
+        assert isinstance(self.weight_axis, torch.Tensor)
+        return _quantize_weight(
+            self.weight, self.weight_qscheme, self.weight_dtype, self.weight_scale,
+            self.weight_zero_point, self.weight_axis)
+
     @staticmethod
     def from_float(cls, float_conv, weight_qparams):
         qref_conv = cls(
@@ -93,6 +102,25 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         if float_conv.bias is not None:
             qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
         return qref_conv
+
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconv.in_features,
+            ref_qconv.out_features)
+        qweight = ref_qconv.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconv.bias)
+
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
+        return qconv
 
 class Conv1d(_ConvNd, nn.Conv1d):
     def __init__(self,
