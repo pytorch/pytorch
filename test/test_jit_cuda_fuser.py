@@ -2062,49 +2062,6 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
-    def test_add_backward_with_alpha(self):
-        x = torch.randn(4, 2, dtype=torch.float32, device='cuda', requires_grad=True)
-        y = torch.randn(4, 2, dtype=torch.float32, device='cuda', requires_grad=True)
-        grad = torch.randn(4, 2, dtype=torch.float32, device='cuda')
-
-        # Test that a mul is not generated when not needed
-        # Alpha=1.0 or is not used
-        def test1(x: torch.Tensor, y: torch.Tensor):
-            o = torch.add(x, y, alpha=1.0)
-            o = o + 1.0
-            return o
-
-        test1_jit = torch.jit.script(test1)
-        for i in range(3):
-            jit_o = test1_jit(x, y)
-            jit_o.backward(grad)
-
-        bwd1_graph = list(
-            list(test1_jit.get_debug_state().execution_plans.values())[
-                0].code.grad_executor_states()[0].execution_plans.values()
-        )[0].graph
-        FileCheck().check_not("aten::mul_").run(bwd1_graph)
-
-        # Alpha is set to something other than 1.0
-        def test2(x: torch.Tensor, y: torch.Tensor):
-            o = torch.add(x, y, alpha=2.0)
-            o = o + 1.0
-            return o
-
-        test2_jit = torch.jit.script(test2)
-        for i in range(3):
-            jit_o = test2_jit(x, y)
-            jit_o.backward(grad)
-
-        bwd2_graph = list(
-            list(test2_jit.get_debug_state().execution_plans.values())[
-                0].code.grad_executor_states()[0].execution_plans.values()
-        )[0].graph
-        FileCheck().check("aten::mul_").run(bwd2_graph)
-
-    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
-                     "Requires fusion optimization pass to be effective")
     def test_dropout_inference_fusion(self):
         dtype = torch.float
         device = "cuda"
