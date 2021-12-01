@@ -142,12 +142,12 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
-# Default map for swapping float module to static quantized ones
+# Default map for swapping float module to static sparse quantized ones
 DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Linear: ao_nn.sparse.quantized.Linear
 }
 
-# Default map for swapping float module to dynamic quantized ones
+# Default map for swapping float module to dynamic sparse quantized ones
 DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Linear: ao_nn.sparse.quantized.dynamic.Linear
 }
