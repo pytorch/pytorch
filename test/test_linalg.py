@@ -8029,7 +8029,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0, 0), torch.randn(0, 0)))
         self.assertRaises(RuntimeError, lambda: torch.lstsq(torch.randn(0,), torch.randn(0, 0)))
 
-    @dtypes(*floating_types())
+    @dtypes(torch.float32)
     @tf32_on_and_off(0.005)
     def test_tensordot(self, device, dtype):
         # case 1: dims is a Tuple[List[int], List[int]]
