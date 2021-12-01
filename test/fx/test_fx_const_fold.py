@@ -601,7 +601,9 @@ class TestConstFold(TestCase):
                 self.relu = torch.nn.ReLU()
 
             def forward(self, x):
-                quant_weight = torch.quantize_per_tensor(self.weight, 0.5, 3, torch.quint8)
+                quant_weight = torch.quantize_per_tensor(
+                    self.weight, 0.5, 3, torch.quint8
+                )
                 dequant_weight = torch.dequantize(quant_weight)
                 output = torch.nn.functional.linear(x, dequant_weight, self.bias)
                 return self.relu(output)
@@ -630,3 +632,25 @@ class TestConstFold(TestCase):
         fold_result = gm_folded(in_x)
         base_result = mod(in_x)
         self.assertTrue(torch.equal(fold_result, base_result))
+
+    def test_fold_module(self):
+        r"""
+        Perform constant folding with a call_module node.
+        """
+
+        class ConstFoldTestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin_input = torch.nn.Parameter(torch.randn(4, 4))
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(self.lin_input) + x
+
+        mod = ConstFoldTestModule()
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(mod)
+        self._verify_const_fold_mod(mod_folded)
+
+        # Now run both folded and non-folded to check results equal.
+        inp = torch.randn(4, 4)
+        self.assertTrue(torch.equal(mod_folded(inp), mod(inp)))
