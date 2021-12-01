@@ -24,20 +24,19 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
-  void run(Stack&& stack) override;
+  std::function<void(GraphFunction&)> function_creator() const {
+    return function_creator_;
+  }
 
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
 
-  IValue operator()(std::vector<IValue> stack, const Kwargs& kwargs = Kwargs())
-      override;
-
   std::shared_ptr<Graph> graph() const {
     return graph_;
   }
 
-  std::shared_ptr<Graph> optimized_graph() const override {
+  std::shared_ptr<Graph> optimized_graph() const {
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     auto& optimized_graph = optimized_graphs_[currentSpecialization()];
     if (optimized_graph) {
@@ -50,22 +49,8 @@ struct TORCH_API GraphFunction : public Function {
     return *optimized_graph;
   }
 
-  void clear_execution_info() override {
-    std::lock_guard<std::recursive_mutex> lock(compile_mutex);
-    for (auto& graph : optimized_graphs_) {
-      graph.reset();
-    }
-    for (auto& executor : executors_) {
-      executor.reset();
-    }
-  }
-
   const c10::QualifiedName& qualname() const override {
     return name_;
-  }
-
-  const std::string& name() const override {
-    return name_.name();
   }
 
   // if this isn't yet defined, run its method_creator function
@@ -82,13 +67,6 @@ struct TORCH_API GraphFunction : public Function {
 
   const FunctionSchema& getSchema() const override;
 
-  std::string pretty_print_schema() const override {
-    AT_ASSERT(schema_);
-    std::stringstream ss;
-    ss << *schema_;
-    return ss.str();
-  }
-
   GraphExecutorState getDebugState() {
     return get_executor().getDebugState();
   }
@@ -100,22 +78,34 @@ struct TORCH_API GraphFunction : public Function {
     return true;
   }
 
-  void check_single_output() override {
+  void check_single_output() {
     TORCH_CHECK(
         graph()->outputs().size() == 1,
         "Method (but not graphs in general) require a single output. Use None/Tuple for 0 or 2+ outputs");
   }
 
-  GraphExecutor& get_executor() override {
+  GraphExecutor& get_executor() {
     ensure_defined();
     std::lock_guard<std::recursive_mutex> lock(compile_mutex);
     auto& executor = executors_[currentSpecialization()];
     if (executor) {
-      return executor;
+      return *executor;
     }
     check_single_output();
     executor = GraphExecutor(optimized_graph(), name_.name());
-    return executor;
+    return *executor;
+  }
+
+  bool call(
+      Stack& stack,
+      size_t bailOut,
+      c10::function_ref<void(const Code&)> f) override {
+    f(get_executor().getPlanFor(stack, bailOut).code);
+    return true;
+  }
+
+  void clear_optimized_graphs() {
+    optimized_graphs_.fill(c10::nullopt);
   }
 
  private:
@@ -151,8 +141,11 @@ struct TORCH_API GraphFunction : public Function {
   mutable std::recursive_mutex compile_mutex;
 
   // executor_[0] - autocast off
-  // executor_[1] - autocast on
-  std::array<GraphExecutor, SpecializationKey::TotalCount> executors_;
+  // executor_[1] - autocast cpu on
+  // executor_[2] - autocast gpu on
+  // executor_[3] - autocast cpu & gpu on
+  std::array<c10::optional<GraphExecutor>, SpecializationKey::TotalCount>
+      executors_;
 
   // an optional function that actually creates the method when
   // ensure_defined() is called. This is used by the compiler so

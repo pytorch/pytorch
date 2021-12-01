@@ -35,6 +35,17 @@ def load_with_process_group(process_group):
     finally:
         _CURRENT_PROCESS_GROUP = None
 
+def get_current_process_group():
+    """
+    Retrieves the current process group set by ``load_with_process_group``.
+    If not set, it just returns the default group.
+    """
+    global _CURRENT_PROCESS_GROUP
+    if _CURRENT_PROCESS_GROUP is None:
+        return distributed_c10d._get_default_group()
+    else:
+        return _CURRENT_PROCESS_GROUP
+
 def _parse_and_validate_remote_device(pg, remote_device):
 
     worker_name = remote_device.worker_name()
@@ -151,8 +162,14 @@ def build_metadata_from_local_shards(
                 f'Found current rank in the process group: {current_rank}, '
                 f"local ShardMetadata placement's rank: {rank}"
             )
+        if local_shard_tensor.device != local_device:
+            raise ValueError(
+                f"Local shard tensor device does not match with local Shard's placement! "
+                f"Found local shard tensor device: {local_shard_tensor.device}, "
+                f"local shard metadata placement device: {local_device}"
+            )
 
-        _raise_if_mismatch(local_shard_meta.shard_lengths, list(local_shard_tensor.size()), "size", current_rank)
+        _raise_if_mismatch(local_shard_meta.shard_sizes, list(local_shard_tensor.size()), "size", current_rank)
         _raise_if_mismatch(local_shard_tensor.is_pinned(), first_shard_is_pinned, "pin_memory", current_rank)
         _raise_if_mismatch(local_shard_tensor.dtype, first_shard_dtype, "dtype", current_rank)
         _raise_if_mismatch(local_shard_tensor.requires_grad, first_shard_requires_grad, "requires_grad", current_rank)

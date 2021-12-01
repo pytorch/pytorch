@@ -1,7 +1,6 @@
 from tools.codegen.model import (Argument, BaseTy, BaseType, ListType,
                                  NativeFunctionsGroup, OptionalType,
-                                 SelfArgument, TensorOptionsArguments, Type,
-                                 assert_never)
+                                 SelfArgument, TensorOptionsArguments, Type)
 
 from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      ConstRefCType, OptionalCType, NamedCType,
@@ -9,6 +8,7 @@ from tools.codegen.api.types import (ArgName, BaseCType, Binding, ArrayRefCType,
                                      optionalTensorRefT, optionalScalarRefT)
 
 from tools.codegen.api import cpp
+from tools.codegen.utils import assert_never
 
 from typing import Union, List
 

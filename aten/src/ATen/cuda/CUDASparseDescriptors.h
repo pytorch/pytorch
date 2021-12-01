@@ -6,13 +6,13 @@
 
 #include <c10/core/ScalarType.h>
 
-#if AT_USE_CUSPARSE_GENERIC_API()
+#if defined(USE_ROCM)
+#include <type_traits>
+#endif
 
 namespace at {
 namespace cuda {
 namespace sparse {
-
-cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
 template <typename T, cusparseStatus_t (*destructor)(T*)>
 struct CuSparseDescriptorDeleter {
@@ -36,6 +36,25 @@ class CuSparseDescriptor {
  protected:
   std::unique_ptr<T, CuSparseDescriptorDeleter<T, destructor>> descriptor_;
 };
+
+#if defined(USE_ROCM)
+// hipSPARSE doesn't define this
+using cusparseMatDescr = std::remove_pointer<cusparseMatDescr_t>::type;
+#endif
+
+class TORCH_CUDA_CPP_API CuSparseMatDescriptor
+    : public CuSparseDescriptor<cusparseMatDescr, &cusparseDestroyMatDescr> {
+ public:
+  CuSparseMatDescriptor() {
+    cusparseMatDescr_t raw_descriptor;
+    TORCH_CUDASPARSE_CHECK(cusparseCreateMatDescr(&raw_descriptor));
+    descriptor_.reset(raw_descriptor);
+  }
+};
+
+#if AT_USE_CUSPARSE_GENERIC_API()
+
+cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
@@ -143,8 +162,8 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
 };
 #endif
 
+#endif // AT_USE_CUSPARSE_GENERIC_API()
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
-
-#endif // AT_USE_CUSPARSE_GENERIC_API()

@@ -181,7 +181,7 @@ TEST(LiteInterpreterTest, Tuple) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
+  AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -466,6 +466,15 @@ TEST(LiteInterpreterTest, GetRuntimeByteCodeVersion) {
       caffe2::serialize::kMaxSupportedBytecodeVersion);
 }
 
+TEST(LiteInterpreterTest, GetRuntimeOperatorsVersion) {
+  auto runtime_operators_version = _get_runtime_operators_min_max_versions();
+  AT_ASSERT(
+      runtime_operators_version.first ==
+          caffe2::serialize::kMinSupportedFileFormatVersion &&
+      runtime_operators_version.second ==
+          caffe2::serialize::kMaxSupportedFileFormatVersion);
+}
+
 /**
  * The test below is disarmed for FB internal xplat builds since
  * BUCK requires us to pass in the script_module_v4.ptl file in
@@ -526,7 +535,7 @@ void runAndCheckTorchScriptModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
   compareModelOutput(actual_result_list, expect_result_list);
 }
 
@@ -543,7 +552,7 @@ void runAndCheckBytecodeModel(
   Module m_mobile = load(input_model_stream);
 
   auto actual_result = m_mobile.forward(input_data);
-  const auto& actual_result_list = actual_result.toTuple()->elements();
+  const auto& actual_result_list = actual_result.toTupleRef().elements();
 
   compareModelOutput(actual_result_list, expect_result_list);
 }
@@ -665,7 +674,9 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_map<std::string, OperatorInfo> runtime_ops;
   runtime_ops["aten::add.Int"] = OperatorInfo{2};
   auto runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
 
@@ -675,14 +686,32 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
       result.errors[0] ==
       "Operator 'aten::add.Scalar' missing from runtime (not found)");
 
-  // test trivial failure due to bytecode
+  // test trivial failure due to bytecode greater than max supported bytecode
+  // version
   runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
   runtime_info = RuntimeCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
       runtime_ops,
       _get_mobile_supported_types()};
   model_info.bytecode_version =
       caffe2::serialize::kMaxSupportedBytecodeVersion + 1;
+
+  result = is_compatible(runtime_info, model_info);
+  AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to bytecode less than min supported bytecode
+  // version
+  runtime_ops["aten::add.Scalar"] = OperatorInfo{2};
+  runtime_info = RuntimeCompatibilityInfo{
+      std::pair<uint64_t, uint64_t>(
+          caffe2::serialize::kMinSupportedBytecodeVersion,
+          caffe2::serialize::kMaxSupportedBytecodeVersion),
+      runtime_ops,
+      _get_mobile_supported_types()};
+  model_info.bytecode_version =
+      caffe2::serialize::kMinSupportedBytecodeVersion - 1;
 
   result = is_compatible(runtime_info, model_info);
   AT_ASSERT(result.status = ModelCompatibilityStatus::ERROR);
@@ -1456,6 +1485,58 @@ TEST(RunTimeTest, RuntimeCall) {
   foo->run(inputs);
   auto output = inputs[0];
   ASSERT_EQ(output, at::tensor(7));
+}
+
+TEST(LiteInterpreterTest, OperatorSize1) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  const auto& func = bc.get_method("forward").function();
+  ASSERT_EQ(
+      func.get_code()->operator_input_sizes_.size(),
+      func.get_code()->operators_.size());
+}
+
+TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    std::stringstream ss;
+    m._save_for_mobile(ss);
+    mobile::Module bc = _load_for_mobile(ss);
+    const auto& func = bc.get_method("test_func").function();
+    ASSERT_EQ(
+        func.get_code()->operator_input_sizes_.size(),
+        func.get_code()->operators_.size());
+  }
 }
 
 } // namespace jit

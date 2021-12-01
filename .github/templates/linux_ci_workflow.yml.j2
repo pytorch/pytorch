@@ -37,8 +37,12 @@ env:
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PYTORCH_RETRY_TEST_CASES: 1
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 !{{ common.concurrency(build_environment) }}
 
 jobs:
@@ -47,6 +51,7 @@ jobs:
   build:
     runs-on: linux.2xlarge
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       JOB_BASE_NAME: !{{ build_environment }}-build
     outputs:
@@ -61,7 +66,7 @@ jobs:
       !{{ common.parse_ref() }}
       - name: Build
         env:
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -70,9 +75,9 @@ jobs:
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e IS_GHA \
-            -e CIRCLE_PR_NUMBER \
-            -e CIRCLE_SHA1 \
-            -e CIRCLE_BRANCH \
+            -e PR_NUMBER \
+            -e SHA1 \
+            -e BRANCH \
             -e GITHUB_RUN_ID \
             -e SCCACHE_BUCKET \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
@@ -97,9 +102,9 @@ jobs:
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
@@ -138,6 +143,7 @@ jobs:
   generate-test-matrix:
     runs-on: ubuntu-18.04
     needs: [!{{ ciflow_config.root_job_name }}]
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       TEST_RUNNER_TYPE: !{{ test_runner_type }}
       ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
@@ -176,6 +182,7 @@ jobs:
       matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       JOB_BASE_NAME: !{{ build_environment }}-test
@@ -220,7 +227,7 @@ jobs:
       - name: Test
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         # Time out the test phase after !{{ timeout_after }} minutes
         timeout-minutes: !{{ timeout_after }}
         run: |
@@ -233,10 +240,18 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+          PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
+          if [[ $TEST_CONFIG != 'xla' ]]; then
+            # shellcheck disable=SC2089
+            PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -245,9 +260,8 @@ jobs:
             -e GITHUB_ACTIONS \
             -e IN_CI \
             -e IS_GHA \
-            -e CIRCLE_BRANCH \
-            -e CIRCLE_SHA1 \
-            -e CIRCLE_PR_NUMBER \
+            -e BRANCH \
+            -e SHA1 \
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
@@ -255,15 +269,17 @@ jobs:
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PYTORCH_IGNORE_DISABLED_ISSUES \
+            -e PYTORCH_RETRY_TEST_CASES \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            ${PROXY_ENV} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -288,6 +304,7 @@ jobs:
 {%- if enable_doc_jobs %}
   build-docs:
     runs-on: linux.2xlarge
+    timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
@@ -321,7 +338,7 @@ jobs:
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e IN_CI \
             -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e CIRCLE_SHA1="$GITHUB_SHA" \
+            -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
             -e PR_LABELS \

@@ -55,7 +55,7 @@ struct TORCH_API Method : public torch::IMethod {
   }
 
   GraphExecutor& get_executor() {
-    return function_->get_executor();
+    return toGraphFunction(*function_).get_executor();
   }
 
   Function& function() const {

@@ -462,7 +462,7 @@ def shard_parameter(
 
         shard_metadata = ShardMetadata(
             shard_offsets=copy.deepcopy(current_offsets),
-            shard_lengths=shard_size,
+            shard_sizes=shard_size,
             placement=placement,
         )
         shards_metadata.append(shard_metadata)
@@ -479,7 +479,7 @@ def shard_parameter(
     local_shard = tensor.narrow(
         sharding_spec.dim,  # type: ignore[arg-type]
         local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_lengths[sharding_spec.dim],  # type: ignore[union-attr, index]
+        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
     ).contiguous()
 
     # Create ShardedTensor based on local shards.
@@ -489,19 +489,8 @@ def shard_parameter(
             metadata=local_metadata,  # type: ignore[arg-type]
         )
     ]
-    sharded_tensor_metadata = ShardedTensorMetadata(
-        shards_metadata=shards_metadata,
-        size=tensor.size(),
-        tensor_properties=TensorProperties(
-            dtype=local_shard.dtype,
-            layout=local_shard.layout,
-            requires_grad=local_shard.requires_grad,
-            memory_format=torch.contiguous_format,
-            pin_memory=local_shard.is_pinned(),
-        )
-    )
 
-    st = ShardedTensor._init_from_local_shards(local_shards, sharded_tensor_metadata, process_group=pg)
+    st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
 
     # Manually set sharding_spec
     st._sharding_spec = sharding_spec

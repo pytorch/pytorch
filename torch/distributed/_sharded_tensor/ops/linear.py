@@ -3,7 +3,7 @@ from typing import List, cast
 import torch
 import torch.distributed as dist
 from torch.distributed._sharded_tensor.ops._common import (
-    _handle_col_wise_sharding_common,
+    _handle_col_wise_sharding_base,
 )
 from torch.distributed._sharding_spec import ChunkShardingSpec
 from torch.distributed._sharding_spec._internals import (
@@ -115,7 +115,22 @@ def sharded_linear(types, args, kwargs, pg):
         raise RuntimeError(f'nn.Linear weight sharded on dim {sharding_dim} not supported!')
 
 def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg):
-    return _handle_col_wise_sharding_common(
+    """
+    Entry-point function to handle the logic of col-wise sharding of weight
+    for Linear. (Detailed explanations of the logic can be found in the
+    comment for sharded_linear.)
+
+    Args:
+        input: matrix to be multiplied with the sharded weight.
+        world_size: number of ranks.
+        weight: shareded weight tensor.
+        local_shard_t: row-wise shared local weight used for lookup.
+        bias: bias term of linear op.
+        pg: process group.
+
+    Returns: final result of linear operation.
+    """
+    return _handle_col_wise_sharding_base(
         torch.matmul,
         weight.size(0),
         len(input.size()) - 1,
@@ -127,6 +142,22 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
     ) + bias
 
 def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
+    """
+    Entry-point function to handle the logic of row-wise sharding of weight
+    for Linear. (Detailed explanations of the logic can be found in the
+    comment for sharded_linear.)
+
+    Args:
+        input: matrix to be multiplied with the sharded weight.
+        world_size: number of ranks.
+        weight: shareded weight tensor.
+        rank: # of cuda process.
+        local_shard_t: row-wise shared local weight used for lookup.
+        bias: bias term of linear op.
+        pg: process group.
+
+    Returns: final result of linear operation.
+    """
     # alltoall to gather all the appropriate inputs.
     input_t = input.t().contiguous()
     input_t_size = input_t.size()
