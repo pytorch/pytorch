@@ -172,9 +172,9 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
               pno->debugName(),
               ": ",
               existing_tensor_type);
-          auto merged_type =
-              new_tensor_type->merge(std::move(existing_tensor_type));
-          GRAPH_DEBUG("Merged type for %", pno->debugName(), ": ", *merged_type);
+          auto merged_type = new_tensor_type->merge(existing_tensor_type);
+          GRAPH_DEBUG(
+              "Merged type for %", pno->debugName(), ": ", *merged_type);
           pn->ty_(attr::profiled_type, std::move(merged_type));
         } else {
           pn->setHasRun(true);
