@@ -62,6 +62,7 @@ def threshold_backward_decomposition(grad_output: Tensor, self: Tensor, threshol
 def leaky_relu_backward(grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool):
     return aten.where(self > 0, grad_output, grad_output * negative_slope)
 
+
 @register_decomposition(aten.mse_loss_backward)
 def mse_loss_backward_decomposition(grad_output: Tensor, input: Tensor, target: Tensor, reduction: int):
     norm = 2./input.numel() if reduction == Reduction.MEAN.value else 2.
@@ -83,13 +84,28 @@ def select_backward_decomposition(grad_output: Tensor, input_sizes: List[int], d
     grad_input = aten.new_zeros(grad_output, input_sizes)
     return aten.select_scatter(grad_input, grad_output, dim, index)
 
-# Currently not numerically identical for bfloat16
-# @register_decomposition(aten._softmax_backward_data)
-# def _softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
-#     grad_input = output * (grad_output - aten.sum(grad_output * output, dim=dim, keepdim=True))
-#     import pdb; pdb.set_trace()
-#     print(grad_input - aten._softmax_backward_data(grad_output, output.elem, dim, input_dtype))
-#     return grad_input
+# These  2 softmax decompositions are currently not numerically identical to eager for bfloat16
+######## Fails numerically on bfloat16
+@register_decomposition(aten._softmax_backward_data)
+def _softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
+    new_grad = grad_output * output
+    return (new_grad - output * aten.sum(new_grad, dim=dim, keepdim=True))
+
+@register_decomposition(aten._log_softmax_backward_data)
+def _log_softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
+    grad_input = grad_output - aten.exp(output) * aten.sum(grad_output, dim=dim, keepdim=True)
+    return grad_input
+
+@register_decomposition(aten.gelu_backward)
+def gelu_backward(grad: Tensor, self: Tensor):
+    M_SQRT1_2 = 0.70710678118654752440
+    M_2_SQRTPI = 1.12837916709551257390
+    kAlpha = M_SQRT1_2
+    kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5
+    cdf = 0.5 * (1 + aten.erf(self * kAlpha))
+    pdf = kBeta * aten.exp(self * self * -0.5)
+    return grad * (cdf + self * pdf)
+######## 
 
 # @register_decomposition(aten._fused_dropout)
 # def _fused_dropout_decomposition(input, p, generator=None):
