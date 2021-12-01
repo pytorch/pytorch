@@ -233,6 +233,7 @@ std::unique_ptr<mobile::Code> compileGraphToMobileCode(
     mobile_code.instructions_.emplace_back(ins);
     mobile_code.debug_handles_.emplace_back(debug_handle);
   }
+
   // copy constants
   mobile_code.constants_ = code.constant_table();
 
