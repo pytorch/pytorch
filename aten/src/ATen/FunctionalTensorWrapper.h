@@ -125,7 +125,7 @@ TORCH_API inline bool isFunctionalTensor(const at::Tensor& tensor) {
 }
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
-TORCH_API TensorList to_functional_tensor(const c10::List<Tensor>& t_list);
+TORCH_API c10::List<Tensor> to_functional_tensor(const c10::List<Tensor>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(const std::vector<Tensor>& t_list);
 TORCH_API TensorList to_functional_tensor(const TensorList& t_list);
 
