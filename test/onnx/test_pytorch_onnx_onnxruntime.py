@@ -124,7 +124,7 @@ def run_ort(ort_sess, inputs):
     input = unpack_to_numpy(flatten_tuples(inputs))
     ort_inputs = {}
     kw_inputs = {}
-    if isinstance(inputs[-1], dict):
+    if inputs and isinstance(inputs[-1], dict):
         kw_inputs = inputs[-1]
         inputs = inputs[:-1]
     for input_name, input in kw_inputs.items():
@@ -202,7 +202,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         input_copy = copy.deepcopy(input)
         if flatten:
             input_copy, _ = torch.jit._flatten(input_copy)
-        elif input_copy[-1] == {}:
+        elif input_copy and input_copy[-1] == {}:
             # Handle empty kwargs (normally removed by flatten).
             input_copy = input_copy[:-1]
         ort_outs = run_ort(ort_sess, input_copy)

@@ -364,8 +364,8 @@ def _decide_input_format(model, args):
         warnings.warn("No input args, skipping _decide_input_format")
     except Exception as e:
         warnings.warn("Skipping _decide_input_format\n {}".format(e.args[0]))
-    finally:
-        return args
+
+    return args
 
 
 def _trace(func, args, operator_export_type, return_outs=False):
@@ -1248,7 +1248,7 @@ def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
         if key not in valid_names:
             warnings.warn("Provided key {} for dynamic axes is not a valid input/output name".format(key))
         if isinstance(value, list):
-            warnings.warn("No names were found for specified dynamic axes of provided input."
+            warnings.warn("No names were found for specified dynamic axes of provided input. "
                           "Automatically generated names will be applied to each dynamic axes of input {}".format(key))
 
             value_dict = {}

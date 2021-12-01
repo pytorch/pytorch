@@ -3505,8 +3505,7 @@ class Prim:
                 if i == 0 and i < len(inputs):
                     b_in.setType(inputs[i].type())
                 # For optional block inputs, input type could be NoneType, which we don't want to propagate.
-                # TODO: Compare against string "NoneType" for consistency?
-                if i > 0 and (i + 1) < len(inputs) and not inputs[i + 1].type().isSubtypeOf(NoneType.get()):
+                if i > 0 and (i + 1) < len(inputs) and not isinstance(inputs[i + 1].type(), NoneType):
                     b_in.setType(inputs[i + 1].type())
             torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env, False)  # type:ignore[arg-type]
         new_op_outputs = torch._C._jit_pass_fixup_onnx_controlflow_node(new_node, opset_version)

@@ -26,13 +26,14 @@
 
 
 import torch
+from torch._C import NoneType, OptionalType
 from torch.onnx.symbolic_opset9 import eq, wrap_logical_op_with_negation
 from torch.onnx.symbolic_helper import _is_none
 
 
 def __is_(g, self, other):
     if _is_none(other):
-        if self.type().kind() in ("NoneType", "OptionalType"):
+        if isinstance(self.type(), (NoneType, OptionalType)):
             none = g.op("OptionalHasElement", self)
             return g.op("Not", none)
         else:
@@ -53,7 +54,7 @@ class Prim:
         # exists to refine the type of the Value
         # if x is Optional[Tensor], unchecked_cast will cast
         # x to Tensor, so the rest of the graph knows that x is a Tensor.
-        if self.type().kind() in ("NoneType", "OptionalType"):
+        if isinstance(self.type(), (NoneType, OptionalType)):
             return g.op("OptionalGetElement", self)
         else:
             return self
