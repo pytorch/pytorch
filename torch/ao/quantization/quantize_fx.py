@@ -241,6 +241,7 @@ forward graph of the parent module,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
     )
+
     for attr_name in preserved_attributes:
         setattr(prepared, attr_name, getattr(model, attr_name))
     return prepared
