@@ -802,15 +802,15 @@ void checkScopeCallbacks() {
   at::addGlobalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         if (fn.scope() == at::RecordScope::FUNCTION &&
-            std::string(fn.name().str()) == "test_function") {
+            std::string(fn.name()) == "test_function") {
           found_function_scope = true;
         }
         if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
-            std::string(fn.name().str()) == "test_method") {
+            std::string(fn.name()) == "test_method") {
           found_method_scope = true;
         }
         if (fn.scope() == at::RecordScope::USER_SCOPE &&
-            std::string(fn.name().str()) == "test_user_scope") {
+            std::string(fn.name()) == "test_user_scope") {
           found_user_scope = true;
         }
         return nullptr;
@@ -860,9 +860,9 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
         sizes.push_back(std::vector<int64_t>());
       }
     }
-    traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_inputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_input_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name());
   }
   return nullptr;
 }
@@ -878,9 +878,9 @@ void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         sizes.emplace_back();
       }
     }
-    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_outputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_output_names.insert(fn.name().str());
+    ts_output_names.insert(fn.name());
   }
 }
 
@@ -932,7 +932,7 @@ TEST(RecordFunctionTest, TracedTestInputsOutputs) {
 
 static int sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++sampled_cb_ctr;
   }
   return nullptr;
@@ -940,7 +940,7 @@ std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
 
 static int non_sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++non_sampled_cb_ctr;
   }
   return nullptr;
@@ -1007,7 +1007,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
         // NOLINTNEXTLINE(modernize-use-emplace)
-        fn_names.push_back(fn.name().str());
+        fn_names.push_back(fn.name());
         return nullptr;
       }));
   {
@@ -1217,7 +1217,7 @@ TEST(RecordFunctionTest, Basic) {
     RecordFunctionGuard enable_rec_fn;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-          recorded_op = fn.name().str();
+          recorded_op = fn.name();
           return nullptr;
         }));
     ThreadLocalState state;
