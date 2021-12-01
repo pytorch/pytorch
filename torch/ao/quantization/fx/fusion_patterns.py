@@ -132,7 +132,7 @@ class ModuleReLUFusion(FuseHandler):
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
-        assert root_node.op == "call_module", "Expecting root node to be a call_module Node"
+        assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = quantizer.modules[root_node.target]
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."

@@ -46,12 +46,16 @@ class Fuser:
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            root_node, pattern, matched_node_pattern, obj = \
+            maybe_last_node, pattern, matched_node_pattern, obj = \
                 fusion_pairs.get(node.name, (None, None, None, None))
-            if root_node is node:
+            if maybe_last_node is node:
                 assert obj is not None
+                # TODO: currently we hard code the root node, which only works for
+                # a tuple of two nodes, we want to make this more general to
+                # support more complex patterns
+                root_node = matched_node_pattern[-1]
                 env[node.name] = obj.fuse(self, load_arg, root_node, matched_node_pattern, fuse_custom_config_dict)
-            elif root_node is None:
+            elif maybe_last_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
