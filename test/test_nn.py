@@ -1848,6 +1848,14 @@ class TestNN(NNTestCase):
         self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
         check()
 
+        parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertIs({'p19': None, 'p20': None}, parameter_dict)
+        check()
+
+        parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertIs({'p19': temp_param, 'p20': temp_param}, parameter_dict)
+        check()
+
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
         for fn in methods_to_test:
