@@ -79,6 +79,7 @@ class Wishart(Distribution):
             batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
+        self.df = df.expand(batch_shape)
 
         assert self.df.gt(event_shape[-1] - 1).all(), \
             f"Expected parameter 'df' to have value greater than {event_shape[-1] - 1}."
