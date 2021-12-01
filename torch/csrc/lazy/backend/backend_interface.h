@@ -119,9 +119,9 @@ class TORCH_API BackendRegistrar {
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-inline const BackendImplInterface* TORCH_API getBackend() {
+static inline const BackendImplInterface* getBackend() {
   auto p = backend_impl_registry.load();
-  CHECK(p) << "Lazy tensor backend not registered.";
+  TORCH_CHECK(p, "Lazy tensor backend not registered.");
   return p;
 }
 
