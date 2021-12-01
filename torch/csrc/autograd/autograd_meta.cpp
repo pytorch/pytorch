@@ -85,7 +85,7 @@ namespace {
         return false;
       }
     }
-    if (!at::_has_same_storage_numel(base, other)) {
+    if (base._storage_numel() != other._storage_numel()) {
       return false;
     }
     return true;

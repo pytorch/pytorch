@@ -563,13 +563,11 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
-bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
-    "Only the 'batched grad' use case is supported in PyTorch core.");
-  // NB: This check doesn't really make sense because batched tensors
-  //     don't have storage. We should just forbid as_strided in
-  //     batched forward grad computations (TODO).
-  return true;
+int64_t _storage_numel_batching_rule(const Tensor& self) {
+  auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
+  auto num_batch_dims = physical_view.numBatchDims();
+  const auto& physical_tensor = physical_view.tensor();
+  return physical_tensor.strides()[num_batch_dims - 1];
 }
 
 // What are the semantics of as_strided inside of vmap?
@@ -1069,7 +1067,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", _make_dual_batching_rule);
-  m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
+  m.impl("_storage_numel", _storage_numel_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 

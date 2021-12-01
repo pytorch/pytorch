@@ -66,8 +66,8 @@ Tensor _new_zeros_with_same_feature_meta(
   return new_tensor.as_strided(out_sizes, out_strides, other_storage_offset);
 }
 
-bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
-  return base.storage().nbytes() / base.itemsize() == other.storage().nbytes() / other.itemsize();
+int64_t _storage_numel(const at::Tensor& self) {
+  return self.storage().nbytes() / self.itemsize();
 }
 
 } // namespace native
