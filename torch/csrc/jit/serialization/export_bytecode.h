@@ -38,7 +38,7 @@ TORCH_API std::unique_ptr<mobile::Function> convertJitFunctionToMobileFunction(
     const CompilationOptions& options);
 
 TORCH_API IValue convertMobileFunctionToCodeTable(
-    const mobile::Function* func,
+    const mobile::Function& func,
     const CompilationOptions& compilation_options);
 
 } // namespace jit
