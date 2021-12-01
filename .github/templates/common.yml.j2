@@ -118,6 +118,43 @@ concurrency:
           submodules: !{{ submodules }}
 {%- endmacro -%}
 
+{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True) -%}
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+{%- if name == 'linux' or name == 'windows' or name == 'macos' %}
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+{%- else %}
+          FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
+{%- endif %}
+{%- if name == 'windows' %}
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
+{%- else %}
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+{%- endif %}
+{%- if use_s3 %}
+      - uses: !{{ upload_artifact_s3_action }}
+        name: Store Test Downloaded JSONs on S3
+{%- else %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Downloaded JSONs on Github
+{%- endif %}
+        if: always()
+        with:
+{%- if artifact_name != "" %}
+          name: !{{ artifact_name }}
+{%- endif %}
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
+{%- endmacro -%}
 
 {%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
