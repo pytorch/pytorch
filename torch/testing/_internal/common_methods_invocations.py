@@ -7842,6 +7842,7 @@ op_db: List[OpInfo] = [
                    ),
                    supports_inplace_autograd=False,
                    assert_autodiffed=True,
+                   supports_sparse_csr=True,
                    supports_forward_ad=True),
     # NOTE: CPU complex acos produces incorrect outputs (https://github.com/pytorch/pytorch/issues/42952)
     UnaryUfuncInfo('acos',
