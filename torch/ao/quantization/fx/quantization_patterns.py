@@ -4,9 +4,9 @@ from torch.fx.graph import (
     Node,
     Graph,
 )
-from ..fake_quantize import (
-    default_affine_fixed_qparams_fake_quant,
-    default_symmetric_fixed_qparams_fake_quant,
+from ..observer import (
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
 )
 
 from ..quantization_mappings import (
@@ -146,6 +146,7 @@ class QuantizeHandler(ABC):
         self,
         qconfig: Any,
         pattern: Pattern,
+        is_training: bool,
     ) -> Optional[Callable]:
         """
         Returns the constructor for the activation observer which should be
@@ -1414,18 +1415,18 @@ class DefaultNodeQuantizeHandler(QuantizeHandler):
                     op_out, activation_post_process,
                     node, modules, quantized_graph, node_name_to_scope, is_input=False)
 
-@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern('tanh', default_symmetric_fixed_qparams_fake_quant)
-@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_fake_quant)
+@register_quant_pattern(torch.nn.Hardsigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.functional.hardsigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern('hardsigmoid', default_affine_fixed_qparams_observer)
+@register_quant_pattern('hardsigmoid_', default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.Sigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.sigmoid, default_affine_fixed_qparams_observer)
+@register_quant_pattern('sigmoid', default_affine_fixed_qparams_observer)
+@register_quant_pattern('sigmoid_', default_affine_fixed_qparams_observer)
+@register_quant_pattern(torch.nn.Tanh, default_symmetric_fixed_qparams_observer)
+@register_quant_pattern(torch.tanh, default_symmetric_fixed_qparams_observer)
+@register_quant_pattern('tanh', default_symmetric_fixed_qparams_observer)
+@register_quant_pattern('tanh_', default_symmetric_fixed_qparams_observer)
 class FixedQParamsOpQuantizeHandler(QuantizeHandler):
     def __init__(self,
                  node: Node,
@@ -1441,10 +1442,10 @@ class FixedQParamsOpQuantizeHandler(QuantizeHandler):
         return activation_dtype(qconfig) in [torch.quint8, torch.qint8]
 
     # some qhandlers override the activations constructor
-    def get_activation_ctr(self, qconfig, pattern) -> Optional[Callable]:
+    def get_activation_ctr(self, qconfig, pattern, is_training) -> Optional[Callable]:
         act_dtype = activation_dtype(qconfig)
         if act_dtype == torch.quint8:
-            return get_default_output_activation_post_process_map().get(
+            return get_default_output_activation_post_process_map(is_training).get(
                 pattern, qconfig.activation)
         else:
             return qconfig.activation
