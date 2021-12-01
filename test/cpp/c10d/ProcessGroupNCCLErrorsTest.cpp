@@ -19,8 +19,9 @@ class WorkNCCLSimulateErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       const std::vector<at::Device>& devices,
       bool simulate_error,
       int rank,
-      c10d::OpType opType)
-      : WorkNCCL(devices, rank, opType), simulate_error_(simulate_error) {}
+      c10d::OpType opType,
+      uint64_t seq)
+      : WorkNCCL(devices, rank, opType, seq), simulate_error_(simulate_error) {}
 
   std::exception_ptr checkForNCCLErrors(
       const std::vector<std::shared_ptr<c10d::NCCLComm>>& ncclComms)
@@ -63,7 +64,7 @@ class ProcessGroupNCCLSimulateErrors : public c10d::ProcessGroupNCCL {
       c10d::OpType opType,
       const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLSimulateErrors>(
-        devices, simulate_error_, rank, opType);
+        devices, simulate_error_, rank, opType, seq_);
   }
 
   size_t getNCCLCommCacheSize() {
@@ -88,8 +89,9 @@ class WorkNCCLTimedoutErrors : public c10d::ProcessGroupNCCL::WorkNCCL {
       const std::vector<at::Device>& devices,
       bool set_timedout_error,
       int rank,
-      c10d::OpType opType)
-      : WorkNCCL(devices, rank, opType),
+      c10d::OpType opType,
+      uint64_t seq)
+      : WorkNCCL(devices, rank, opType, seq),
         set_timedout_error_(set_timedout_error) {}
 
  private:
@@ -120,7 +122,7 @@ class ProcessGroupNCCLTimedOutErrors : public ProcessGroupNCCLSimulateErrors {
       c10d::OpType opType,
       const char* profilingTitle, const c10::optional<std::vector<at::Tensor>>& inputs = c10::nullopt) override {
     return c10::make_intrusive<WorkNCCLTimedoutErrors>(
-        devices, set_timedout_error_, rank, opType);
+        devices, set_timedout_error_, rank, opType, seq_);
   }
 
   void set_timedout_error() {
