@@ -185,14 +185,6 @@ struct ProfilingRecord {
   mutable std::mutex mutex_;
   size_t profiling_count_;
 
-  // A thin wrapper around `partitionSetByDimension` to ensure
-  // `new_sizes` and `sym_shapes` are of the same rank
-
-  static c10::SymbolicShape mergeSymbolicShapes(
-      const c10::SymbolicShape& new_sizes,
-      const c10::SymbolicShape& sym_shapes,
-      SetPartitioningHelper& partition_helper);
-
   bool ready() const;
 
   std::shared_ptr<Graph> graph() const {

@@ -113,31 +113,6 @@ ProfileIValueOp* ProfilingRecord::createProfileIValueNode(
   return pn;
 }
 
-c10::SymbolicShape ProfilingRecord::mergeSymbolicShapes(
-    const c10::SymbolicShape& new_sizes,
-    const c10::SymbolicShape& sym_shapes,
-    SetPartitioningHelper& partition_helper) {
-  std::vector<c10::ShapeSymbol> new_symbols;
-  TORCH_INTERNAL_ASSERT(
-      new_sizes.rank().has_value() && sym_shapes.rank().has_value() &&
-      *new_sizes.rank() == *sym_shapes.rank());
-
-  for (const auto i : c10::irange(*new_sizes.rank())) {
-    if (!(*sym_shapes.sizes())[i].is_static() ||
-        !(*new_sizes.sizes())[i].is_static()) {
-      new_symbols.emplace_back();
-      continue;
-    }
-    auto symbol = (*sym_shapes.sizes())[i];
-    Dimension new_size = (*new_sizes.sizes())[i].static_size();
-    GRAPH_DEBUG("Merging symbol ", symbol);
-    auto new_sym = partition_helper.partitionSetByDimension(new_size, symbol);
-    new_symbols.emplace_back(new_sym);
-  }
-
-  return c10::SymbolicShape(new_symbols);
-}
-
 void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
   Value* i = n->input(offset);
   auto pn = createProfileNode(nullptr, {i});
