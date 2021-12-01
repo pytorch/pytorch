@@ -319,7 +319,7 @@ class _AlltoAll(Function):
             torch.empty(size, device=grad_outputs[0].device)
             for size in ctx.input_tensor_size_list
         ]
-        grad_outputs = [tensor.contiguous() for tensor in grad_outputs]
+        grad_outputs = tuple(tensor.contiguous() for tensor in grad_outputs)
         return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
 
 
@@ -345,10 +345,10 @@ class _AlltoAllSingle(Function):
         return (None, None, None, None) + (
             _AlltoAllSingle.apply(
                 ctx.group,
-                grad_output,
+                tensor,
                 ctx.output_split_sizes,
                 ctx.input_split_sizes,
-                tensor,
+                grad_output.contiguous(),
             ),
         )
 
