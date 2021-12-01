@@ -30,7 +30,7 @@ class TanhInt8QuantizeNNPIOp final : public Operator<CPUContext> {
     Y->scale = Y_scale;
     Y->zero_point = Y_offset;
 
-    constexpr int tanhLUTMinOffset = 7000;
+    constexpr int tanhLUTMinOffset = 0;
     constexpr int tanhLUTMaxOffset = 18000;
     constexpr int lutSize = tanhLUTMaxOffset - tanhLUTMinOffset;
 

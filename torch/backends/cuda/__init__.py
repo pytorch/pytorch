@@ -85,12 +85,18 @@ class cuFFTPlanCacheManager(object):
 
 class cuBLASModule:
     def __getattr__(self, name):
-        assert name == "allow_tf32", "Unknown attribute " + name
-        return torch._C._get_cublas_allow_tf32()
+        if name == "allow_tf32":
+            return torch._C._get_cublas_allow_tf32()
+        elif name == "allow_fp16_reduced_precision_reduction":
+            return torch._C._get_cublas_allow_fp16_reduced_precision_reduction()
+        raise AssertionError("Unknown attribute " + name)
 
     def __setattr__(self, name, value):
-        assert name == "allow_tf32", "Unknown attribute " + name
-        return torch._C._set_cublas_allow_tf32(value)
+        if name == "allow_tf32":
+            return torch._C._set_cublas_allow_tf32(value)
+        elif name == "allow_fp16_reduced_precision_reduction":
+            return torch._C._set_cublas_allow_fp16_reduced_precision_reduction(value)
+        raise AssertionError("Unknown attribute " + name)
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()
