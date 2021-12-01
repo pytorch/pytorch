@@ -386,6 +386,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::dequantize_copy.self(Tensor self) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -489,7 +492,9 @@ void ReplaceWithCopy(
        fromQualString("static_runtime::to_copy")},
       {torch::schema(
            "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       fromQualString("static_runtime::to_copy")}};
+       fromQualString("static_runtime::to_copy")},
+      {torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+       fromQualString("static_runtime::dequantize_copy")}};
 
   auto match_schema = [&supported_schema](
                           const Node* node, c10::Symbol& out_matched_symbol) {

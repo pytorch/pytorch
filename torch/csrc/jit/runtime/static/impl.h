@@ -235,13 +235,13 @@ class TORCH_API StaticModule {
   using DefInfo = std::pair<int, int>;
 
  public:
-  using KWargs = std::unordered_map<std::string, c10::IValue>;
+  using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
-      const KWargs& kwargs = KWargs());
+      const KeywordArgs& kwargs = KeywordArgs());
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
-      const KWargs& kwargs = KWargs());
+      const KeywordArgs& kwargs = KeywordArgs());
 
   const Graph& graph() const {
     return *graph_;
@@ -344,17 +344,17 @@ class TORCH_API StaticRuntime {
 
   C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
 
-  using KWargs = std::unordered_map<std::string, c10::IValue>;
+  using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
       const std::vector<c10::IValue>& args,
-      const KWargs& kwargs = KWargs());
+      const KeywordArgs& kwargs = KeywordArgs());
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
-      const KWargs& kwargs = KWargs());
+      const KeywordArgs& kwargs = KeywordArgs());
 
   void benchmark(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<KWargs>& kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs,
       bool print_per_node_time = false,
@@ -379,7 +379,7 @@ class TORCH_API StaticRuntime {
 
   IndividualMetrics benchmark_individual_ops(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<KWargs>& kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
@@ -436,16 +436,16 @@ class TORCH_API StaticRuntime {
 
  private:
   template <typename IValueList>
-  c10::IValue run_impl(IValueList&& args, const KWargs& kwargs);
+  c10::IValue run_impl(IValueList&& args, const KeywordArgs& kwargs);
 
   template <typename IValueList>
   c10::IValue run_impl_record_functions(
       IValueList&& args,
-      const KWargs& kwargs);
+      const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
-  void set_inputs(const std::vector<c10::IValue>& args, const KWargs& kwargs);
-  void set_inputs(std::vector<c10::IValue>&& args, const KWargs& kwargs);
+  void set_inputs(const std::vector<c10::IValue>& args, const KeywordArgs& kwargs);
+  void set_inputs(std::vector<c10::IValue>&& args, const KeywordArgs& kwargs);
 
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
@@ -462,13 +462,13 @@ class TORCH_API StaticRuntime {
 
   float benchmark_model(
       const std::vector<std::vector<c10::IValue>>& args_list,
-      const std::vector<KWargs>& kwargs_list,
+      const std::vector<KeywordArgs>& kwargs_list,
       const int warmup_runs,
       const int main_runs);
 
   void display_nodes(
       const std::vector<c10::IValue>& args,
-      const KWargs& kwargs);
+      const KeywordArgs& kwargs);
 
   // Memory planning is only enabled if sm->opts().cleanup_activations is true.
   // Otherwise, the memory used by activations is cached inside the static
