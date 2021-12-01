@@ -1471,12 +1471,28 @@ void ComputeConstant(Node* n, int opset_version) {
         if (input0_shape_size.has_value()) {
           auto input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
+            // When value of `shape` is statically known.
+            // Shape of expand output can be computed.
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
             auto final_shape =
                 ComputeShapeFromExpand(input0_shape_value, shape_temp);
             if (final_shape.has_value()) {
               UpdateShape(n->output(), final_shape.value());
+            }
+          } else if (ConstantValueMap::HasShape(n->input(1)->debugName())) {
+            // When shape of `shape` is statically known.
+            // Rank of expand output can be computed.
+            auto expand_shape =
+                ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
+                    n->input(1)->debugName());
+            if (expand_shape.has_value() && expand_shape.value().size() == 1 &&
+                expand_shape.value()[0] > 0) {
+              std::vector<c10::ShapeSymbol> final_shape;
+              for (const auto i : c10::irange(expand_shape.value()[0])) {
+                final_shape.emplace_back(c10::ShapeSymbol::newSymbol());
+              }
+              UpdateShape(n->output(), c10::SymbolicShape(final_shape));
             }
           }
         }
