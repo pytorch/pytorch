@@ -726,10 +726,6 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
   // Batch size + input planes
   int64_t batch_size = input.size(0);
 
-  // Define a buffer of ones, for bias accumulation
-  Tensor ones = grad_bias.defined() ? at::ones({output_depth, output_height, output_width}, input_.options())
-      : Tensor();
-
   // Create temporary columns
   bool need_columns = (kernel_depth != 1 || kernel_height != 1 || kernel_width != 1 ||
       stride_depth != 1 || stride_height != 1 || stride_width != 1 ||
@@ -810,29 +806,10 @@ void slow_conv_transpose3d_acc_grad_parameters_cuda(
                 grad_weight.data_ptr<scalar_t>(),
                 n);
           }
+        }
 
-          // Do Bias:
-          if (grad_bias.defined()) {
-            // M,N,K are dims of matrix A and B
-            // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-            int64_t m_ = n_output_plane;
-            int64_t k_ = output_depth * output_height * output_width;
-
-            // Do GEMV (note: this is a bit confusing because gemv assumes
-            // column-major matrices)
-            at::cuda::blas::gemv<scalar_t>(
-                't',
-                k_,
-                m_,
-                scale,
-                grad_output_n.data_ptr<scalar_t>(),
-                k_,
-                ones.data_ptr<scalar_t>(),
-                1,
-                static_cast<scalar_t>(1),
-                grad_bias.data_ptr<scalar_t>(),
-                1);
-          }
+        if (grad_bias.defined()) {
+          at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3, 4});
         }
 
         // Resize
