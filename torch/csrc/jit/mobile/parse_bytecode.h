@@ -1,6 +1,5 @@
 #pragma once
 #include <torch/csrc/jit/mobile/function.h>
-#include "caffe2/serialize/versions.h"
 
 namespace torch {
 namespace jit {
@@ -10,10 +9,7 @@ TORCH_API void parseInstructions(
     const std::string& function_name,
     c10::ivalue::TupleElements&& ins_list,
     c10::ivalue::TupleElements& debug_handles_m_tuple,
-    mobile::Function* function,
-    bool use_upgrader = false,
-    uint64_t operator_version =
-        caffe2::serialize::kMaxSupportedFileFormatVersion);
+    mobile::Function* function);
 TORCH_API void parseConstants(
     const c10::ivalue::TupleElements& consts_list,
     mobile::Function* function);

@@ -124,9 +124,9 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
-  const StringView& name() const {
+  const char* name() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
-    return state_->name_;
+    return state_->name_.c_str();
   }
 
   int64_t seqNr() const {
@@ -316,7 +316,7 @@ struct TORCH_API RecordFunction {
     // callbacks.
     ObserverContextList global_ctx_;
 
-    StringView name_;
+    std::string name_;
     int64_t sequence_nr_ = -1;
     std::vector<c10::IValue> inputs_;
     std::vector<c10::IValue> outputs_;

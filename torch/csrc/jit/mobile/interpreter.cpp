@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
-#include <iostream>
 
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
@@ -95,14 +94,15 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
-      if (inst.op == OP) {
-        std::cout << ", " << code.op_names_[inst.X].name;
-        if (!code.op_names_[inst.X].overload_name.empty()) {
-          std::cout << "." << code.op_names_[inst.X].overload_name;
-        }
-      }
-      std::cout << std::endl;
+      // std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
+      // if (inst.op == OP) {
+      //   std::cout << ", " << code.op_names_[inst.X].name;
+      //   if (!code.op_names_[inst.X].overload_name.empty()) {
+      //     std::cout << "." << code.op_names_[inst.X].overload_name;
+      //   }
+      // }
+      // std::cout << std::endl;
+      // std::cout << "top " << stack.back().tagKind() << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in
       // Dispatcher
