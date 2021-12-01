@@ -13996,6 +13996,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.l1_loss",
@@ -14110,6 +14111,13 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
+            ),
+            # This tests raises a plain AssertionError at
+            # https://github.com/pytorch/pytorch/blob/840fe8e4e6efee5d8197bd6987757f29d72dd162/test/test_fx_experimental.py#L1559
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestNormalizeOperators",
+                "test_normalize_operator_exhaustive",
             ),
         ),
     )
