@@ -631,7 +631,7 @@ class ParameterDict(Module):
         """
         return self._parameters.get(key, default)
 
-    def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict': 
+    def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict':
         self._parameters.fromkeys(keys, default)
         return self
 
