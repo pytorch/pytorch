@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat
@@ -293,6 +294,7 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
@@ -512,6 +514,7 @@ Other Operations
     gcd
     histc
     histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
