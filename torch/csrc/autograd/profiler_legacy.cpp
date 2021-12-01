@@ -221,7 +221,7 @@ void ProfilerThreadLocalState::pushRange(
   } else {
     LegacyEvent evt(
         EventKind::PushRange,
-        fn.name(),
+        at::StringView(std::string(fn.name())),
         at::RecordFunction::currentThreadId(),
         record_cuda,
         fn.handle(),
@@ -233,7 +233,7 @@ void ProfilerThreadLocalState::pushRange(
     evt.setScope((uint8_t)fn.scope());
     if (config_.with_flops) {
       evt.setExtraArgs(saveExtraArgs(fn));
-      evt.setFlops(computeFlops(std::string(fn.name().str()), evt.extraArgs()));
+      evt.setFlops(computeFlops(std::string(fn.name()), evt.extraArgs()));
     }
 
 // TODO: will unify the two macros BUILD_LITE_INTERPRETER and C10_MOBILE soon.
@@ -297,23 +297,23 @@ bool ProfilerThreadLocalState::memoryProfilingEnabled() const {
 }
 
 std::string getNvtxStr(
-    const at::StringView& name,
+    const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::stringstream s;
 #if defined(USE_ROCM)
-    s << name.str();
+    s << name;
 #endif
     if (sequence_nr >= 0) {
 #if defined(USE_ROCM)
       s << ", seq = " << sequence_nr;
 #else
-      s << name.str() << ", seq = " << sequence_nr;
+      s << name << ", seq = " << sequence_nr;
 #endif
     } else if (sequence_nr == -1) {
 #if !defined(USE_ROCM)
-      s << name.str();
+      s << name;
 #endif
     }
     if (shapes.size() > 0) {
@@ -339,7 +339,7 @@ std::string getNvtxStr(
     }
     return s.str();
   } else {
-    return name.str();
+    return name;
   }
 }
 
@@ -437,7 +437,7 @@ void pushProfilingCallbacksLegacy() {
         }
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
-        if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
+        if (record_cuda && disable_cuda_profiling.find(fn.name()) != disable_cuda_profiling.end()) {
           record_cuda = false;
         }
 
@@ -457,7 +457,7 @@ void pushProfilingCallbacksLegacy() {
         }
         bool record_cuda =
             state_ptr->config().state == ProfilerState::CUDA;
-        if (record_cuda && disable_cuda_profiling.find(fn.name().str()) != disable_cuda_profiling.end()) {
+        if (record_cuda && disable_cuda_profiling.find(fn.name()) != disable_cuda_profiling.end()) {
           record_cuda = false;
         }
         state_ptr->popRange(fn, record_cuda);
