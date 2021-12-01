@@ -164,8 +164,7 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
-// TODO: @krshrimali, add a comment here
-//
+/* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout */
 
 #define CREATE_UNARY_FUNC(func) \
   Tensor& func##_##sparse_csr_out(const Tensor& self, Tensor& result) { \
@@ -199,6 +198,7 @@ CREATE_UNARY_FUNC(sqrt);
 CREATE_UNARY_FUNC(square);
 CREATE_UNARY_FUNC(tan);
 CREATE_UNARY_FUNC(tanh);
+CREATE_UNARY_FUNC(conj_physical);
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {

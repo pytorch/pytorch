@@ -364,6 +364,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: _conj_physical
+    SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr
 
 - func: conj_physical(Tensor self) -> Tensor
   variants: function, method
@@ -372,11 +373,13 @@
   dispatch:
     CPU, CUDA: conj_physical_out
     SparseCPU, SparseCUDA: conj_physical_out_sparse
+    SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr_out
 
 - func: conj_physical_(Tensor(a!) self) -> Tensor(a!)
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: conj_physical_
+    SparseCsrCPU, SparseCsrCUDA: conj_physical_sparse_csr_
 
 - func: resolve_conj(Tensor(a) self) -> Tensor(a)
   variants: function, method
