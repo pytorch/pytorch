@@ -195,7 +195,7 @@ void slow_conv_transpose2d_out_cuda_template(
       input_height * input_width}, input_.options());
 
   // Define a buffer of ones, for bias accumulation
-  Tensor ones_ = bias.defined() ? at::ones({output_height, output_width}) : Tensor();
+  Tensor ones_ = bias.defined() ? at::ones({output_height, output_width}, input_.options()) : Tensor();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input_.scalar_type(), "slow_conv_transpose2d_out_cuda", [&] {
@@ -590,7 +590,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cuda_template(
       stride_width != 1 || pad_height != 0 || pad_width != 0 ||
       dilation_height != 1 || dilation_width != 1);
   Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height,
-      input_height * input_width}) : Tensor();
+      input_height * input_width}, input.options()) : Tensor();
 
   AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
       input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cuda", [&] {
