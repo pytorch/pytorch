@@ -97,8 +97,7 @@
       "win-vs2019-cuda11.3-py3"
     ],
     "ciflow/docs": [
-      "linux-docs",
-      "linux-docs-push"
+      "linux-docs"
     ],
     "ciflow/ios": [
       "ios-12-5-1-arm64",
