@@ -475,7 +475,8 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # Narrow op is not included in the grad graph.
+    # We don't want autograd recording here for the narrow op and
+    # 'local_shard' should be a leaf variable in the autograd graph
     with torch.no_grad():
         # Reshape to get shard for this rank.
         local_shard = tensor.narrow(

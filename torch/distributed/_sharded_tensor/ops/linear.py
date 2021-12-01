@@ -211,7 +211,6 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     # Perform autograd enabled alltoall
     all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
-
     gathered_input = gathered_input.t()
 
     # Perform local matmuls for all shards
