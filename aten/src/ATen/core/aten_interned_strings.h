@@ -193,7 +193,6 @@ _(aten, amin) \
 _(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
@@ -421,6 +420,7 @@ _(aten, isposinf) \
 _(aten, isneginf) \
 _(aten, kaiser_window) \
 _(aten, kl_div) \
+_(aten, kl_div_backward) \
 _(aten, kthvalue) \
 _(aten, l1_loss) \
 _(aten, l1_loss_backward) \
@@ -739,6 +739,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, _upsample_bilinear2d_aa) \
+_(aten, _upsample_bilinear2d_aa_backward) \
+_(aten, _upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \

@@ -132,7 +132,7 @@ WelfordDataLN cuWelfordCombine(
   return {mean, sigma2, count};
 }
 
-template<typename T, int alignment=16>
+template<typename T>
 __device__ WelfordDataLN compute_stats(
   const T*  __restrict__ X,
   const int N,
@@ -303,6 +303,88 @@ __global__ void ComputeInternalGradientsCUDAKernel(
   }
 }
 
+
+template<typename T, typename T_ACC>
+__device__ __inline__ void compute_gI(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T* dX,
+  const int N,
+  T_ACC * buf){
+    const auto i1 = blockIdx.x;
+    const T_ACC mean_val = mean[i1];
+    const T_ACC rstd_val = rstd[i1];
+    T_ACC stats_x1{0}, stats_x2{0};
+    constexpr int unroll = 4;
+    auto l = unroll * threadIdx.x;
+    const T * X_i = X + i1 * N;
+    const T * dY_i = dY + i1 * N;
+    T * dX_i = dX + i1 * N;
+    //vectorized reads don't improve perf, so use regular unrolling
+
+    for (; l+unroll - 1 < N; l += blockDim.x * unroll){
+      #pragma unroll
+      for (int k=0; k< unroll; k++){
+          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l+k]) : T_ACC(1);
+          const T_ACC c_h = static_cast<T_ACC>(X_i[l+k]);
+          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l+k]);
+          stats_x1 += c_loss * gamma_val;
+          stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
+      }
+    }
+    for (;  l < N; l ++) {
+          T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+          const T_ACC c_h = static_cast<T_ACC>(X_i[l]);
+          const T_ACC c_loss = static_cast<T_ACC>(dY_i[l]);
+          stats_x1 += c_loss * gamma_val;
+          stats_x2 += c_loss * gamma_val * (c_h - mean_val) * rstd_val;
+    }
+
+    stats_x1 = cuda_utils::BlockReduceSum(stats_x1, buf);
+    stats_x2 = cuda_utils::BlockReduceSum(stats_x2, buf);
+    if (threadIdx.x == 0) {
+      buf[0] = stats_x1;
+      buf[1] = stats_x2;
+    }
+    __syncthreads();
+    stats_x1 = buf[0];
+    stats_x2 = buf[1];
+    T_ACC fH = N;
+    T_ACC term1 = (T_ACC(1) / fH) * rstd_val;
+
+    for (int l = threadIdx.x; l < N; l += blockDim.x){
+        const T_ACC x = X_i[l];
+        const T_ACC dy = dY_i[l];
+        T_ACC gamma_val = (gamma != nullptr) ? static_cast<T_ACC>(gamma[l]) : T_ACC(1);
+        T_ACC f_grad_input = fH * gamma_val * dy;
+        f_grad_input -= (x - mean_val) * rstd_val * stats_x2;
+        f_grad_input -= stats_x1;
+        f_grad_input *= term1;
+        dX_i[l] = f_grad_input;
+    }
+  }
+
+
+
+template<typename T, typename T_ACC>
+__global__ void layer_norm_grad_input_kernel(
+  const T* __restrict__ dY,
+  const T* __restrict__ X,
+  const T_ACC* __restrict__ mean,
+  const T_ACC* __restrict__ rstd,
+  const T* __restrict__ gamma,
+  T*  dX,
+  const int N){
+    alignas(sizeof(double)) extern __shared__ char s_data1[];
+    T_ACC * buf = reinterpret_cast<T_ACC*>(&s_data1);
+
+    compute_gI(dY, X, mean, rstd, gamma, dX, N, buf);
+  }
+
+
 template <typename T, typename T_ACC>
 __global__ void ComputeGradientFusedParamsCUDAKernel(
     int64_t M,
@@ -379,7 +461,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
 }
 
 template <typename T, typename T_ACC>
-__global__ void GammaBetaBackwardCUDAKernel(
+__global__ void GammaBetaBackwardCUDAKernel1(
     int64_t M,
     int64_t N,
     const T* dY,
@@ -452,8 +534,90 @@ __global__ void GammaBetaBackwardCUDAKernel(
   }
 }
 
+
+
+
 template <typename T, typename T_ACC>
-//typename std::enable_if<!std::is_same<>::type* = nullptr>
+__global__ void GammaBetaBackwardCUDAKernel(
+    int64_t M,
+    int64_t N,
+    const T* dY,
+    const T* X,
+    const T_ACC* mean,
+    const T_ACC* rstd,
+    T* dg,
+    T* db) {
+  alignas(sizeof(double)) extern __shared__ char s_data1[];
+  T_ACC * s_data_typed = reinterpret_cast<T_ACC*>(&s_data1);
+  const int64_t j = blockIdx.x * blockDim.x + threadIdx.x;
+  T_ACC dg_sum1 = 0;
+  T_ACC dg_sum2 = 0;
+  T_ACC db_sum1 = 0;
+  T_ACC db_sum2 = 0;
+  constexpr int unroll = 8;
+  T dYs[unroll];
+  T Xs[unroll];
+  T_ACC *  means = s_data_typed;
+  T_ACC * rstds = s_data_typed + unroll * blockDim.y;
+  T_ACC dg_sum = 0;
+  T_ACC db_sum = 0;
+  if (j < N) {
+    int bcounter;
+    for (bcounter = 0; bcounter < M/(blockDim.y * unroll); bcounter++){
+      int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
+      #pragma unroll
+      for (int ii=0; ii<unroll; ii++){
+        if (threadIdx.x == 0) {
+          means[ii*blockDim.y + threadIdx.y] = mean[offset + ii];
+          rstds[ii*blockDim.y + threadIdx.y] = rstd[offset + ii];
+        }
+        dYs[ii] = dY[(offset + ii) * N + j ];
+        Xs[ii] = X[(offset + ii) * N + j];
+
+      }
+      __syncthreads();
+      #pragma unroll
+      for (int ii=0; ii<unroll; ii++){
+        dg_sum += dYs[ii] * (Xs[ii] - means[ii*blockDim.y + threadIdx.y]) * rstds[ii * blockDim.y + threadIdx.y];
+        db_sum += dYs[ii];
+      }
+      __syncthreads();
+    }
+    int offset = (bcounter * blockDim.y + threadIdx.y) * unroll;
+    for (int ii = 0; ii<8; ii++ ){
+      T_ACC mean_val, rstd_val; // we don't use smem in the tail to avoid awkward synchronizations, perf penalty is negligible
+      if ((offset + ii) < M) {
+        mean_val = mean[offset+ii];
+        rstd_val = rstd[offset+ii];
+        dYs[0] = dY[(offset + ii) * N + j ];
+        Xs[0] = X[(offset + ii) * N + j];
+        dg_sum += dYs[0] * (Xs[0] - mean_val) * rstd_val;
+        db_sum += dYs[0];
+      }
+    }
+    s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] = dg_sum;
+    s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] = db_sum;
+    __syncthreads();
+    for (int offset = blockDim.y/2; offset >=1; offset /= 2){
+      if (threadIdx.y < offset) {
+        s_data_typed[threadIdx.y * blockDim.x + threadIdx.x] += s_data_typed[(threadIdx.y + offset) * blockDim.x + threadIdx.x];
+        s_data_typed[blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x] +=
+        s_data_typed[blockDim.x * blockDim.y + (threadIdx.y + offset) * blockDim.x + threadIdx.x];
+      }
+      __syncthreads();
+    }
+    if (threadIdx.y == 0) {
+      if (dg) {
+        dg[j] = s_data_typed[threadIdx.x];
+      }
+      if (db) {
+        db[j] = s_data_typed[threadIdx.x + blockDim.x * blockDim.y];
+      }
+    }
+  }
+}
+
+template <typename T, typename T_ACC>
 void launch_vectorized_layer_norm_kernel(
   int N,
   int64_t M,
@@ -490,6 +654,8 @@ void LayerNormKernelImplInternal(
     Tensor* rstd) {
   // assumes input, gamma and beta are of proper shape, this was checked in _check_layer_norm_inputs
   // assumes all tensors are contiguous
+  TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
+  file a support request to support bigger batches");
   const T* X_data = X.data_ptr<T>();
   const T* gamma_data = gamma.defined() ? gamma.data_ptr<T>() : nullptr;
   const T* beta_data = beta.defined() ? beta.data_ptr<T>() : nullptr;
@@ -552,11 +718,13 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dgamma,
     Tensor* dbeta) {
   using T_ACC = acc_type<T, true>;
-  DCHECK_EQ(dY.numel(), M * N);
-  DCHECK_EQ(X.numel(), M * N);
-  DCHECK_EQ(mean.numel(), M);
-  DCHECK_EQ(rstd.numel(), M);
-  DCHECK(!gamma.defined() || gamma.numel() == N);
+  TORCH_CHECK(dY.numel() == M * N);
+  TORCH_CHECK(mean.numel() == M);
+  TORCH_CHECK(rstd.numel() == M);
+  TORCH_CHECK(M <= at::cuda::getCurrentDeviceProperties()->maxGridSize[0], "M should be less than maximum CUDA grid size, \
+  file a support request to support bigger batches");
+  TORCH_CHECK(N <= std::numeric_limits<int>::max(), "Normalized shape should have less than INT_MAX elements, \
+  file a support request to support bigger normalized shapes");
   const T* dY_data = dY.template data_ptr<T>();
   const T* X_data = X.template data_ptr<T>();
   const T_ACC* mean_data = mean.template data_ptr<T_ACC>();
@@ -578,33 +746,14 @@ void LayerNormBackwardKernelImplInternal(
     T_ACC* db_data = db.template data_ptr<T_ACC>();
     T_ACC* scale_data = scale.template data_ptr<T_ACC>();
     T_ACC* bias_data = bias.template data_ptr<T_ACC>();
-    ComputeInternalGradientsCUDAKernel<T>
-        <<<M, cuda_utils::kCUDABlockReduceNumThreads, 0, cuda_stream>>>(
-            N, dY_data, X_data, gamma_data, ds_data, db_data);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    const int64_t B = (M + kCUDANumThreads - 1) / kCUDANumThreads;
-    ComputeGradientFusedParamsCUDAKernel<T, T_ACC>
-        <<<B, kCUDANumThreads, 0, cuda_stream>>>(
-            M,
-            N,
-            mean_data,
-            rstd_data,
-            ds_data,
-            db_data,
-            scale_data,
-            bias_data);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    LayerNormBackwardCUDAKernel<T><<<M, kCUDANumThreads, 0, cuda_stream>>>(
-        N,
-        dY_data,
-        X_data,
-        gamma_data,
-        rstd_data,
-        scale_data,
-        bias_data,
-        dX_data);
+    const int num_threads = 128;
+    const dim3 blocks(M);
+    int nshared = (num_threads/C10_WARP_SIZE) * sizeof(T_ACC);
+    layer_norm_grad_input_kernel<<<blocks, num_threads, nshared, cuda_stream>>>(dY_data,
+    X_data, mean_data, rstd_data, gamma_data, dX_data, N);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
+
   if (dgamma->defined() || dbeta->defined()) {
     T* dgamma_data =
         dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
@@ -624,12 +773,10 @@ void LayerNormBackwardKernelImplInternal(
               dbeta_data);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      const int64_t B =
-          (N + kColwiseReduceTileSize - 1) / kColwiseReduceTileSize;
-      constexpr int kThreadX = kColwiseReduceTileSize;
-      constexpr int kThreadY = kColwiseReduceTileSize / 2;
+      dim3 threads{16, 32};
+      int blocks = (N + threads.x-1)/threads.x;
       GammaBetaBackwardCUDAKernel<T, T_ACC>
-          <<<B, dim3(kThreadX, kThreadY), 0, cuda_stream>>>(
+          <<<blocks, threads, 2 * sizeof(T_ACC) * threads.x * threads.y, cuda_stream>>>(
               M,
               N,
               dY_data,
