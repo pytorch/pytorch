@@ -832,6 +832,14 @@ class BulkLoadingSampler(torch.utils.data.Sampler):
         return int(math.ceil(len(self.dataset) / float(self.batch_size)))
 
 
+class CustomList(list):
+    pass
+
+
+class CustomDict(dict):
+    pass
+
+
 @unittest.skipIf(
     TEST_WITH_TSAN,
     "Fails with TSAN with the following error: starting new threads after multi-threaded "
@@ -1905,6 +1913,24 @@ except RuntimeError as e:
             batch = next(iter(loader))
             self.assertIsInstance(batch, tt)
 
+    def test_default_convert_mapping_keep_type(self):
+        data = CustomDict({"a": 1, "b": 2})
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, data)
+
+    def test_default_convert_sequence_keep_type(self):
+        data = CustomList([1, 2, 3])
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, data)
+
+    def test_default_convert_sequence_dont_keep_type(self):
+        data = range(2)
+        converted = _utils.collate.default_convert(data)
+
+        self.assertEqual(converted, [0, 1])
+
     def test_default_collate_dtype(self):
         arr = [1, 2, -1]
         collated = _utils.collate.default_collate(arr)
@@ -1925,6 +1951,30 @@ except RuntimeError as e:
         # Should be a no-op
         arr = ['a', 'b', 'c']
         self.assertEqual(arr, _utils.collate.default_collate(arr))
+
+    def test_default_collate_mapping_keep_type(self):
+        batch = [CustomDict({"a": 1, "b": 2}), CustomDict({"a": 3, "b": 4})]
+        collated = _utils.collate.default_collate(batch)
+
+        expected = CustomDict({"a": torch.tensor([1, 3]), "b": torch.tensor([2, 4])})
+        self.assertEqual(collated, expected)
+
+    def test_default_collate_sequence_keep_type(self):
+        batch = [CustomList([1, 2, 3]), CustomList([4, 5, 6])]
+        collated = _utils.collate.default_collate(batch)
+
+        expected = CustomList([
+            torch.tensor([1, 4]),
+            torch.tensor([2, 5]),
+            torch.tensor([3, 6]),
+        ])
+        self.assertEqual(collated, expected)
+
+    def test_default_collate_sequence_dont_keep_type(self):
+        batch = [range(2), range(2)]
+        collated = _utils.collate.default_collate(batch)
+
+        self.assertEqual(collated, [torch.tensor([0, 0]), torch.tensor([1, 1])])
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
     def test_default_collate_bad_numpy_types(self):
