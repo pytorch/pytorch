@@ -117,7 +117,10 @@ def list_toy_models():
         for model in toy_models:
             yield model(dims=dims)
 
-def pick_grad(name):
+def pick_grad(args, name):
+    if args.test == 'train':
+        return torch.enable_grad()
+
     if name in ("maml",):
         return torch.enable_grad()
     else:
@@ -149,15 +152,11 @@ def iter_models(args):
                 benchmark = benchmark_cls(device=device, jit=False)
                 torch.manual_seed(1337)
                 lazy_benchmark = benchmark_cls(device='lazy', jit=False)
-                model, example_inputs = benchmark.get_module()
-                lazy_model, lazy_example_inputs = lazy_benchmark.get_module()
-                model.eval()
-                lazy_model.eval()
                 gc.collect()
                 global current_name, current_device
                 current_device = device
                 current_name = short_name(benchmark.name)
-                yield device, current_name, model, example_inputs, lazy_model, lazy_example_inputs
+                yield device, current_name, benchmark, lazy_benchmark
             except NotImplementedError:
                 print("NotImplementedError")
                 pass
@@ -239,14 +238,21 @@ def dump_lazy_metrics(reset=False):
         metrics.reset_metrics()
     return met
 
-def timed(model, example_inputs, sync, times=1):
+def timed(args, benchmark, sync, times=1):
     results = []
     sync.final_sync(results)
     torch.manual_seed(1337)
+    if args.test == 'eval':
+        model, example_inputs = benchmark.get_module()
+
     # keep the lazy tensor results alive until the final sync
     t0 = time.perf_counter()
     for i in range(times):
-        results.append(call_model_with(model, example_inputs))
+        if args.test == 'eval':
+            results.append(call_model_with(model, example_inputs))
+        elif args.test == 'train':
+            benchmark.train(niter=1)
+            
         # for the last i, let final_sync take care of it
         if i < times - 1:
             # may be just an async 'mark_step' for lazy, or no-op for cuda
@@ -256,7 +262,8 @@ def timed(model, example_inputs, sync, times=1):
     # unless strictly measuring lazy trace overhead, then no-op
     sync.final_sync(results)
     t1 = time.perf_counter()
-    return results[-1], t1 - t0
+    rc = results[-1] if args.test == 'eval' else None
+    return rc, t1 - t0
 
 def to_device(tensors, device):
     """Handles moving tensor or tensors (in various containers) to a new device.
@@ -281,17 +288,17 @@ def to_device(tensors, device):
         return tensors.to(device)
     raise RuntimeError("invalid example tensors ", tensors)
 
-def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs):
+def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     timings = np.zeros((args.repeat, 2), np.float64)
     ref_sync = CudaSync if current_device == 'cuda' else NoOpSync
     for rep in range(args.warmup):
         # interleave the runs to handle frequency scaling and load changes
-        timed(model, example_inputs, sync=ref_sync(sync_every_iter=True))
-        timed(lazy_model, lazy_inputs, sync=LazySync(sync_every_iter=True))
+        timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
+        timed(args, lazy_benchmark, sync=LazySync(sync_every_iter=True))
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
-        _, timings[rep, 0] = timed(model, example_inputs, sync=ref_sync(sync_every_iter=True))
-        _, timings[rep, 1] = timed(lazy_model, lazy_inputs, sync=NoOpSync())
+        _, timings[rep, 0] = timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
+        _, timings[rep, 1] = timed(args, lazy_benchmark, sync=NoOpSync())
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     overhead = median[1] / median[0]
@@ -300,10 +307,10 @@ def lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, l
         "lazy_overheads.csv",
         ("dev", "name", "overhead", "pvalue"),
     ).writerow([current_device, current_name, f"{overhead:.4f}", f"{pvalue:.4e}"])
-    print(f"{short_name(name, 30):<30} {current_device:<4}  {'trace overheads':<20} overhead: {overhead:.4f} pvalue: {pvalue:.4e}")
+    print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
     return (overhead, pvalue)
 
-def lazy_compute_experiment(experiment, results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=False, to_dev_sync=None):
+def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
     timings = np.zeros((args.repeat, 2), np.float64)
     if to_dev_sync is not None:
         ref_sync = ToDeviceSync(to_dev_sync, sync_every_iter=sync_every_iter)
@@ -315,17 +322,17 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     # interleave the runs to handle frequency scaling and load changes
     for rep in range(args.warmup):
         # warmup
-        timed(model, example_inputs, sync=ref_sync)
-        timed(lazy_model, lazy_inputs, sync=lazy_sync)
+        timed(args, benchmark, sync=ref_sync)
+        timed(args, lazy_benchmark, sync=lazy_sync)
 
     # fresh metrics for each timed run
     dump_lazy_metrics(reset=True)
     for rep in range(args.repeat):
         # measure
-        _, timings[rep, 0] = timed(model, example_inputs, times=args.inner_loop_repeat, sync=ref_sync)
-        _, timings[rep, 1] = timed(lazy_model, lazy_inputs, times=args.inner_loop_repeat, sync=lazy_sync)
+        _, timings[rep, 0] = timed(args, benchmark, times=args.inner_loop_repeat, sync=ref_sync)
+        _, timings[rep, 1] = timed(args, lazy_benchmark, times=args.inner_loop_repeat, sync=lazy_sync)
     lazy_metrics = dump_lazy_metrics(reset=True)
-    if lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
+    if 'CachedCompile' not in lazy_metrics or lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
     fallbacks = {k:v for (k,v) in lazy_metrics.items() if 'aten::' in k}
     if len(fallbacks):
@@ -339,8 +346,8 @@ def lazy_compute_experiment(experiment, results, args, model, example_inputs, la
     output_csv(
         "lazy_compute.csv",
         ("name", "dev", "experiment", "speedup", "pvalue"),
-    ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.4e}"])
-    print(f"{short_name(current_name, 30):<30} {current_device:<4}  {experiment:<20} speedup: {speedup:.4f} pvalue: {pvalue:.4e}")
+    ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.2e}"])
+    print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
@@ -369,6 +376,7 @@ if __name__ == "__main__" :
     parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
+    parser.add_argument("--test", type=str, choices=['eval', 'train'], default='eval')
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
     args = parser.parse_args()
@@ -380,24 +388,31 @@ if __name__ == "__main__" :
     assert os.path.exists(os.path.join(torchbench_dir, "torchbenchmark")), "set --torchbench_dir to installed torchbench repo"
     sys.path.append(torchbench_dir)
 
-    for device, name, model, example_inputs, lazy_model, lazy_inputs in iter_models(args):
+    for device, name, benchmark, lazy_benchmark in iter_models(args):
+
         if device == 'cuda':
             assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA'])
 
-        with pick_grad(name):
+        with pick_grad(args, name):
             try:
-                torch.manual_seed(1337)
-                correct_result = call_model_with(copy.deepcopy(model), example_inputs)
-                torch.manual_seed(1337)
-                lazy_result = call_model_with(lazy_model, lazy_inputs)
+                if args.test == 'eval':
+                    # Correctness Check
+                    torch.manual_seed(1337)
+                    model, example_inputs = benchmark.get_module()
+                    model.eval()
+                    correct_result = call_model_with(model, example_inputs)
+                    torch.manual_seed(1337)
+                    lazy_model, lazy_inputs = lazy_benchmark.get_module()
+                    lazy_model.eval()
+                    lazy_result = call_model_with(lazy_model, lazy_inputs)
+                    if not check_results(name, correct_result, lazy_result, device):
+                        print(f"INCORRECT ({name})")
+                        continue
             except Exception:
                 logging.exception("unhandled error")
                 print(f"ERROR ({name})")
                 continue
-            if not check_results(name, correct_result, lazy_result, device):
-                print(f"INCORRECT ({name})")
-                continue
-            lazy_overhead_experiment(results, args, model, example_inputs, lazy_model, lazy_inputs)
+            lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
 
             with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
                 if args.fuser == 'noopt':
@@ -409,18 +424,19 @@ if __name__ == "__main__" :
                     torch._C._jit_set_nvfuser_enabled(False)
 
                 # using LazySync
-                lazy_compute_experiment(f"amortized {args.inner_loop_repeat}x", results, args, model, example_inputs, lazy_model, lazy_inputs)
-                lazy_compute_experiment("unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True)
+                lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
+                lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
 
                 """Alternate ways of synchronizing for timing- calling .to() on output tensors -
                    Used initially to corroborate the results of timing via mark_step.  Should be debuged further as calling .to() appears
                    to penalize lazy more than cuda, possibly due to ineffiencies in how we implement the .to operator.
                 """
                 # using to_cpu sync
-                # lazy_compute_experiment("to_cpu amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cpu')
-                # lazy_compute_experiment("to_cpu unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cpu')
+                # lazy_compute_experiment(args, "to_cpu amortized", results, benchmark, lazy_benchmark, to_dev_sync='cpu')
+                # lazy_compute_experiment(args, "to_cpu unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True, to_dev_sync='cpu')
 
                 # if device == 'cuda':
                     # using to_cuda sync
-                    # lazy_compute_experiment("to_cuda amortized", results, args, model, example_inputs, lazy_model, lazy_inputs, to_dev_sync='cuda')
-                    # lazy_compute_experiment("to_cuda unamortized", results, args, model, example_inputs, lazy_model, lazy_inputs, sync_every_iter=True, to_dev_sync='cuda')
+                    # lazy_compute_experiment(args, "to_cuda amortized", results,benchmark, lazy_benchmark, to_dev_sync='cuda')
+                    # lazy_compute_experiment(args, "to_cuda unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True, to_dev_sync='cuda')
+        print()
