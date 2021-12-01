@@ -2312,9 +2312,9 @@ triangular such that the returned tensor is
     inv = (u^T u)^{{-1}}
 
 Args:
-    input (Tensor): the input tensor :math:A of size :math:`(*, n, n)`,
-                where :math:`*` is zero of more batch dimensions composed of
-                symmetric positive-definite matrices.
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
+                consisting of symmetric positive-definite matrices
+                where :math:`*` is zero or more batch dimensions.
     upper (bool, optional): flag that indicates whether to return a
                 upper or lower triangular matrix. Default: False
 
