@@ -336,10 +336,10 @@ NumericsFilter = collections.namedtuple('NumericsFilter', ['condition', 'safe_va
 #
 #   def sample_inputs_foo(op_info, device, dtype, requires_grad, **kwargs):
 #
-#   And should return a list of SampleInputs (see the class description above).
-#   Each SampleInput defines an "input", "args", "kwargs",
-#   an "output_process_fn_grad" function, the "broadcasts_input" bool and
-#   a "name".
+#   And should return an iterable of SampleInputs (see the class description
+#   above). Each SampleInput defines an "input", "args", "kwargs", an
+#   "output_process_fn_grad" function, the "broadcasts_input" bool and a
+#   "name".
 #
 # The "input" is the first argument to the operator, or the tensor that
 #   the method or inplace variants of the operator should be called on, and
@@ -795,7 +795,7 @@ class OpInfo(object):
                 tensor = tensor.conj()
             return tensor.requires_grad_(_requires_grad)
 
-        for i in range(len(samples)):
+        for i, sample in enumerate(samples):
             sample = conj_samples[i]
             # Note: it is assumed that the input here is either a tensor or tensorlist
             if isinstance(sample.input, torch.Tensor):
@@ -1129,16 +1129,14 @@ def sample_inputs_unary(op_info, device, dtype, requires_grad, **kwargs):
 
     if op_info.supports_sparse_csr:
         # Tensors with dim=2 for sparse CSR testing
-        return (SampleInput(make_tensor((L, L), device=device, dtype=dtype,
-                                        low=low, high=high,
-                                        requires_grad=requires_grad)),)
+        yield SampleInput(make_tensor((L, L), device=device, dtype=dtype,
+                                      low=low, high=high,
+                                      requires_grad=requires_grad))
     else:
-        return (SampleInput(make_tensor((L,), device=device, dtype=dtype,
-                                        low=low, high=high,
-                                        requires_grad=requires_grad)),
-                SampleInput(make_tensor((), device=device, dtype=dtype,
-                                        low=low, high=high,
-                                        requires_grad=requires_grad)))
+        for shape in ((L,), ()):
+            yield SampleInput(make_tensor(shape, device=device, dtype=dtype,
+                                          low=low, high=high,
+                                          requires_grad=requires_grad))
 
 # Metadata class for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -1805,7 +1803,6 @@ def sample_inputs_binary_pwise(
         ((M, 1, S), (1, M, S)),
     ]
 
-    sample_inputs = []
     for shape_lhs, shape_rhs_or_scalar in shapes:
         lhs = make_tensor(
             shape_lhs,
@@ -1829,8 +1826,7 @@ def sample_inputs_binary_pwise(
             rhs = shape_rhs_or_scalar  # type: ignore[assignment]
             broadcasts_input = False
 
-        sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=op_kwargs, broadcasts_input=broadcasts_input))
-    return sample_inputs
+        yield SampleInput(lhs, args=(rhs,), kwargs=op_kwargs, broadcasts_input=broadcasts_input)
 
 
 def sample_inputs_add_sub(
@@ -1852,7 +1848,7 @@ def sample_inputs_add_sub(
         rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
     )
 
-    sample_inputs = sample_inputs_binary_pwise(
+    yield from sample_inputs_binary_pwise(
         op_info,
         device,
         dtype,
@@ -1866,9 +1862,7 @@ def sample_inputs_add_sub(
 
     lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
     rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
-    sample_inputs.append(SampleInput(lhs, args=(rhs,), kwargs=dict(op_kwargs, alpha=alpha), broadcasts_input=False))
-
-    return sample_inputs
+    yield SampleInput(lhs, args=(rhs,), kwargs=dict(op_kwargs, alpha=alpha), broadcasts_input=False)
 
 def sample_inputs_isclose(
     op_info,
@@ -1888,7 +1882,7 @@ def sample_inputs_isclose(
         rhs_make_tensor_kwargs=rhs_make_tensor_kwargs,
     )
 
-    sample_inputs = sample_inputs_binary_pwise(
+    yield from sample_inputs_binary_pwise(
         op_info,
         device,
         dtype,
@@ -1910,10 +1904,8 @@ def sample_inputs_isclose(
         lhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **lhs_make_tensor_kwargs)
         rhs = make_tensor((S, S), device=device, dtype=dtype, requires_grad=requires_grad, **rhs_make_tensor_kwargs)
 
-        sample_inputs.append(SampleInput(lhs, args=(rhs,),
-                             kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan)))
-
-    return sample_inputs
+        yield SampleInput(lhs, args=(rhs,),
+                          kwargs=dict(op_kwargs, rtol=rtol, atol=atol, equal_nan=equal_nan))
 
 def sample_inputs_t(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8841,13 +8833,13 @@ op_db: List[OpInfo] = [
                      ),
     OpInfo('fft.fftshift',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
-           sample_inputs_func=lambda *a, **kw: list(sample_inputs_fftshift(*a, **kw)),
+           sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
            ),
     OpInfo('fft.ifftshift',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
-           sample_inputs_func=lambda *a, **kw: list(sample_inputs_fftshift(*a, **kw)),
+           sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
            ),
@@ -8858,7 +8850,7 @@ op_db: List[OpInfo] = [
                             'TestJit', 'test_variant_consistency_jit'),
            ],
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=lambda *a, **kw: list(sample_inputs_stft(*a, **kw)),
+           sample_inputs_func=sample_inputs_stft,
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,
@@ -8873,7 +8865,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(skipCUDAIfRocm, 'TestGradients', 'test_fn_grad'),
            ],
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=lambda *a, **kw: list(sample_inputs_istft(*a, **kw)),
+           sample_inputs_func=sample_inputs_istft,
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_out=False,

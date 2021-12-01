@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 import unittest
+import itertools
 
 import torch
 
@@ -478,6 +479,7 @@ class TestCommon(TestCase):
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
+        samples = list(samples)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
