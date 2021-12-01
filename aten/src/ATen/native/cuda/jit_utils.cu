@@ -25,7 +25,7 @@ const std::string jit_code_template = R"ESCAPE(
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  constexpr int num_threads = 64;
+  constexpr int num_threads = 128;
   constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
   #define ERROR_UNSUPPORTED_CAST assert(false);
@@ -216,9 +216,11 @@ const std::string jit_code_template = R"ESCAPE(
       linear_idx = divmod.div;
 
       #pragma unroll
-      for (int arg = 0; arg < ${nInputs}; ++arg) {
+      for (int arg = 0; arg < NARGS; ++arg) {
           offsets[arg] += divmod.mod * strides_[dim][arg];
       }
+      //printf("offset calc thread dim size stride offset %d %d %d %d %d %d %d %d\n",
+      //threadIdx.x, dim, sizes_[dim].divisor, strides_[dim][0], offsets[0], linear_idx, divmod.div, divmod.mod);
       }
       return offsets;
   }
@@ -256,11 +258,6 @@ const std::string jit_code_template = R"ESCAPE(
 
         int linear_idx = thread_idx + block_work_size * idx;
         auto input_offsets = input_calculator.get(linear_idx);
-        // printf(
-        //     "thread %d data %p %p offset %d\n",
-        //     threadIdx.x,
-        //     data[0], data[1],
-        //     input_offsets[0]);
         ${load_inputs}
         // printf(
         //    "thread %d a %f offsets %d\n", threadIdx.x, arg0[j], input_offsets[0]);
@@ -282,9 +279,9 @@ const std::string jit_code_template = R"ESCAPE(
         //offsets computed in the load loop
         int linear_idx = thread_idx + block_work_size * idx;
         auto output_offsets = output_calculator.get(linear_idx);
+        //printf("output thread %d offset %d\n", threadIdx.x, output_offsets[0]);
         //TODO handle multi-return functors
         ${store_outputs}
-        //*(reinterpret_cast<${scalar_type}*>(data[0])+output_offsets[0]) = out[j];
         thread_idx += num_threads;
     }
   }
