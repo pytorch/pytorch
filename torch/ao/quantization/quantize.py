@@ -531,17 +531,25 @@ def _convert(
     if not inplace:
         module = copy.deepcopy(module)
     reassign = {}
-    for name, mod in module.named_children():
-        # both fused modules and observed custom modules are
-        # swapped as one unit
+
+    def swap_module_helper(mod):
         if not isinstance(mod, _FusedModule) and \
            type(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
                      convert_custom_config_dict)
-        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
+        mod = swap_module(mod, mapping, custom_module_class_mapping)
+        return mod
 
-    for key, value in reassign.items():
-        module._modules[key] = value
+    # Condition when the module itself is to be swapped.
+    if not module.named_children():
+        module = swap_module_helper(module)
+    else:  # Children module needs to be swapped.
+        for name, mod in module.named_children():
+            # both fused modules and observed custom modules are
+            # swapped as one unit
+            reassign[name] = swap_module_helper(mod)
+        for key, value in reassign.items():
+            module._modules[key] = value
 
     return module
 
