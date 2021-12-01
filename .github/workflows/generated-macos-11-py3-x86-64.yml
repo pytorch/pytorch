@@ -180,7 +180,7 @@ jobs:
       - name: Zip test reports for upload
         if: always()
         env:
-          FILE_SUFFIX: 'macos-${{ github.job }}'
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         run: |
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
