@@ -10,7 +10,7 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.distributed.nn.functional import (
     all_gather,
-    all_to_all,
+    all_to_all_single,
 )
 
 
@@ -127,20 +127,14 @@ def _result_distribute_with_col_rearrange(
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)
     output_split_sizes = [0] * world_size
-    output_tensor_list = [None] * world_size
     for idx, placement in enumerate(weight._sharding_spec.placements):
-        output_split_size = get_chunked_dim_size(sharding_dim_size, split_size, idx)
-        output_split_sizes[placement.rank()] = output_split_size
-        dims[0] = output_split_size
-        output_tensor_list[placement.rank()] = torch.empty(
-            *dims,
-            device=input.device,
+        output_split_sizes[placement.rank()] = get_chunked_dim_size(
+            sharding_dim_size, split_size, idx
         )
 
     # distribute the outputs using all2all.
-    results = [tensor.contiguous() for tensor in results]
-    output = torch.cat(
-        all_to_all(output_tensor_list, results, group=pg)
+    output = all_to_all_single(
+        output, combined_results, output_split_sizes=output_split_sizes, group=pg
     )
 
     # Check if we need to rearrange columns appropriately for output.
