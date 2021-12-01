@@ -1406,10 +1406,11 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
-    def test_chained_lr1_get_last_lr_before_step(self):
-        schedulers = [None] * 2
-        schedulers[0] = LinearLR(self.opt, start_factor=0.4, total_iters=3)
-        schedulers[1] = MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+    def test_chained_lr2_get_last_lr_before_step(self):
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.4, total_iters=3),
+            MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+        ]
         scheduler = ChainedScheduler(schedulers)
         self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
