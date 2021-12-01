@@ -567,6 +567,7 @@ int64_t _storage_numel_batching_rule(const Tensor& self) {
   auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   auto num_batch_dims = physical_view.numBatchDims();
   const auto& physical_tensor = physical_view.tensor();
+  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), num_batch_dims);
   return physical_tensor.strides()[num_batch_dims - 1];
 }
 
