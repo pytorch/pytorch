@@ -65,17 +65,24 @@
 - (BOOL)compileMLModel:(const std::string&)modelSpecs
             identifier:(const std::string&)identifier
     API_AVAILABLE(ios(11.0), macos(10.13)) {
-  _modelPath = [self _save:modelSpecs
-                identifier:[NSString stringWithCString:identifier.c_str()
-                                              encoding:NSUTF8StringEncoding]];
+  _modelPath =
+      [self _saveModel:modelSpecs
+            identifier:[NSString stringWithCString:identifier.c_str()
+                                          encoding:NSUTF8StringEncoding]];
   NSError* error = nil;
   NSURL* compiledModelPath = nil;
-  if (@available(iOS 11.0, macOS 10.13, *)) {
-    compiledModelPath =
-        [MLModel compileModelAtURL:[NSURL URLWithString:_modelPath]
-                             error:&error];
+  // only re-compile the model when OS version changes
+  if ([self _shouldRecompileModel]) {
+    if (@available(iOS 11.0, macOS 10.13, *)) {
+      compiledModelPath =
+          [MLModel compileModelAtURL:[NSURL URLWithString:_modelPath]
+                               error:&error];
+    } else {
+      TORCH_CHECK(false, "CoreML is not available on your deivce");
+    }
   } else {
-    TORCH_CHECK(false, "CoreML is not available on your deivce");
+    compiledModelPath = [NSURL
+        fileURLWithPath:[NSString stringWithFormat:@"%@.mlmodelc", _modelPath]];
   }
   if (error || !compiledModelPath) {
     // remove cached models if compalition failed.
@@ -154,7 +161,8 @@
   return !error;
 }
 
-- (NSString*)_save:(const std::string&)spec identifier:(NSString*)identifier {
+- (NSString*)_saveModel:(const std::string&)spec
+             identifier:(NSString*)identifier {
   NSURL* temporaryDirectoryURL = [NSURL fileURLWithPath:NSTemporaryDirectory()
                                             isDirectory:YES];
   NSString* modelPath = [NSString
@@ -170,4 +178,31 @@
   return modelPath;
 }
 
+- (BOOL)_shouldRecompileModel {
+  NSError* error = nil;
+  NSString* currentOSVer = [UIDevice currentDevice].systemVersion;
+  NSString* versionPath =
+      [NSString stringWithFormat:@"%@/version.txt",
+                                 [NSURL fileURLWithPath:NSTemporaryDirectory()
+                                            isDirectory:YES]
+                                     .path];
+  BOOL shouldRecompileModel = YES;
+  if ([[NSFileManager defaultManager] fileExistsAtPath:versionPath]) {
+    NSString* cachedOSVer =
+        [NSString stringWithContentsOfFile:versionPath
+                                  encoding:NSUTF8StringEncoding
+                                     error:&error];
+    if ([cachedOSVer isEqualToString:currentOSVer]) {
+      NSString* compiledModelPath =
+          [NSString stringWithFormat:@"%@.mlmodelc", _modelPath];
+      if ([[NSFileManager defaultManager] fileExistsAtPath:compiledModelPath]) {
+        shouldRecompileModel = NO;
+      }
+    }
+  }
+  [[UIDevice currentDevice].systemVersion writeToFile:versionPath
+                                           atomically:YES];
+
+  return shouldRecompileModel;
+}
 @end
