@@ -6284,7 +6284,6 @@ def sample_inputs_unravel_index(op_info, device, dtype, requires_grad, **kwargs)
     create_tensor = partial(torch.tensor, dtype=dtype, device=device, requires_grad=False)
 
     cases = (  # type: ignore[assignment]
-        # TODO: (@krshrimali) This doesn't work as of now, WIP, @krshrimali
         ((), (1, 2)),
         ((S, S), (25,)),
         ((1, 2, 3), (2, 6)),
