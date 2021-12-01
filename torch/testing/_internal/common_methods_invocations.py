@@ -9391,6 +9391,10 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_linalg_lu_factor,
+           skips=(
+               # Call to .item<int64_t>() in checkErrors
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
+           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.lu_factor_ex',
            aten_name='linalg_lu_factor_ex',
@@ -9409,7 +9413,7 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_out=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
+           decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:
