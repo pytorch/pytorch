@@ -190,7 +190,7 @@ def create_joint_forward_backward(fn):
         primals = [p for p in pytree.tree_flatten(primals)[0] if p.requires_grad]
         backward_out = []
         if primals:
-            backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, create_graph=True, allow_unused=True)
+            backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, allow_unused=True)
         return out, backward_out
     return joint_forward_backward
 
