@@ -81,6 +81,8 @@ std::unique_ptr<TensorArgAbstract> getTensorArg(
       return getTensorArg<float, INDEX_MODE>(nDims);
     case c10::ScalarType::Half:
       return getTensorArg<at::Half, INDEX_MODE>(nDims);
+    case c10::ScalarType::BFloat16:
+      return getTensorArg<at::BFloat16, INDEX_MODE>(nDims);
     case c10::ScalarType::Bool:
       return getTensorArg<bool, INDEX_MODE>(nDims);
     case c10::ScalarType::Long:

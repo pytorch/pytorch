@@ -67,6 +67,12 @@ class TORCH_API Context {
   static long versionCUDART() {
     return detail::getCUDAHooks().versionCUDART();
   }
+  static bool hasCuDNN() {
+    return detail::getCUDAHooks().hasCuDNN();
+  }
+  static long versionCuDNN() {
+    return detail::getCUDAHooks().versionCuDNN();
+  }
   static bool hasHIP() {
     return detail::getHIPHooks().hasHIP();
   }
