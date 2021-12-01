@@ -1966,14 +1966,17 @@ class TestSparse(TestCase):
         is_integral_dtype = is_integral(sparse_tensor.dtype)
         self.assertEqual(expected_output, sparse_tensor.log1p().to_dense())
         if is_integral_dtype:
-            with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got:"):
                 sparse_tensor.coalesce().log1p_()
         else:
             self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
 
-        if not coalesced:
+        if not coalesced and not is_integral_dtype:
             # test in-place op on uncoalesced input
-            with self.assertRaisesRegex(RuntimeError, "log1p_ requires coalesced input"):
+            with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                sparse_tensor.log1p_()
+        elif not coalesced and is_integral_dtype:
+            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got"):
                 sparse_tensor.log1p_()
 
         if not is_integral_dtype:
@@ -2117,20 +2120,24 @@ class TestSparse(TestCase):
                     op(sparse_tensor, out=sparse_tensor_out)
                     self.assertEqual(expected_output, sparse_tensor_out.to_dense())
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
+                    with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
                         op(sparse_tensor, out=sparse_tensor_out)
 
         for op in (torch.Tensor.asin_, torch.Tensor.arcsin_):
             if is_integral_dtype:
                 # test coalesce on integral dtype tensor
-                with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
+                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
                     op(sparse_tensor.clone().coalesce()).to_dense()
             else:
                 self.assertEqual(expected_output, op(sparse_tensor.clone().coalesce()).to_dense())
 
-            if not coalesced:
+            if not coalesced and not is_integral_dtype:
                 # test in-place op on uncoalesced input
-                with self.assertRaisesRegex(RuntimeError, "asin_ requires coalesced input"):
+                with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
+                    op(sparse_tensor)
+            elif not coalesced:
+                # test in-place op on integral dtype tensor
+                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
                     op(sparse_tensor)
 
     @coalescedonoff
@@ -3472,7 +3479,7 @@ class TestSparseUnaryUfuncs(TestCase):
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
         if not torch.can_cast(expect.dtype, dtype):
-            with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
+            with self.assertRaisesRegex(RuntimeError, "result type"):
                 op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
             return
 
