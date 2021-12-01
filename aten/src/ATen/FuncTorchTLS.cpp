@@ -2,16 +2,20 @@
 
 namespace at { namespace functorch {
 
-thread_local std::shared_ptr<FuncTorchTLSBase> kFuncTorchTLS = nullptr;
+namespace {
 
-std::shared_ptr<FuncTorchTLSBase> getCopyOfFuncTorchTLS() {
+thread_local std::unique_ptr<FuncTorchTLSBase> kFuncTorchTLS = nullptr;
+
+}
+
+std::unique_ptr<FuncTorchTLSBase> getCopyOfFuncTorchTLS() {
   if (kFuncTorchTLS == nullptr) {
     return nullptr;
   }
   return kFuncTorchTLS->deepcopy();
 }
 
-void setFuncTorchTLS(const std::shared_ptr<FuncTorchTLSBase>& state) {
+void setFuncTorchTLS(const std::shared_ptr<const FuncTorchTLSBase>& state) {
   if (state == nullptr) {
     kFuncTorchTLS = nullptr;
     return;
@@ -19,7 +23,7 @@ void setFuncTorchTLS(const std::shared_ptr<FuncTorchTLSBase>& state) {
   kFuncTorchTLS = state->deepcopy();
 }
 
-std::shared_ptr<FuncTorchTLSBase>& functorchTLSAccessor() {
+std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor() {
   return kFuncTorchTLS;
 }
 
