@@ -32,7 +32,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
 
   // See test_layout_check_for_primal_with_conj_bit in test_autograd.py
-  m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+  m.impl("_storage_numel", torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("dot", torch::CppFunction::makeFallthrough());
