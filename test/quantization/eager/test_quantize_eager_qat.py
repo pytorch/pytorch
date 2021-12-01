@@ -161,6 +161,9 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 self.assertEqual(type(model.linear.activation_post_process), FusedMovingAvgObsFakeQuantize)
                 # make sure that Embedding has a noop for activation.
                 self.assertEqual(type(model.emb.activation_post_process), NoopObserver)
+                # make sure that FakeQuant zero_points are correct dtype
+                self.assertEqual(model.emb.weight_fake_quant.zero_point.dtype, torch.float32)
+                self.assertEqual(model.linear.weight_fake_quant.zero_point.dtype, torch.int32)
 
                 model = convert(model, mapping=get_embedding_static_quant_module_mappings())
 
@@ -187,6 +190,9 @@ class TestQuantizationAwareTraining(QuantizationTestCase):
                 test_only_train_fn(model, self.embed_linear_data_train)
                 # make sure not activation_post_process is inserted for EmbeddingBag
                 self.assertFalse(hasattr(model, "activation_post_process"))
+                # make sure that FakeQuant zero_points are correct dtype
+                self.assertEqual(model.emb.weight_fake_quant.zero_point.dtype, torch.float32)
+                self.assertEqual(model.linear.weight_fake_quant.zero_point.dtype, torch.int32)
                 model = convert(model, mapping=get_embedding_static_quant_module_mappings())
 
                 def checkQuantized(model):
