@@ -651,16 +651,6 @@ void fmin_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void l1_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "l1_cpu", [&]() {
-    using Vec = Vectorized<scalar_t>;
-    cpu_kernel_vec(
-        iter,
-        [](scalar_t a, scalar_t b) -> scalar_t { return std::abs(a - b); },
-        [](Vec a, Vec b) -> Vec { return (a - b).abs(); });
-    });
-}
-
 void smooth_l1_kernel(TensorIterator& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
@@ -1170,7 +1160,6 @@ REGISTER_DISPATCH(maximum_stub, &maximum_kernel);
 REGISTER_DISPATCH(minimum_stub, &minimum_kernel);
 REGISTER_DISPATCH(fmax_stub, &fmax_kernel);
 REGISTER_DISPATCH(fmin_stub, &fmin_kernel);
-REGISTER_DISPATCH(l1_stub, &l1_kernel);
 REGISTER_DISPATCH(smooth_l1_stub, &smooth_l1_kernel);
 REGISTER_DISPATCH(huber_stub, &huber_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, &sigmoid_backward_kernel);

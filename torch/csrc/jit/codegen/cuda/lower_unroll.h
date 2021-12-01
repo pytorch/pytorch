@@ -58,6 +58,8 @@ class TORCH_CUDA_CU_API UnrollPass {
       Fusion* fusion,
       const std::vector<kir::Expr*>& exprs);
 
+  static bool canOmitElseClause(kir::ForLoop* fl);
+
  private:
   // Generate the for Expr replacement map
   UnrollPass(const std::vector<kir::Expr*>& exprs);
@@ -70,8 +72,6 @@ class TORCH_CUDA_CU_API UnrollPass {
 
   void handle(kir::Expr* expr);
 
-  bool canOmitElseClause(kir::ForLoop* fl) const;
-
  private:
   // We will track which loops in the incoming IR will be replaced and by what
   std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
@@ -81,6 +81,10 @@ class TORCH_CUDA_CU_API UnrollPass {
 
   // keep track if we're within an unrolled loop
   bool look_for_unroll_ = true;
+
+  // Indicates if the currently visited expression is inside a
+  // unswitched path
+  bool unswitched_loop_ = false;
 
   // As we generate inline predicates check if we actually generated a
   // non-trivial one.

@@ -190,11 +190,11 @@ class TestForwardOverlapWorldSizeOne(FSDPTest):
         # wait should be long, except when there is no real work on GPU.
         #
         # If the assertions fail below, we likely have a cpu-gpu wait in the forward/backward pass.
+        # e4["cpu_iter"] may not be short as cpu may take some time to queue both compute and all-gather.
         short = [
             e1["cpu_iter"],
             e2["cpu_iter"],
             e3["cpu_iter"],
-            e4["cpu_iter"],
             e1["cpu_wait"],
         ]
         long = [e3["cpu_wait"], e4["cpu_wait"]]

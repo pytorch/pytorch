@@ -6,9 +6,6 @@
 #include <ATen/native/PointwiseOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/Resize.h>
-#include <c10/core/MemoryFormat.h>
-#include <c10/core/ScalarType.h>
 
 constexpr float EPSILON = 1e-12;
 
@@ -25,8 +22,6 @@ namespace {
 
 namespace at { namespace native {
 
-DEFINE_DISPATCH(l1_stub);
-DEFINE_DISPATCH(l1_backward_stub);
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
 DEFINE_DISPATCH(huber_stub);
@@ -111,10 +106,46 @@ Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Ten
   return apply_loss_reduction(output, reduction);
 }
 
-Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
-  auto output = log_target ? at::exp(target) * (target - input)
-                           : at::xlogy(target, target) - target * input;
+Tensor _kl_div_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto output = at::exp(target) * (target - input);
   return apply_loss_reduction(output, reduction);
+}
+
+Tensor _kl_div_non_log_target(const Tensor& input, const Tensor& target, int64_t reduction) {
+  auto output_pos = target * (at::log(target) - input);
+  auto zeros = at::zeros_like(output_pos, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto output = at::where(target > 0, output_pos, zeros);
+  return apply_loss_reduction(output, reduction);
+}
+
+Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  return log_target ? _kl_div_log_target(input, target, reduction)
+                    : _kl_div_non_log_target(input, target, reduction);
+}
+
+Tensor kl_div_backward_cpu(const Tensor& grad, const Tensor& input, const Tensor& target, int64_t reduction, bool log_target) {
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto grad_expand = grad.expand_as(input);
+  if (!log_target) {
+    auto iter = TensorIteratorConfig()
+      .add_output(grad_input)
+      .add_input(target)
+      .add_input(grad_expand)
+      .build();
+    AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "kl_div_backward_cpu", [&]() {
+      cpu_serial_kernel(iter, [](scalar_t target_val, scalar_t grad_val) -> scalar_t{
+        return target_val > 0 ? -target_val * grad_val : 0;
+      });
+    });
+  }
+  else {
+    grad_input = -at::exp(target) * grad_expand;
+  }
+
+  if (reduction == at::Reduction::Mean) {
+    return grad_input / input.numel();
+  }
+  return grad_input;
 }
 
 Tensor binary_cross_entropy_cpu(const Tensor& input, const Tensor& target, const c10::optional<Tensor>& weight_opt, int64_t reduction) {
@@ -320,86 +351,43 @@ Tensor soft_margin_loss(
   return output;
 }
 
-Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor& result) {
-  const auto common_type = promoteTypes(input.scalar_type(), target.scalar_type());
-  const auto reduce = reduction != Reduction::None;
-  const auto is_complex = isComplexType(common_type);
-  const auto aux_output = reduce || is_complex;
-  auto output_iter =  aux_output ? MaybeOwned<Tensor>::owned(at::empty({0}, input.options().dtype(common_type)))
-                                 : MaybeOwned<Tensor>::borrowed(result);
-  auto iter = TensorIterator::borrowing_binary_op(*output_iter, input, target);
-
-  l1_stub(iter.device_type(), iter);
-
-  // No need to resize the output otherwise, as TensorIterator will take care of that
-  if (reduce) {
-    at::native::resize_output(result, {});
-  } else if (is_complex) {
-    at::native::resize_output(result, output_iter->sizes());
+Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
+  TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
+  if (beta == 0) {
+      return at::native::l1_loss(input, target, reduction);
   }
-
-  if (is_complex) {
-    if (reduction == Reduction::Mean) {
-      result.copy_(at::real(*output_iter).mean());
-    } else if (reduction == Reduction::Sum) {
-      result.copy_(at::real(*output_iter).sum());
-    } else {
-      result.copy_(at::real(*output_iter));
-    }
-  } else {
-    if (reduction == Reduction::Mean) {
-      result.copy_(output_iter->mean());
-    } else if (reduction == Reduction::Sum) {
-      result.copy_(output_iter->sum());
-    }
-  }
-  return result;
-}
-
-Tensor l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction) {
-  const auto real_type = toValueType(promoteTypes(input.scalar_type(), target.scalar_type()));
-  Tensor output = at::empty({0}, input.options().dtype(real_type));
-  at::native::l1_loss_out(input, target, reduction, output);
-  return output;
+  Tensor loss;
+  auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+  smooth_l1_stub(iter.device_type(), iter, beta);
+  return apply_loss_reduction(iter.output(), reduction);
 }
 
 Tensor& smooth_l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& result) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
   if (beta == 0) {
-    return at::native::l1_loss_out(input, target, reduction, result);
+      return at::native::l1_loss_out(input, target, reduction, result);
   }
-  const auto common_type = promoteTypes(input.scalar_type(), target.scalar_type());
-  const auto reduce = reduction != Reduction::None;
-  auto output_iter =  reduce ? MaybeOwned<Tensor>::owned(at::empty({0}, input.options().dtype(common_type)))
-                             : MaybeOwned<Tensor>::borrowed(result);
-  auto iter = TensorIterator::borrowing_binary_op(*output_iter, input, target);
-
-  // No need to resize the output otherwise, as TensorIterator will take care of that
-  if (reduce) {
-    at::native::resize_output(result, {});
+  if (reduction != Reduction::None) {
+    Tensor loss;
+    auto iter = TensorIterator::borrowing_binary_op(loss, input, target);
+    smooth_l1_stub(iter.device_type(), iter, beta);
+    if (reduction == Reduction::Mean) {
+      at::mean_out(result, iter.output(), 0);
+    } else {
+      at::sum_out(result, iter.output(), 0);
+    }
+  } else {
+    auto iter = TensorIterator::borrowing_binary_op(result, input, target);
+    smooth_l1_stub(iter.device_type(), iter, beta);
   }
-
-  smooth_l1_stub(iter.device_type(), iter, beta);
-
-  if (reduction == Reduction::Mean) {
-    result.copy_(output_iter->mean());
-  } else if (reduction == Reduction::Sum) {
-    result.copy_(output_iter->sum());
-  }
-
   return result;
 }
 
-Tensor smooth_l1_loss(const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
-  const auto common_type = promoteTypes(input.scalar_type(), target.scalar_type());
-  Tensor output = at::empty({0}, input.options().dtype(common_type));
-  at::native::smooth_l1_loss_out(input, target, reduction, beta, output);
-  return output;
-}
-
-Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
-  const auto common_type = promoteTypes(input.scalar_type(), target.scalar_type());
-  auto grad_input = at::empty(input.sizes(), input.options().dtype(common_type));
+Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta, Tensor& grad_input) {
+  if (beta <= 0)
+    return at::native::l1_loss_backward_out(
+        grad_output, input, target, reduction, grad_input);
+  auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
     .add_input(input)
@@ -409,26 +397,15 @@ Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Te
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
     .build();
-  auto norm = reduction == Reduction::Mean ? 1. / iter.numel() : 1.;
-  l1_backward_stub(iter.device_type(), iter, norm);
+  smooth_l1_backward_stub(iter.device_type(), iter, norm, beta);
   return grad_input;
 }
 
 Tensor smooth_l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, double beta) {
-  if (beta == 0) {
-    return at::native::l1_loss_backward(grad_output, input, target, reduction);
-  }
-  auto grad_input = at::zeros_like(input, at::MemoryFormat::Preserve);
-  auto iter = at::TensorIteratorConfig()
-    .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
-    .promote_inputs_to_common_dtype(true)
-    .build();
-  auto norm = reduction == Reduction::Mean ? 1. / iter.numel() : 1.;
-  smooth_l1_backward_stub(iter.device_type(), iter, norm, beta);
-  return grad_input;
+  if (beta <= 0)
+      return at::native::l1_loss_backward(grad_output, input, target, reduction);
+  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::smooth_l1_loss_backward_out(grad_input, grad_output, input, target, reduction, beta);
 }
 
 Tensor huber_loss(const Tensor& input, const Tensor& target, int64_t reduction, double delta) {
@@ -508,6 +485,38 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;
+}
+
+Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
+  const auto float_type = c10::toValueType(input.scalar_type());
+  Tensor result = at::empty({0}, input.options().dtype(float_type));
+  return at::l1_loss_out(result, input, target, reduction);
+}
+
+Tensor& l1_loss_out(const Tensor& input, const Tensor& target, int64_t reduction, Tensor& result) {
+  if (reduction != Reduction::None) {
+    auto diff = at::sub(input, target);
+    auto loss = diff.is_complex() ? diff.abs() : diff.abs_();
+    if (reduction == Reduction::Mean) {
+      return at::mean_out(result, loss, IntArrayRef{});
+    } else {
+      return at::sum_out(result, loss, IntArrayRef{});
+    }
+  } else {
+    auto diff = input.is_complex() ? at::sub(input, target) : at::sub_out(result, input, target);
+    return at::abs_out(result, diff);
+  }
+}
+
+Tensor l1_loss_backward(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction) {
+  Tensor grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return at::l1_loss_backward_out(grad_input, grad_output, input, target, reduction);
+}
+
+Tensor& l1_loss_backward_out(const Tensor& grad_output,
+    const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
+  auto norm = reduction == Reduction::Mean ? grad_output / input.numel() : grad_output;
+  return at::sub_out(grad_input, input, target).sgn_().mul_(norm);
 }
 
 }}  // namespace at::native
