@@ -167,6 +167,9 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
             out.append(self[idx])
     return out
 
+def max_dim(self: List[int], dim: int, keep_dim: bool):
+    out = mean_dim(self, [dim], keep_dim, None)
+    return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
 def div_rtn(x: int, y: int):

@@ -13217,6 +13217,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         assert_autodiffed=True,
+        assert_jit_shape_analysis=True,
         promotes_int_to_float=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.mean),
