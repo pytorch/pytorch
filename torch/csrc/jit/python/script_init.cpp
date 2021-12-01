@@ -1603,9 +1603,9 @@ void initJitScriptBindings(PyObject* module) {
       "_compile_graph_to_code_table",
       [](const std::string& name, const std::shared_ptr<Graph>& graph) {
         CompilationOptions options;
-        auto jitFunc = std::make_unique<GraphFunction>(name, graph, nullptr);
-        auto mobileFunc = convertJitFunctionToMobileFunction(*jitFunc, options);
-        return convertMobileFunctionToCodeTable(mobileFunc.get(), options);
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
       });
 
   m.def(
