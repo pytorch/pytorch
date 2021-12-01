@@ -440,7 +440,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             self.assertEqual(x, None)
 
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
-        class NonWrapperSublass(torch.Tensor):
+        class NonWrapperSubclass(torch.Tensor):
             elem: torch.Tensor
 
             __slots__ = ['elem']
@@ -456,22 +456,22 @@ $6 = torch._ops.aten.add_($1, $5)''')
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 def unwrap(e):
-                    return e.elem if isinstance(e, NonWrapperSublass) else e
+                    return e.elem if isinstance(e, NonWrapperSubclass) else e
 
                 def wrap(e):
-                    return NonWrapperSublass(e) if isinstance(e, torch.Tensor) else e
+                    return NonWrapperSubclass(e) if isinstance(e, torch.Tensor) else e
 
                 # no_dispatch is only needed if you use enable_python_mode.
                 # It prevents infinite recursion.
                 with no_dispatch():
                     rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                logging.getLogger("NonWrapperSublass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+                logging.getLogger("NonWrapperSubclass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
                 return rs
 
-        x = NonWrapperSublass(torch.tensor([3.0, 4.0], requires_grad=True))
+        x = NonWrapperSubclass(torch.tensor([3.0, 4.0], requires_grad=True))
         y = torch.randn(2, requires_grad=True)
         z = x * y
-        self.assertIsInstance(z, NonWrapperSublass)
+        self.assertIsInstance(z, NonWrapperSubclass)
         z.sum().backward(torch.tensor(1))
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
@@ -479,7 +479,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
     def test_none_wrapping(self):
         # A Tensor subclass that returns None when doing add
         # See LoggingTensor above for more details on the subclass
-        class SublassWithNone(torch.Tensor):
+        class SubclassWithNone(torch.Tensor):
             @staticmethod
             def __new__(cls, elem, *args, **kwargs):
                 r = torch.Tensor._make_wrapper_subclass(
@@ -493,10 +493,10 @@ $6 = torch._ops.aten.add_($1, $5)''')
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 def unwrap(e):
-                    return e.elem if isinstance(e, SublassWithNone) else e
+                    return e.elem if isinstance(e, SubclassWithNone) else e
 
                 def wrap(e):
-                    return SublassWithNone(e) if isinstance(e, torch.Tensor) else e
+                    return SubclassWithNone(e) if isinstance(e, torch.Tensor) else e
 
                 # no_dispatch is only needed if you use enable_python_mode.
                 # It prevents infinite recursion.
@@ -507,9 +507,9 @@ $6 = torch._ops.aten.add_($1, $5)''')
                 else:
                     return rs
 
-        x = SublassWithNone(torch.rand(2))
+        x = SubclassWithNone(torch.rand(2))
         # Make sure both run without error
-        self.assertIsInstance(x * 2, SublassWithNone)
+        self.assertIsInstance(x * 2, SubclassWithNone)
         self.assertIsNone(x + 2)
 
         x.requires_grad_()
