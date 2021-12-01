@@ -39,7 +39,8 @@ from .gen_inplace_or_view_type import (
 
 from tools.codegen.api.types import (Binding, DispatcherSignature, BaseCType, intArrayRefT,
                                      tensorT, tensorListT, MutRefCType, OptionalCType,
-                                     ListCType, SpecialArgName, scalarT, stringT)
+                                     ListCType, SpecialArgName, scalarT, stringT,
+                                     VectorCType)
 from tools.codegen.api.autograd import (
     DifferentiableInput, NativeFunctionWithDifferentiabilityInfo,
     SavedAttribute, dispatch_strategy, gen_differentiable_outputs,
@@ -334,7 +335,7 @@ if (${out_arg}_new_fw_grad_opt.has_value() && ${out_arg}_new_fw_grad_opt.value()
 
 FW_DERIVATIVE_SETTER_TENSOR_LIST = CodeTemplate("""\
 if (${out_arg}_new_fw_grad_opt.has_value()) {
-  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value()
+  auto ${out_arg}_new_fw_grad = ${out_arg}_new_fw_grad_opt.value();
   TORCH_INTERNAL_ASSERT(${out_arg}.size() == ${out_arg}_new_fw_grad.size());
   for (auto i=0; i<${out_arg}.size(); ++i) {
     if (${out_arg}_new_fw_grad[i].defined()) {
@@ -925,7 +926,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
                 opt_res_grad_type = OptionalCType(BaseCType(tensorT)).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR.substitute(out_arg=res, is_inplace=is_inplace_str)
             elif isinstance(derivative.var_type, ListType) and derivative.var_type.is_tensor_like():
-                opt_res_grad_type = OptionalCType(ListCType(BaseCType(tensorT))).cpp_type()
+                opt_res_grad_type = OptionalCType(VectorCType(BaseCType(tensorT))).cpp_type()
                 fw_grad_setter = FW_DERIVATIVE_SETTER_TENSOR_LIST.substitute(out_arg=res, is_inplace=is_inplace_str)
             else:
                 raise RuntimeError("Unsupported output type for forward derivative")
