@@ -125,7 +125,10 @@ class FullyShardedDataParallel(nn.Module):
             )
             # TODO: refactor recursive_wrap so that it is not dependent on
             # ConfigAutoWrap.
-            config_auto_wrap = ConfigAutoWrap(auto_wrap_policy=fsdp_auto_wrap_policy, wrapper_cls=FullyShardedDataParallel)
+            config_auto_wrap = ConfigAutoWrap(
+                auto_wrap_policy=fsdp_auto_wrap_policy,
+                wrapper_cls=FullyShardedDataParallel  # type: ignore[arg-type]
+            )
             with config_auto_wrap:
                 assert ConfigAutoWrap.in_autowrap_context
                 assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
