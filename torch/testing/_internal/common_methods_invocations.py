@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import \
      random_fullrank_matrix_distinct_singular_value,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like, freeze_rng_state)
+     GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
 from setuptools import distutils
@@ -7684,9 +7684,17 @@ def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout
     See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
     """
-    with freeze_rng_state():
-        torch.manual_seed(42)
-        return op(*args, **kwargs)
+    # freeze_rng_state causes test_composite_compliance to fail.
+    # Once the issure is resolved, think about replacing the code below with
+    # from torch.testing._internal.common_utils import freeze_rng_state
+    # with freeze_rng_state():
+    #     torch.manual_seed(42)
+    #     return op(*args, **kwargs)
+    # This code could be future-proof against accidental
+    # changes in the global random state.
+
+    torch.manual_seed(42)
+    return op(*args, **kwargs)
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
     feature_size = np.prod(normalized_shape)
@@ -11704,8 +11712,6 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
            )),
     OpInfo('pca_lowrank',
            op=lambda *args, **kwargs: wrapper_set_seed(
@@ -11722,8 +11728,6 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
            )),
     OpInfo('polar',
            dtypes=floating_types(),
