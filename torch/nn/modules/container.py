@@ -621,6 +621,18 @@ class ParameterDict(Module):
         del self[key]
         return v
 
+    def get(self, key: str, default: Parameter = None) -> 'Parameter':
+        r"""Return the parameter associated with key if present.
+            Otherwise return default if provided, None if not.
+
+        Args:
+            key (string): key to get from the ParameterDict
+            default (Parameter, optional): value to return if key not present
+        """
+        if key in self._parameters:
+            return self[key]
+        return default
+
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
         """
