@@ -17,6 +17,7 @@
 // removed LLVM_GSL_OWNER
 // added SmallVector::at
 // added operator<< for std::ostream
+// added C10_API to export SmallVectorBase
 
 #pragma once
 
@@ -48,7 +49,7 @@ namespace c10 {
 /// 32 bit size would limit the vector to ~4GB. SmallVectors are used for
 /// buffering bitcode output - which can exceed 4GB.
 template <class Size_T>
-class SmallVectorBase {
+class C10_API SmallVectorBase {
  protected:
   void* BeginX;
   Size_T Size = 0, Capacity;
