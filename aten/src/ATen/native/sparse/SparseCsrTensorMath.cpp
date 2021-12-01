@@ -179,7 +179,6 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   }
 
 CREATE_UNARY_FUNC(abs);
-CREATE_UNARY_FUNC(absolute);
 CREATE_UNARY_FUNC(angle);
 CREATE_UNARY_FUNC(asin);
 CREATE_UNARY_FUNC(asinh);
@@ -194,7 +193,12 @@ CREATE_UNARY_FUNC(neg);
 CREATE_UNARY_FUNC(rad2deg);
 CREATE_UNARY_FUNC(sign);
 CREATE_UNARY_FUNC(sin);
+CREATE_UNARY_FUNC(sinh);
 CREATE_UNARY_FUNC(sgn);
+CREATE_UNARY_FUNC(sqrt);
+CREATE_UNARY_FUNC(square);
+CREATE_UNARY_FUNC(tan);
+CREATE_UNARY_FUNC(tanh);
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
