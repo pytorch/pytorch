@@ -37,6 +37,11 @@ def broadcast(a: List[int], b: List[int]):
 
     return expandedSizes
 
+def broadcast_three(a: List[int], b: List[int], c: List[int]):
+    return broadcast(broadcast(a, b), c)
+
+def broadcast_one_three(a: List[int], b: Any, c: List[int]):
+    return broadcast(a, c)
 
 def adaptive_avg_pool2d(self: List[int], out: List[int]):
     assert len(out) == 2
