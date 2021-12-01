@@ -11,23 +11,17 @@
 
 namespace at { namespace native { namespace {
 
-// template<typename scalar_t>
-// struct CompareEqFunctor {
-//   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-//     return a == b;
-//   }
-// };
-
+enum class EqOpType {EQ, NE};
 
 template<typename scalar_t>
 struct CompareEqFunctor{
-  CompareEqFunctor(const int op): op_(op) {TORCH_INTERNAL_ASSERT_DEBUG_ONLY(op_>=0 && op_ <= 1);}
-  const int op_;
+  CompareEqFunctor(EqOpType op): op_(op) {}
+  const EqOpType op_;
   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
     //printf("vals %ld %ld\n", a, b);
-    if (op_ == 0) {
+    if (op_ == EqOpType::EQ) {
       return a == b;
-    } else {
+    } else { //NE
       return a != b;
     }
 
@@ -37,13 +31,13 @@ struct CompareEqFunctor{
 
 void eq_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(0));
+    gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(EqOpType::EQ));
   });
 }
 
 void ne_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
-    gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(1));
+    gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(EqOpType::NE));
   });
 }
 
