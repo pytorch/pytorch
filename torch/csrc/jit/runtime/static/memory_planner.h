@@ -5,6 +5,40 @@
 namespace torch {
 namespace jit {
 
+// A StorageGroup represents a collection of tensors that share backing storage.
+class StorageGroup {
+ public:
+  // Every storage group must contain at least one tensor.
+  explicit StorageGroup(at::Tensor* tensor) : group_{tensor} {}
+
+  void addTensor(at::Tensor* tensor) {
+    group_.push_back(tensor);
+  }
+
+  const std::vector<at::Tensor*>& group() const {
+    return group_;
+  }
+
+  size_t maxTensorSize() const {
+    return max_tensor_size_;
+  }
+
+  void setMaxTensorSize(size_t new_size) {
+    max_tensor_size_ = new_size;
+  }
+
+  size_t numManagedTensors() const {
+    return group_.size();
+  }
+
+ private:
+  // The size attribute represents the amount of memory that will be
+  // allocated for all tensors in this storage group. Initially it
+  // is zero, eventually it gets updated by the MemoryPlanner.
+  size_t max_tensor_size_ = 0;
+  std::vector<at::Tensor*> group_{};
+};
+
 /// There are three types of ops in a processed graph in Static Runtime:
 ///   1. op with _out variant
 ///   2. view producing op
@@ -154,7 +188,7 @@ class MemoryPlanner {
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the StorageImpls each time we deallocate.
-  std::vector<std::pair<size_t, std::vector<at::Tensor*>>> managed_tensors_;
+  std::vector<StorageGroup> managed_tensors_{};
   at::DataPtr buffer_; // allocated each time we call Run()
   uint8_t* buffer_start_{nullptr};
   uint8_t* buffer_end_{nullptr};
