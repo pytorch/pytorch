@@ -30,7 +30,8 @@ One important case where this assumption is important is when tracking
 the CUDA device a tensor is stored in: this information is stored
 solely in the storage, so if a storage is nullptr, we lose this information.
 
-Although storage is never nullptr, the data field of THStorage may be nullptr.  This
+Although storage is never nullptr, the data field of c10::StorageImpl may be
+nullptr.  This
 mostly occurs when we want to pre-allocate an output tensor struct, but then
 have it be resized and filled with data by some operator: there's no point in
 allocating data for it in this case!
