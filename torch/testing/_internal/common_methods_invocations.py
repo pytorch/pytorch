@@ -13905,21 +13905,11 @@ op_db: List[OpInfo] = [
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
-        backward_dtypesIfCPU=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
         dtypesIfCUDA=floating_types_and(
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
-        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.int8, torch.int16, torch.int32, torch.int64),
         supports_out=False,
         check_batched_grad=False,
-        skips=(
-            # See https://github.com/pytorch/pytorch/issues/65466
-            DecorateInfo(
-                unittest.expectedFailure,
-                "TestGradients",
-                "test_fn_gradgrad",
-            ),
-        ),
     ),
     OpInfo(
         "diagflat",

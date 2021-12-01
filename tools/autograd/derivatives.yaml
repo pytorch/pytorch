@@ -1641,8 +1641,8 @@
   self: not_implemented("embedding_renorm")
 
 - name: kl_div(Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  self: kl_div_backward(grad, self, target, reduction, log_target)
-  target: kl_div_target_backward(grad, self, target, reduction, log_target)
+  self: kl_div_backward_aux(grad, self, target, reduction, log_target)
+  target: kl_div_target_backward_aux(grad, self, target, reduction, log_target)
 
 - name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: l1_loss_backward(grad, self, target, reduction)
@@ -2005,11 +2005,6 @@
 - name: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val) -> Tensor
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad)
-
-- name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, int reduction=Mean, *, bool log_target=False) -> Tensor
-  grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
-  self: zeros_like(grad)
-  target: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
