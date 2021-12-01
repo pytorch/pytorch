@@ -164,17 +164,38 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
-Tensor& sin_sparse_csr_out(const Tensor& self, Tensor& result) {
-  return unary_op_out(&at::sin_outf, self, result);
-}
+#define CREATE_UNARY_FUNC(func) \
+  Tensor& func##_##sparse_csr_out(const Tensor& self, Tensor& result) { \
+    return unary_op_out(&at::func##_##outf, self, result);              \
+  }                                                                     \
+  Tensor func##_##sparse_csr(const Tensor& self) {                      \
+    return get_result_tensor_for_unary_op(&at::func, self);             \
+  }                                                                     \
+  Tensor& func##_##sparse_csr_(Tensor& self) {                          \
+    return func##_##sparse_csr_out(self, self);                         \
+  }
 
-Tensor sin_sparse_csr(const Tensor& self) {
-  return get_result_tensor_for_unary_op(&at::sin, self);
-}
-
-Tensor& sin_sparse_csr_(Tensor& self) {
-  return sin_sparse_csr_out(self, self);
-}
+CREATE_UNARY_FUNC(abs);
+CREATE_UNARY_FUNC(absolute);
+CREATE_UNARY_FUNC(asin);
+CREATE_UNARY_FUNC(arcsin);
+CREATE_UNARY_FUNC(asinh);
+CREATE_UNARY_FUNC(arcsinh);
+CREATE_UNARY_FUNC(atan);
+CREATE_UNARY_FUNC(arctan);
+CREATE_UNARY_FUNC(atanh);
+CREATE_UNARY_FUNC(arctanh);
+CREATE_UNARY_FUNC(ceil);
+CREATE_UNARY_FUNC(erf);
+CREATE_UNARY_FUNC(erfinv);
+CREATE_UNARY_FUNC(expm1);
+CREATE_UNARY_FUNC(log1p);
+CREATE_UNARY_FUNC(neg);
+CREATE_UNARY_FUNC(negative);
+CREATE_UNARY_FUNC(rad2deg);
+CREATE_UNARY_FUNC(sign);
+CREATE_UNARY_FUNC(sin);
+CREATE_UNARY_FUNC(sgn);
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
