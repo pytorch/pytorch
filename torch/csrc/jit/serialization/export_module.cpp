@@ -213,6 +213,7 @@ std::pair<IValue, IValue> getFunctionTuple(
         `TypeNameUniquer` to get the managled name of the argument. This helps
         in having the right object reference when a class method is called using
         the `self` argument.
+
         arg.type()->annotation_str(type_printer) => mangled unique name of the
         module/submodule
       */
