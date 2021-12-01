@@ -1,8 +1,7 @@
-
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Dict, Tuple, Union
+from typing import Dict, Tuple, Union
 
 import torch
 from torch import nn
@@ -13,8 +12,6 @@ from .utils import FakeSparsity, module_to_fqn, fqn_to_module
 SUPPORTED_MODULES = {
     nn.Linear
 }
-
-_SPARSE_PARAM_TYPE = Union[Tuple[str, ...], Dict[str, Tuple[str, ...]]]
 
 
 class BaseSparsifier(abc.ABC):
@@ -186,17 +183,24 @@ class BaseSparsifier(abc.ABC):
             self.state[config['fqn']]['mask'] = mask
             parametrize.register_parametrization(module, 'weight', param(mask))
 
-    def squash_mask(self, keep_sparse_params: _SPARSE_PARAM_TYPE = None,
+    def squash_mask(self,
+                    params_to_keep: Tuple[str, ...] = None,
+                    params_to_keep_per_layer: Dict[str, Tuple[str, ...]] = None,
                     *args, **kwargs):
         r"""Squashes the sparse masks into the appropriate tensors.
 
-        If the `keep_sparse_params` is set, the module will have a
-        `sparse_params` dict attached to it.
+        If either the `params_to_keep` or `params_to_keep_per_layer` is set,
+        the module will have a `sparse_params` dict attached to it.
 
         Args:
-            keep_sparse_params: List of keys to save in the module or a dict
-                                representing the modules and keys that will have
-                                sparsity parameters saved
+            params_to_keep: List of keys to save in the module or a dict
+                            representing the modules and keys that will have
+                            sparsity parameters saved
+            params_to_keep_per_layer: Dict to specify the params that should be
+                            saved for specific layers. The keys in the dict
+                            should be the module fqn, while the values should
+                            be a list of strings with the names of the variables
+                            to save in the `sparse_params`
 
         Examples:
             >>> # Don't save any sparse params
@@ -206,9 +210,9 @@ class BaseSparsifier(abc.ABC):
 
             >>> # Keep sparse params per layer
             >>> sparsifier.squash_mask(
-            ...     keep_sparse_params={
+            ...     params_to_keep_per_layer={
             ...         'submodule1.linear1': ('foo', 'bar'),
-            ...         'submodule2.linear42': ('baz')
+            ...         'submodule2.linear42': ('baz',)
             ...     })
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
@@ -216,31 +220,39 @@ class BaseSparsifier(abc.ABC):
             {'baz': 0.1}
 
             >>> # Keep sparse params for all layers
-            >>> sparsifier.squash_mask(keep_sparse_params=('foo', 'bar'))
+            >>> sparsifier.squash_mask(params_to_keep=('foo', 'bar'))
             >>> print(model.submodule1.linear1.sparse_params)
             {'foo': 42, 'bar': 24}
             >>> print(model.submodule2.linear42.sparse_params)
             {'foo': 42, 'bar': 24}
 
+            >>> # Keep some sparse params for all layers, and specific ones for
+            >>> # some other layers
+            >>> sparsifier.squash_mask(
+            ...     params_to_keep=('foo', 'bar'),
+            ...     params_to_keep_per_layer={
+            ...         'submodule2.linear42': ('baz',)
+            ...     })
+            >>> print(model.submodule1.linear1.sparse_params)
+            {'foo': 42, 'bar': 24}
+            >>> print(model.submodule2.linear42.sparse_params)
+            {'foo': 42, 'bar': 24, 'baz': 0.1}
         """
         for config in self.module_groups:
             module = config['module']
             parametrize.remove_parametrizations(module, 'weight',
                                                 leave_parametrized=True)
-            if keep_sparse_params is not None:
-                if isinstance(keep_sparse_params, dict):
-                    # Case 1: Dict[str, Tuple[str, ...]]
-                    sparse_params = keep_sparse_params.get(config['fqn'], None)
-                    if sparse_params is not None:
-                        sparse_params = {k: config[k] for k in sparse_params}
-                elif isinstance(keep_sparse_params, (tuple, list)):
-                    # Case 2: Tuple[str, ...]
-                    sparse_params = {k: config[k] for k in keep_sparse_params}
-                else:
-                    raise ValueError(
-                        "'keep_sparse_params' should either be a list, a tuple, or a dict")
+            sparse_params = dict()
+            if params_to_keep is not None:
+                params = {k: config[k] for k in params_to_keep}
+                sparse_params.update(params)
+            if params_to_keep_per_layer is not None:
+                params = params_to_keep_per_layer.get(config['fqn'], None)
+                if params is not None:
+                    params = {k: config[k] for k in params}
+                    sparse_params.update(params)
+            if sparse_params:
                 module.sparse_params = sparse_params
-
 
     def convert(self):
         # TODO: Call the torch.ao.utils.convert in here
