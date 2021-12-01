@@ -23,10 +23,10 @@
 #include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 #include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/narrow.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
 #include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch {
@@ -90,10 +90,10 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::SelectViewUpdate>(
               node, *torch_lazy_tensors::ir::ops::ltc_select_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_update_slice) {
-      return LowerUpdateSlice(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::UpdateSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_update_slice));
+    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_narrow_view_update) {
+      return LowerNarrowViewUpdate(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::NarrowViewUpdate>(
+              node, *torch_lazy_tensors::ir::ops::ltc_narrow_view_update));
     }
     if (node->op().op == at::prim::Constant) {
       return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
@@ -480,8 +480,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {dest};
   }
 
-  TSOpVector LowerUpdateSlice(
-      const torch_lazy_tensors::ir::ops::UpdateSlice* node) {
+  TSOpVector LowerNarrowViewUpdate(
+      const torch_lazy_tensors::ir::ops::NarrowViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();

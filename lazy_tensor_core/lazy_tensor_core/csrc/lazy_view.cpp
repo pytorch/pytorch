@@ -13,11 +13,11 @@
 #include "lazy_tensor_core/csrc/view_ops/diagonal.h"
 #include "lazy_tensor_core/csrc/view_ops/diagonal_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/narrow.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/resize.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
 #include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch_lazy_tensors {
@@ -80,8 +80,8 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
             view_info.select->stride);
         break;
       case ViewInfo::Type::kNarrow:
-        result = torch::lazy::MakeNode<ir::ops::UpdateSlice>(tmp_values[i - 1], result,
-                                                    view_info.indices);
+        result = torch::lazy::MakeNode<ir::ops::NarrowViewUpdate>(
+            tmp_values[i - 1], result, view_info.indices);
         break;
       case ViewInfo::Type::kNoOp:
         break;

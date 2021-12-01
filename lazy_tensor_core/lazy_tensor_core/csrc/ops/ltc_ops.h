@@ -38,13 +38,13 @@ extern const OpKindWrapper ltc_device_data;
 extern const OpKindWrapper ltc_diagonal_view_update;
 extern const OpKindWrapper ltc_get_dimensions_size;
 extern const OpKindWrapper ltc_moving_average;
+extern const OpKindWrapper ltc_narrow_view_update;
 extern const OpKindWrapper ltc_nms;
 extern const OpKindWrapper ltc_not_supported;
 extern const OpKindWrapper ltc_replication_pad;
 extern const OpKindWrapper ltc_replication_pad_backward;
 extern const OpKindWrapper ltc_select_view_update;
 extern const OpKindWrapper ltc_tensor_data;
-extern const OpKindWrapper ltc_update_slice;
 
 }  // namespace ops
 }  // namespace ir
