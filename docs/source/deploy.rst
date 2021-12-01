@@ -4,7 +4,7 @@ torch::deploy
 ``torch::deploy`` is a system that allows you to run multiple embedded Python
 interpreters in a C++ process without a shared global interpreter lock. For more
 information on how ``torch::deploy`` works internally, please see the related
-`arXiv paper <https://arxiv.org/pdf/2104.00254.pdf>`.
+`arXiv paper <https://arxiv.org/pdf/2104.00254.pdf>`_.
 
 
 .. warning::
@@ -21,7 +21,7 @@ Installing ``torch::deploy``
 
 ``torch::deploy`` is not yet built by default in our binary releases, so to get
 a copy of libtorch with ``torch::deploy`` enabled, follow the instructions for
-`building PyTorch from source <https://github.com/pytorch/pytorch/#from-source>`.
+`building PyTorch from source <https://github.com/pytorch/pytorch/#from-source>`_.
 
 When running ``setup.py``, you will need to specify ``USE_DEPLOY=1``, like:
 
@@ -38,7 +38,7 @@ Creating a model package in Python
 
 ``torch::deploy`` can load and run Python models that are packaged with
 ``torch.package``. You can learn more about ``torch.package`` in the
-``torch.package`` `documentation <https://pytorch.org/docs/stable/package.html#tutorials>`.
+``torch.package`` `documentation <https://pytorch.org/docs/stable/package.html#tutorials>`_.
 
 For now, let's create a simple model that we can load and run in ``torch::deploy``.
 
