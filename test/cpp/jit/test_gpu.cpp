@@ -10846,6 +10846,9 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
 }
 
 TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 

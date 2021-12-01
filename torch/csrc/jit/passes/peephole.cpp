@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/peephole_alias_sensitive.h>
 #include <torch/csrc/jit/passes/peephole_dict_idioms.h>
@@ -34,8 +35,9 @@ struct PeepholeOptimizeImpl {
     bool changed = optimizeBlock(graph_->block());
     changed |= PeepholeOptimizeListIdioms(graph_);
     changed |= PeepholeOptimizeDictIdioms(graph_);
-    changed |= PeepholeOptimizeAliasSensitive(graph_);
+    changed |= PeepholeOptimizeAliasSensitive(graph_, shape_peepholes_);
     changed |= PeepholeOptimizeNonTensor(graph_);
+    changed |= CombineConcats(graph_);
     return changed;
   }
 

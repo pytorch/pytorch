@@ -321,6 +321,22 @@ effect of INT8 quantization.
     Conv3d
     Linear
 
+torch.nn.qat.dynamic
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This module implements versions of the key nn modules such as **Linear()**
+which run in FP32 but with rounding applied to simulate the effect of INT8
+quantization and will be dynamically quantized during inference.
+
+.. currentmodule:: torch.nn.qat.dynamic
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    Linear
+
 torch.nn.quantized
 ~~~~~~~~~~~~~~~~~~~~~~
 

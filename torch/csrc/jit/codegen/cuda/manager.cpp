@@ -161,6 +161,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
     // Note that even for Profiling Executor, scalar type could still be
     // missing, especially for output tensor from a given node (as profiling
     // node only insert meta information after itself).
+    PropagateShapesOnGraph(graph);
     TypePropagate(graph);
     PropagateShapesOnGraph(graph);
 

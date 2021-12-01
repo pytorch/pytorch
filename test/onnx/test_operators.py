@@ -17,6 +17,7 @@ import inspect
 import glob
 import os
 import shutil
+import tempfile
 import torch.testing._internal.common_utils as common
 
 '''Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
@@ -282,12 +283,12 @@ class TestOperators(TestCase):
         model = torch.nn.Conv2d(3, 2, 3)
 
         dynamic_axes = {"input_1": [0, 2, 3], "output_1": {0: "output_1_variable_dim_0", 1: "output_1_variable_dim_1"}}
-        model_proto_name = "conv2d.onnx"
-        torch.onnx.export(model, x, model_proto_name, verbose=True, input_names=["input_1"], output_names=["output_1"],
+        model_proto_file = tempfile.NamedTemporaryFile()
+        torch.onnx.export(model, x, model_proto_file.name, verbose=True, input_names=["input_1"], output_names=["output_1"],
                           dynamic_axes=dynamic_axes)
 
         import onnx
-        onnx_model = onnx.load(model_proto_name)
+        onnx_model = onnx.load(model_proto_file.name)
         onnx.checker.check_model(onnx_model)
 
         # Asserting the default dynamic axes names are generated when custom names are not provided

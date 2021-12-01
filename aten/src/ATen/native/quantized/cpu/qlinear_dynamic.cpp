@@ -19,7 +19,9 @@ int register_linear_params();
 
 #ifdef USE_FBGEMM
 template <bool ReluFused>
-at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_range) {
+at::Tensor PackedLinearWeight::apply_dynamic_impl(
+    at::Tensor input,
+    bool reduce_range) {
   using at::Tensor;
   // fp32 * int8 -> fp32 (with quantization on activation, and dequantization
   // on the result).
@@ -212,11 +214,16 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(at::Tensor input, bool reduce_
   return output;
 }
 
-at::Tensor PackedLinearWeight::apply_dynamic(at::Tensor input, bool reduce_range) {
-  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input), reduce_range);
+at::Tensor PackedLinearWeight::apply_dynamic(
+    at::Tensor input,
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/false>(
+      std::move(input), reduce_range);
 }
 
-at::Tensor PackedLinearWeight::apply_dynamic_relu(at::Tensor input, bool reduce_range) {
+at::Tensor PackedLinearWeight::apply_dynamic_relu(
+    at::Tensor input,
+    bool reduce_range) {
   return apply_dynamic_impl</*ReluFused=*/true>(std::move(input), reduce_range);
 }
 
@@ -224,7 +231,8 @@ at::Tensor PackedLinearWeight::apply_dynamic_relu(at::Tensor input, bool reduce_
 
 #ifdef USE_PYTORCH_QNNPACK
 template <bool ReluFused>
-at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
+at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
+    at::Tensor input) {
   using at::Tensor;
   TORCH_CHECK(
       input.dim() >= 2,
@@ -233,6 +241,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   // C(output) = A(input) x B(weight), where C, A, B are M x N, M x K, K x N
   // matrices, respectively.
 
+  // Weight packing is not thread safe
+  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   auto packB = w.get();
   size_t rows_w = bias_.size(0);
   size_t cols_w = input_contig.size(input_contig.dim() - 1);
@@ -267,21 +277,22 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
       /*qmax=*/255);
   float* weight_scales_data = w_scales.data_ptr<float>();
 
-  // QNNPack is not thread safe
-  std::lock_guard<std::mutex> lock(qnnp_mutex_);
   if (!input_scale.has_value() || input_scale.value() != q_params.scale) {
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        w_scales, q_params.scale, 1.f, requantization_scales);
+        w_scales,
+        q_params.scale,
+        1.f,
+        requantization_scales);
   }
 
   if (!input_scale.has_value()) {
     // Get the original weight and adjust it to uint8 from int8
     auto weight_contig = orig_weight;
 
-    // TODO(kimishpatel), we are allocating affine_quantized regardless of per channel or not.
-    // This allocation is actually used only for packing weight and thus will be freed.
-    // Still we should be consistent. Fix this.
+    // TODO(kimishpatel), we are allocating affine_quantized regardless of per
+    // channel or not. This allocation is actually used only for packing weight
+    // and thus will be freed. Still we should be consistent. Fix this.
     Tensor qnnp_weight = at::_empty_affine_quantized(
         weight_contig.sizes(),
         at::device(c10::kCPU).dtype(c10::kQUInt8),
@@ -305,8 +316,8 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
         nullptr);
     packB = w.get();
     if (at::globalContext().releaseWeightsWhenPrepacking()) {
-      // On mobile, we release the original weight by resetting the intrusive_ptr.
-      // Calling unpack after this will throw an assertion.
+      // On mobile, we release the original weight by resetting the
+      // intrusive_ptr. Calling unpack after this will throw an assertion.
       orig_weight.reset();
     }
   }
@@ -361,11 +372,15 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(at::Tensor input) {
   return output;
 }
 
-at::Tensor PackedLinearWeightsQnnp::apply_dynamic(at::Tensor input, bool reduce_range) {
+at::Tensor PackedLinearWeightsQnnp::apply_dynamic(
+    at::Tensor input,
+    bool /* reduce_range */) {
   return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
 }
 
-at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(at::Tensor input, bool reduce_range) {
+at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(
+    at::Tensor input,
+    bool /* reduce_range */) {
   return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
 }
 
@@ -374,7 +389,9 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(at::Tensor input, bool re
 #ifdef USE_FBGEMM
 
 template <bool ReluFused>
-at::Tensor PackedLinearWeightFp16::apply_dynamic_impl(at::Tensor input) {
+at::Tensor& PackedLinearWeightFp16::apply_dynamic_impl(
+    const at::Tensor& input,
+    at::Tensor& output) {
   const at::Tensor input_contig = input.contiguous();
   const float* input_ptr = input_contig.data_ptr<float>();
 
@@ -386,9 +403,11 @@ at::Tensor PackedLinearWeightFp16::apply_dynamic_impl(at::Tensor input) {
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int64_t M = size_to_dim_(input.dim() - 1, input.sizes());
   const int64_t N = packed_weight_fp16.numCols();
-  std::vector<int64_t> output_size = input.sizes().vec();
-  output_size.back() = N;
-  at::Tensor output = at::empty(output_size, input.options().dtype(at::kFloat));
+  std::vector<int64_t> output_sizes = input.sizes().vec();
+  TORCH_CHECK(!output_sizes.empty())
+  output_sizes.back() = N;
+  // Resize output Tensor
+  output.resize_(output_sizes);
 
   // Call the fp16 gemm interface
   fbgemm::cblas_gemm_compute(
@@ -408,12 +427,34 @@ at::Tensor PackedLinearWeightFp16::apply_dynamic_impl(at::Tensor input) {
   return output;
 }
 
-at::Tensor PackedLinearWeightFp16::apply_dynamic(at::Tensor input, bool reduce_range) {
-  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
+at::Tensor PackedLinearWeightFp16::apply_dynamic(
+    at::Tensor input,
+    bool /* reduce_range */) {
+  at::Tensor output = at::empty({0}, input.options().dtype(at::kFloat));
+  return apply_dynamic_impl</*ReluFused=*/false>(input, output);
 }
 
-at::Tensor PackedLinearWeightFp16::apply_dynamic_relu(at::Tensor input, bool reduce_range) {
-  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
+at::Tensor PackedLinearWeightFp16::apply_dynamic_relu(
+    at::Tensor input,
+    bool /* reduce_range */) {
+  at::Tensor output = at::empty({0}, input.options().dtype(at::kFloat));
+  return apply_dynamic_impl</*ReluFused=*/true>(input, output);
+}
+
+at::Tensor& PackedLinearWeightFp16::apply_dynamic_out(
+    const at::Tensor& input,
+    at::Tensor& output,
+    bool /* reduce_range */) {
+  TORCH_CHECK((output.device() == c10::kCPU) && (output.dtype() == at::kFloat));
+  return apply_dynamic_impl<false>(input, output);
+}
+
+at::Tensor& PackedLinearWeightFp16::apply_dynamic_relu_out(
+    const at::Tensor& input,
+    at::Tensor& output,
+    bool /* reduce_range */) {
+  TORCH_CHECK((output.device() == c10::kCPU) && (output.dtype() == at::kFloat));
+  return apply_dynamic_impl<true>(input, output);
 }
 
 void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
@@ -477,14 +518,24 @@ class QLinearDynamicFp16 final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic"), TORCH_FN(QLinearDynamicInt8<true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"), TORCH_FN(QLinearDynamicFp16<true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic"),
+      TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic"),
+      TORCH_FN(QLinearDynamicInt8<true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_dynamic_fp16"),
+      TORCH_FN(QLinearDynamicFp16<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::linear_relu_dynamic_fp16"),
+      TORCH_FN(QLinearDynamicFp16<true>::run));
 }
 
 TORCH_LIBRARY_IMPL(_quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"), TORCH_FN(QLinearDynamicInt8<false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("_quantized::linear_dynamic"),
+      TORCH_FN(QLinearDynamicInt8<false>::run));
 }
 
 } // namespace

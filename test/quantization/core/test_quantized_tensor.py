@@ -27,7 +27,7 @@ def _calculate_dynamic_qparams(X, dtype, reduce_range=False):
     """Calculate the dynamic quantization parameters (scale, zero_point)
     according to the min and max element of the tensor"""
     if isinstance(X, torch.Tensor):
-        X = X.numpy()
+        X = X.cpu().data.numpy()
     if dtype == torch.qint8:
         if reduce_range:
             qmin, qmax = -64, 63
@@ -143,9 +143,29 @@ class TestQuantizedTensor(TestCase):
     @unittest.skipIf(not TEST_CUDA, "No gpu is available.")
     def test_qtensor_cuda(self):
         self._test_qtensor(torch.device('cuda'))
+        self._test_qtensor_dynamic(torch.device('cuda'))
 
     def test_qtensor_cpu(self):
         self._test_qtensor(torch.device('cpu'))
+        self._test_qtensor_dynamic(torch.device('cpu'))
+
+    def _test_qtensor_dynamic(self, device):
+        # max number of tensor dimensions
+        max_tensor_order = 4
+        # max size for any tensor dimension
+        max_dim_sz = 20
+
+        num_dim = np.random.randint(low=1, high=max_tensor_order)
+        dims = np.random.randint(low=1, high=max_dim_sz, size=num_dim)
+        mat2quant = torch.randn(*dims, dtype=torch.float, device=device)
+        reduce_flag = False
+
+        for dtype in [torch.qint8, torch.quint8]:
+            q_d = torch.quantize_per_tensor_dynamic(mat2quant, dtype, reduce_flag)
+            scale, zero_pt = _calculate_dynamic_qparams(mat2quant, dtype, reduce_flag)
+            q_s = torch.quantize_per_tensor(mat2quant, scale, zero_pt, dtype)
+
+            self.assertEqual(q_d, q_s)
 
     def _test_qtensor(self, device):
         device = str(device)
