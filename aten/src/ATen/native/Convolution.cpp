@@ -827,11 +827,10 @@ ConvBackend select_conv_backend(
   check_shape_forward(input, weight.sizes(), bias, params);
 
   // Expand 1d -> 2d.
-  if (k == 3) {
+  // This is only done for backends that don't natively support 1d spatial input.
+  if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input.is_mkldnn()) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -1019,11 +1018,10 @@ at::Tensor _convolution(
   check_shape_forward(input, weight_sizes, bias, params);
 
   // Expand 1d -> 2d.
-  if (k == 3) {
+  // This is only done for backends that don't natively support 1d spatial input.
+  if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input.is_mkldnn()) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -1172,7 +1170,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3) {
+  if (k == 3 && !input.is_mkldnn()) {
     output = view3d(output);
   }
 

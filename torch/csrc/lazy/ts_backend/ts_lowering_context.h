@@ -97,7 +97,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
     return std::shared_ptr<Computation>(new TSComputation(graph_));
   }
 
-  // Retrieves the lowered operation for a output. If the requested output is
+  // Retrieves the lowered operation for an output. If the requested output is
   // not available yet, the graph behind the output's Node is lowered, and the
   // corresponding TS operation returned.
   torch::jit::Value* GetOutputOp(const Output& output) {
@@ -106,13 +106,15 @@ class TORCH_API TSLoweringContext : public LoweringContext {
       auto post_order = Util::ComputePostOrder(output.node, &emit_status_);
       for (auto node : post_order) {
         bool ok = lowering_->Lower(node);
-        CHECK(ok) << "Failed to lower: " << *node;
+        TORCH_CHECK(ok, "Failed to lower: ", node->ToString());
       }
-      // At this point the outpout better be present, otherwise there is an issue
+      // At this point the output better be present, otherwise there is an issue
       // with the lowering code.
       it = emitted_outputs_.find(output);
-      CHECK(it != emitted_outputs_.end())
-          << "No TS operation emitted for output: " << output;
+      TORCH_CHECK(
+          it != emitted_outputs_.end(),
+          "No TS operation emitted for output: ",
+          output.ToString());
     }
     return it->second;
   }
