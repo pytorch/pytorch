@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat

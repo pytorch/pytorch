@@ -1869,7 +1869,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
     def test_init_from_local_shards_invalid_property_cross_ranks(self):
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
-            shard_lengths=[5, 5],
+            shard_sizes=[5, 5],
             placement=f"rank:{self.rank}/cuda:{self.rank}"
         )
         tensor_overall_size = [10, 10] if self.rank == 0 else [10, 5]
@@ -1899,7 +1899,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
 
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
-            shard_lengths=[5, 5],
+            shard_sizes=[5, 5],
             placement=f"rank:{self.rank}/cpu"
         )
 
@@ -1909,7 +1909,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         # pin memory can only be on dense cpu
         local_shard_metadata = ShardMetadata(
             shard_offsets=[(self.rank // 2) * 5, (self.rank % 2) * 5],
-            shard_lengths=[5, 5],
+            shard_sizes=[5, 5],
             placement=f"rank:{self.rank}/cpu"
         )
         wrong_pin_memory_local_shards = [

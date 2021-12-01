@@ -192,14 +192,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-# Patch required to build xla
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "xla/.circleci/common.sh"
-  apply_patches
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
@@ -305,15 +297,6 @@ else
     WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
-fi
-
-# Test XLA build
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  XLA_DIR=xla
-  # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR
-  build_torch_xla $XLA_DIR
-  assert_git_not_dirty
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
