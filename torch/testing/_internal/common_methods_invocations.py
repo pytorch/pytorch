@@ -2709,10 +2709,9 @@ def sample_inputs_gradient(op_info, device, dtype, requires_grad):
         t = make_tensor(size, device, dtype, low=None, high=None, requires_grad=requires_grad)
         coordinates_tensor_list = []
         for coords in coordinates:
-            # `coords` will always contain floating point values and Python 3.10 does not support
-            # implicit conversion to an integer using `__int__`
-            # See https://github.com/pytorch/pytorch/issues/67612 for more context
-            a = torch.tensor(coords, dtype=torch.float32, device=device)
+            # `coords` will always contain floating point values and Python 3.10 does not support this
+            # implicit conversion to an integer using `__int__`           
+            a = torch.tensor(coords, device=device)
             coordinates_tensor_list.append(a.to(dtype))
         sample_inputs.append(SampleInput(t, kwargs=dict(dim=dim, spacing=coordinates_tensor_list, edge_order=edge_order)))
 
