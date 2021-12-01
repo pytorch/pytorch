@@ -51,6 +51,19 @@ from torch.jit._serialization import save, load
 from torch.jit._fuser import optimized_execution, fuser, last_executed_optimized_graph
 from torch.jit._freeze import freeze, optimize_for_inference, run_frozen_optimizations
 
+
+import warnings
+from importlib.machinery import SourceFileLoader
+
+import os
+try:
+    shape_function_fp = (
+        f"{os.path.dirname(os.path.realpath(torch.__file__))}/include/torch/csrc/jit/runtime/shape_functions.h"
+    )
+    _shapes = SourceFileLoader("shape_functions", shape_function_fp).load_module()  # type: ignore[call-arg]
+except Exception as e:
+    warnings.warn(f"Couldn't load shape functions: {e}")
+
 # For backwards compatibility
 _fork = fork
 _wait = wait
