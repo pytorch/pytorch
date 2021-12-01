@@ -6,6 +6,7 @@
 #include <c10/util/ThreadLocalDebugInfo.h>
 
 #include <ATen/record_function.h>
+#include <ATen/FuncTorchTLS.h>
 #include <ATen/core/PythonModeTLS.h>
 
 namespace at {
@@ -37,6 +38,9 @@ class TORCH_API ThreadLocalState {
 
   // RecordFunction TLS
   RecordFunctionTLS rf_tls_;
+
+  // TLS for functorch
+  std::shared_ptr<functorch::FuncTorchTLSBase> functorch_tls_;
 
   // TLS for AutogradModes
   AutogradState autograd_tls_;
