@@ -64,6 +64,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_transpose_backward(
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/ConvUtils.h>
+#include <c10/util/irange.h>
 
 namespace at { namespace native {
 
@@ -271,6 +272,27 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_convolution_backward(
   return std::make_tuple(grad_input, grad_weight, grad_bias);
 }
 
+static inline std::vector<int64_t> padding_r(
+    IntArrayRef padding, IntArrayRef output_padding)
+{
+  // ConvTranpose padding adjustment
+  //
+  // PyTorch uses padding/output_padding:
+  //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
+  //
+  // MKLDNN uses padding_l/padding_r:
+  //   osize = (isize - 1) * stride - padding_l - padding_r + dilation * (kernel_size - 1) + 1
+  //
+  // So: padding_l = padding, padding_r = padding - output_padding
+  //
+  auto dim = padding.size();
+  std::vector<int64_t> pad_r(dim);
+  for (const auto d : c10::irange(dim)) {
+    pad_r[d] = padding[d] - output_padding[d];
+  }
+  return pad_r;
+}
+
 Tensor mkldnn_convolution_transpose(
     const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
@@ -310,7 +332,7 @@ Tensor mkldnn_convolution_transpose(
         y,
         stride.vec(),
         padding.vec(),
-        padding.vec(),
+        padding_r(padding, output_padding),
         dilation.vec(),
         groups);
   } else {
@@ -321,7 +343,7 @@ Tensor mkldnn_convolution_transpose(
         y,
         stride.vec(),
         padding.vec(),
-        padding.vec(),
+        padding_r(padding, output_padding),
         dilation.vec(),
         groups);
   }
@@ -359,7 +381,7 @@ Tensor mkldnn_convolution_transpose_backward_input(
       grad_x,
       stride.vec(),
       padding.vec(),
-      padding.vec(),
+      padding_r(padding, output_padding),
       dilation.vec(),
       groups);
 
@@ -393,7 +415,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         grad_b,
         stride.vec(),
         padding.vec(),
-        padding.vec(),
+        padding_r(padding, output_padding),
         dilation.vec(),
         groups);
   } else {
@@ -404,7 +426,7 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
         grad_w,
         stride.vec(),
         padding.vec(),
-        padding.vec(),
+        padding_r(padding, output_padding),
         dilation.vec(),
         groups);
   }
