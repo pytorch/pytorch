@@ -1,8 +1,5 @@
-import operator
-
-from functools import reduce
 from torch.utils.data import MapDataPipe, functional_datapipe, DataChunk
-from typing import List, Optional, Sized, TypeVar, Union
+from typing import List, Optional, Sized, TypeVar
 
 
 T = TypeVar('T')
