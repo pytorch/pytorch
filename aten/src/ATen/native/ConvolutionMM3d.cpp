@@ -64,7 +64,7 @@ static Tensor compute_columns3d(
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
-        for (int64_t t = start; t < end; t++) {
+        for (const auto t : c10::irange(start, end)) {
           auto input_t = input_a[t];
           auto columns_t = columns_a[t];
           Unfold3dCopyCPU(
@@ -415,7 +415,6 @@ void slow_conv3d_backward_out_cpu_template(
   Tensor fgrad_input = at::empty({batch_size,
       n_input_plane * kernel_depth * kernel_height * kernel_width,
       output_depth * output_height * output_width}, input.options());
-  TORCH_CHECK(fgrad_input.is_contiguous(), "fgrad_input must be contiguous")
 
   AT_DISPATCH_FLOATING_TYPES_AND(
       kBFloat16, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
