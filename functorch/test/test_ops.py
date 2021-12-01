@@ -792,18 +792,39 @@ class TestDecompositionOpInfo(TestCase):
         skip('resize_'),
     })
     def test_decomposition(self, device, dtype, op):
+        # copied from common_utils.py
+        dtype_precisions = {
+            torch.float16    : (0.001, 1e-5),
+            torch.bfloat16   : (0.016, 1e-5),
+            torch.float32    : (1.3e-6, 1e-5),
+            torch.float64    : (1e-7, 1e-7),
+            torch.complex32  : (0.001, 1e-5),
+            torch.complex64  : (1.3e-6, 1e-5),
+            torch.complex128 : (1e-7, 1e-7),
+        }
+
+        # Returns the "default" rtol and atol for comparing scalars or
+        # tensors of the given dtypes.
+        def _getDefaultRtolAndAtol(dtype0, dtype1):
+            rtol = max(dtype_precisions.get(dtype0, (0, 0))[0],
+                    dtype_precisions.get(dtype1, (0, 0))[0])
+            atol = max(dtype_precisions.get(dtype0, (0, 0))[1],
+                    dtype_precisions.get(dtype1, (0, 0))[1])
+            return rtol, atol
+
         def op_assert_equal(op, a, b):
             # Some ops, like those involving reductions, are fundamentally non-decomposable with precision guarantees
             tol_table = {
                 aten._softmax_backward_data: (0.016, 1e-2), # aggghhhhhhhhhh I hate reductions and floating point
                 aten._log_softmax_backward_data: (0.016, 1e-2),
             }
+            msg = f"{op} decomposition failed"
             if op in tol_table:
                 rtol, atol = tol_table[op]
-                self.assertEqual(a, b, rtol=rtol, atol=atol, msg=op)
             else:
-                self.assertEqual(a, b, msg=op)
-            
+                rtol, atol = _getDefaultRtolAndAtol(a.dtype, b.dtype)
+            assert torch.allclose(a, b, rtol=rtol, atol=atol), msg
+
         # We check the correctness of each decomposition right after running it.
         class DecompositionTensor(torch.Tensor):
             elem: torch.Tensor
@@ -812,9 +833,6 @@ class TestDecompositionOpInfo(TestCase):
 
             @staticmethod
             def __new__(cls, elem):
-                # The wrapping tensor (PythonTensor) is just a meta tensor, so it
-                # doesn't hold any memory (meta tensor is generally the preferred type
-                # of tensor you want to make a subclass from)...
                 r = torch.Tensor._make_wrapper_subclass(
                     cls, elem.size(),
                     strides=elem.stride(), storage_offset=elem.storage_offset(),
@@ -822,7 +840,6 @@ class TestDecompositionOpInfo(TestCase):
                     device=elem.device, requires_grad=elem.requires_grad
                 )
 
-                # ...the real tensor is held as an element on the tensor.
                 r.elem = elem
                 return r
 
