@@ -132,6 +132,8 @@ class ModuleReLUFusion(FuseHandler):
              matched_node_pattern: NodePattern,
              fuse_custom_config_dict: Dict[str, Any]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
+        assert root_node.op == "call_module", "Expecting root node to be a call_module Node"
+        root_module = quantizer.modules[root_node.target]
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
         def get_module(n):
@@ -139,7 +141,7 @@ class ModuleReLUFusion(FuseHandler):
                 return quantizer.modules[n.target]
             elif n.op == "call_function" and n.target == torch.nn.functional.relu:
                 relu = torch.nn.ReLU()
-                relu.training = self.module.training
+                relu.training = root_module.training
                 return relu
             return MatchAllNode
 
@@ -150,10 +152,10 @@ class ModuleReLUFusion(FuseHandler):
             return type(m)
 
         matched_module_types = tuple(map(get_type, matched_modules))
-        module_parent_name, module_name = _parent_name(self.module_node.target)
+        module_parent_name, module_name = _parent_name(root_node.target)
         fuser_method = get_fuser_method_new(matched_module_types)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
         fused_module = fuser_method(*matched_modules)
         setattr(quantizer.modules[module_parent_name], module_name, fused_module)
-        return quantizer.fused_graph.node_copy(self.module_node, load_arg)
+        return quantizer.fused_graph.node_copy(root_node, load_arg)

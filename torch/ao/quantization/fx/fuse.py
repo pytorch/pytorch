@@ -17,7 +17,7 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401,F403
 
-from typing import Callable, Tuple, Dict, Any, Optional, Union
+from typing import Callable, Tuple, Dict, Any, Optional, List
 
 from .quantization_types import Pattern, NodePattern
 
@@ -69,7 +69,7 @@ class Fuser:
         def apply_match(pattern, node, match, matched_node_pattern):
             if isinstance(pattern, tuple):
                 s, *args = pattern
-                current_node_pattern = []
+                current_node_pattern: List[Node] = []
                 apply_match(s, node, match, current_node_pattern)
                 for subpattern, arg in zip(args, node.args):
                     apply_match(subpattern, arg, match, current_node_pattern)
@@ -84,7 +84,7 @@ class Fuser:
         for node in reversed(graph.nodes):
             if node.name not in match_map:
                 for pattern, value in patterns.items():
-                    matched_node_pattern = []
+                    matched_node_pattern: List[Node] = []
                     if is_match(modules, node, pattern):
                         apply_match(pattern, node, (node, pattern, value(self, node)), matched_node_pattern)
 
