@@ -13964,6 +13964,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bool),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
+        supports_forward_ad=True,
     ),
     OpInfo(
         "nn.functional.l1_loss",
