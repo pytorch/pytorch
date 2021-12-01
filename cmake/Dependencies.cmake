@@ -1635,7 +1635,6 @@ if(NOT INTERN_BUILD_MOBILE)
                                    " -D__CUDA_NO_HALF_CONVERSIONS__"
                                    " -D__CUDA_NO_HALF2_OPERATORS__"
                                    " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-    add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
   endif()
@@ -1662,23 +1661,6 @@ if(NOT INTERN_BUILD_MOBILE)
     find_package(MAGMA)
   endif()
   if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
-    include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
-    if(USE_CUDA)
-      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
-    endif()
-    if(USE_ROCM)
-      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR}")
-    endif()
-    include(CheckPrototypeDefinition)
-    check_prototype_definition(magma_get_sgeqrf_nb
-     "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
-     "0"
-     "magma.h"
-      MAGMA_V2)
-    if(MAGMA_V2)
-      add_definitions(-DMAGMA_V2)
-    endif(MAGMA_V2)
-
     set(USE_MAGMA 1)
     message(STATUS "Compiling with MAGMA support")
     message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
