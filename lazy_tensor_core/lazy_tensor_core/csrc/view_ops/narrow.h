@@ -6,11 +6,10 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class GenericSlice : public torch::lazy::TsNode {
+class Narrow : public torch::lazy::TsNode {
  public:
-  GenericSlice(const torch::lazy::Value& input,
-               c10::ArrayRef<int64_t> base_indices,
-               c10::ArrayRef<int64_t> sizes);
+  Narrow(const torch::lazy::Value& input, c10::ArrayRef<int64_t> base_indices,
+         c10::ArrayRef<int64_t> sizes);
 
   std::string ToString() const override;
 

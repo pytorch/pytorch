@@ -12,7 +12,7 @@
 #include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/diagonal.h"
 #include "lazy_tensor_core/csrc/view_ops/diagonal_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/resize.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
@@ -30,8 +30,8 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
           ir_value, view_info.select->dim, view_info.select->start,
           view_info.select->end, view_info.select->stride);
     case ViewInfo::Type::kNarrow:
-      return torch::lazy::MakeNode<ir::ops::GenericSlice>(ir_value, view_info.indices,
-                                                 view_info.shape.sizes());
+      return torch::lazy::MakeNode<ir::ops::Narrow>(ir_value, view_info.indices,
+                                                    view_info.shape.sizes());
     case ViewInfo::Type::kNoOp:
       return ir_value;
     case ViewInfo::Type::kPermute:

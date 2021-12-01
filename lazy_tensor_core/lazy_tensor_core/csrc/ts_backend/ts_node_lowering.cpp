@@ -22,7 +22,7 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 #include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
 #include "lazy_tensor_core/csrc/view_ops/unselect.h"
@@ -85,11 +85,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
           node, *torch_lazy_tensors::ir::ops::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_generic_slice) {
-      return LowerGenericSlice(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::GenericSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_generic_slice));
-    }
     if (node->op() == *torch_lazy_tensors::ir::ops::ltc_unselect) {
       return LowerUnselect(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Unselect>(
@@ -143,6 +138,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerExpand(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Expand>(
               node, torch::lazy::OpKind(at::aten::expand)));
+    }
+    if (node->op().op == at::aten::narrow) {
+      return LowerNarrow(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Narrow>(
+              node, torch::lazy::OpKind(at::aten::narrow)));
     }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
@@ -390,8 +390,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return expand_out;
   }
 
-  TSOpVector LowerGenericSlice(
-      const torch_lazy_tensors::ir::ops::GenericSlice* node) {
+  TSOpVector LowerNarrow(
+      const torch_lazy_tensors::ir::ops::Narrow* node) {
     const torch::lazy::Output& input = node->operand(0);
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
