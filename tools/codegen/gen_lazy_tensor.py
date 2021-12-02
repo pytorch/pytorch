@@ -3,12 +3,12 @@ import argparse
 import os
 import yaml
 from collections import namedtuple
-from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator
-from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey,
+from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.model import (DispatchKey, FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import concatMap, YamlLoader
+from tools.codegen.utils import concatMap, YamlLoader, FileManager
 import tools.codegen.dest as dest
 from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_kernels,
                                 gen_dispatchkey_nativefunc_headers,
@@ -118,7 +118,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         """
         generated = set()
 
-        def gen_key(func: NativeFunction):
+        def gen_key(func: FunctionSchema) -> Tuple[str, str]:
             # we want to generate unique entries for overloads of functional variants,
             # but not for inplace variants unless explicitly told `codegenInplaceVariant`
             return (func.name.name.base, func.name.overload_name)
@@ -161,7 +161,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         # Generate native function impls that build IR nodes
         fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
-            'includes': [f'#include "{path}"' for path in [
+            'includes': [f'#include <{path}>' for path in [
                 tensor_class_hdr,
                 "ATen/MetaFunctions.h",
                 "torch/csrc/lazy/core/shape.h",
@@ -185,15 +185,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # Generate headers for shape/dtype funcs for non-meta kernels
         fm.write_with_template(f'{backend_dispatch_key}ShapeInference.h', 'ShapeInference.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                "ATen/Tensor.h",
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
-                "ATen/Tensor.h",
-                "vector",
-            ]],
-            'lazy_ir_inc': [f'#include "{path}"' for path in [
                 "torch/csrc/lazy/core/ir.h",
                 "torch/csrc/lazy/core/shape.h",
+                "vector",
             ]],
+            'lazy_ir_inc': [],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
             'func_declarations': list(concat_map_codegen(
@@ -207,12 +206,11 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
+                "torch/csrc/lazy/core/hash.h",
+                "torch/csrc/lazy/core/ir.h",
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "torch/csrc/lazy/core/hash.h",
-                "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/ts_backend/ts_node_lowering.h",
                 "lazy_tensor_core/csrc/ops/scalar.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],

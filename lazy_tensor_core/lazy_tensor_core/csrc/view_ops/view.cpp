@@ -1,9 +1,6 @@
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
 #include <ATen/InferSize.h>
-#include <torch/csrc/lazy/core/shape.h>
-
-#include "lazy_tensor_core/csrc/helpers.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

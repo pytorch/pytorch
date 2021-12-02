@@ -67,6 +67,8 @@ class CounterData {
 
   int64_t Value() const { return value_; }
 
+  void Reset() { value_ = 0; }
+
  private:
   std::atomic<int64_t> value_;
 };
@@ -74,6 +76,8 @@ class CounterData {
 class MetricsArena {
  public:
   static MetricsArena* Get();
+
+  void Reset();
 
   // Registers a new metric in the global arena.
   void RegisterMetric(const std::string& name, MetricReprFn repr_fn,

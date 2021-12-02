@@ -308,15 +308,14 @@ void LazyTensor::SetSubView(ViewInfo view_info) const {
 
 void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
   if (data()->view != nullptr) {
-    data()->view = data()->view->CreateSubView(view_info.shape, view_info);
+    SetSubView(view_info);
     return;
   }
   // This node is not a view. Since this function is meant to modify a view
   // in place, we need to turn this existing tensor into a view.
   torch::lazy::Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  data()->view = std::make_shared<LazyView>(
-      torch::lazy::GetShapeFromTsValue(ir_value), alias, std::move(view_info));
+  data()->view = std::make_shared<LazyView>(view_info.shape, alias, std::move(view_info));
   AssignIrValue(torch::lazy::Value());
 }
 

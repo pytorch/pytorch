@@ -27,9 +27,10 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
             raise AssertionError("TODO not sure if there are other valid types to handle here")
     else:
         if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
-            return f"lazy_tensors::util::ToVector<{arg.type.elem.type}>({arg.name})"
+            return f"std::vector<{arg.type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
         elif (isinstance(arg.type, OptionalCType) and
-                isinstance(arg.type.elem, VectorCType)):
+                isinstance(arg.type.elem, VectorCType) and
+                isinstance(arg.type.elem.elem, BaseCType)):
             return f"torch::lazy::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
         else:
             return f"{arg.name}"
@@ -89,7 +90,7 @@ class LazyIR:
 }}""")
             else:
                 members_to_string.append(f'ss << ", {t.name}=" << {t.name}_;')
-        members_to_string = "\n    ".join(members_to_string)
+        members_to_string_str = "\n    ".join(members_to_string)
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
@@ -109,7 +110,7 @@ class {schema.node_name} : public {self.node_base} {{
   std::string ToString() const override {{
     std::stringstream ss;
     ss << TsNode::ToString();
-    {members_to_string}
+    {members_to_string_str}
     return ss.str();
   }}
 
@@ -159,8 +160,8 @@ class GenLazyNativeFuncDefinition:
         scalar_types = schema.filtered_types(values=False, scalars=True)
         returns_length = len(schema.returns)
 
-        get_device_str = f"""auto device = bridge::GetBackendDevice(
-            {", ".join([f"{t.name}" for t in value_types])});"""
+        value_types_names = ", ".join([f"{t.name}" for t in value_types])
+        get_device_str = f"""auto device = bridge::GetBackendDevice({value_types_names});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
         node_ctor_input_str = node_ctor_inputs(schema)
 
@@ -168,7 +169,7 @@ class GenLazyNativeFuncDefinition:
         if func.structured or func.structured_delegate is not None:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
-                def this_shape(i):
+                def this_shape(i: int) -> str:
                     return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"

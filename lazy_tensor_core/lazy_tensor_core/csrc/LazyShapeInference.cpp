@@ -224,6 +224,15 @@ std::vector<Shape> compute_shape_smooth_l1_loss_backward(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+std::vector<Shape> compute_shape_logdet(const at::Tensor & self) {
+  // assumes self.shape is {*, n, n} and returns shape *
+  TORCH_INTERNAL_ASSERT(self.dim() >= 2);
+  std::vector<int64_t> out_sizes(self.sizes().begin(), self.sizes().end() - 2);
+  // Doesn't check input dtype, but output dtype either matches it,
+  // or the actual logdet operation will throw if it's an unsupported type
+  return {Shape(self.scalar_type(), out_sizes)};
+}
+
 std::vector<Shape> compute_shape_log_sigmoid_forward(const at::Tensor& self) {
   // Based on definition of aten/src/ATen/native/Activation.cpp::log_sigmoid_forward_out_cpu.
   return {Shape(self.scalar_type(), self.sizes().vec()),

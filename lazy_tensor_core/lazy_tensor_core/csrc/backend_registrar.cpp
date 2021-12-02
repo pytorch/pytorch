@@ -3,13 +3,6 @@
 namespace torch {
 namespace lazy {
 
-std::atomic<const BackendImplInterface*> backend_impl_registry;
-
-BackendRegistrar::BackendRegistrar(
-    const BackendImplInterface* backend_impl_interface) {
-  backend_impl_registry.store(backend_impl_interface);
-}
-
 std::vector<std::string> GetCompilationDevices(
     const std::string& device, c10::ArrayRef<std::string> devices) {
   return getBackend()->GetCompilationDevices(device, devices);

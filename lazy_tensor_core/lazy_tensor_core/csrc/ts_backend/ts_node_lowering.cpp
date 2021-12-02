@@ -22,11 +22,11 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 #include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/generic_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow.h"
+#include "lazy_tensor_core/csrc/view_ops/narrow_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/permute.h"
 #include "lazy_tensor_core/csrc/view_ops/select.h"
-#include "lazy_tensor_core/csrc/view_ops/unselect.h"
-#include "lazy_tensor_core/csrc/view_ops/update_slice.h"
+#include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
 #include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch {
@@ -85,25 +85,15 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
           node, *torch_lazy_tensors::ir::ops::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_generic_slice) {
-      return LowerGenericSlice(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::GenericSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_generic_slice));
+    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select_view_update) {
+      return LowerSelectViewUpdate(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::SelectViewUpdate>(
+              node, *torch_lazy_tensors::ir::ops::ltc_select_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select) {
-      return LowerSelect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
-              node, *torch_lazy_tensors::ir::ops::ltc_select));
-    }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_unselect) {
-      return LowerUnselect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Unselect>(
-              node, *torch_lazy_tensors::ir::ops::ltc_unselect));
-    }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_update_slice) {
-      return LowerUpdateSlice(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::UpdateSlice>(
-              node, *torch_lazy_tensors::ir::ops::ltc_update_slice));
+    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_narrow_view_update) {
+      return LowerNarrowViewUpdate(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::NarrowViewUpdate>(
+              node, *torch_lazy_tensors::ir::ops::ltc_narrow_view_update));
     }
     if (node->op().op == at::prim::Constant) {
       return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
@@ -149,6 +139,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Expand>(
               node, torch::lazy::OpKind(at::aten::expand)));
     }
+    if (node->op().op == at::aten::narrow) {
+      return LowerNarrow(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Narrow>(
+              node, torch::lazy::OpKind(at::aten::narrow)));
+    }
     if (node->op().op == at::aten::permute) {
       return LowerPermute(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Permute>(
@@ -158,6 +153,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerRepeat(
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Repeat>(
               node, torch::lazy::OpKind(at::aten::repeat)));
+    }
+    if (node->op().op == at::aten::select) {
+      return LowerSelect(
+          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
+              node, torch::lazy::OpKind(at::aten::select)));
     }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(
@@ -316,9 +316,17 @@ class TSNodeLowering : public TSNodeLoweringInterface {
             ? LowerBuiltin(at::aten::cudnn_convolution_transpose_backward,
                            arguments)
             : LowerBuiltin(at::aten::cudnn_convolution_backward, arguments);
-    // cudnn_convolution_backward/cudnn_convolution_transpose_backward only
-    // returns 2 tensors
-    result.push_back(nullptr);
+
+    // N.B. rank is specialized even with dynamic shapes
+    // all axes but channel to reduce to the bias size
+    auto grad_rank = dynamic_cast<const torch::lazy::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
+    std::vector<int64_t> axes(grad_rank);
+    std::iota(axes.begin(), axes.end(), 0);
+    TORCH_INTERNAL_ASSERT(grad_rank >= 3, "Convolution outputs should have 3+ dimensions");
+    axes.erase(axes.begin() + 1);
+    auto axes_val = loctx()->graph()->insertConstant(axes);
+    auto bias_grad = loctx()->graph()->insert(at::aten::sum, {loctx()->GetOutputOp(operands[0]), axes_val});
+    result.push_back(bias_grad);
     return result;
   }
 
@@ -382,8 +390,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return expand_out;
   }
 
-  TSOpVector LowerGenericSlice(
-      const torch_lazy_tensors::ir::ops::GenericSlice* node) {
+  TSOpVector LowerNarrow(const torch_lazy_tensors::ir::ops::Narrow* node) {
     const torch::lazy::Output& input = node->operand(0);
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
@@ -460,7 +467,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(stack, arguments);
   }
 
-  TSOpVector LowerUnselect(const torch_lazy_tensors::ir::ops::Unselect* node) {
+  TSOpVector LowerSelectViewUpdate(
+      const torch_lazy_tensors::ir::ops::SelectViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     int64_t step = torch_lazy_tensors::ir::ops::Select::GetStride(
@@ -472,8 +480,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {dest};
   }
 
-  TSOpVector LowerUpdateSlice(
-      const torch_lazy_tensors::ir::ops::UpdateSlice* node) {
+  TSOpVector LowerNarrowViewUpdate(
+      const torch_lazy_tensors::ir::ops::NarrowViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();
