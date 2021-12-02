@@ -300,7 +300,7 @@ void slow_conv_transpose3d_out_cuda_template(
           // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
           int64_t m =
               weight.size(1) * weight.size(2) * weight.size(3) * weight.size(4);
-          int64_t n = input_depth * input_height * input_width;
+          int64_t n = columns.size(1);
           int64_t k = weight.size(0);
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
