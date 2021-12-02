@@ -6748,7 +6748,11 @@ class DistributedTest:
                 RuntimeError,
                 "Expected to have finished reduction in the prior iteration "
                 "before starting a new one. This error indicates that your "
-                "training graph has changed in this iteration",
+                "training graph has changed in this iteration, "
+                "e.g., one parameter is used in first iteration, "
+                "but then got unused in the second iteration. "
+                "this is not compatible with static_graph set to True.\n"
+                "Parameter indices which did not receive grad for"
             ):
                 for i in range(2):
                     if i % 2 != 0:
