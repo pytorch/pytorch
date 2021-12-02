@@ -1,4 +1,5 @@
 #include <c10/core/DispatchKeySet.h>
+#include <torch/csrc/lazy/backend/backend_interface.h>
 
 namespace c10 {
 
@@ -102,8 +103,16 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDA:
     case DispatchKey::XLA:
-    case DispatchKey::Lazy:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
+    case DispatchKey::Lazy:
+      switch (torch::lazy::getBackend()->EagerFallbackDeviceType()) {
+        case c10::kCUDA:
+          return DispatchKeySet(DispatchKey::AutocastCUDA);
+        case c10::kCPU:
+          return DispatchKeySet(DispatchKey::AutocastCPU);
+        default:
+          return DispatchKeySet();
+      }
     default:
       return DispatchKeySet();
   }
