@@ -941,8 +941,10 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
       const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
+      const size_t output_depth = op->output_depth;
+      const size_t output_size = (output_depth != 0 ? output_depth : 1) *
+          op->output_height * op->output_width;
 
-      const size_t output_size = op->output_height * op->output_width;
       struct q8gemm_context q8gemm_context = {
           .k = group_input_channels,
           .k_stride = k_stride,
@@ -1117,10 +1119,14 @@ enum pytorch_qnnp_status pytorch_qnnp_run_operator(
       const uint32_t kr = pytorch_qnnp_params.q8conv.kr;
       const size_t k_stride = (group_input_channels + (kr - 1)) & -kr;
       const size_t n_stride = (group_output_channels + (nr - 1)) & -nr;
-
-      const size_t output_size = op->output_height * op->output_width;
-      const size_t kernel_size = op->kernel_height * op->kernel_width;
+      const size_t output_depth = op->output_depth;
+      const size_t output_size = (output_depth != 0 ? output_depth : 1) *
+          op->output_height * op->output_width;
+      const size_t kernel_depth = op->kernel_depth;
+      const size_t kernel_size = (kernel_depth != 0 ? kernel_depth : 1) *
+          op->kernel_height * op->kernel_width;
       const size_t m_stride = round_up(output_size, mr);
+
       struct q8conv_context q8conv_context = {
           .bs = batch_size,
           .ks = kernel_size,
