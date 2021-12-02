@@ -41,7 +41,7 @@ Shape Diagonal::MakeDiagonalShape(
       dimensions.push_back(shape.size(dim));
     }
   }
-  int64_t dsize;
+  int64_t dsize = 0;
   if (offset >= 0) {
     dsize = std::max<int64_t>(
         std::min(shape.size(dim1), shape.size(dim2) - offset), 0);
