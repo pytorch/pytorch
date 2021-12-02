@@ -3857,13 +3857,13 @@ def sample_inputs_upsample(mode, self, device, dtype, requires_grad):
     for rank in ranks_for_mode[mode]:
         sample_inputs.extend([
             SampleInput(make_arg(shape(D, rank)),
-                        args=(shape(S, rank, False), None)),
+                        kwargs=dict(size=shape(S, rank, False))),
             SampleInput(make_arg(shape(D, rank)),
-                        args=(shape(L, rank, False), None)),
+                        kwargs=dict(size=shape(L, rank, False))),
             SampleInput(make_arg(shape(D, rank)),
-                        args=(None, 1.7)),
+                        kwargs=dict(scale_factor=1.7)),
             SampleInput(make_arg(shape(D, rank)),
-                        args=(None, 0.6)),
+                        kwargs=dict(scale_factor=0.6)),
         ])
 
     return sample_inputs
@@ -10426,9 +10426,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
            decorators=[
                # FIXME: both derivatives are implemented incorrectly
+               # https://github.com/pytorch/pytorch/issues/69322
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # FIXME: produces incorrect output on non-contiguous inputs
+               # https://github.com/pytorch/pytorch/issues/69325
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -10445,9 +10447,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
            decorators=[
                # FIXME: both derivatives are implemented incorrectly
+               # https://github.com/pytorch/pytorch/issues/69322
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # FIXME: produces incorrect output on non-contiguous inputs
+               # https://github.com/pytorch/pytorch/issues/69325
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
