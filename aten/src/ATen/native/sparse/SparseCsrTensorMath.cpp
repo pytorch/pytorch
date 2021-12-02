@@ -164,41 +164,69 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
-/* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout */
+/* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
+ * Only simple funcs, with 0->0 correspondence are currently supported. */
 
-#define CREATE_UNARY_FUNC(func) \
-  Tensor& func##_##sparse_csr_out(const Tensor& self, Tensor& result) { \
-    return unary_op_out(&at::func##_##outf, self, result);              \
-  }                                                                     \
-  Tensor func##_##sparse_csr(const Tensor& self) {                      \
-    return get_result_tensor_for_unary_op(&at::func, self);             \
-  }                                                                     \
-  Tensor& func##_##sparse_csr_(Tensor& self) {                          \
-    return func##_##sparse_csr_out(self, self);                         \
+#define CREATE_UNARY_UFUNC_OUT(op_name)                                    \
+  Tensor& op_name##_sparse_csr_out(const Tensor& self, Tensor& result) {   \
+    return unary_op_out(&at::op_name##_outf, self, result);                \
   }
 
-CREATE_UNARY_FUNC(abs);
-CREATE_UNARY_FUNC(angle);
-CREATE_UNARY_FUNC(asin);
-CREATE_UNARY_FUNC(asinh);
-CREATE_UNARY_FUNC(atan);
-CREATE_UNARY_FUNC(atanh);
-CREATE_UNARY_FUNC(ceil);
-CREATE_UNARY_FUNC(erf);
-CREATE_UNARY_FUNC(erfinv);
-CREATE_UNARY_FUNC(expm1);
-CREATE_UNARY_FUNC(log1p);
-CREATE_UNARY_FUNC(neg);
-CREATE_UNARY_FUNC(rad2deg);
-CREATE_UNARY_FUNC(sign);
-CREATE_UNARY_FUNC(sin);
-CREATE_UNARY_FUNC(sinh);
-CREATE_UNARY_FUNC(sgn);
-CREATE_UNARY_FUNC(sqrt);
-CREATE_UNARY_FUNC(square);
-CREATE_UNARY_FUNC(tan);
-CREATE_UNARY_FUNC(tanh);
-CREATE_UNARY_FUNC(conj_physical);
+#define CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)                             \
+  Tensor op_name##_sparse_csr(const Tensor& self) {                        \
+    return get_result_tensor_for_unary_op(&at::op_name, self);             \
+  }
+
+#define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
+  Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
+    return op_name##_sparse_csr_out(self, self);                           \
+  }
+
+#define CREATE_UNARY_UFUNC(op_name)                                        \
+  CREATE_UNARY_UFUNC_OUT(op_name);                                         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);                                  \
+  CREATE_UNARY_UFUNC_INPLACE(op_name);
+
+#define CREATE_UNARY_UFUNC_NO_INPLACE(op_name)                             \
+  CREATE_UNARY_UFUNC_OUT(op_name);                                         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
+
+// Exhaustive list of the unary ufuncs supported by sparse CSR
+CREATE_UNARY_UFUNC(abs);
+CREATE_UNARY_UFUNC(angle);
+CREATE_UNARY_UFUNC(asin);
+CREATE_UNARY_UFUNC(asinh);
+CREATE_UNARY_UFUNC(atan);
+CREATE_UNARY_UFUNC(atanh);
+CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(erf);
+CREATE_UNARY_UFUNC(erfinv);
+CREATE_UNARY_UFUNC(expm1);
+CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(log1p);
+CREATE_UNARY_UFUNC(log10);
+CREATE_UNARY_UFUNC(neg);
+CREATE_UNARY_UFUNC(rad2deg);
+CREATE_UNARY_UFUNC(round);
+CREATE_UNARY_UFUNC(sign);
+CREATE_UNARY_UFUNC(sin);
+CREATE_UNARY_UFUNC(sinh);
+CREATE_UNARY_UFUNC(sgn);
+CREATE_UNARY_UFUNC(sqrt);
+CREATE_UNARY_UFUNC(square);
+CREATE_UNARY_UFUNC(tan);
+CREATE_UNARY_UFUNC(tanh);
+CREATE_UNARY_UFUNC(conj_physical);
+
+// signbit, isneginf and isposinf currently don't have an inplace variant
+CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
+CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
+CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+
+// isnan and Uisinf don't have an out variant
+CREATE_UNARY_UFUNC_FUNCTIONAL(positive);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
