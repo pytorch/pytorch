@@ -5,6 +5,7 @@
 #include <c10/util/complex.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/helpers.h>
 
 #include <algorithm>
 #include <cstring>
@@ -12,8 +13,6 @@
 #include <list>
 #include <numeric>
 #include <thread>
-
-#include <torch/csrc/lazy/core/helpers.h>
 
 namespace torch {
 namespace lazy {

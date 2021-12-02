@@ -3,17 +3,19 @@
 namespace torch {
 namespace lazy {
 
+namespace {
 std::atomic<const BackendImplInterface*> backend_impl_registry;
+} // namespace
+
+const BackendImplInterface* getBackend() {
+  auto* interface = backend_impl_registry.load();
+  TORCH_CHECK(interface, "Lazy tensor backend not registered.");
+  return interface;
+}
 
 BackendRegistrar::BackendRegistrar(
     const BackendImplInterface* backend_impl_interface) {
   backend_impl_registry.store(backend_impl_interface);
-}
-
-std::vector<std::string> GetCompilationDevices(
-    const std::string& device,
-    c10::ArrayRef<std::string> devices) {
-  return getBackend()->GetCompilationDevices(device, devices);
 }
 
 at::Tensor MakeTensorFromComputationData(
@@ -37,5 +39,5 @@ std::unique_ptr<LoweringContext> LoweringContext::Create(
   return getBackend()->CreateLoweringContext(name, device);
 }
 
-} // namespace lazy
-} // namespace torch
+}  // namespace lazy
+}  // namespace torch

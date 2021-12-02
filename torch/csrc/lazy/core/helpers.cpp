@@ -1,10 +1,10 @@
 #include <torch/csrc/lazy/core/helpers.h>
 
 #include <c10/util/Half.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 #include <limits>
 
-#include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch {
 namespace lazy {
