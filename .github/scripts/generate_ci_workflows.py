@@ -343,7 +343,6 @@ LINUX_WORKFLOWS = [
         # NOTE: This is purposefully left without LABEL_CIFLOW_DOCS so that you can run
         #       docs builds on your PR without the fear of anything pushing
         ciflow_config=CIFlowConfig(
-            run_on_canary=True,
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
