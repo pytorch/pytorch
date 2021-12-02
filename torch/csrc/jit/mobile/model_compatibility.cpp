@@ -102,6 +102,29 @@ uint64_t _get_model_bytecode_version(
   TORCH_CHECK(false, "Failed to get bytecode version.");
 }
 
+/********************** Operator Version **********************/
+
+uint64_t _get_model_operator_version(std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  return reader.version();
+}
+
 /********************** Operators and Info **********************/
 
 // Forward declare
