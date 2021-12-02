@@ -4983,8 +4983,6 @@
 
 - func: positive(Tensor(a) self) -> Tensor(a)
   variants: function, method
-  dispatch:
-    SparseCsrCPU, SparseCsrCUDA: positive_sparse_csr
 
 - func: resize_as_(Tensor(a!) self, Tensor the_template, *, MemoryFormat? memory_format=None) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True

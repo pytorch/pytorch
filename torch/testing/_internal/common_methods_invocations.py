@@ -8344,7 +8344,6 @@ op_db: List[OpInfo] = [
                    ref=np.positive,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                    supports_out=False,
-                   supports_sparse_csr=True,
                    supports_forward_ad=True,
                    ),
     UnaryUfuncInfo('conj',

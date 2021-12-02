@@ -224,8 +224,7 @@ CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
 CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
 CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
 
-// isnan and Uisinf don't have an out variant
-CREATE_UNARY_UFUNC_FUNCTIONAL(positive);
+// isnan and isinf don't have an out variant
 CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
 
