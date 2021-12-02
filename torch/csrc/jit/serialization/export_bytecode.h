@@ -1,59 +1,31 @@
 #pragma once
 
+#include <tuple>
 #include <unordered_map>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/qualified_name.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
+#include <torch/csrc/jit/mobile/function.h>
+#include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>
 
 namespace torch {
 namespace jit {
 
-struct ExportedFunction {
-  ExportedFunction(
-      const Module& m,
-      const Function& f,
-      std::unique_ptr<Graph> g,
-      bool t)
-      : mod(m), function(f), optimizedGraph(std::move(g)), toplevel(t) {}
-  Module mod;
-  const Function& function;
-  std::unique_ptr<Graph> optimizedGraph;
-  bool toplevel;
+struct TORCH_API CompilationOptions {
+  bool incl_interface_call = false;
+  bool enable_default_value_for_unspecified_arg = false;
+  bool enable_default_args_before_out_args = true;
+  int model_version = caffe2::serialize::kProducedBytecodeVersion;
 };
 
-class TORCH_API BytecodeExportSet {
- public:
-  BytecodeExportSet() = default;
-  BytecodeExportSet(const BytecodeExportSet&) = delete;
-  BytecodeExportSet& operator=(const BytecodeExportSet&) = delete;
-  BytecodeExportSet(BytecodeExportSet&&) = default;
-  BytecodeExportSet& operator=(BytecodeExportSet&&) = default;
-
-  void add(const c10::QualifiedName& qn, ExportedFunction);
-  void update(const c10::QualifiedName& qn, bool toplevel);
-  bool contains(const c10::QualifiedName& qn) const;
-
-  template <typename F>
-  void visit(F&& f) {
-    for (auto& item : items_) {
-      if (item.second.toplevel) {
-        f(item.first, item.second);
-      }
-    }
-    for (auto& item : items_) {
-      if (!item.second.toplevel) {
-        f(item.first, item.second);
-      }
-    }
-  }
-
- private:
-  std::unordered_map<c10::QualifiedName, ExportedFunction> items_;
-};
+TORCH_API mobile::Module jitModuleToMobile(
+    const Module& module,
+    const CompilationOptions& options);
 
 } // namespace jit
 } // namespace torch
