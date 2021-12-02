@@ -1853,7 +1853,7 @@ class TestNN(NNTestCase):
         check()
 
         parameter_dict.fromkeys(['p19', 'p20'], temp_param)
-        self.assertIs({'p19': temp_param, 'p20': temp_param}, parameter_dict)
+        self.assertEquals({'p19': temp_param, 'p20': temp_param}, parameter_dict)
         check()
 
     def test_add_module(self):
