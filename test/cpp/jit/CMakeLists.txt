@@ -97,6 +97,9 @@ add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${JIT_TEST_SRCS}
 )
+add_dependencies(test_jit flatbuffers)
+target_link_libraries(test_jit PRIVATE flatbuffers)
+
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_jit PRIVATE USE_GTEST)

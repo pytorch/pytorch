@@ -770,6 +770,7 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-noexcept-type")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"
