@@ -1637,6 +1637,32 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
 
+    def test_batch_datapipe(self):
+        arr = list(range(13))
+        input_dp = dp.map.SequenceWrapper(arr)
+
+        # Functional Test: batches top level by default
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12]], list(batch_dp))
+
+        # Functional Test: drop_last on command
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2, drop_last=True)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(batch_dp))
+
+        # Functional Test: nested batching
+        batch_dp_2 = batch_dp.batch(batch_size=3)
+        self.assertEqual([[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]], list(batch_dp_2))
+
+        # Reset Test:
+        n_elements_before_reset = 3
+        res_before_reset, res_after_reset = reset_after_n_next_calls(batch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5]], res_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], res_after_reset)
+
+        # __len__ Test:
+        self.assertEqual(6, len(batch_dp))
+        self.assertEqual(2, len(batch_dp_2))
+
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
 _generic_namedtuple_allowed = sys.version_info >= (3, 7) and sys.version_info < (3, 9)
