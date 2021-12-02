@@ -14,8 +14,6 @@ using namespace torch;
 using namespace torch::jit;
 using namespace torch::jit::test;
 
-C10_DECLARE_bool(static_runtime_disable_debug_memory_overlap_check);
-
 namespace {
 
 StaticModule makeStaticModuleFromScript(const std::string& script) {
@@ -818,13 +816,15 @@ TEST(
       /*check_memory_overlap=*/false);
   ProcessedNode pnode(sigmoid_node, &fn, createProcessedNodeInputs({0}), 1);
   pnode.set_values(values.data());
-  EXPECT_TRUE(pnode.verify_no_memory_overlap(/* force_check*/ true));
+  EXPECT_TRUE(pnode.verify_no_memory_overlap());
 
   pnode.Output(0) = values[0];
-  EXPECT_FALSE(pnode.verify_no_memory_overlap(/* force_check*/ true));
+  EXPECT_FALSE(pnode.verify_no_memory_overlap());
 }
 
-TEST(ProcessedNode, VerifyNoMemoryOverlapWithImmutableInputsWithInplaceOps) {
+TEST(
+    ProcessedNode,
+    VerifyNoMemoryOverlapWithImmutableInputsWithMutableArguments) {
   script::Module module("module");
   // Using out= variant.
   module.define(sigmoid_inplace_script);
@@ -866,8 +866,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
         list_unpack_node, &fn, createProcessedNodeInputs({0}), 1);
     list_unpack_pnode.set_values(values.data());
     ASSERT_EQ(list_unpack_pnode.outputs().size(), 2);
-    EXPECT_TRUE(
-        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
+    EXPECT_TRUE(list_unpack_pnode.verify_no_memory_overlap());
   }
   {
     std::array<IValue, 3> values = {
@@ -882,8 +881,7 @@ TEST(ProcessedNode, VerifyNoMemoryOverlapWithOverlappingOutputs) {
     auto b = at::randn({2, 3});
     list_unpack_pnode.Output(0) = b;
     list_unpack_pnode.Output(1) = b;
-    EXPECT_FALSE(
-        list_unpack_pnode.verify_no_memory_overlap(/* force_check*/ true));
+    EXPECT_FALSE(list_unpack_pnode.verify_no_memory_overlap());
   }
 }
 
@@ -915,7 +913,6 @@ TORCH_LIBRARY_IMPL(test, CPU, m) {
 }
 
 TEST(StaticRuntime, BadSchemaAliasInfo) {
-  FLAGS_static_runtime_disable_debug_memory_overlap_check = true;
   const std::string src = R"IR(
       graph(%x: Tensor, %s: int):
           %c0 : int = prim::Constant[value=0]()
@@ -933,7 +930,6 @@ TEST(StaticRuntime, BadSchemaAliasInfo) {
   // This test doesn't pass yet. This is the corner case mentioned in Step 2 of
   // [Check and correct bad schema alias info at runtime]
   // testStaticRuntime(src, {x1, 10}, {x2, 0});
-  FLAGS_static_runtime_disable_debug_memory_overlap_check = false;
 }
 
 // This test repeats the last test, but with the correct schema alias
