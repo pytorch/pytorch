@@ -21,6 +21,6 @@ class TestUpgraders(JitTestCase):
     def test_aten_div_at_3(self):
         model_path = pytorch_test_dir + "/cpp/jit/div_at_version_3.pt"
         loaded_model = torch.jit.load(model_path)
-        torch._C._jit_pass_replace_upgraders(loaded_model.graph)
+        torch._C._jit_pass_replace_old_ops_with_upgraders(loaded_model.graph)
         FileCheck().check("prim::If").run(loaded_model.graph)
         FileCheck().check_count("aten::div", 2).run(loaded_model.graph)

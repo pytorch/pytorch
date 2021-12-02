@@ -1,9 +1,9 @@
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 
 #include <algorithm>
 
 #include <ATen/core/qualified_name.h>
+#include <caffe2/serialize/versions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
@@ -1586,9 +1586,6 @@ struct PythonPrintImpl {
   // when we print this, should we error if the resulting output would
   // not be able to be reparsed?
   bool enforce_importable_;
-
-  // The least version that supports all printed ops
-  uint64_t min_version_ = caffe2::serialize::kProducedFileFormatVersion;
 };
 
 PythonPrint::PythonPrint(
@@ -1620,10 +1617,6 @@ std::string PythonPrint::str() const {
 
 const SourceRangeRecords& PythonPrint::ranges() const {
   return pImpl->body_.ranges();
-}
-
-uint64_t PythonPrint::minVersion() const {
-  return pImpl->min_version_;
 }
 
 PythonPrint::~PythonPrint() = default;

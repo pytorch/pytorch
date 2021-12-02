@@ -22,7 +22,7 @@
 #include <torch/csrc/jit/passes/lift_closures.h>
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
-#include <torch/csrc/jit/passes/op_replacement.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -646,7 +646,7 @@ struct to_ir {
         typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
-    ReplaceOpsWithUpgraders(graph);
+    ApplyOldOpsUpgraders(graph);
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
@@ -5173,7 +5173,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
     CompilationUnit::FunctionType type,
-    c10::optional<size_t> version) const {
+    c10::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5207,9 +5207,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   }
 
   auto graph = std::make_shared<Graph>();
-  if (version.has_value()) {
-    graph->set_op_version(version.value());
-  }
+  graph->set_op_version(operator_set_version);
 
   auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
@@ -5233,7 +5231,7 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle,
-    c10::optional<size_t> version) {
+    c10::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5276,7 +5274,7 @@ std::vector<Function*> CompilationUnit::define(
         function_table,
         shouldMangle,
         CompilationUnit::FunctionType::Method,
-        version);
+        operator_set_version);
 
     record_function(std::move(fn));
   }

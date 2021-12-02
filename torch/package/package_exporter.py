@@ -197,7 +197,7 @@ class PackageExporter:
             self.buffer = f
 
         self.zip_file = torch._C.PyTorchFileWriter(f)
-        self.zip_file.set_min_version(6)
+        self.zip_file.set_version(6)
         self._written_files: Set[str] = set()
 
         self.serialized_reduces: Dict[int, Any] = {}
