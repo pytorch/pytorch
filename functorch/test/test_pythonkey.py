@@ -319,7 +319,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('linalg.det'),
         xfail('linalg.inv'),
         xfail('matmul'),
-        xfail('nn.functional.gelu'),
         xfail('nn.functional.linear'),
         xfail('nn.functional.dropout'),
         xfail('polar'),
