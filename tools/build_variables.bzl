@@ -297,6 +297,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp",
     "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
@@ -367,6 +368,7 @@ core_sources_full = core_sources_full_mobile + [
 
 lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
@@ -636,7 +638,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
-    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
@@ -1228,6 +1229,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensor.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
     "aten/src/TH/THGeneral.cpp",
     "aten/src/TH/THTensor.cpp",

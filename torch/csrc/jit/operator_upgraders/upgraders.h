@@ -10,7 +10,7 @@ namespace jit {
 
 struct UpgradersMap {
     static std::unordered_map<std::string, std::string> content;
-    static std::mutex *lock;
+    static std::mutex lock;
     static bool isPopulated;
 };
 
