@@ -96,13 +96,14 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 }
 
 // This algorithm takes the list of intermediate buffers and their liveness
-// ragnes, and returns a map of these buffers to memory blocks. A memory block
-// is indicated by the buffer for which it is allocated. Specifically, we
+// ragnes, and returns the allocations of these buffers. A buffer 'A' can be
+// allocated in the memory (appears as a pair of 'A's in the allocation results)
+// or reuse another buffer such as 'B' (appears as ('A', 'B')). Specifically, we
 // linearly scan the intermediate buffers by the time they appear, and try to
-// assign it an existing non-occupied memory block. If there are no such memory
-// blocks available, we'll create memory for it. Once we are beyond the liveness
-// range of this buffer, we'll mark its corresponding memory block as "up for
-// grabs" for future reuse.
+// assign it an existing non-occupied memory allocation. If there are no such
+// allocations available, we'll create memory for it. Once we are beyond the
+// liveness range of this buffer, we'll mark its corresponding memory allocation
+// as "up for grabs" for future reuse.
 std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     const std::unordered_set<BufPtr>& bufs,
     const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>&
@@ -118,8 +119,8 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
 
   // Map intermediate buffers to the most recently used memory if any.
   std::list<BufPtr> mem_up_for_grabs;
-  std::unordered_map<BufPtr, BufPtr> curr_buf_mem_map;
-  std::vector<std::pair<BufPtr, BufPtr>> global_buf_mem_map;
+  std::unordered_map<BufPtr, BufPtr> buf_mem_map;
+  std::vector<std::pair<BufPtr, BufPtr>> buf_allocs;
 
   auto sorting_function_by_end_time = [&buf_ranges](
                                           BufPtr b1, BufPtr b2) -> bool {
@@ -134,7 +135,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     // time of this buf.
     // TODO: optimize in-place opererations and copy operations
     buf_to_release.clear();
-    for (auto& mapped : curr_buf_mem_map) {
+    for (auto& mapped : buf_mem_map) {
       auto buf_mapped = mapped.first;
       auto end_buf_mapped = std::get<1>(buf_ranges.at(buf_mapped));
       if (end_buf_mapped < start) {
@@ -149,15 +150,15 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
         buf_to_release.end(),
         sorting_function_by_end_time);
     for (auto& buf_rl : buf_to_release) {
-      mem_up_for_grabs.push_front(curr_buf_mem_map[buf_rl]);
-      curr_buf_mem_map.erase(buf_rl);
+      mem_up_for_grabs.push_front(buf_mem_map[buf_rl]);
+      buf_mem_map.erase(buf_rl);
     }
 
     // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
     if (!bufSize(buf)) {
-      global_buf_mem_map.emplace_back(std::make_pair(buf, buf));
+      buf_allocs.emplace_back(std::make_pair(buf, buf));
       continue;
     }
 
@@ -167,8 +168,8 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
          it++) {
       auto m = *it;
       if (bufSize(m) >= bufSize(buf)) {
-        curr_buf_mem_map[buf] = m;
-        global_buf_mem_map.emplace_back(std::make_pair(buf, m));
+        buf_mem_map[buf] = m;
+        buf_allocs.emplace_back(std::make_pair(buf, m));
         allocated = true;
         mem_up_for_grabs.erase(it);
         break;
@@ -178,23 +179,24 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     // If there are no memories to reuse, we'll have to allocate new memory for
     // it.
     if (!allocated) {
-      curr_buf_mem_map[buf] = buf;
-      global_buf_mem_map.emplace_back(std::make_pair(buf, buf));
+      buf_mem_map[buf] = buf;
+      buf_allocs.emplace_back(std::make_pair(buf, buf));
     }
   }
 
-  return global_buf_mem_map;
+  return buf_allocs;
 }
 
 void CodeGen::insertAllocFree(
-    std::vector<std::pair<BufPtr, BufPtr>>& b2m,
+    std::vector<std::pair<BufPtr, BufPtr>>& buf_allocs,
     const bool pre_alloc) {
   BlockPtr b = to<Block>(stmt_);
   if (!b) {
     b = alloc<Block>(std::vector<StmtPtr>({stmt_}));
   }
 
-  for (auto rit = b2m.rbegin(); rit != b2m.rend(); ++rit) {
+  // Insert allocations and frees for temporary buffers at global scope.
+  for (auto rit = buf_allocs.rbegin(); rit != buf_allocs.rend(); ++rit) {
     if (rit->first == rit->second) {
       BufPtr buf = rit->first;
       if (pre_alloc) {
@@ -240,20 +242,18 @@ void CodeGen::allocIntermediateBufs(const bool pre_alloc) {
 
       // Identify the access stmts to each unallocated intermeiate buffer.
       auto range = BufLiveRange::liveRange(stmt_, buf);
-      // TORCH_INTERNAL_ASSERT(accesses.size() >= 1);
-      // auto range =
-      //    std::make_pair(accesses.at(0), accesses.at(accesses.size() - 1));
       interm_buf_ranges.emplace(buf, range);
     }
   }
 
-  // For each intermediate buffer, we reuse the memory of an old buffer which
-  // dies, or allocate memory if reusing buffer is impossible.
-  auto b2m = linearScan(interm_bufs, interm_buf_ranges);
+  // For each intermediate buffer, we reuse the memory of an old buffer whose
+  // liveness range does not overlap with the current buffer, or allocate memory
+  // if reusing buffer is impossible.
+  auto buf_allocs = linearScan(interm_bufs, interm_buf_ranges);
 
   // Insert memory allocation/mapping nodes.
-  if (b2m.size() > 0) {
-    insertAllocFree(b2m, pre_alloc);
+  if (buf_allocs.size() > 0) {
+    insertAllocFree(buf_allocs, pre_alloc);
   }
 
   GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
