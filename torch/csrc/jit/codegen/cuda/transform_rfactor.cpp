@@ -55,7 +55,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* ido = new IterDomain(
         new Int(0),
         s->innerSplit() ? remainder->as<Int>() : s->factor(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_outer ? IterType::Reduction : IterType::Iteration,
         true); // broadcast
 
@@ -63,7 +63,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* idi = new IterDomain(
         new Int(0),
         s->innerSplit() ? s->factor() : remainder->as<Int>(),
-        mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_inner ? IterType::Reduction : IterType::Iteration,
         true);
 
@@ -118,7 +118,7 @@ class ReplayRFactor : public ReplayTransformations {
     IterDomain* merged_id = new IterDomain(
         new Int(0),
         merged_id_size->as<Int>(),
-        id_outer_mapped->getParallelType(),
+        ParallelType::Serial,
         rfactor_output ? IterType::Reduction : IterType::Iteration,
         true);
 
@@ -208,16 +208,6 @@ TensorDomain* TransformRFactor::runReplay(
   auto rfactor_root_vals = IterVisitor::getInputsTo(
       std::vector<Val*>(rfactor_axes.begin(), rfactor_axes.end()));
 
-  // Make sure they're all IterDomains.
-  TORCH_INTERNAL_ASSERT(
-      std::all_of(
-          rfactor_root_vals.begin(),
-          rfactor_root_vals.end(),
-          [](Val* v) {
-            return v->getValType().value() == ValType::IterDomain;
-          }),
-      "Found invalid input domain axes.");
-
   // Put in a set to make searching easy
   std::unordered_set<IterDomain*> rfactor_root_axes;
   std::transform(
@@ -228,7 +218,13 @@ TensorDomain* TransformRFactor::runReplay(
         TORCH_INTERNAL_ASSERT(
             val->getValType().value() == ValType::IterDomain,
             "Invalid value type found in rfactor axes inputs.");
-        return val->as<IterDomain>();
+        auto rfactor_root_id = val->as<IterDomain>();
+        // Partial domains don't work with RFactor
+        TORCH_INTERNAL_ASSERT(
+            !rfactor_root_id->maybePartial(),
+            "Rfactor partial domains not allowed:",
+            rfactor_root_id);
+        return rfactor_root_id;
       });
 
   auto orig_td_root = orig_td->getRootDomain();
@@ -245,7 +241,8 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->getParallelType(),
+            id->stopOffset(),
+            ParallelType::Serial,
             IterType::Reduction,
             true);
         // If this is not an rfactor root, but a reduction root, it should be
@@ -254,7 +251,8 @@ TensorDomain* TransformRFactor::runReplay(
         new_root[i] = new IterDomain(
             id->start(),
             id->extent(),
-            id->getParallelType(),
+            id->stopOffset(),
+            ParallelType::Serial,
             IterType::Iteration,
             false);
       } else {
@@ -272,12 +270,18 @@ TensorDomain* TransformRFactor::runReplay(
 
   std::vector<IterDomain*> new_domain(orig_td->nDims(), nullptr);
   {
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
       TORCH_INTERNAL_ASSERT(
-          replayed.find(id) != replayed.end(),
+          replayed_id_it != replayed.end(),
           "Error during rfactor replay, missing an axis.");
-      new_domain[i++] = replayed[id];
+      auto replayed_id = replayed_id_it->second;
+      replayed_id->parallelize(orig_id->getParallelType());
+      if (orig_id->hasPaddingToMultipleOfWarp()) {
+        replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+      }
+      new_domain[i++] = replayed_id;
     }
   }
 
@@ -296,7 +300,7 @@ TensorDomain* TransformRFactor::runReplay(
       new_root,
       rfactor_root,
       new_domain,
-      std::vector<bool>(new_root.size(), true));
+      std::vector<bool>(rfactor_root.size(), true));
 }
 
 // We want to take any axes marked in axes and remove them from the TensorDomain
@@ -377,12 +381,18 @@ TensorDomain* TransformRFactor::runReplay2(
 
   {
     // Construct the new domain, and append rfactor axes to the new root domain
-    size_t i = 0;
-    for (auto id : orig_td->domain()) {
-      if (replayed.find(id) != replayed.end()) {
-        new_domain.push_back(replayed[id]);
+    for (auto i : c10::irange(orig_td->nDims())) {
+      auto orig_id = orig_td->axis(i);
+      auto replayed_id_it = replayed.find(orig_id);
+      if (replayed_id_it != replayed.end()) {
+        auto replayed_id = replayed_id_it->second;
+        new_domain.push_back(replayed_id);
+        replayed_id->parallelize(orig_id->getParallelType());
+        if (orig_id->hasPaddingToMultipleOfWarp()) {
+          replayed_id->padToMultipleOfWarp(orig_id->getMaybeSizeAfterPadding());
+        }
       } else if (axes_set.find(i) == axes_set.end()) {
-        IterDomain* new_id = id->clone();
+        IterDomain* new_id = orig_id->clone();
         new_domain.push_back(new_id);
         new_root.push_back(new_id);
       }

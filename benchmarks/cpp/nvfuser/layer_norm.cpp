@@ -58,7 +58,8 @@ static void NvFuserScheduler_LayerNorm(
     DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
-  std::vector<int64_t> input_shape{656, benchmark_state.range(0)};
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0), benchmark_state.range(1)};
   const float kEps = 1e-5;
 
   // inputs
@@ -86,7 +87,8 @@ static void Baseline_LayerNorm(
     DataType dtype) {
   TORCH_INTERNAL_ASSERT(dtype == DataType::Float || dtype == DataType::Half);
 
-  std::vector<int64_t> input_shape{656, benchmark_state.range(0)};
+  std::vector<int64_t> input_shape{
+      benchmark_state.range(0), benchmark_state.range(1)};
   const int kReductionAxis = 1;
   std::vector<int64_t> norm_shape;
   for (int idx = kReductionAxis; idx < input_shape.size(); ++idx) {
@@ -101,6 +103,7 @@ static void Baseline_LayerNorm(
   at::Tensor weight = at::randn({input_shape[1]}, options);
   at::Tensor bias = at::randn({input_shape[1]}, options);
 
+  clearL2Cache();
   cudaDeviceSynchronize();
   for (auto _ : benchmark_state) {
     CudaKernelTimer timer;
@@ -110,6 +113,11 @@ static void Baseline_LayerNorm(
     clearL2Cache();
     cudaDeviceSynchronize();
   }
+
+  benchmark_state.SetBytesProcessed(
+      int64_t(benchmark_state.iterations()) *
+      (2 * input.numel() + weight.numel() + bias.numel()) *
+      int64_t(dataTypeSize(dtype)));
 }
 
 static void Baseline_LayerNorm_fp32(benchmark::State& benchmark_state) {
@@ -123,39 +131,111 @@ static void Baseline_LayerNorm_fp16(benchmark::State& benchmark_state) {
 //------------------------------------------------------------------------------
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp32_LayerNorm,
+    NvFuserScheduler_LayerNorm_fp32,
     setupLayerNorm,
     NvFuserScheduler_LayerNorm,
     DataType::Float);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp32_LayerNorm)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 12}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{160, 320}, {2, 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 NVFUSER_BENCHMARK_DEFINE(
-    NvFuserScheduler_fp16_LayerNorm,
+    NvFuserScheduler_LayerNorm_fp16,
     setupLayerNorm,
     NvFuserScheduler_LayerNorm,
     DataType::Half);
 
-NVFUSER_BENCHMARK_RUN(NvFuserScheduler_fp16_LayerNorm)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 12}})
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{160, 320}, {2, 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+NVFUSER_BENCHMARK_RUN(NvFuserScheduler_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 //------------------------------------------------------------------------------
 
 BENCHMARK(Baseline_LayerNorm_fp32)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 12}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{160, 320}, {2, 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 32 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 32 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp32)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
 
 BENCHMARK(Baseline_LayerNorm_fp16)
-    ->RangeMultiplier(2)
-    ->Ranges({{8, 8 << 12}})
+    // ->RangeMultiplier(2)
+    ->Ranges({{160, 320}, {2, 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{2, 16}, {32768, 64 * 1024 * 1024}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{32768, 64 * 1024 * 1024}, {2, 16}})
+    ->Unit(benchmark::kMicrosecond)
+    ->UseManualTime();
+
+BENCHMARK(Baseline_LayerNorm_fp16)
+    // ->RangeMultiplier(2)
+    ->Ranges({{128, 1024 * 16}, {128, 1024 * 16}})
     ->Unit(benchmark::kMicrosecond)
     ->UseManualTime();
