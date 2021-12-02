@@ -539,7 +539,7 @@ std::pair<size_t, MatchedSchema> matchSchemas(
   // first. this is faster and puts less dead code in the graph.
   if (schemas.size() == 1) {
     return std::make_pair(
-        0, matchSchema(*schemas[0], loc, graph, args, kwargs, self));
+        0, matchSchema(*schemas.at(0), loc, graph, args, kwargs, self));
   }
   std::stringstream failure_messages;
   for (bool allow_conversions : {false, true}) {
@@ -601,7 +601,7 @@ static Value* emitBuiltinNode(
     const SourceRange& loc,
     Graph& graph,
     Symbol name,
-    c10::optional<int> version) {
+    c10::optional<size_t> version) {
   auto n = graph.insertNode(graph.create(name, matched_schema.inputs, 0))
                ->setSourceRange(loc);
 

@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
-#include <torch/csrc/jit/passes/op_replacement.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <memory>
 
 namespace torch {
@@ -17,7 +17,7 @@ TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ReplaceOpsWithUpgraders(g);
+  ApplyOldOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
@@ -44,7 +44,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
-  ReplaceOpsWithUpgraders(g);
+  ApplyOldOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
       ->check_count("aten::add", 2, false)

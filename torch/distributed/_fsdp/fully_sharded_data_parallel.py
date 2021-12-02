@@ -5,6 +5,7 @@ from enum import Enum, auto
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -23,6 +24,8 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
+from .wrap import ConfigAutoWrap
+
 from .utils import (
     _apply_to_tensors,
 )
@@ -95,16 +98,60 @@ class FullyShardedDataParallel(nn.Module):
             params and grads to be on same device to work with optimizer. This
             API is subject to change. Default is ``None`` in which case there
             will be no offloading.
+        fsdp_auto_wrap_policy: (Optional [callable]):
+            A callable specifying a policy to recursively wrap layers with FSDP.
+            Note that this policy currently will only apply to child modules of
+            the passed in module. The remainder modules are always wrapped in
+            the returned FSDP root instance.
     """
 
     def __init__(
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
-        cpu_offload: Optional[CPUOffload] = None
+        cpu_offload: Optional[CPUOffload] = None,
+        fsdp_auto_wrap_policy: Optional[Callable] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        # if fsdp_auto_wrap_policy is specified, submodules should not be
+        # already wrapped, otherwise we'd attempt to double wrap them resulting
+        # in errors.
+        if fsdp_auto_wrap_policy is not None:
+            self._check_wrapped(
+                module,
+                check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
+                err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
+            )
+            # TODO: refactor recursive_wrap so that it is not dependent on
+            # ConfigAutoWrap.
+            config_auto_wrap = ConfigAutoWrap(
+                auto_wrap_policy=fsdp_auto_wrap_policy,
+                wrapper_cls=FullyShardedDataParallel  # type: ignore[arg-type]
+            )
+            with config_auto_wrap:
+                assert ConfigAutoWrap.in_autowrap_context
+                assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
+                assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
+                # This will only wrap the children, and then constructor will
+                # run for root module.
+                ConfigAutoWrap.recursive_wrap(
+                    module,
+                    auto_wrap_policy=fsdp_auto_wrap_policy,
+                    # Note that we have the recursive_wrap skip wrapping for
+                    # the outermost (this) module otherwise it will result in a
+                    # double-wrap causing issues.
+                    only_wrap_children=True,
+                    # FSDP arguments follow.
+                    process_group=process_group,
+                    cpu_offload=cpu_offload,
+                    # Note that recursive_wap should not call FSDP with wrapping
+                    # enabled, as this recursive call handles all wrapping,
+                    # including for nested children.
+                    fsdp_auto_wrap_policy=None,
+                )
+            assert not ConfigAutoWrap.in_autowrap_context
+
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
@@ -163,6 +210,12 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+    @classmethod
+    def _check_wrapped(cls, begin_module, check_fn, err_fn):
+        for _, mod in begin_module.named_modules():
+            if not check_fn(mod):
+                raise ValueError(err_fn(mod))
 
     @property
     def module(self) -> FlattenParamsWrapper:
@@ -395,7 +448,12 @@ class FullyShardedDataParallel(nn.Module):
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), "Expected param to be on CPU when cpu_offloading is enabled."
+            assert p.device == torch.device(
+                "cpu"
+            ), ("Expected param to be on CPU when cpu_offloading is enabled. "
+                "If CPU offloading is enabled correctly, you may be "
+                "accidentally moving the model to CUDA after FSDP initialization."
+                )
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
