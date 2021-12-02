@@ -78,7 +78,7 @@ DONT_REQUIRE_DERIVATIVE = {
     # Functions return none are not differentiable
     'record_stream',
     # These functions are not differentiable
-    'logical_and', 'logical_xor', 'logical_not',
+    'logical_and', 'logical_xor', 'logical_not', 'logical_or',
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
