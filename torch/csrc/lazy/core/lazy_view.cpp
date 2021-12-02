@@ -64,8 +64,7 @@ Value ApplyViewInfo(Value ir_value, const ViewInfo& view_info) {
 Value ApplyUpdate(Value ir_value, const Alias::UpdateData& update_data) {
   // We first bring the source IR value forward, by reshaping and slicing.
   std::vector<Value> tmp_values({ir_value});
-  for (size_t i = 0; i < update_data.view_infos.size(); ++i) {
-    const ViewInfo& view_info = update_data.view_infos[i];
+  for (const ViewInfo& view_info : update_data.view_infos) {
     tmp_values.push_back(ApplyViewInfo(tmp_values.back(), view_info));
   }
   // We then move backward given the source update value, by reshaping and
@@ -151,7 +150,7 @@ ViewInfo::ViewInfo(Type view_type, const Shape& source_shape, SelectInfo select)
           select.end,
           select.stride)),
       source_shape(source_shape),
-      select(std::move(select)) {
+      select(select) {
   TORCH_CHECK(view_type == Type::kSelect);
 }
 
@@ -178,7 +177,7 @@ ViewInfo::ViewInfo(
           diagonal.dim1,
           diagonal.dim2)),
       source_shape(source_shape),
-      diagonal(std::move(diagonal)) {
+      diagonal(diagonal) {
   TORCH_CHECK(view_type == Type::kDiagonal);
 }
 
@@ -230,7 +229,7 @@ std::shared_ptr<LazyView> LazyView::CreateSubView(
 
 std::tuple<Value, bool> LazyView::GetViewIrNode() {
   if (IsUpToDate()) {
-    return {ir_value_, false};
+    return std::make_tuple(ir_value_, false);
   }
   Value update = alias_->SyncUpdateOperations();
   for (auto& view_info : view_infos_) {
@@ -238,7 +237,7 @@ std::tuple<Value, bool> LazyView::GetViewIrNode() {
   }
   ir_value_ = update;
   generation_ = alias_->generation();
-  return {ir_value_, true};
+  return std::make_tuple(ir_value_, true);
 }
 
 } // namespace lazy
