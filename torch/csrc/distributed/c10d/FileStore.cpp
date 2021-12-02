@@ -271,10 +271,23 @@ FileStore::FileStore(const std::string& path, int numWorkers)
       pos_(0),
       numWorkers_(numWorkers),
       cleanupKey_("cleanup/"),
-      regularPrefix_("/") {
-}
+      regularPrefix_("/") {}
 
 FileStore::~FileStore() {
+  // If the file does not exist - exit.
+  // This can happen when FileStore is invoked from python language which has
+  // GC. If python code has directory cleanup procedure, the race condition may
+  // occur between that code and this deconstructor. As a result, we check for
+  // file existense before cleanup
+#ifdef _WIN32
+  int res = syscall(std::bind(::_access, path_.c_str(), 0));
+#else
+  int res =
+      syscall([filepath = path_.c_str()] { return ::access(filepath, F_OK); });
+#endif
+  if (res == -1) {
+    return;
+  }
   // cleanup key will be different from all rest keys since all rest keys will
   // have a regular prefix.
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
