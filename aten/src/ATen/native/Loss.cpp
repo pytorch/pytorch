@@ -28,13 +28,16 @@ namespace meta {
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
   TORCH_CHECK(beta >= 0, "smooth_l1_loss does not support negative values for beta.")
-  build_borrowing_binary_op(maybe_get_output(), input, target);
   if (reduction == Reduction::None) {
-    return;
+    build_borrowing_binary_op(maybe_get_output(), input, target);
+  } else {
+    TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
+    // We want to use TensorIteratorBase for all of the error checking in the meta kernel.
+    // However, we do NOT want to allocate the full output of the binary operator here.
+    // Why?
+    // smooth_l1_loss uses TensorIterator to construct an intermediate result, and performs a reduction to get the output.
+    build_borrowing_binary_op_coerce_to_scalar(maybe_get_output(), input, target);
   }
-
-  TORCH_INTERNAL_ASSERT(reduction == Reduction::Mean || reduction == Reduction::Sum);
-  maybe_get_output().resize_({});
 }
 
 } // namespace meta

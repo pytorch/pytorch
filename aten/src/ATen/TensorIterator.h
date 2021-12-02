@@ -424,6 +424,7 @@ public:
   void build_borrowing_binary_float_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_float_op)
   void build_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
+  void build_borrowing_binary_op_coerce_to_scalar(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   void build_borrowing_binary_op(const TensorBase& out, const TensorBase& a, const TensorBase& b);
   TORCH_DISALLOW_TEMPORARIES(build_borrowing_binary_op)
   void build_unary_float_op(const TensorBase& out, const TensorBase& a);
@@ -719,6 +720,21 @@ public:
     return *this;
   }
 
+  // Sets the coerce_to_scalar flag, which is false by default
+  // If true, we check that the output has scalar size, or set it if it is undefined.
+  // This flag is only used by TensorIteratorBase (in structured kernels),
+  // and is not respected by TensorIterator.
+  // The only reason this flag exists is because of kernels that use TensorIteratorBase
+  // to compute intermediate results, and then perform a reduction on the intermediate to get the result.
+  // In the meta function of an operator, we still need to run the same logic (to run shape checks and set output dtype).
+  //
+  // This is pretty hacky, and longterm it would be cleaner to teach TensorIterator how to deal with
+  // intermediate tensors to run the computation on, separately from the output tensor.
+  TensorIteratorConfig& coerce_to_scalar(const bool _coerce_to_scalar) {
+    coerce_to_scalar_ = _coerce_to_scalar;
+    return *this;
+  }
+
   TensorIteratorConfig& resize_outputs(bool resize_outputs) {
     resize_outputs_ = resize_outputs;
     return *this;
@@ -758,6 +774,7 @@ private:
   bool promote_inputs_to_common_dtype_ = false;
   bool promote_integer_inputs_to_float_ = false;
   bool cast_common_dtype_to_outputs_ = false;
+  bool coerce_to_scalar_ = false;
 };
 
 
