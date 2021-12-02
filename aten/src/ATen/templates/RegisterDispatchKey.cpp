@@ -17,7 +17,6 @@
 #include <ATen/Dispatch.h>
 #include <c10/util/ExclusivelyOwned.h>
 #include <c10/util/Half.h>
-#include <c10/core/TensorImpl.h>
 #include <c10/core/UndefinedTensorImpl.h>
 #include <c10/util/Optional.h>
 #include <ATen/Tensor.h>
