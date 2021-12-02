@@ -1845,13 +1845,20 @@ class TestNN(NNTestCase):
 
         # Check copy works
         copy = parameter_dict.copy()
+
+        # Check all keys are present and have equal alues
+        for key in parameter_dict:
+            self.assertTrue(key in copy)
+            self.assertEqual(parameter_dict[key], copy[key])
+        check()
+
         parameter_dict["p15"] = Parameter(torch.randn(10, 10))
         copy["p16"] = Parameter(torch.randn(9, 10))
 
-        self.assertEqual("p15" in parameter_dict, True)
-        self.assertEqual("p15" in copy, False)
-        self.assertEqual("p16" in parameter_dict, False)
-        self.assertEqual("p16" in copy, True)
+        self.assertTrue("p15" in parameter_dict)
+        self.assertFalse("p15" in copy)
+        self.assertFalse("p16" in parameter_dict)
+        self.assertTrue("p16" in copy)
         check()
 
         parameter_dict.clear()
