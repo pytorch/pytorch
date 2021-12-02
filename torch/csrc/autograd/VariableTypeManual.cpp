@@ -42,14 +42,16 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
 namespace {
 const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
+             "for argument #", pos, " '", name, "'");
   }
   return t;
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
+             "for argument #", pos, " '", name, "'");
   }
   return t;
 }
