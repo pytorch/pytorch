@@ -513,7 +513,7 @@ class TestOperators(TestCase):
         xfail('linalg.eigvalsh'),
 
         # functorch doesn't support channels_last
-        # PyTorch core's vmap doesn't have a batching rule for `double`, if it 
+        # PyTorch core's vmap doesn't have a batching rule for `double`, if it
         # did it would also not support channels last, so I'm including this
         # xfail "above the line".
         xfail('double', 'channels_last'),
@@ -621,7 +621,6 @@ class TestOperators(TestCase):
         xfail('nanquantile'),
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.gelu'),
-        xfail('nn.functional.grid_sample'),
         xfail('nn.functional.pad', 'circular'),
         xfail('norm', 'fro'),
         xfail('norm', 'inf'),

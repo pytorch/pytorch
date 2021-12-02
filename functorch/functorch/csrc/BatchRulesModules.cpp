@@ -255,6 +255,86 @@ grid_sample_batch_rule(const Tensor& input, optional<int64_t> input_bdim, const 
   return result;
 }
 
+std::tuple<Tensor, Tensor, Tensor, int64_t>
+grid_sample_backward_helper_in(
+    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+    const Tensor& input, optional<int64_t> input_bdim,
+    const Tensor& grid, optional<int64_t> grid_bdim) {
+
+  auto batch_size = get_bdim_size3(
+      grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
+
+  auto grad_output_ = moveBatchDimToFront(grad_output, grad_output_bdim);
+  grad_output_ = ensure_has_bdim(grad_output_, grad_output_bdim.has_value(), batch_size);
+  grad_output_ = reshape_dim_into(0, 0, grad_output_);
+
+  auto input_ = moveBatchDimToFront(input, input_bdim);
+  input_ = ensure_has_bdim(input_, input_bdim.has_value(), batch_size);
+  input_ = reshape_dim_into(0, 0, input_);
+
+  auto grid_ = moveBatchDimToFront(grid, grid_bdim);
+  grid_ = ensure_has_bdim(grid_, grid_bdim.has_value(), batch_size);
+  grid_ = reshape_dim_into(0, 0, grid_);
+
+  return std::make_tuple(grad_output_, input_, grid_, batch_size);
+}
+
+std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
+grid_sample_backward_helper_out(
+    const std::tuple<Tensor, Tensor> & bw_out,
+    optional<int64_t> grad_input_out_bdim,
+    optional<int64_t> grad_grid_out_bdim,
+    int64_t bdim_size) {
+  auto grad_input = std::get<0>(bw_out);
+  auto grad_grid = std::get<1>(bw_out);
+  grad_input = reshape_dim_outof(*grad_input_out_bdim, bdim_size, grad_input);
+  grad_grid = reshape_dim_outof(*grad_grid_out_bdim, bdim_size, grad_grid);
+  auto result = std::make_tuple(grad_input, grad_input_out_bdim, grad_grid, grad_grid_out_bdim);
+  return result;
+}
+
+
+template<typename F, F Func, typename... ExtraArgs>
+std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
+grid_sample_backward_batch_rule(
+    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+    const Tensor& input, optional<int64_t> input_bdim,
+    const Tensor& grid, optional<int64_t> grid_bdim,
+    ExtraArgs... extra_args) {
+
+  auto new_bw_input = grid_sample_backward_helper_in(
+      grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
+
+  auto new_grad_output = std::get<0>(new_bw_input);
+  auto new_input = std::get<1>(new_bw_input);
+  auto new_grid = std::get<2>(new_bw_input);
+  int64_t batch_size = std::get<3>(new_bw_input);
+
+  auto bw_out = Func(new_grad_output, new_input, new_grid, std::forward<ExtraArgs>(extra_args)...);
+
+  return grid_sample_backward_helper_out(bw_out, 0, 0, batch_size);
+}
+
+template<typename F, F Func>
+std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>>
+cudnn_grid_sample_backward_batch_rule(
+    const Tensor& input, optional<int64_t> input_bdim,
+    const Tensor& grid, optional<int64_t> grid_bdim,
+    const Tensor& grad_output, optional<int64_t> grad_output_bdim) {
+
+  auto new_bw_input = grid_sample_backward_helper_in(
+      grad_output, grad_output_bdim, input, input_bdim, grid, grid_bdim);
+
+  auto new_grad_output = std::get<0>(new_bw_input);
+  auto new_input = std::get<1>(new_bw_input);
+  auto new_grid = std::get<2>(new_bw_input);
+  int64_t bdim_size = std::get<3>(new_bw_input);
+
+  auto bw_out = Func(new_input, new_grid, new_grad_output);
+
+  return grid_sample_backward_helper_out(bw_out, 0, 0, bdim_size);
+}
+
 std::tuple<Tensor, optional<int64_t>> cross_batch_rule(
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim,
@@ -370,11 +450,52 @@ struct GridSampleBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
   }
 };
 
+template <typename A, A a, typename C>
+struct GridSampleBackwardBatchRuleHelper;
+
+template <typename F, F Func, typename T1, typename T2, typename T3, typename... T>
+struct GridSampleBackwardBatchRuleHelper<F, Func, typelist<T1, T2, T3, T...>> {
+  static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> apply(
+      const Tensor& grad_output, optional<int64_t> grad_output_batch_dim,
+      const Tensor& input, optional<int64_t> input_batch_dim,
+      const Tensor& grid, optional<int64_t> grid_batch_dim,
+      T... extra_args) {
+    return grid_sample_backward_batch_rule<F, Func, T...>(
+        grad_output, grad_output_batch_dim,
+        input, input_batch_dim,
+        grid, grid_batch_dim,
+        std::forward<T>(extra_args)...);
+  }
+};
+
+template <typename F, F Func>
+struct CudnnGridSampleBackwardBatchRuleHelper {
+  static std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> apply(
+      const Tensor& input, optional<int64_t> input_batch_dim,
+      const Tensor& grid, optional<int64_t> grid_batch_dim,
+      const Tensor& grad_output, optional<int64_t> grad_output_batch_dim) {
+    return cudnn_grid_sample_backward_batch_rule<F, Func>(
+        input, input_batch_dim,
+        grid, grid_batch_dim,
+        grad_output, grad_output_batch_dim
+    );
+  }
+};
+
 #define GRID_SAMPLE_BATCH_RULE(fn) SINGLE_ARG(\
     GridSampleBatchRuleHelper<\
       decltype(&ATEN_FN(fn)),\
       &ATEN_FN(fn),\
       c10::guts::function_traits<decltype(ATEN_FN(fn))>::parameter_types>::apply)
+
+#define GRID_SAMPLE_BW_BATCH_RULE(fn) SINGLE_ARG(\
+    GridSampleBackwardBatchRuleHelper<\
+      decltype(&ATEN_FN(fn)),\
+      &ATEN_FN(fn),\
+      c10::guts::function_traits<decltype(ATEN_FN(fn))>::parameter_types>::apply)
+
+#define CUDNN_GRID_SAMPLE_BW_BATCH_RULE(fn)\
+    CudnnGridSampleBackwardBatchRuleHelper<decltype(&ATEN_FN(fn)), &ATEN_FN(fn)>::apply
 
 #define UPSAMPLE_BACKWARD(op, overload) VMAP_SUPPORT(#op"."#overload, SINGLE_ARG(\
     UpsampleBackwardBatchRuleHelper<\
@@ -385,6 +506,7 @@ struct GridSampleBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
 #define UPSAMPLE_BATCH(op) \
   EXISTING_BDIM2(op, vec); \
   EXISTING_BDIM(op);
+
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batch_rule);
@@ -400,7 +522,12 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   EXISTING_BDIM(im2col_backward);
 
   VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT("grid_sampler_2d_backward", GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_2d_backward));
+
   VMAP_SUPPORT("grid_sampler_3d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
+  VMAP_SUPPORT("grid_sampler_3d_backward", GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_3d_backward));
+  VMAP_SUPPORT("cudnn_grid_sampler_backward", CUDNN_GRID_SAMPLE_BW_BATCH_RULE(cudnn_grid_sampler_backward));
+
   VMAP_SUPPORT("cudnn_grid_sampler", GRID_SAMPLE_BATCH_RULE(cudnn_grid_sampler));
   VMAP_SUPPORT("cross", cross_batch_rule);
 

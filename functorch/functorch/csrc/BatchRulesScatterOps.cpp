@@ -158,34 +158,6 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   return self;
 }
 
-int64_t bdim_size(
-    const Tensor& a, optional<int64_t> a_bdim,
-    const Tensor& b, optional<int64_t> b_bdim,
-    const Tensor& c, optional<int64_t> c_bdim) {
-  if (a_bdim) {
-    return a.size(*a_bdim);
-  }
-  if (b_bdim) {
-    return b.size(*b_bdim);
-  }
-  if (c_bdim) {
-    return c.size(*c_bdim);
-  }
-  TORCH_INTERNAL_ASSERT(false);
-}
-
-int64_t bdim_size(
-    const Tensor& a, optional<int64_t> a_bdim,
-    const Tensor& b, optional<int64_t> b_bdim) {
-  if (a_bdim) {
-    return a.size(*a_bdim);
-  }
-  if (b_bdim) {
-    return b.size(*b_bdim);
-  }
-  TORCH_INTERNAL_ASSERT(false);
-}
-
 namespace {
 
 template<typename Func, typename ...Args>
@@ -197,7 +169,7 @@ std::tuple<Tensor,optional<int64_t>> scatter_batch_rule(
     const Scalar& value, Args... args) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
-  auto batch_size = bdim_size(self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -230,7 +202,7 @@ inline std::tuple<Tensor,optional<int64_t>> scatter_batch_rule(
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
   auto src_logical_rank = rankWithoutBatchDim(src, src_bdim);
-  auto batch_size = bdim_size(self, self_bdim, index, index_bdim, src, src_bdim);
+  auto batch_size = get_bdim_size3(self, self_bdim, index, index_bdim, src, src_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -314,7 +286,7 @@ std::tuple<Tensor,optional<int64_t>> gather_batch_rule(
     bool sparse_grad) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto index_logical_rank = rankWithoutBatchDim(index, index_bdim);
-  auto batch_size = bdim_size(self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size2(self, self_bdim, index, index_bdim);
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
@@ -343,7 +315,7 @@ std::tuple<Tensor,optional<int64_t>> gather_backward_batch_rule(
     int64_t dim,
     const Tensor& index, optional<int64_t> index_bdim,
     bool sparse_grad) {
-  auto batch_size = bdim_size(grad, grad_bdim, self, self_bdim, index, index_bdim);
+  auto batch_size = get_bdim_size3(grad, grad_bdim, self, self_bdim, index, index_bdim);
   auto grad_ = moveBatchDimToFront(grad, grad_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto index_ = moveBatchDimToFront(index, index_bdim);
