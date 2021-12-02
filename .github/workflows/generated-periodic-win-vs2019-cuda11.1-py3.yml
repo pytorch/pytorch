@@ -243,6 +243,22 @@ jobs:
         timeout-minutes: 210
         run: |
             .jenkins/pytorch/win-test.sh
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        shell: powershell
+        run: |
+          # -ir => recursive include all files in pattern
+          7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\*.json'
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Downloaded JSONs on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:
