@@ -472,7 +472,11 @@ Tensor view_as_complex_batching_rule(const Tensor& self) {
 // Checks that the smallest batch stride is greater than the largest example
 // stride. This is something we can support but we choose not to because it's
 // potentially error prone.
-static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, IntArrayRef physical_sizes, int64_t num_batch_dims) {
+static void checkBatchDimsAtFrontInLayout(
+    IntArrayRef physical_strides,
+    IntArrayRef physical_sizes,
+    int64_t num_batch_dims,
+    std::string func_name) {
   if (std::find(physical_sizes.begin(), physical_sizes.end(), 0) != physical_sizes.end()) {
     // The tensor has zero numel
     return;
@@ -486,7 +490,7 @@ static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, IntArray
     return;
   }
   TORCH_CHECK(*smallest_batch_stride >= *largest_example_stride,
-    "vmap: Calling Tensor.as_strided is not supported unless the batch dims being ",
+    "vmap: Calling ", func_name, " is not supported unless the batch dims being ",
     "vmapped over are at the front of the tensor (in memory layout). When they are ",
     "not at the front of the tensor this operation can be error prone so we "
     "actively discourage it; please file us a bug report and/or try to ",
@@ -562,7 +566,8 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
   auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   const auto& self_physical_tensor = self_physical_view.tensor();
   int64_t num_batch_dims = self_physical_view.numBatchDims();
-  checkBatchDimsAtFrontInLayout(self_physical_tensor.strides(), self_physical_tensor.sizes(), num_batch_dims);
+  checkBatchDimsAtFrontInLayout(
+      self_physical_tensor.strides(), self_physical_tensor.sizes(),num_batch_dims, "_new_zeros_with_same_feature_meta");
   auto result = at::_new_zeros_with_same_feature_meta(self_physical_tensor, other, num_batch_dims);
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
@@ -571,7 +576,7 @@ int64_t _storage_numel_batching_rule(const Tensor& self) {
   auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   auto num_batch_dims = physical_view.numBatchDims();
   const auto& physical_tensor = physical_view.tensor();
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims);
+  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims, "_storage_numel");
   return physical_tensor.strides()[num_batch_dims - 1];
 }
 
@@ -619,7 +624,8 @@ Tensor as_strided_batching_rule(
   // 2. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
   // is valid for a slice of the input tensor.
   // See Note: [When will the as_strided batching rule fail?] for details.
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims);
+  checkBatchDimsAtFrontInLayout(
+      physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims, "Tensor.as_strided");
   checkBasicAsStridedValidForSlice(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
