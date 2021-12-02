@@ -1645,8 +1645,7 @@ static void triangular_solve_out_impl(
     "torch.linalg.solve_triangular has its arguments reversed and does not return a copy of one of the inputs.\n",
     "X = torch.triangular_solve(B, A).solution\n",
     "should be replaced with\n",
-    "X = torch.linalg.solve_triangular(A, B, upper=upper)\n",
-    "where upper should be set as appropriate.");
+    "X = torch.linalg.solve_triangular(A, B).");
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls

@@ -230,12 +230,21 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
           out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean))
           + static_cast<T_ACC>(beta[i*vec_size + ii]);
         }
+      } else if (gamma != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = static_cast<T_ACC>(gamma[i*vec_size + ii]) * (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean));
+        }
+      } else if (beta != nullptr) {
+        #pragma unroll
+        for (int ii=0; ii < vec_size; ii++){
+          out.val[ii] = (rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean)) + static_cast<T_ACC>(beta[i*vec_size + ii]);
+        }
       } else {
         #pragma unroll
         for (int ii=0; ii < vec_size; ii++){
           out.val[ii] = rstd_val * (static_cast<T_ACC>(data.val[ii]) - wd.mean);
         }
-
       }
       Y_vec[i] = out;
     }
