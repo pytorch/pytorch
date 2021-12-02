@@ -366,6 +366,8 @@ class FullyShardedDataParallel(nn.Module):
         """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
+        self._fsdp_graph_order: List[nn.Module] = []
+        self._my_fsdp_idx_in_graph: Optional[int] = None
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -526,6 +528,7 @@ class FullyShardedDataParallel(nn.Module):
         for n, m in self.named_modules():
             if n != "" and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
+                m._fsdp_graph_order = self._fsdp_graph_order
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -546,6 +549,8 @@ class FullyShardedDataParallel(nn.Module):
         # All-gather full parameters, moving them to compute_device if
         # necessary.
         self._rebuild_full_params()
+        # Wait for all_gather full parameters to finish before computation
+        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         # Register backward hooks to reshard params and reduce-scatter grads.
         # These need to be re-registered every forward pass in some cases where grad_fn
@@ -553,6 +558,10 @@ class FullyShardedDataParallel(nn.Module):
         self._register_post_backward_hooks()
 
         outputs = self.module(*args, **kwargs)
+
+        if self not in self._fsdp_graph_order:
+            self._my_fsdp_idx_in_graph = len(self._fsdp_graph_order)
+            self._fsdp_graph_order.append(self)
 
         if self.reshard_after_forward:
             self._free_full_params()
@@ -604,7 +613,20 @@ class FullyShardedDataParallel(nn.Module):
 
             # All-gather full parameters, moving them to compute device if
             # necessary.
+            # Always wait for all_gather before rebuilding full params, just
+            # in case full params are prefetched, if full params are not prefetched,
+            # it is no-op to wait for all gather stream
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
             self._rebuild_full_params()
+            # Wait for all_gather to finish before computation
+            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
+            # Prefetch previous layer's full params in backward pass
+            if (
+                self._fsdp_graph_order is not None
+                and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
+            ):
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
@@ -899,8 +921,6 @@ class FullyShardedDataParallel(nn.Module):
 
                     # Set p.data = output_tensor (with padding trimmed)
                     update_p_data(output_tensor)
-
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
