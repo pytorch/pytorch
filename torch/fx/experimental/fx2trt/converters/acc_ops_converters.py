@@ -1694,3 +1694,108 @@ def acc_ops_hardtanh(network, target, args, kwargs, name):
         alpha=kwargs["min_val"],
         beta=kwargs["max_val"],
     )
+
+
+@tensorrt_converter(acc_ops.linalg_norm)
+def acc_ops_linalg_norm(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    dim = kwargs["dim"]
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"LinalgNorm received input {input_val} that is not part "
+                           "of the TensorRT region!")
+    if kwargs["dim"] is None or \
+       (0 in np.array(kwargs["dim"], dtype=np.int32)):
+        dim_val = kwargs["dim"]
+        raise RuntimeError(f"LinalgNorm received dim {dim_val} that is not supported "
+                           "by this version of plugin, batch size cannot be changed!")
+
+    # l2_norm is able to process implicit batch dimension
+    # TODO: disabling this due to numerical issue (possibly overflow when doing fp16)
+    # if dim is not None and isinstance(dim, int) and kwargs["ord"] is not None and
+    # isinstance(kwargs["ord"], int) and kwargs["ord"] == 2:
+    #     return l2_norm(network, target, args, kwargs, name)
+
+    if network.has_implicit_batch_dimension:
+        raise RuntimeError("LinalgNorm does not support implicit_batch_dimension "
+                           "for now!")
+
+    keepdim = trt.PluginField("keep_dims",
+                              np.array(1 if kwargs["keepdim"] is not None and kwargs["keepdim"]
+                                       else 0).astype(np.int32),
+                              trt.PluginFieldType.INT32)
+    ord = trt.PluginField("ord")
+    if kwargs["ord"] is not None:
+        if isinstance(kwargs["ord"], str):
+            ord = trt.PluginField("ord_str",
+                                  np.array([kwargs["ord"]], dtype=np.str),  # type: ignore[attr-defined]
+                                  trt.PluginFieldType.CHAR)
+
+        elif isinstance(kwargs["ord"], int):
+            ord = trt.PluginField("ord_int", np.array([kwargs["ord"]], dtype=np.int32), trt.PluginFieldType.INT32)
+        elif isinstance(kwargs["ord"], float):
+            ord = trt.PluginField("ord_float",
+                                  np.array([kwargs["ord"]], dtype=np.float),  # type: ignore[attr-defined]
+                                  trt.PluginFieldType.FLOAT64)
+    dim = trt.PluginField("dim")
+    if kwargs["dim"] is not None:
+        dim = trt.PluginField("dim_val", np.array(kwargs["dim"], dtype=np.int32), trt.PluginFieldType.INT32)
+    else:
+        # Convert dim='None' to all dims.
+        dim = trt.PluginField("dim_val", np.array(range(0, len(input_val.shape)), dtype=np.int32), trt.PluginFieldType.INT32)
+
+    field_collection = trt.PluginFieldCollection([ord, dim, keepdim])
+    plugin = get_trt_plugin("LinalgNormPlugin", field_collection, "1", "fx2trt")
+    layer = network.add_plugin_v2([input_val], plugin)
+    layer.name = name
+    return layer.get_output(0)
+
+
+# math presentation of l2 norm:  sum(abs(x)^{ord})^{(1 / ord)} with ord = 2
+def l2_norm(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+    dim = kwargs["dim"]
+    keepdim = kwargs['keepdim']
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"L2 norm received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+    if not isinstance(dim, int):
+        raise RuntimeError(
+            f"L2 norm received dim {dim} that is not valid!"
+        )
+
+    # (x ^ 2).sum()
+    pow_trt = add_binary_elementwise_layer(
+        network, kwargs["input"], 2.0, trt.ElementWiseOperation.POW, target, name
+    )
+    sum_layer = network.add_reduce(
+        pow_trt,
+        trt.ReduceOperation.SUM,
+        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
+        keepdim,
+    )
+
+    # sqrt
+    sqrt_trt = add_unary_layer(network, sum_layer.get_output(0), trt.UnaryOperation.SQRT, target, f"{name}_sqrt")
+
+    return sqrt_trt
+
+
+@tensorrt_converter(acc_ops.sign)
+def acc_ops_sign(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(
+            f"Sign received input {input_val} that is not part "
+            "of the TensorRT region!"
+        )
+
+    if has_dynamic_shape(input_val.shape):
+        raise RuntimeError("Currently sign doesn't support dynamic shape.")
+
+    plugin = get_trt_plugin("SignPlugin", trt.PluginFieldCollection(), "1", "fx2trt")
+    layer = network.add_plugin_v2([input_val], plugin)
+    layer.name = name
+    return layer.get_output(0)

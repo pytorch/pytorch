@@ -4,7 +4,11 @@ import numpy as np
 import tensorrt as trt
 import torch
 from torch.fx.experimental.fx2trt.fx2trt import torch_dtype_from_trt
-
+try:
+    # @manual=//caffe2/torch/csrc/fx/fx2trt:plugins
+    from torch.csrc.fx.fx2trt.plugins.plugins import init_fx2trt_plugins  # type: ignore[import]
+except ModuleNotFoundError as err_trace:
+    print(f"Unable to load trt plugins, please check plugin module loading. Full trace {err_trace}")
 Target = Union[Callable[..., Any], str]
 ShapeType = Union[Sequence[int], trt.Dims]
 
@@ -28,6 +32,7 @@ def get_trt_plugin(
     Returns:
         A TensorRT plugin that can be added to TensorRT network as Plugin layer.
     """
+    init_fx2trt_plugins()
     plugin_registry = trt.get_plugin_registry()
     plugin_creator = plugin_registry.get_plugin_creator(plugin_name, version, plugin_namespace)
     plugin = plugin_creator.create_plugin(name=plugin_name, field_collection=field_collection)
