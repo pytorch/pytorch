@@ -5171,7 +5171,7 @@ std::unique_ptr<Function> CompilationUnit::define(
     const std::unordered_map<std::string, Function*>& function_table,
     bool shouldMangle,
     CompilationUnit::FunctionType type,
-    c10::optional<size_t> version) const {
+    c10::optional<size_t> operator_set_version) const {
   TORCH_INTERNAL_ASSERT(resolver);
   auto _resolver = resolver;
   if (!self) {
@@ -5205,9 +5205,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   }
 
   auto graph = std::make_shared<Graph>();
-  if (version.has_value()) {
-    graph->set_op_version(version.value());
-  }
+  graph->set_op_version(operator_set_version);
 
   auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
@@ -5231,7 +5229,7 @@ std::vector<Function*> CompilationUnit::define(
     const std::vector<ResolverPtr>& defResolvers,
     const Self* self,
     bool shouldMangle,
-    c10::optional<size_t> version) {
+    c10::optional<size_t> operator_set_version) {
   TORCH_INTERNAL_ASSERT(definitions.size() == defResolvers.size());
   TORCH_INTERNAL_ASSERT(properties.size() == propResolvers.size());
   std::vector<Function*> functions;
@@ -5274,7 +5272,7 @@ std::vector<Function*> CompilationUnit::define(
         function_table,
         shouldMangle,
         CompilationUnit::FunctionType::Method,
-        version);
+        operator_set_version);
 
     record_function(std::move(fn));
   }

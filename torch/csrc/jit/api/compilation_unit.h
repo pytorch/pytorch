@@ -99,7 +99,7 @@ struct TORCH_API CompilationUnit {
       const Self* self,
       // see [name mangling]
       bool shouldMangle = false,
-      c10::optional<size_t> version = c10::nullopt);
+      c10::optional<size_t> operator_set_version = c10::nullopt);
 
   void define_hooks(
       const c10::optional<c10::QualifiedName>& prefix,

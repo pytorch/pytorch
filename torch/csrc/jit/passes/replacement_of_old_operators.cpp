@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
-#include <torch/csrc/jit/passes/op_replacement.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <limits>
 #include <regex>
@@ -12,8 +12,8 @@
 namespace torch {
 namespace jit {
 
-struct OpsReplacer {
-  OpsReplacer(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
+struct OldOpsReplacer {
+  OldOpsReplacer(std::shared_ptr<Graph> graph) : graph_(std::move(graph)) {}
 
   void run() {
     if (!graph_->get_op_version().has_value()) {
@@ -61,8 +61,8 @@ struct OpsReplacer {
   std::shared_ptr<Graph> graph_;
 };
 
-TORCH_API void ReplaceOpsWithUpgraders(std::shared_ptr<Graph> graph) {
-  OpsReplacer(graph).run();
+TORCH_API void ApplyOldOpsUpgraders(std::shared_ptr<Graph> graph) {
+  OldOpsReplacer(graph).run();
 }
 
 } // namespace jit
