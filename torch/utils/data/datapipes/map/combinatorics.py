@@ -1,7 +1,7 @@
 import random
 
 from torch.utils.data import MapDataPipe, functional_datapipe
-from typing import Dict, List, Optional, TypeVar
+from typing import Iterator, List, Optional, TypeVar
 
 
 T_co = TypeVar('T_co', covariant=True)
@@ -34,20 +34,21 @@ class ShufflerMapDataPipe(MapDataPipe[T_co]):
                  ) -> None:
         super().__init__()
         self.datapipe = datapipe
-        self.possible_indices = set(range(len(datapipe))) if indices is None else set(indices)
-        self.index_mapping: Dict = {}
+        self.indices = list(range(len(datapipe))) if indices is None else indices
+        self.index_map = {index_name: num_index for num_index, index_name in enumerate(self.indices)}
+        # We do not lazily shuffle because this way is significantly faster in terms of total time
+        random.shuffle(self.indices)
 
-    def __getitem__(self, index):
-        if index in self.index_mapping:
-            return self.datapipe[self.index_mapping[index]]
-        else:
-            try:
-                new_idx = random.sample(self.possible_indices, 1)[0]
-            except ValueError:
-                raise IndexError(f"Index {index} is out of bound.")
-            self.possible_indices.remove(new_idx)
-            self.index_mapping[index] = new_idx
-            return self.datapipe[new_idx]
+    def __getitem__(self, index) -> T_co:
+        old_numeric_index = self.index_map[index]
+        new_index = self.indices[old_numeric_index]
+        return self.datapipe[new_index]
+
+    # Without __iter__ implemented, by default it tries to use 0-index,
+    # which doesn't work when there is a custom index.
+    def __iter__(self) -> Iterator[T_co]:
+        for i in self.indices:
+            yield self.datapipe[i]
 
     def __len__(self) -> int:
         return len(self.datapipe)
