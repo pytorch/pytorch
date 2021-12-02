@@ -8,7 +8,7 @@ from .utils import _parent_name
 from .quantization_types import QuantizerCls
 from ..fuser_method_mappings import get_fuser_method
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional
 
 # ---------------------
 # Fusion Pattern Registrations
@@ -23,7 +23,7 @@ class FuseHandler(ABC):
 
     @abstractmethod
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: typing.Optional[Dict[str, Any]]=None) -> Node:
+             fuse_custom_config_dict: Optional[Dict[str, Any]]=None) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
@@ -63,7 +63,7 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
         self.conv_or_linear = quantizer.modules[self.conv_or_linear_node.target]
 
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: typing.Optional[Dict[str, Any]]=None ) -> Node:
+             fuse_custom_config_dict: Optional[Dict[str, Any]]=None ) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
         if self.relu_node is not None:
@@ -118,7 +118,7 @@ class ModuleReLUFusion(FuseHandler):
         self.module = quantizer.modules[self.module_node.target]
 
     def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: typing.Optional[Dict[str, Any]]=None) -> Node:
+             fuse_custom_config_dict: Optional[Dict[str, Any]]=None) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
         # since relu can be used multiple times, we'll need to create a relu module for each match
