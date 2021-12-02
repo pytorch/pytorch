@@ -250,38 +250,27 @@ class ModifiesVarChecker : public IRVisitor {
 
 enum AccMode { READ, WRITE, BOTH };
 
-// This indicates the path from root to a stmt A in AST. Specifically, it
-// consists of a vector of integers: each integer represents the number of stmts
-// before A's ancestor or A in the block. For example, "1:1:0" points to stmt
-// "d[i] += e[i, j];" in the following code.
-//
-// c = a/b;
-// for i
-//  d[i] = 0;
-//  for j
-//    d[i] += e[i, j];
-using StmtIndex = std::vector<int32_t>;
-// Traverses the IR to identify all reads/writes to a buf, and their positions
-// in the AST which is represented as a StmtIndex
-using BufAccessNode = std::tuple<StmtPtr, AccMode, StmtIndex>;
-class BufAccesses : public IRVisitor {
+// Traverse the Block stmt to identify the live range of the specified buf. The
+// live range, indicated by a pair of integers, specifies the first and last
+// stmt in block stmts that access to the buf.
+class BufLiveRange : public IRVisitor {
  public:
-  BufAccesses(BufPtr b) : buf_(b) {}
+  BufLiveRange(BufPtr b) : buf_(b) {}
 
-  std::vector<std::tuple<StmtPtr, AccMode, StmtIndex>> accesses() {
-    return accesses_;
+  std::tuple<int32_t, int32_t> getLiveRange() {
+    return std::make_tuple(begin_, end_);
   }
 
-  static std::vector<BufAccessNode> find(StmtPtr s, BufPtr b) {
-    BufAccesses finder(b);
-    s->accept(&finder);
-    return finder.accesses();
+  static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
+    BlockPtr block = to<Block>(s);
+    TORCH_INTERNAL_ASSERT(
+        block, "Only analze buffer live range for block stmt");
+    BufLiveRange analyzer(b);
+    block->accept(&analyzer);
+    return analyzer.getLiveRange();
   }
 
  private:
-  StmtIndex getStmtIndex() {
-    return stmt_index_;
-  }
   bool findBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (auto l : loads1) {
@@ -316,54 +305,53 @@ class BufAccesses : public IRVisitor {
     return false;
   }
 
-  void insertAccesses(StmtPtr s) {
+  void updateRange(StmtPtr s) {
     bool has_reads = findBufReads(s), has_writes = findBufWrites(s);
-    if (has_reads && has_writes) {
-      auto acc = std::make_tuple(s, AccMode::BOTH, getStmtIndex());
-      accesses_.push_back(acc);
-      return;
-    }
-    if (has_reads) {
-      auto acc = std::make_tuple(s, AccMode::READ, getStmtIndex());
-      accesses_.push_back(acc);
-      return;
-    }
-    if (has_writes) {
-      auto acc = std::make_tuple(s, AccMode::WRITE, getStmtIndex());
-      accesses_.push_back(acc);
+    if (has_reads || has_writes) {
+      if (begin_ == -1) {
+        begin_ = curr_index_;
+      };
+      end_ = curr_index_;
     }
   }
 
   void visit(StorePtr v) {
-    insertAccesses(v);
+    updateRange(v);
   }
 
   void visit(LetPtr v) {
-    insertAccesses(v);
+    updateRange(v);
   }
 
   void visit(AtomicAddPtr v) {
-    insertAccesses(v);
+    updateRange(v);
   }
 
   void visit(ExternalCallPtr v) {
-    insertAccesses(v);
+    updateRange(v);
   }
 
   void visit(BlockPtr v) {
     // Stmt counter of the block
-    int count = 0;
+    bool enable_count = false;
     for (StmtPtr s : *v) {
-      stmt_index_.push_back(count);
+      if (to_count_) {
+        curr_index_ += 1;
+        to_count_ = false;
+        enable_count = true;
+      }
       s->accept(this);
-      stmt_index_.pop_back();
-      count++;
+      if (enable_count) {
+        to_count_ = true;
+      }
     }
   }
 
   BufPtr buf_;
-  std::vector<BufAccessNode> accesses_;
-  StmtIndex stmt_index_;
+  int32_t begin_ = -1;
+  int32_t end_ = -1;
+  int32_t curr_index_ = -1;
+  bool to_count_ = true;
 };
 
 // A class that analyzes the given program relevant for Block backend
