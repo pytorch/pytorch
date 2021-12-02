@@ -28,6 +28,7 @@ from jit.test_symbolic_shape_analysis import TestSymbolicShapeAnalysis  # noqa: 
 from jit.test_unsupported_ops import TestUnsupportedOps  # noqa: F401
 from jit.test_freezing import TestFreezing, TestFrozenOptimizations, TestMKLDNNReinplacing  # noqa: F401
 from jit.test_peephole import TestPeephole  # noqa: F401
+from jit.test_alias_analysis import TestAliasAnalysis  # noqa: F401
 from jit.test_save_load import TestSaveLoad  # noqa: F401
 from jit.test_module_containers import TestModuleContainers  # noqa: F401
 from jit.test_python_bindings import TestPythonBindings  # noqa: F401
@@ -67,6 +68,8 @@ from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobi
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
+from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_dce import TestDCE  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -1961,7 +1964,7 @@ graph(%Ra, %Rb):
             return torch.sparse.addmm(input, input1, input2)
 
         def test_sparse_addmm_alpha_beta(input, input1, input2):
-            return torch.sparse.addmm(input, input1, input2, 1.3, 1.5)
+            return torch.sparse.addmm(input, input1, input2, alpha=1.3, beta=1.5)
 
         self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
         self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
@@ -5310,7 +5313,7 @@ a")
                 outputs = func(x, y, profile_and_replay=True)
                 outputs_ref = torch.unbind(x, dim=y)
                 self.assertEqual(outputs, outputs_ref)
-                self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
+                self.assertAutodiffNode(func.graph_for(x, y), True, [], [])
 
                 grad = torch.autograd.grad(_sum_of_list(outputs), x)
                 grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
@@ -5335,7 +5338,7 @@ a")
                 self.assertEqual(outputs, outputs_ref)
 
                 if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-                    self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+                    self.assertAutodiffNode(func.graph_for(inputs), True, [], [])
 
                     grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
                     grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
@@ -14648,7 +14651,7 @@ dedent """
         @torch.jit._overload
         def null_overload(x: int) -> int: ...  # noqa: E704
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def null_overload(x: str) -> str:  # noqa: F811
             pass
 
@@ -14666,7 +14669,7 @@ dedent """
             def forward(self, x: int):
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x: Tensor):  # noqa: F811
                 pass
 

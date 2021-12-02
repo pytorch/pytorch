@@ -24,6 +24,10 @@ struct TORCH_API GraphFunction : public Function {
 
   void run(Stack& stack) override;
 
+  std::function<void(GraphFunction&)> function_creator() const {
+    return function_creator_;
+  }
+
   c10::intrusive_ptr<c10::ivalue::Future> runAsync(
       Stack& stack,
       TaskLauncher taskLauncher = at::launch) override;
@@ -98,6 +102,10 @@ struct TORCH_API GraphFunction : public Function {
       c10::function_ref<void(const Code&)> f) override {
     f(get_executor().getPlanFor(stack, bailOut).code);
     return true;
+  }
+
+  void clear_optimized_graphs() {
+    optimized_graphs_.fill(c10::nullopt);
   }
 
  private:

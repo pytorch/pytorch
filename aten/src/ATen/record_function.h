@@ -29,6 +29,8 @@ enum class C10_API_ENUM RecordScope : uint8_t {
   KERNEL_FUNCTION_DTYPE,
   // Torchbind custom class,
   CUSTOM_CLASS,
+  // Generic Build Feature
+  BUILD_FEATURE,
   // Kernel Function dtype Tag
   LITE_INTERPRETER,
   // User defined scope (e.g. with record_function())
@@ -122,9 +124,9 @@ struct TORCH_API RecordFunction {
   RecordFunction(const RecordFunction&) = delete;
   RecordFunction& operator=(const RecordFunction&) = delete;
 
-  const StringView& name() const {
+  const char* name() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called name() on inactive RecordFunction");
-    return state_->name_;
+    return state_->name_.c_str();
   }
 
   int64_t seqNr() const {
@@ -142,12 +144,12 @@ struct TORCH_API RecordFunction {
     return state_->outputs_;
   }
 
-  void setOutputs(std::vector<c10::IValue>&& outputs) const {
+  void setOutputs(std::vector<c10::IValue>&& outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = std::move(outputs);
   }
 
-  void setOutputs(c10::ArrayRef<c10::IValue> outputs) const {
+  void setOutputs(c10::ArrayRef<c10::IValue> outputs) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(state_, "Called setOutputs() on inactive RecordFunction");
     state_->outputs_ = outputs.vec();
   }
@@ -256,7 +258,7 @@ struct TORCH_API RecordFunction {
 
   // Whether this RecordFunction runs any callbacks.
   bool isActive() const {
-    return state_ != nullptr;
+    return state_.has_value();
   }
 
   bool needsInputs() const {
@@ -314,7 +316,7 @@ struct TORCH_API RecordFunction {
     // callbacks.
     ObserverContextList global_ctx_;
 
-    StringView name_;
+    std::string name_;
     int64_t sequence_nr_ = -1;
     std::vector<c10::IValue> inputs_;
     std::vector<c10::IValue> outputs_;
@@ -348,7 +350,7 @@ struct TORCH_API RecordFunction {
     int64_t debug_handle_{-1};
   };
 
-  std::unique_ptr<State> state_;
+  c10::optional<State> state_;
 };
 
 //

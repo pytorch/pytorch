@@ -159,11 +159,11 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   // loop over all the functions in the bytecode
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     // descend to the operators list
-    const auto& method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
-    auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
-    auto operators = operators_tuple.toTuple()->elements()[1];
-    for (auto& op_tuple : operators.toTuple()->elements()) {
-      const auto& op = op_tuple.toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
+    auto operators_tuple = method_tuple.at(1).toTupleRef().elements()[1];
+    auto operators = operators_tuple.toTupleRef().elements()[1];
+    for (auto& op_tuple : operators.toTupleRef().elements()) {
+      const auto& op = op_tuple.toTupleRef().elements();
 
       // grab name
       std::string op_name = op.at(0).toStringRef();
@@ -226,11 +226,11 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   // the hash to record which types are parsed.
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
-    const auto& method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
     auto type_table_tuple =
-        method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
+        method_tuple.at(1).toTupleRef().elements()[BYTECODE_INDEX_TYPE];
     const auto& type_table =
-        type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+        type_table_tuple.toTupleRef().elements()[1].toTupleRef().elements();
 
     // type_table is a list of IValue, and each IValue is a string,
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
@@ -283,11 +283,22 @@ ModelCompatCheckResult is_compatible(
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
-  if (model_info.bytecode_version > runtime_info.bytecode_version) {
+  if (model_info.bytecode_version >
+      runtime_info.min_max_supported_bytecode_version.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "model bytecode version " << model_info.bytecode_version
-      << "is greater than the runtimes " << runtime_info.bytecode_version;
+      << "is greater than the max supported bytecode version in runtimes "
+      << runtime_info.min_max_supported_bytecode_version.second;
+    result.errors.emplace_back(s.str());
+  } else if (
+      model_info.bytecode_version <
+      runtime_info.min_max_supported_bytecode_version.first) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "model bytecode version " << model_info.bytecode_version
+      << "is less than the minimum supported bytecode version in runtime "
+      << runtime_info.min_max_supported_bytecode_version.first;
     result.errors.emplace_back(s.str());
   }
 

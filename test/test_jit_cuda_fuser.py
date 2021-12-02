@@ -1180,8 +1180,10 @@ class TestCudaFuser(JitTestCase):
         model = {3: t_wb, 2: t_w, 1: t_b, 0: t}
 
         for w, b in itertools.product([True, False], repeat=2):
-            batch = [4]
-            shapes = [2, 3, 4]
+            batch = [2]
+            # note: awkward shape here to avoid vectorized fast kernel, which is
+            # buggy in aten
+            shapes = [2, 7, 3]
             m = model[w * 2 + b]
 
             grad = torch.randn(batch + shapes, dtype=torch.float32, device="cuda")

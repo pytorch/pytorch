@@ -25,22 +25,26 @@ std::vector<torch::lazy::Node*> Util::ComputePostOrder(
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           queue.push_back(const_cast<torch::lazy::Node*>(output.node));
         } else {
-          DCHECK(oit->second != kEmitting)
-              << "Graph loop found at " << *output.node;
+          TORCH_CHECK(
+              oit->second != kEmitting,
+              "Graph loop found at ",
+              output.node->ToString());
         }
       }
     } else if (it->second == kEmitting) {
       for (auto& output : node->operands()) {
         auto oit = emap->find(output.node);
-        DCHECK(oit != emap->end() && oit->second == kEmitted)
-            << "Graph loop found at " << *output.node;
+        TORCH_CHECK(
+            oit != emap->end() && oit->second == kEmitted,
+            "Graph loop found at ",
+            output.node->ToString());
       }
       (*emap)[node] = kEmitted;
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       post_order.push_back(const_cast<torch::lazy::Node*>(node));
       queue.pop_back();
     } else {
-      DCHECK_EQ(it->second, kEmitted);
+      TORCH_CHECK(it->second == kEmitted);
       queue.pop_back();
     }
   }

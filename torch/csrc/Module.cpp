@@ -6,6 +6,7 @@
 #endif
 
 #include <ATen/ATen.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
@@ -36,6 +37,7 @@
 #include <torch/csrc/autograd/python_nn_functions.h>
 #include <torch/csrc/autograd/python_fft_functions.h>
 #include <torch/csrc/autograd/python_linalg_functions.h>
+#include <torch/csrc/autograd/python_sparse_functions.h>
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_legacy_variable.h>
 #include <torch/csrc/autograd/python_variable.h>
@@ -57,7 +59,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/python/init.h>
 #include <torch/csrc/jit/python/python_ir.h>
-#include <torch/csrc/fx/fx_init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/utils/init.h>
 #include <torch/csrc/utils/crash_handler.h>
@@ -522,6 +523,22 @@ PyObject *THPModule_allowTF32CuBLAS(PyObject *_unused, PyObject *noargs)
   Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setAllowFP16ReductionCuBLAS(PyObject *_unused, PyObject *arg)
+{
+  THPUtils_assert(PyBool_Check(arg), "set_allow_fp16_reduction_cublas expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  at::globalContext().setAllowFP16ReductionCuBLAS(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject *THPModule_allowFP16ReductionCuBLAS(PyObject *_unused, PyObject *noargs)
+{
+  if (at::globalContext().allowFP16ReductionCuBLAS()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -676,6 +693,8 @@ static PyMethodDef TorchMethods[] = {
   {"_set_warnAlways", THPModule_setWarnAlways, METH_O,  nullptr},
   {"_get_cublas_allow_tf32", THPModule_allowTF32CuBLAS, METH_NOARGS,     nullptr},
   {"_set_cublas_allow_tf32", THPModule_setAllowTF32CuBLAS, METH_O,  nullptr},
+  {"_get_cublas_allow_fp16_reduced_precision_reduction", THPModule_allowFP16ReductionCuBLAS, METH_NOARGS, nullptr},
+  {"_set_cublas_allow_fp16_reduced_precision_reduction", THPModule_setAllowFP16ReductionCuBLAS, METH_O, nullptr},
   {"_vmapmode_increment_nesting", THPModule_vmapmode_increment_nesting, METH_NOARGS, nullptr},
   {"_vmapmode_decrement_nesting", THPModule_vmapmode_decrement_nesting, METH_NOARGS, nullptr},
   {"_debug_only_display_vmap_fallback_warnings", THPModule_set_display_vmap_fallback_warnings_mode, METH_O, nullptr},
@@ -811,13 +830,13 @@ PyObject* initModule() {
   // init.
   torch::onnx::initONNXBindings(module);
   torch::jit::initJITBindings(module);
-  torch::fx::initFx(module);
   torch::impl::dispatch::initDispatchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);
   torch::crash_handler::initCrashHandlerBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::initFFTFunctions(module);
   torch::autograd::initLinalgFunctions(module);
+  torch::autograd::initSparseFunctions(module);
   torch::autograd::initSpecialFunctions(module);
   torch::autograd::init_legacy_variable(module);
   torch::python::init_bindings(module);
@@ -947,6 +966,36 @@ Call this whenever a new thread is created in order to propagate values from
       return WeakTensorRef(THPVariable_Unpack(tensor.ptr()));
     }))
     .def("expired", &WeakTensorRef::expired);
+
+  py::enum_<at::native::ConvBackend>(py_module, "_ConvBackend")
+    .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
+    .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)
+    .value("Cudnn", at::native::ConvBackend::Cudnn)
+    .value("CudnnTranspose", at::native::ConvBackend::CudnnTranspose)
+    .value("Empty", at::native::ConvBackend::Empty)
+    .value("Miopen", at::native::ConvBackend::Miopen)
+    .value("MiopenDepthwise", at::native::ConvBackend::MiopenDepthwise)
+    .value("MiopenTranspose", at::native::ConvBackend::MiopenTranspose)
+    .value("Mkldnn", at::native::ConvBackend::Mkldnn)
+    .value("MkldnnEmpty", at::native::ConvBackend::MkldnnEmpty)
+    .value("NnpackSpatial", at::native::ConvBackend::NnpackSpatial)
+    .value("Overrideable", at::native::ConvBackend::Overrideable)
+    .value("Slow2d", at::native::ConvBackend::Slow2d)
+    .value("Slow3d", at::native::ConvBackend::Slow3d)
+    .value("SlowDilated2d", at::native::ConvBackend::SlowDilated2d)
+    .value("SlowDilated3d", at::native::ConvBackend::SlowDilated3d)
+    .value("SlowTranspose2d", at::native::ConvBackend::SlowTranspose2d)
+    .value("SlowTranspose3d", at::native::ConvBackend::SlowTranspose3d)
+    .value("Winograd3x3Depthwise", at::native::ConvBackend::Winograd3x3Depthwise)
+    .value("Xnnpack2d", at::native::ConvBackend::Xnnpack2d);
+
+  py_module.def("_select_conv_backend", [](
+        const at::Tensor& input, const at::Tensor& weight, const c10::optional<at::Tensor>& bias_opt,
+        at::IntArrayRef stride_, at::IntArrayRef padding_, at::IntArrayRef dilation_,
+        bool transposed_, at::IntArrayRef output_padding_, int64_t groups_) {
+      return at::native::select_conv_backend(
+          input, weight, bias_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
+  });
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;
