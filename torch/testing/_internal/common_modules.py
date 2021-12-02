@@ -1,4 +1,5 @@
 import torch
+import unittest
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
@@ -10,6 +11,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
+from torch.testing._internal.common_methods_invocations import DecorateInfo
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -151,6 +153,8 @@ class ModuleInfo(object):
                  decorators=None,  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  supports_gradgrad=True,  # whether the op supports second order gradients
+                 supports_channels_last=False,  # whether the op supports channels last memory format
+                 supports_channels_last_3d=False,  # whether the op supports channels_last_3d memory format
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
@@ -158,6 +162,8 @@ class ModuleInfo(object):
         self.decorators = decorators
         self.dtypes = dtypes
         self.supports_gradgrad = supports_gradgrad
+        self.supports_channels_last = supports_channels_last
+        self.supports_channels_last_3d = supports_channels_last_3d
 
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
@@ -265,6 +271,20 @@ def module_inputs_torch_nn_AvgPool1d(module_info, device, dtype, requires_grad, 
                     forward_input=FunctionInput(make_input(shape=(3, 6))),
                     desc='no_batch_dim',
                     reference_fn=no_batch_dim_reference_fn)]
+
+def module_inputs_torch_nn_Conv2d(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(3, 4, 3),
+                    forward_input=FunctionInput(make_input(shape=(2, 3, 7, 5))))]
+
+def module_inputs_torch_nn_Conv3d(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(constructor_input=FunctionInput(2, 3, (2, 3, 2)),
+                    forward_input=FunctionInput(make_input(shape=(1, 2, 4, 5, 4))))]
 
 
 def module_inputs_torch_nn_ELU(module_info, device, dtype, requires_grad, **kwargs):
@@ -380,6 +400,17 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d),
+    ModuleInfo(torch.nn.Conv2d,
+               module_inputs_func=module_inputs_torch_nn_Conv2d,
+               supports_channels_last=True),
+    ModuleInfo(torch.nn.Conv3d,
+               module_inputs_func=module_inputs_torch_nn_Conv3d,
+               supports_channels_last_3d=True,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'))
+               ),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
     ModuleInfo(torch.nn.L1Loss,
