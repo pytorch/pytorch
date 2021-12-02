@@ -83,25 +83,24 @@ void createPropNodeForIfBlock(
   auto opt_pn = createProfileIValueNode(graph, empty_values);
   insertTracingNodes(b, graph, td);
   b->appendNode(opt_pn);
-  std::function<void(Stack&)> optional_profiler =
-      [n, b, &td](Stack& stack) {
-        std::lock_guard<std::mutex> lock(td.mutex_);
+  std::function<void(Stack&)> optional_profiler = [n, b, &td](Stack& stack) {
+    std::lock_guard<std::mutex> lock(td.mutex_);
 
-        // frame_id is unused
-        int64_t frame_id = 0;
-        pop(stack, frame_id);
+    // frame_id is unused
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
 
-        for (size_t i = 0; i < b->outputs().size(); i++) {
-          // propagate a then-block or else-output to an if-output
-          auto nbo = td.old_to_new_.at(b->outputs()[i]);
-          td.old_to_new_[n->outputs()[i]] = nbo;
-          GRAPH_DEBUG(
-              "Map ",
-              td.old_to_new_[n->outputs()[i]]->debugName(),
-              " to ",
-              nbo->debugName());
-        }
-      };
+    for (size_t i = 0; i < b->outputs().size(); i++) {
+      // propagate a then-block or else-output to an if-output
+      auto nbo = td.old_to_new_.at(b->outputs()[i]);
+      td.old_to_new_[n->outputs()[i]] = nbo;
+      GRAPH_DEBUG(
+          "Map ",
+          td.old_to_new_[n->outputs()[i]]->debugName(),
+          " to ",
+          nbo->debugName());
+    }
+  };
 
   // uncomment for debugging
   // opt_pn->i_(Symbol::attr("propagate"), 1);
@@ -211,7 +210,10 @@ static void traceLoop(Node* n, std::shared_ptr<Graph>& graph, TracingData& td) {
   }
 }
 
-void insertTracingNodes(Block* block, std::shared_ptr<Graph>& graph, TracingData& td) {
+void insertTracingNodes(
+    Block* block,
+    std::shared_ptr<Graph>& graph,
+    TracingData& td) {
   for (auto it = block->nodes().begin(); it != block->nodes().end();) {
     auto n = *it;
     it++;
