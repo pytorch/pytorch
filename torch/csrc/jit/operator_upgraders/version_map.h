@@ -42,5 +42,10 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> operator_vers
         "full_out_0_4",
         "aten::full.out(int{} size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
 
+std::unordered_map<std::string, std::vector<UpgraderEntry>>
+get_operator_version_map() {
+  return operator_version_map;
+}
+
 } // namespace jit
 } // namespace torch
