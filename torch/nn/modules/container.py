@@ -695,5 +695,5 @@ class ParameterDict(Module):
         return super(ParameterDict, self)._replicate_for_data_parallel()
 
     def __ior__(self, parameter_dict2 : 'ParameterDict') -> 'ParameterDict':
-        self._parameters |= parameter_dict2._parameters
+        self.update(parameter_dict2)
         return self
