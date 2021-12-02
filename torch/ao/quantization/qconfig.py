@@ -173,7 +173,7 @@ Fused version of `default_qat_config`, has performance benefits.
 """
 
 default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
-                                 weight=default_reuse_input_observer)
+                                      weight=default_reuse_input_observer)
 """
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
