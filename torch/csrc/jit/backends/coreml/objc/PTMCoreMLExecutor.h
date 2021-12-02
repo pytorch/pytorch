@@ -25,6 +25,10 @@ API_AVAILABLE(ios(11.0), macos(10.13))
 @property(nonatomic, assign) BOOL allowLowPrecision;
 @property(nonatomic, assign) NSUInteger coreMLVersion;
 
++ (BOOL)isAvailable;
++ (void)setModelCacheDirectory:(NSString*)dir;
++ (NSString*)modelCacheDirectory;
+
 - (BOOL)compileMLModel:(const std::string&)modelSpecs
             identifier:(const std::string&)identifier;
 - (id<MLFeatureProvider>)forwardWithInputs:
