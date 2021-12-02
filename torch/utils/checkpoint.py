@@ -165,12 +165,6 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     consisting of Tensors, these Tensors nested in custom structures will not
     be considered as part of autograd.
 
-    .. warning::
-        If ``use_reentrant=True`` is specified, checkpointing currently only
-        supports :func:`torch.autograd.backward` and only if its `inputs`
-        argument is not passed. :func:`torch.autograd.grad`
-        is not supported. If ``use_reentrant=False`` is specified, checkpointing
-        will work with :func:`torch.autograd.grad`.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
@@ -191,6 +185,13 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         grads are needed for model inputs, otherwise the checkpointed part of the
         model won't have gradients. At least one of the outputs needs to have
         :code:`requires_grad=True` as well.
+
+    .. warning::
+        If ``use_reentrant=True`` is specified, checkpointing currently only
+        supports :func:`torch.autograd.backward` and only if its `inputs`
+        argument is not passed. :func:`torch.autograd.grad`
+        is not supported. If ``use_reentrant=False`` is specified, checkpointing
+        will work with :func:`torch.autograd.grad`.
 
     Args:
         function: describes what to run in the forward pass of the model or

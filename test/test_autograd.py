@@ -26,12 +26,13 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import (profile, record_function, emit_nvtx)
 from torch.autograd.profiler_util import (_format_time, EventList, FunctionEvent, FunctionEventAvg)
 import torch.autograd.functional as autogradF
-from torch.utils.checkpoint import checkpoint, Checkpoint
+from torch.utils.checkpoint import checkpoint
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (TestCase, run_tests, skipIfNoLapack,
                                                   slowTest, IS_WINDOWS, IS_MACOS, CudaMemoryLeakCheck,
-                                                  disable_gc, gradcheck, gradgradcheck)
+                                                  disable_gc, gradcheck, gradgradcheck,
+                                                  parametrize, instantiate_parametrized_tests)
 from torch.autograd import Variable, Function, detect_anomaly, kineto_available
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
@@ -4283,7 +4284,8 @@ for shape in [(1,), ()]:
 
 
     @slowTest
-    def test_checkpointing(self):
+    @parametrize("input_requires_grad", [True, False])
+    def test_checkpointing(self, input_requires_grad):
         num_inp = 2000
         nz_inp = 10
         nz_out = 10
@@ -4300,7 +4302,7 @@ for shape in [(1,), ()]:
         for r in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
-            data_r.requires_grad = True
+            data_r.requires_grad = input_requires_grad
             feat_r = checkpoint(module, data_r)
             feat_combined.append(feat_r)
 
@@ -4375,22 +4377,29 @@ for shape in [(1,), ()]:
         Verifies gradient correctness when checkpoint without reentrant autograd
         is used in conjunction with DataParallel.
         """
-        class ExpModule(torch.nn.Module):
+        class LinearModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
+                self.linear = nn.Linear(2, 2, bias=False)
 
             def forward(self, inp):
-                return torch.exp(inp)
+                return self.linear(inp)
 
-        a = torch.randn(20, 20, requires_grad=True)
+        a = torch.randn(2, 2, requires_grad=True)
+        if torch.cuda.is_available():
+            a = a.cuda()
 
-        b = torch.exp(a).sum()
+        model = LinearModule()
+        if torch.cuda.is_available():
+            model = model.cuda()
+
+        b = deepcopy(model)(a).sum()
         b.backward()
         b_grad = a.grad
 
         a.grad = None
 
-        module = torch.nn.DataParallel(ExpModule())
+        module = torch.nn.DataParallel(deepcopy(model))
         c = checkpoint(module, a, use_reentrant=False).sum()
         c.backward()
         c_grad = a.grad
@@ -4410,8 +4419,8 @@ for shape in [(1,), ()]:
 
         w.register_hook(hook)
         x = torch.rand(10, 10, requires_grad=True)
-        h = w * x  # Using w outisde the checkpoint
-        out = checkpoint(lambda x: w * x, h, use_reentrant=False) # Using w inside the checkpoint
+        h = w * x  # Using w outside the checkpoint
+        out = checkpoint(lambda x: w * x, h, use_reentrant=False)  # Using w inside the checkpoint
 
         out.sum().backward()
         # should only call hook once
@@ -9246,6 +9255,8 @@ instantiate_device_type_tests(
     globals(),
     except_for=None
 )
+
+instantiate_parametrized_tests(TestAutograd)
 
 if __name__ == '__main__':
     run_tests()
