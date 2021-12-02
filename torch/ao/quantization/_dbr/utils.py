@@ -9,7 +9,6 @@ toq = torch.ops.quantized
 from .mappings import (
     functions_supported_by_quantization,
     module_types_supported_by_quantization,
-    q_mod_to_float_mod_mapping,
     module_types_supported_by_quantization_preserves_dtype,
     functions_supported_by_quantization_preserves_dtype,
     fp32_to_int8_fun_mapping,
@@ -45,6 +44,8 @@ SeenOpInfo = collections.namedtuple(
         # Python type of the seen op. For modules, this is type(mod). For
         # functions, this is the target function.
         'type',
+        # True if the type is a module, False otherwise (for functions/methods).
+        'type_is_module',
         # Note: FQN refers to the current module for modules and to the parent
         # module for functions
         'fqn',
@@ -102,11 +103,10 @@ QTensorInfo = collections.namedtuple(
 def op_needs_quantization(op: Callable) -> bool:
     if op in functions_supported_by_quantization:
         return True
-    if type(op) in module_types_supported_by_quantization:
+    elif type(op) in module_types_supported_by_quantization:
         return True
-    if op in q_mod_to_float_mod_mapping:
-        return True
-    return False
+    else:
+        return False
 
 # TODO: fix lint
 class ObserverWrapper(torch.nn.Identity):
@@ -439,7 +439,7 @@ def iterate_and_apply(
             return args
 
 def get_producer_of_seen_op_info(
-    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    idx_to_seen_op_info: Dict[int, SeenOpInfo],
     cur_seen_op_info: SeenOpInfo,
 ) -> Optional[SeenOpInfo]:
     """
@@ -455,7 +455,7 @@ def get_producer_of_seen_op_info(
     return None
 
 def get_users_of_seen_op_info(
-    idx_to_seen_op_info: Dict[str, SeenOpInfo],
+    idx_to_seen_op_info: Dict[int, SeenOpInfo],
     cur_seen_op_info: SeenOpInfo,
 ) -> List[SeenOpInfo]:
     """
@@ -498,10 +498,13 @@ def get_torch_function_hook_type(
     parent_module: Optional[torch.nn.Module],
     func: Callable,
 ) -> HookType:
-    parent_module_has_qstate = parent_module and \
-        hasattr(parent_module, '_auto_quant_state')
+    # the direct __dict__ accesses are for performance, because
+    # the default `torch.nn.Module.__getattr__` has overhead.
+    parent_module_has_qstate = parent_module is not None and \
+        '_modules' in parent_module.__dict__ and \
+        '_auto_quant_state' in parent_module.__dict__['_modules']
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module._auto_quant_state.cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(func)  # type: ignore[union-attr, operator]
 
     if needs_op_hooks:
         return HookType.OP_HOOKS
@@ -514,28 +517,35 @@ def get_module_hook_type(
     parent_module: Optional[torch.nn.Module],
     cur_module: torch.nn.Module,
 ) -> HookType:
+    cached_hook_type = getattr(cur_module, '_auto_quant_module_hook_type', None)
+    if cached_hook_type is not None:
+        return cached_hook_type
     parent_module_has_qstate = parent_module is not None and \
-        hasattr(parent_module, '_auto_quant_state')
+        '_modules' in parent_module.__dict__ and \
+        '_auto_quant_state' in parent_module.__dict__['_modules']
     needs_op_hooks = parent_module_has_qstate and \
-        parent_module._auto_quant_state.cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
+        parent_module.__dict__['_modules']['_auto_quant_state'].cur_op_needs_hooks(cur_module)  # type: ignore[union-attr, operator]
     # We need IO hooks if
     # * we are calling forward on a module (always True here)
     # * that module has quant state
     # * that module does not need op hooks for the parent
     needs_io_hooks = (
-        hasattr(cur_module, '_auto_quant_state') and
+        '_modules' in cur_module.__dict__ and
+        '_auto_quant_state' in cur_module.__dict__['_modules'] and
         (not needs_op_hooks)
     )
     needs_arg_dequants = parent_module_has_qstate and not needs_op_hooks
 
     if needs_op_hooks:
-        return HookType.OP_HOOKS
+        result = HookType.OP_HOOKS
     elif needs_io_hooks:
-        return HookType.MODULE_IO_HOOKS
+        result = HookType.MODULE_IO_HOOKS
     elif needs_arg_dequants:
-        return HookType.ARG_DEQUANTS
+        result = HookType.ARG_DEQUANTS
     else:
-        return HookType.NONE
+        result = HookType.NONE
+    cur_module._auto_quant_module_hook_type = result  # type: ignore[assignment]
+    return result
 
 def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
     """
@@ -554,8 +564,8 @@ def clone_detach_tensor_without_dispatch(x: torch.Tensor) -> torch.Tensor:
 
 def get_input_args_quant_dequant_info(
     seen_op_info: SeenOpInfo,
-    tensor_id_to_scale_zp: Dict[str, Tuple[torch.Tensor, torch.Tensor]],
-) -> Tuple[List[Optional[Tuple[float, int]]], List[bool]]:
+    tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]],
+) -> Tuple[List[Optional[Tuple[float, int]]], List[bool], bool]:
     """
     Returns a list of information about the tensor inputs to the current op.
 
@@ -568,6 +578,10 @@ def get_input_args_quant_dequant_info(
     Dequant list:
     For each tensor input:
     * if the tensor input needs a dequant, True, otherwise, False
+
+    any_arg_quant_or_dequant_needed:
+    If True, at least one of quants or dequants is needed. If False,
+    there are no quants or dequants needed.
 
     For example, if there are two tensor inputs to the current op, and the
     first input needs a quant, this function will return
@@ -583,6 +597,7 @@ def get_input_args_quant_dequant_info(
     # determine the expected output dtype
     output_dtype = seen_op_info.output_tensor_infos[0].inf_dtype
     packable_arg_idxs = get_packable_arg_idxs(seen_op_info.type)
+    any_arg_quant_or_dequant_needed = False
 
     for input_arg_idx, input_arg in enumerate(seen_op_info.input_tensor_infos):
         arg_will_be_packed = packable_arg_idxs is not None and \
@@ -591,9 +606,10 @@ def get_input_args_quant_dequant_info(
         if input_arg is not None and not arg_will_be_packed:
             tensor_id = input_arg.id
             if input_arg.inf_dtype != output_dtype:
+                any_arg_quant_or_dequant_needed = True
                 if output_dtype == torch.quint8:
-                    assert str(tensor_id) in tensor_id_to_scale_zp
-                    scale, zp = tensor_id_to_scale_zp[str(tensor_id)]
+                    assert tensor_id in tensor_id_to_scale_zp
+                    scale, zp = tensor_id_to_scale_zp[tensor_id]
                     # TODO: return this to the caller
                     quant_infos.append((scale, zp,))  # type: ignore[arg-type]
                     dequant_infos.append(False)
@@ -606,4 +622,4 @@ def get_input_args_quant_dequant_info(
         else:
             quant_infos.append(None)
             dequant_infos.append(False)
-    return quant_infos, dequant_infos
+    return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
