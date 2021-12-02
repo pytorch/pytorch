@@ -309,11 +309,15 @@ class Checkpoint(torch.nn.Module):
 
     @contextmanager
     def _mark_module_recomputing(self):
+        is_module = isinstance(self.function, torch.nn.Module)
+
         try:
-            self.function._recomputing = True
+            if is_module:
+                self.function._recomputing = True
             yield
         finally:
-            self.function._recomputing = False
+            if is_module:
+                self.function._recomputing = False
 
     def forward(self, *args):
         self.had_autocast_in_fwd = torch.is_autocast_enabled()
