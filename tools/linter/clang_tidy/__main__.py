@@ -11,6 +11,7 @@ from typing import List
 from tools.linter.clang_tidy.run import run
 from tools.linter.clang_tidy.generate_build_files import generate_build_files
 from tools.linter.install.clang_tidy import INSTALLATION_PATH
+from tools.linter.install.download_bin import PYTORCH_ROOT
 
 
 def clang_search_dirs() -> List[str]:
@@ -46,6 +47,17 @@ def clang_search_dirs() -> List[str]:
         elif append_path:
             search_paths.append(line.strip())
 
+    # There are source files include <torch/cuda.h>, <torch/torch.h> etc.
+    # under torch/csrc/api/include folder. Since torch/csrc/api/include is not
+    # a search path for clang-tidy, there will be clang-disagnostic errors
+    # complaing those header files not found. Change the source code to include
+    # full path like torch/csrc/api/include/torch/torch.h does not work well
+    # since torch/torch.h includes torch/all.h which inturn includes more.
+    # We would need recursively change mutliple files.
+    # Adding the include path to the lint script should be a better solution.
+    search_paths.append(
+        os.path.join(PYTORCH_ROOT, "torch/csrc/api/include"),
+    )
     return search_paths
 
 

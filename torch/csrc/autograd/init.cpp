@@ -11,6 +11,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_python.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/saved_variable.h>
@@ -18,6 +19,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/python_mode.h>
+#include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <c10/core/ScalarType.h>
 
@@ -81,7 +83,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
       .def(py::init<ProfilerState,
           bool, /* record_input_shapes */
           bool, /* profile_memory */
-          bool, /* with_stac k*/
+          bool, /* with_stack */
           bool, /* with_flops */
           bool  /* with_modules */
           >());
@@ -323,6 +325,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
     torch::autograd::PyDefaultSavedVariableHooks::reset_hooks();
   });
 
+  _C_m.def("_register_py_class_for_device", [](const std::string& device, py::object python_type_class) {
+    auto cls = python_type_class.ptr();
+    registerPythonTensorClass(device, cls);
+  });
+
   py::class_<c10::InferenceMode>(_C_m, "_InferenceMode")
       .def(py::init<bool>());
 
@@ -338,6 +345,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject *unused) {
         s.register_hooks(std::make_unique<torch::autograd::PySavedVariableHooks>(pack_hook, unpack_hook));
     });
 
+  torch::autograd::profiler::python_tracer::init();
   Py_RETURN_TRUE;
 }
 

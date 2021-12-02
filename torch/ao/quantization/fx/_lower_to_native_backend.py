@@ -1,5 +1,5 @@
 import torch
-from torch.fx import subgraph_rewriter
+from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
@@ -18,7 +18,7 @@ def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModul
     # TODO: maybe orgnize this better (e.g. break down to more functions)
     # to make this function more readable
     for n in model.graph.nodes:
-        if not is_match(modules, n, pattern, max_uses=1):
+        if not is_match(modules, n, pattern):
             continue
         q_node = n
         linear_node = q_node.args[0]
@@ -74,6 +74,6 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     model = _lower_ref_linear_module(model)
     model.recompile()
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter.replace_pattern(model, pattern, replacement)
+        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
     model.graph.lint()
     return model

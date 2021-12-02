@@ -20,7 +20,7 @@ void listIndex<at::Tensor>(Stack& stack) {
   auto pos =
       std::find_if(list.begin(), list.end(), [elem](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
+        return at::native::is_nonzero(cmp_result);
       });
 
   if (pos != list.end()) {
@@ -38,7 +38,7 @@ void listCount<at::Tensor>(Stack& stack) {
   const int64_t count =
       std::count_if(list.begin(), list.end(), [&](const at::Tensor& b) {
         const auto cmp_result = elem.eq(b);
-        return cmp_result.is_nonzero();
+        return at::native::is_nonzero(cmp_result);
       });
   push(stack, count);
 }
@@ -69,7 +69,7 @@ void listSort<at::Tensor>(Stack& stack) {
         if (a.getIntrusivePtr() == b.getIntrusivePtr()) {
           return false;
         }
-        return (a.lt(b).is_nonzero()) ^ reverse;
+        return (at::native::is_nonzero(a.lt(b))) ^ reverse;
       });
 }
 
@@ -81,7 +81,7 @@ void listCopyAndSort<at::Tensor>(Stack& stack) {
       list_copied.begin(),
       list_copied.end(),
       [](const at::Tensor& a, const at::Tensor& b) {
-        return a.lt(b).is_nonzero();
+        return at::native::is_nonzero(a.lt(b));
       });
   push(stack, list_copied);
 }
@@ -93,7 +93,7 @@ void listRemove<at::Tensor>(Stack& stack) {
 
   auto pos = std::find_if(list.begin(), list.end(), [&](const at::Tensor& b) {
     const auto cmp_result = elem.eq(b);
-    return cmp_result.is_nonzero();
+    return at::native::is_nonzero(cmp_result);
   });
 
   if (pos != list.end()) {

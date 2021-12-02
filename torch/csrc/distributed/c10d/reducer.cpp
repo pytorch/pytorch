@@ -1291,6 +1291,12 @@ void Reducer::search_unused_parameters(
       // Graph is still static if the set of unused parameters did not change.
       ddp_graph_static_ =
           prev_iteration_unused_parameters_ == unused_parameters_;
+
+      if (!ddp_graph_static_) {
+        // Log graph is not static. Logger takes care of ensuring this is done
+        // only once to avoid overhead.
+        logger_.lock()->log_if_graph_static(false);
+      }
     }
     prev_iteration_unused_parameters_ = unused_parameters_;
   }
@@ -1764,15 +1770,6 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
-    REDUCER_CHECK(
-        !static_graph_,
-        logger_,
-        "Expected to have finished reduction in the prior iteration before "
-        "starting a new one. "
-        "This error indicates that your training graph has changed ",
-        "in this iteration, e.g., one parameter is used in first ",
-        "iteration, but then got unused in the second iteration. ",
-        "this is not compatible with static_graph set to True.");
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
@@ -1799,7 +1796,15 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. "
         "list, dict, iterable).";
 
-    if (!find_unused_parameters_) {
+    if (static_graph_) {
+      kBaseErrorMsg =
+          "Expected to have finished reduction in the prior iteration before "
+          "starting a new one. "
+          "This error indicates that your training graph has changed "
+          "in this iteration, e.g., one parameter is used in first "
+          "iteration, but then got unused in the second iteration. "
+          "this is not compatible with static_graph set to True.";
+    } else if (!find_unused_parameters_) {
       // Parameters may have been unused in forward pass, or not all outputs
       // were used in producing loss.
       kBaseErrorMsg +=

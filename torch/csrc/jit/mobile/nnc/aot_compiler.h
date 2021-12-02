@@ -14,7 +14,9 @@ namespace nnc {
 TORCH_API std::pair<std::unique_ptr<Function>, const std::string> aotCompile(
     const std::string& method_name,
     std::shared_ptr<Graph>& subgraph,
-    const std::vector<std::vector<int64_t>>& sizes);
+    const std::vector<std::vector<int64_t>>& sizes,
+    const std::vector<at::ScalarType>& types,
+    const std::string& kernel_func_name = "func");
 
 } // namespace nnc
 } // namespace mobile
