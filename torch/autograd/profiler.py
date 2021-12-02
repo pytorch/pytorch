@@ -178,13 +178,16 @@ class profile(object):
             self.with_modules)
 
     def __enter__(self):
+        self.start()
+        return self
+
+    def start(self):
         if not self.enabled:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
         self._prepare_trace()
         self._start_trace()
-        return self
 
     def _prepare_trace(self):
         self.entered = True
@@ -195,6 +198,10 @@ class profile(object):
         _enable_profiler(self.config(), self.kineto_activities)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+        return False
+
+    def stop(self):
         if not self.enabled:
             return
         if self.use_cuda:
@@ -207,7 +214,6 @@ class profile(object):
             profile_memory=self.profile_memory,
             with_flops=self.with_flops)
         self.function_events._build_tree()
-        return False
 
     def __repr__(self):
         if self.function_events is None:

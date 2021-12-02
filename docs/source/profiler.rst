@@ -11,7 +11,7 @@ Overview
 API Reference
 -------------
 
-.. autoclass:: torch.profiler.kineto_profiler
+.. autoclass:: torch.profiler.kineto_profile
   :members:
 
 .. autoclass:: torch.profiler.profile
