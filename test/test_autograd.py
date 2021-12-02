@@ -1,5 +1,6 @@
 # Owner(s): ["module: autograd"]
 
+import contextlib
 import gc
 import io
 import math
@@ -4328,17 +4329,31 @@ for shape in [(1,), ()]:
             nn.Linear(nz_bottleneck, nz_inp)
         )
 
+        # Run model with and without checkpointing and verify gradients are
+        # equivalent, regardless of if inputs require grads or not.
+        module_copy = deepcopy(module)
+
         feat_combined = []
+        feat_combined_no_checkpoint = []
         for r in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
             data_r.requires_grad = input_requires_grad
+            data_r_copy = data_r.clone()
             feat_r = checkpoint(module, data_r, use_reentrant=False)
             feat_combined.append(feat_r)
+            feat_r_no_checkpoint = module_copy(data_r)
+            feat_combined_no_checkpoint.append(feat_r_no_checkpoint)
+
 
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+        mean_combined_no_checkpoint = torch.stack(feat_combined_no_checkpoint).mean()
+        mean_combined_no_checkpoint.backward()
+
+        for checkpoint_param, param in zip(module.parameters(), module_copy.parameters()):
+            self.assertEqual(checkpoint_param.grad, param.grad)
 
     def test_checkpoint_valid_reset_on_error(self):
         a = torch.randn(2, 2, requires_grad=True)
@@ -4349,6 +4364,39 @@ for shape in [(1,), ()]:
 
         c = checkpoint(torch.exp, a).sum()
         c.backward()
+
+    @parametrize("use_reentrant", [True, False])
+    def test_checkpointing_without_reentrant_detached_tensor(self, use_reentrant):
+        class NoGradModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(2, 2, bias=False)
+                self.lin2 = nn.Linear(2, 2, bias=False)
+
+            def forward(self, x):
+                with torch.no_grad():
+                    return self.lin2(self.linear(x))
+
+        module = NoGradModule()
+
+        err_ctx = (
+            self.assertRaisesRegex(
+                RuntimeError,
+                "none of output has requires_grad=True"
+            )
+            if use_reentrant
+            else contextlib.suppress()
+        )
+
+        a = torch.randn(2, 2, requires_grad=True)
+        for _ in range(3):
+            with err_ctx:
+                # out does not require grad
+                out = checkpoint(module, a, use_reentrant=use_reentrant)
+                # Make loss require grad, otherwise we would run into
+                # "element 0 of tensors does not require grad and does not have a grad_fn"
+                out += a
+                out.sum().backward()
 
     def test_checkpointing_without_reentrant_correct_grad(self):
         """
