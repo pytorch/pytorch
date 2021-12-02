@@ -387,7 +387,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
   {
     VmapDimVector new_index_shape(self_size.size(), 1);
     new_index_shape[dim] = idx_size;
-    index_ = index.reshape(new_index_shape);
+    index_ = index.view(new_index_shape);
   }
   // Now apply expand to index_
   {
