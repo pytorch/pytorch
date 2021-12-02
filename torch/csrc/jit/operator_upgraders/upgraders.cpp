@@ -12,7 +12,7 @@ bool UpgradersMap::isPopulated = false;
 
 void populate_upgraders_map(const std::unordered_map<std::string, std::string>& content) {
     // make sure we populate the map only once
-    UpgradersMap::lock.lock();
+    std::lock_guard<std::mutex> lock(UpgradersMap::lock);
     if (UpgradersMap::isPopulated) {
         UpgradersMap::lock.unlock();
         return;
@@ -21,22 +21,17 @@ void populate_upgraders_map(const std::unordered_map<std::string, std::string>& 
         UpgradersMap::content.insert(entry);
     }
     UpgradersMap::isPopulated = true;
-    UpgradersMap::lock.unlock();
 }
 
 int get_upgraders_map_size() {
-    UpgradersMap::lock.lock();
-    int out = UpgradersMap::content.size();
-    UpgradersMap::lock.unlock();
-    return out;
+  std::lock_guard<std::mutex> lock(UpgradersMap::lock);
+  return UpgradersMap::content.size();
 }
 
 // this is used for testing, so copying is not a perf issue
 std::unordered_map<std::string, std::string> dump_upgraders_map() {
-    UpgradersMap::lock.lock();
-    auto out = UpgradersMap::content;
-    UpgradersMap::lock.unlock();
-    return out;
+  std::lock_guard<std::mutex> lock(UpgradersMap::lock);
+  return UpgradersMap::content;
 }
 
 } // namespace jit

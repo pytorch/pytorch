@@ -8,7 +8,7 @@ Each function definition here needs to following requirements:
 """
 import torch
 import yaml
-from typing import Union, List, Optional
+from typing import List, Optional, Union
 
 @torch.jit.script
 def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
@@ -21,10 +21,6 @@ def div_Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> tor
     if (self.is_floating_point() or isinstance(other, float)):
         return self.true_divide(other)
     return self.divide(other, rounding_mode='trunc')
-
-# # TODO: not present in the schema
-# def div_0_3(self: number, other: number) -> number:
-#     return self / other
 
 @torch.jit.script
 def div_out_0_3(self: torch.Tensor, other: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
@@ -46,8 +42,8 @@ def div__Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> to
 
 @torch.jit.script
 def full_names_0_4(size: List[int], fill_value: Union[int, float, complex], *,
-             dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
-             pin_memory: Optional[bool]) -> torch.Tensor:
+                   dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
+                   pin_memory: Optional[bool]) -> torch.Tensor:
     if dtype is None:
         fill_value = float(fill_value)
     return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
@@ -69,34 +65,51 @@ def format_bytecode(table):
         content = entry[1]
         content = listify(content)
         formatted_table[identifier] = content
-    print(formatted_table)
     return formatted_table
 
+def collect_available_upgraders():
+    # There needs to be 1 to 1 mapping between the
+    # upgrader entries here and the list of upgraders
+    # in the torch/csrc/operator_upgraders/version_map.h
+
+    entries = globals()
+    version_map = torch._C._get_operator_version_map()
+
+    # 1. Check if everything in version_map.h is defined here
+    available_upgraders_in_version_map = set()
+
+    for op_name in version_map:
+        for upgrader_entry in version_map[op_name]:
+            if upgrader_entry.upgrader_name not in entries:
+                raise AssertionError("Upgrader entry {} needs to be defined in python".format(upgrader_entry.upgrader_name))
+            available_upgraders_in_version_map.add(upgrader_entry.upgrader_name)
+
+    # 2. Check if everything in this file is registered in version_map.h
+    for entry in entries:
+        if isinstance(entries[entry], torch.jit.ScriptFunction):
+            if entry not in available_upgraders_in_version_map:
+                raise AssertionError("The upgrader {} is not registered in the version_map.h")
+
+    return available_upgraders_in_version_map
+
 def generate_bytecode(file_name):
-    yaml_content = [
-        {"div_Tensor_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_Tensor_0_3", div_Tensor_0_3.graph))},
-        {"div_Scalar_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_Scalar_0_3", div_Scalar_0_3.graph))},
-        {"div_out_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_out_0_3", div_out_0_3.graph))},
-        {"div__Tensor_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Tensor_0_3", div__Tensor_0_3.graph))},
-        {"div__Scalar_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Scalar_0_3", div__Scalar_0_3.graph))},
-        {"full_names_0_4": format_bytecode(torch._C._compile_graph_to_code_table("full_names_0_4", full_names_0_4.graph))},
-        {"full_out_0_4": format_bytecode(torch._C._compile_graph_to_code_table("full_out_0_4", full_out_0_4.graph))},
-    ]
+    upgrader_set = collect_available_upgraders()
+    yaml_content = []
+    for upgrader_name in upgrader_set:
+        upgrader_graph = globals()[upgrader_name].graph
+        upgrader_bytecode = torch._C._compile_graph_to_code_table(upgrader_name, upgrader_graph)
+        entry = {upgrader_name: format_bytecode(upgrader_bytecode)}
+        yaml_content.append(entry)
 
     stream = open(file_name, 'w')
     yaml.dump(yaml_content, stream)
 
 def populate_upgraders_map():
-    content = {
-        "div_Tensor_0_3": str(div_Tensor_0_3.graph),
-        "div_Scalar_0_3": str(div_Scalar_0_3.graph),
-        "div_out_0_3": str(div_out_0_3.graph),
-        "div__Tensor_0_3": str(div__Tensor_0_3.graph),
-        "div__Scalar_0_3": str(div__Scalar_0_3.graph),
-        "full_names_0_4": str(full_names_0_4.graph),
-        "full_out_0_4": str(full_out_0_4.graph)
-    }
-    torch._C.populate_upgraders_map(content)
+    upgrader_set = collect_available_upgraders()
+    content = {}
+    for upgrader_name in upgrader_set:
+        content[upgrader_name] = str(globals()[upgrader_name].graph)
+    torch._C._populate_upgraders_map(content)
 
 if __name__ == "__main__":
     raise RuntimeError("This file is not meant to be run directly")

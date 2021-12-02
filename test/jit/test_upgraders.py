@@ -25,14 +25,14 @@ class TestUpgraders(JitTestCase):
         torch.jit.save(f, buffer)
         buffer.seek(0)
         torch.jit.load(buffer)
-        upgraders_size = torch._C.get_upgraders_map_size()
-        upgraders_dump = torch._C.dump_upgraders_map()
+        upgraders_size = torch._C._get_upgraders_map_size()
+        upgraders_dump = torch._C._dump_upgraders_map()
         # make sure we only populate the upgrader map only once
         # so we load it again and make sure the upgrader map has
         # same content
         buffer.seek(0)
         torch.jit.load(buffer)
-        upgraders_size_second_time = torch._C.get_upgraders_map_size()
-        upgraders_dump_second_time = torch._C.dump_upgraders_map()
+        upgraders_size_second_time = torch._C._get_upgraders_map_size()
+        upgraders_dump_second_time = torch._C._dump_upgraders_map()
         self.assertTrue(upgraders_size == upgraders_size_second_time)
         self.assertTrue(upgraders_dump == upgraders_dump_second_time)
