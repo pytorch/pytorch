@@ -5158,6 +5158,9 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.triangular_solve(b, a, out=(out, clone_a))
 
+        # Trigger the WARN_ONCE deprecation error
+        torch.triangular_solve(b, a)
+
         # if out tensor with wrong shape is passed a warning is given
         with warnings.catch_warnings(record=True) as w:
             out = torch.empty(1, dtype=dtype, device=device)
@@ -5165,7 +5168,7 @@ class TestLinalg(TestCase):
             # Trigger warning
             torch.triangular_solve(b, a, out=(out, clone_a))
             # Check warning occurs
-            self.assertEqual(len(w), 3)
+            self.assertEqual(len(w), 2)
             self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
             self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
