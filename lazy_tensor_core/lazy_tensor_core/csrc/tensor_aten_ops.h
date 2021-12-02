@@ -84,8 +84,6 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
 // Permute the dimensions of this tensor according to the given permutation.
 LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims);
 
-LazyTensor pow(const LazyTensor& input, const at::Scalar& exponent);
-
 // Repeats the input tensor along each dimension by the given number of
 // repeats.
 LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats);

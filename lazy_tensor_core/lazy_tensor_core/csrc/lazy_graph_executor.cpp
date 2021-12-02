@@ -10,10 +10,10 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/unique.h"
+
 namespace torch_lazy_tensors {
 namespace {
 
@@ -282,10 +282,10 @@ class DeviceContextArena {
     devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
-    torch::lazy::Value k =
-        ir::ops::ScalarOp(torch::lazy::MakeIntScalar(kSeedMul), kSeedType);
-    torch::lazy::Value b =
-        ir::ops::ScalarOp(torch::lazy::MakeIntScalar(kSeedAdd), kSeedType);
+    torch::lazy::Value k = torch::lazy::MakeNode<ir::ops::Scalar>(
+        torch::lazy::MakeIntScalar(kSeedMul), kSeedType);
+    torch::lazy::Value b = torch::lazy::MakeNode<ir::ops::Scalar>(
+        torch::lazy::MakeIntScalar(kSeedAdd), kSeedType);
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
   }
@@ -509,7 +509,7 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const torch::lazy::BackendDevice& device) {
   if (torch::lazy::IsSpecialScalar(value)) {
-    return ir::ops::ScalarOp(value, type);
+    return torch::lazy::MakeNode<ir::ops::Scalar>(value, type);
   }
   return GetDeviceDataIrValue(value, type, device);
 }
