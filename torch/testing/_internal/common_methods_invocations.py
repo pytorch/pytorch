@@ -4935,9 +4935,10 @@ def sample_inputs_linalg_solve_triangular(op_info, device, dtype, requires_grad=
                     # Either A or B needs to have a gradient
                     if not grad_A and not grad_B:
                         continue
-                    A.requires_grad_(grad_A)
-                    B.requires_grad_(grad_B)
-                    yield SampleInput(A, args=(B,), kwargs=kwargs)
+                    yield SampleInput(
+                        A.clone().requires_grad_(grad_A),
+                        args=(B.clone().requires_grad_(grad_B),),
+                        kwargs=kwargs)
             else:
                 yield SampleInput(A, args=(B,), kwargs=kwargs)
 

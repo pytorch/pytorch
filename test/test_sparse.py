@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard
+    DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -3422,13 +3422,6 @@ def _sparse_to_dense(tensor):
     return tensor.to(torch.int8).to_dense().to(torch.bool)
 
 
-def _first_sample(self, samples):
-    try:
-        return next(iter(samples))
-    except StopIteration:
-        self.skipTest('Skipped! Need at least 1 sample input')
-
-
 _sparse_unary_ops = ops(sparse_unary_ufuncs, dtypes=OpDTypes.supported,
                         allowed_dtypes=all_types_and_complex())
 class TestSparseUnaryUfuncs(TestCase):
@@ -3437,7 +3430,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
-        sample = _first_sample(self, op.sample_inputs(device, dtype))
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         assert isinstance(sample.input, torch.Tensor)
 
         expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -3451,7 +3444,7 @@ class TestSparseUnaryUfuncs(TestCase):
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
 
-        sample = _first_sample(self, op.sample_inputs(device, dtype))
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -3465,7 +3458,7 @@ class TestSparseUnaryUfuncs(TestCase):
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
 
-        sample = _first_sample(self, op.sample_inputs(device, dtype))
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse().coalesce()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
