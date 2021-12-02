@@ -17,7 +17,7 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import QConfigAny
-from ..qconfig import is_replay_qconfig
+from ..qconfig import is_reuse_input_qconfig
 from .qconfig_utils import (
     convert_dict_to_ordered_dict,
     generate_qconfig_map,
@@ -433,7 +433,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         is_weight = node_arg_is_weight(node, arg)
         assert qconfig is not None
 
-        is_replay_qconfig_ = is_replay_qconfig(qconfig)
+        is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
         act_post_process_ctr = qconfig.weight if is_weight else \
             qconfig.activation
@@ -450,8 +450,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             (arg_as_input_target_dtype != torch.float) and
             # if arg is a bool tensor or not a tensor, do not insert observer
             (arg_as_output_target_dtype not in (torch.bool, None)) and
-            # if qconfig is replay qconfig, we won't insert extra observer for input
-            not is_replay_qconfig_
+            # if qconfig is reuse_input qconfig, we won't insert extra observer for input
+            not is_reuse_input_qconfig_
         )
 
     else:
@@ -1109,7 +1109,7 @@ def insert_observers_for_model(
                     is_general_tensor_shape_op = \
                         (qhandler is not None and qhandler.is_general_tensor_shape_op())
 
-                    is_replay_qconfig_ = is_replay_qconfig(qconfig)
+                    is_reuse_input_qconfig_ = is_reuse_input_qconfig(qconfig)
 
                     if is_last_node_of_pattern:
                         # this returns the new observer node if it was needed
@@ -1141,7 +1141,7 @@ def insert_observers_for_model(
                             # for general tensor value ops, we modify the graph
                             # to make all inputs and outputs use the first input's
                             # observer
-                            if is_general_tensor_value_op or is_general_tensor_shape_op or is_replay_qconfig_:
+                            if is_general_tensor_value_op or is_general_tensor_shape_op or is_reuse_input_qconfig_:
                                 if not maybe_make_input_output_share_observers(node, model, modules):
                                     remove_output_observer(node, model, modules)
 

@@ -1310,7 +1310,7 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
-class ReplayObserver(ObserverBase):
+class ReuseInputObserver(ObserverBase):
     r""" This observer is used when we want to reuse the observer from the operator
     that produces the input Tensor, typically used for operators like reshape, e.g.
     ```
@@ -1318,7 +1318,7 @@ class ReplayObserver(ObserverBase):
     x1 = x0.reshape()
     ```
     if we configure x0 to be observed by some observer, let's say MinMaxObserver,
-    and reshape is configured with ReplayObserver, we'll reuse the observer instance
+    and reshape is configured with ReuseInputObserver, we'll reuse the observer instance
     for x0 for x1 (output of reshape). If x0 is not observed, we also won't observe x1.
 
     Note: this is only enabled in FX Graph Mode Quantization
@@ -1476,7 +1476,7 @@ default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
 Default observers for fixed qparams operations.
 """
 
-default_replay_observer = ReplayObserver
+default_reuse_input_observer = ReuseInputObserver
 """
 Default observer for operators like reshape that reuses the observer of input to
 the operator

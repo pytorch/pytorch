@@ -47,7 +47,6 @@ from torch.ao.quantization import (
     get_default_qconfig,
     get_default_qat_qconfig,
     get_default_qconfig_dict,
-    get_default_qat_qconfig_dict,
     fuse_modules,
     prepare,
     prepare_qat,
@@ -3344,7 +3343,7 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
                         DEFAULT_OUTPUT_OBSERVER_MAP)
 
-    def test_replay_qconfig(self):
+    def test_reuse_input_qconfig(self):
         class M1(torch.nn.Module):
             def __init__(self):
                 super().__init__()
