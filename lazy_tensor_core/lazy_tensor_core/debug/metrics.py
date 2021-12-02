@@ -2,6 +2,9 @@ from __future__ import print_function
 
 import lazy_tensor_core
 
+def reset_metrics():
+  lazy_tensor_core._LAZYC._ltc_reset_metrics()
+
 
 def counter_names():
     """Retrieves all the currently active counter names."""

@@ -84,9 +84,19 @@ void EmitCounterInfo(const std::string& name, CounterData* data,
 
 }  // namespace
 
+
+
 MetricsArena* MetricsArena::Get() {
   static MetricsArena* arena = new MetricsArena();
   return arena;
+}
+
+void MetricsArena::Reset() {
+  for (auto& pair: counters_) {
+    if (pair.second){
+      pair.second->Reset();
+    }
+  }
 }
 
 void MetricsArena::RegisterMetric(const std::string& name, MetricReprFn repr_fn,

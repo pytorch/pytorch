@@ -659,6 +659,8 @@ void InitLtcModuleBindings(py::module m) {
         LazyGraphExecutor::Get()->WaitDeviceOps({});
       },
       py::arg("devices"));
+  m.def("_ltc_reset_metrics",
+        []() { lazy_tensors::metrics::MetricsArena::Get()->Reset(); });
   m.def("_ltc_counter_names",
         []() { return lazy_tensors::metrics::GetCounterNames(); });
   m.def("_ltc_counter_value", [](const std::string& name) -> py::object {
