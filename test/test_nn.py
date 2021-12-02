@@ -1837,7 +1837,7 @@ class TestNN(NNTestCase):
         p = Parameter(torch.randn(10, 10))
         parameter_dict['p12'] = p
         p_popitem = parameter_dict.popitem()
-        self.assertIs(p_popitem[0], 'p12')
+        self.assertEqual(p_popitem[0], 'p12')
         self.assertIs(p_popitem[1], p)
         check()
 
