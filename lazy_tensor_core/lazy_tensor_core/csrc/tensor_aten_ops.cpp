@@ -23,7 +23,6 @@
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
-#include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -33,6 +32,7 @@
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "torch/csrc/autograd/variable.h"
 
@@ -329,13 +329,6 @@ LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   return input.CreateViewTensor(std::move(view_info));
 }
 
-LazyTensor pow(const LazyTensor& input, const at::Scalar& exponent) {
-  torch::lazy::Value exponent_node =
-      LazyGraphExecutor::Get()->GetIrValueForScalar(exponent, input.shape(),
-                                                    input.GetDevice());
-  return LazyTensor::Create(ir::ops::Pow(input.GetIrValue(), exponent_node), input.GetDevice());
-}
-
 LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats) {
   return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Repeat>(
       input.GetIrValue(), std::move(repeats)), input.GetDevice());
@@ -461,7 +454,13 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
 
 LazyTensor tanh_backward(const LazyTensor& grad_output,
                          const LazyTensor& output) {
-  return mul(grad_output, rsub(pow(output, 2), 1, 1));
+  // Shape stays the same since pow is a unary op
+  std::vector<torch::lazy::Shape> shapes{output.shape().Get()};
+  torch::lazy::NodePtr pow_node =
+      torch::lazy::MakeNode<ir::ops::PowTensorScalar>(output.GetIrValue(), 2,
+                                                      std::move(shapes));
+  return mul(grad_output,
+             rsub(LazyTensor::Create(pow_node, output.GetDevice()), 1, 1));
 }
 
 LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {

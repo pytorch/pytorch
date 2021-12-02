@@ -9,7 +9,7 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/ops.h"
+#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
@@ -264,7 +264,8 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (torch::lazy::IsSpecialScalar(value)) {
-      return ir::ops::ScalarOp(std::move(value), tensor.scalar_type());
+      return torch::lazy::MakeNode<ir::ops::Scalar>(std::move(value),
+                                                    tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;

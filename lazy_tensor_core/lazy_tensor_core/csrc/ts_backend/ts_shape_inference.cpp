@@ -109,10 +109,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
               node, torch::lazy::OpKind(at::aten::convolution_overrideable)));
     }
     // activation and unary op do not change shape
-    case at::aten::pow: {
-      const torch::lazy::Output& argument = node->operand(0);
-      return torch::lazy::GetShapeFromTsOutput(argument);
-    }
     case at::aten::repeat: {
       return InferRepeat(torch::lazy::NodeCast<ir::ops::Repeat>(
           node, torch::lazy::OpKind(at::aten::repeat)));

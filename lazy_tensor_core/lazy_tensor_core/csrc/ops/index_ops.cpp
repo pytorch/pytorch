@@ -14,7 +14,6 @@
 #include "lazy_tensor_core/csrc/ops/index_along_dim.h"
 #include "lazy_tensor_core/csrc/ops/index_get.h"
 #include "lazy_tensor_core/csrc/ops/index_put.h"
-#include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
