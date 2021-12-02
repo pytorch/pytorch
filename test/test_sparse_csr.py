@@ -1108,9 +1108,6 @@ class TestSparseCSR(TestCase):
     def test_sparse_csr_unary(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         for sample in samples:
             assert torch.is_tensor(sample.input)
             # Sparse CSR only supports 2D tensors as inputs
