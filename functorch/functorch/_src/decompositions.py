@@ -134,6 +134,23 @@ def im2col_backward(grad_output: Tensor, input_size: List[int], kernel_size: Lis
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
     return grad_output * (mask.type_as(grad_output) * scale)
 
+@register_decomposition(aten.logit_backward)
+def logit_backward(grad_output: Tensor, self: Tensor, eps: Optional[float] = None) -> Tensor:
+    if eps is not None:
+        lo = eps
+        hi = 1.0 - lo
+        return aten.where(
+            aten.logical_and(self >= lo, self <= hi),
+            grad_output / (self * (1.0 - self)),
+            aten.new_zeros(self, ()))
+    else:
+        return aten.where(
+            aten.logical_and(self >= 0.0, self <= 1.0),
+            grad_output / (self * (1.0 - self)),
+            aten.new_full(self, (), float('nan')))
+
+
+
 # @register_decomposition(aten._fused_dropout)
 # def _fused_dropout_decomposition(input, p, generator=None):
 #     mask = aten.to(aten.rand_like(input) < p, dtype=torch.uint8)
