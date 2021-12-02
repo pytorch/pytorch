@@ -892,14 +892,6 @@ class TestDecompositionOpInfo(TestCase):
                 return DecompositionTensor(x)
             return x
 
-        def unwrap_tensor(x):
-            if type(x) == DecompositionTensor:
-                if not hasattr(x, 'elem'):
-                    raise InplaceError()
-                return x.elem
-            return x
-
-
         try:
             func = op.get_op()
             for sample_input in samples:
