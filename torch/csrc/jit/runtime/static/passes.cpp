@@ -8,6 +8,11 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
+C10_DEFINE_bool(
+    enable_clip_ranges_gather_fusions,
+    true,
+    "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.");
+
 namespace torch {
 namespace jit {
 namespace {
@@ -337,17 +342,21 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
 
-  ClipRangesGatherRangesLengthsToOffsets(graph);
+  if (FLAGS_enable_clip_ranges_gather_fusions) {
+    ClipRangesGatherRangesLengthsToOffsets(graph);
+  }
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
 
   ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
-  // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
-  // clip_ranges+gather_ranges
-  ClipRangesGather(graph);
+  if (FLAGS_enable_clip_ranges_gather_fusions) {
+    // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
+    // clip_ranges+gather_ranges
+    ClipRangesGather(graph);
 
-  ClipRangesToGatherToOffsets(graph);
+    ClipRangesToGatherToOffsets(graph);
+  }
 #endif
 }
 
