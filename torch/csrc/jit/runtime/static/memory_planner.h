@@ -39,10 +39,67 @@ class StorageGroup {
   std::vector<at::Tensor*> group_{};
 };
 
-TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
-    graph_node_list nodes,
-    const ManagedTensorRanges& ranges,
-    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor);
+// A StorageAssignmentStrategy encapsulates a memory re-use algorithm.
+class TORCH_API StorageAssignmentStrategy {
+ public:
+  explicit StorageAssignmentStrategy(
+      ManagedTensorRanges&& managed_tensor_ranges)
+      : managed_tensor_ranges_(std::move(managed_tensor_ranges)) {}
+
+  virtual ~StorageAssignmentStrategy() = default;
+
+  // Assumptions:
+  // - Every managed tensor is included in a storage group.
+  // - Managed tensors with overlapping lifetimes do not share storage groups.
+  virtual std::vector<StorageGroup> assignStorageGroups(
+      FastMap<const Value*, at::Tensor*> tensor_value_to_tensor) = 0;
+
+  std::vector<StorageGroup> assignStorageGroups(
+      const std::vector<ProcessedNode>& nodes) {
+    return assignStorageGroups(tensorValueToTensor(nodes));
+  }
+
+  const FastSet<const Value*>& managedTensorValues() const {
+    return managed_tensor_ranges_.managedTensorValues();
+  }
+
+ protected:
+  FastMap<const Value*, at::Tensor*> tensorValueToTensor(
+      const std::vector<ProcessedNode>& nodes);
+
+  ManagedTensorRanges managed_tensor_ranges_;
+};
+
+// The default memory reuse algorithm is similar to C2's `memonger`.
+// Currently, this is what is used when `optimize_memory == true`.
+class TORCH_API DefaultReuseStrategy : public StorageAssignmentStrategy {
+ public:
+  explicit DefaultReuseStrategy(ManagedTensorRanges managed_tensor_ranges)
+      : StorageAssignmentStrategy(std::move(managed_tensor_ranges)) {}
+
+  std::vector<StorageGroup> assignStorageGroups(
+      FastMap<const Value*, at::Tensor*> tensor_value_to_tensor) override;
+};
+
+// This is the trivial algorithm that's used when `optimize_memory == false`.
+// Each managed tensor is simply assigned to its own storage group; no reuse
+// happens.
+class TORCH_API NoReuseStrategy : public StorageAssignmentStrategy {
+ public:
+  explicit NoReuseStrategy(ManagedTensorRanges managed_tensor_ranges)
+      : StorageAssignmentStrategy(std::move(managed_tensor_ranges)) {}
+
+  std::vector<StorageGroup> assignStorageGroups(
+      FastMap<const Value*, at::Tensor*> tensor_value_to_tensor) override;
+};
+
+// Create a StorageAssignmentStrategy based on the given options and tensor
+// lifetimes. Don't create StorageAssignmentStrategies directly, use
+// this function instead.
+TORCH_API std::unique_ptr<StorageAssignmentStrategy>
+storageAssignmentStrategyFactory(
+    const StaticModuleOptions& opts,
+    ManagedTensorRanges managed_tensor_ranges);
 
 /// There are three types of ops in a processed graph in Static Runtime:
 ///   1. op with _out variant
@@ -75,10 +132,9 @@ class MemoryPlanner {
   explicit MemoryPlanner(
       StaticRuntime* runtime,
       const ValueGroup& value_group,
-      const FastSet<const Value*>& managed_tensor_values,
       const FastSet<const Value*>& managed_output_tensor_values,
       const FastSet<const Value*>& leaked_values,
-      const ManagedTensorRanges& ranges,
+      StorageAssignmentStrategy& storage_assignment_strategy,
       bool enable_out_variant,
       bool manage_output_tensors,
       bool optimize_memory);

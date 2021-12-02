@@ -282,12 +282,16 @@ bool isPureFunction(const Node* node) {
 } // namespace
 
 ManagedTensorRanges::ManagedTensorRanges(
-    const std::shared_ptr<Graph>& graph,
-    const FastSet<const Value*>& managed_tensor_values) {
-  AliasDb alias_db(graph);
-  const std::vector<Node*> nodes(graph->nodes().begin(), graph->nodes().end());
+    std::shared_ptr<Graph> graph,
+    FastSet<const Value*> managed_tensor_values)
+    : graph_(std::move(graph)),
+      managed_tensor_values_(std::move(managed_tensor_values)) {
+  TORCH_CHECK(graph_ != nullptr);
+  AliasDb alias_db(graph_);
+  const std::vector<Node*> nodes(
+      graph_->nodes().begin(), graph_->nodes().end());
   const FastSet<const Value*> graph_inputs(
-      graph->inputs().begin(), graph->inputs().end());
+      graph_->inputs().begin(), graph_->inputs().end());
 
   auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
     return !alias_db.isMutableType(value) ||
@@ -313,7 +317,7 @@ ManagedTensorRanges::ManagedTensorRanges(
       value_lifetimes_.emplace(output, Lifetime(i, i));
     }
   }
-  for (auto* graph_output : graph->outputs()) {
+  for (auto* graph_output : graph_->outputs()) {
     auto* lifetime = getLifetime(graph_output);
     if (!lifetime) {
       DCHECK(isUntrackedValue(graph_output));
@@ -326,7 +330,7 @@ ManagedTensorRanges::ManagedTensorRanges(
   // has an input and output that may alias each other, set the input's
   // lifetime end to max(input.lifetime_end, output.lifetime_end). Iterate
   // backwards to handle chains of aliases.
-  for (const auto* node : graph->nodes().reverse()) {
+  for (const auto* node : graph_->nodes().reverse()) {
     if (isPureFunction(node)) {
       // If the node is a pure function, it doesn't create any aliases,
       // so we can safely skip it.
@@ -348,13 +352,13 @@ ManagedTensorRanges::ManagedTensorRanges(
       }
     }
   }
-  for (auto* managed_tensor : managed_tensor_values) {
+  for (auto* managed_tensor : managed_tensor_values_) {
     auto* lifetime = getLifetime(managed_tensor);
     DCHECK(lifetime && lifetime->end <= num_nodes);
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Node* freeing_node;
     if (lifetime->end == num_nodes) {
-      freeing_node = graph->return_node();
+      freeing_node = graph_->return_node();
     } else {
       freeing_node = nodes[lifetime->end];
     }
@@ -619,8 +623,13 @@ StaticModule::StaticModule(
   prepareForMemoryPlanner();
 }
 
+StaticModule::~StaticModule() = default;
+
 void StaticModule::prepareForMemoryPlanner() {
+  FastSet<const Value*> managed_tensor_values;
   if (!opts_.enable_out_variant) {
+    storage_assignment_strategy_ = storageAssignmentStrategyFactory(
+        opts_, ManagedTensorRanges(graph_, {}));
     return;
   }
 
@@ -652,7 +661,7 @@ void StaticModule::prepareForMemoryPlanner() {
         continue;
       }
       if (is_tensor_type) {
-        managed_tensor_values_.insert(out_v);
+        managed_tensor_values.insert(out_v);
       } else if (is_optimizable_container_type(pnode.node())) {
         // We "leak" certain container types because their allocations
         // take a long time
@@ -662,14 +671,19 @@ void StaticModule::prepareForMemoryPlanner() {
   }
 
   for (const Value* output : graph_->outputs()) {
-    managed_tensor_values_.erase(output);
+    managed_tensor_values.erase(output);
   }
-  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values_));
+  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values));
   GRAPH_DEBUG(
       "managed_output_tensor_values_: ",
       dumpValueSet(managed_output_tensor_values_));
 
-  managed_tensor_ranges_ = ManagedTensorRanges(graph_, managed_tensor_values_);
+  storage_assignment_strategy_ = storageAssignmentStrategyFactory(
+      opts_, ManagedTensorRanges(graph_, std::move(managed_tensor_values)));
+
+  TORCH_CHECK(
+      storage_assignment_strategy_,
+      "Could not resolve storage assignment strategy. Check static module options.");
 }
 
 const StaticModuleOptions& StaticModule::opts() const {
@@ -826,10 +840,9 @@ void StaticRuntime::create_memory_planner() {
     planner_ = std::make_unique<MemoryPlanner>(
         this,
         static_module_.value_group(),
-        static_module_.managed_tensor_values(),
         static_module_.managed_output_tensor_values(),
         static_module_.leaked_values(),
-        static_module_.managed_tensor_ranges(),
+        static_module_.storage_assignment_strategy(),
         static_module_.opts().enable_out_variant,
         manage_output_tensors_enabled_,
         static_module_.opts().optimize_memory);

@@ -5,12 +5,12 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <iterator>
+#include <memory>
 
 namespace torch {
 namespace jit {
 
 namespace {
-
 bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
   DCHECK(output_idx < pnode.outputs().size());
   static const auto to_maybe_copy_out_symbol =
@@ -22,11 +22,13 @@ bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
   return pnode.node()->kind() == to_maybe_copy_out_symbol &&
       pnode.Output(output_idx).isNone();
 }
+} // namespace
 
-FastMap<const Value*, at::Tensor*> tensorValueToTensor(
-    const std::vector<ProcessedNode>& nodes,
-    const FastSet<const Value*>& managed_tensor_values) {
+FastMap<const Value*, at::Tensor*> StorageAssignmentStrategy::
+    tensorValueToTensor(const std::vector<ProcessedNode>& nodes) {
   FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+  const auto& managed_tensor_values =
+      managed_tensor_ranges_.managedTensorValues();
   for (auto& pnode : nodes) {
     auto* node = pnode.node();
     for (const auto output_idx : c10::irange(node->outputs().size())) {
@@ -35,9 +37,7 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
       if (managed_tensor_values.find(output) == managed_tensor_values.end()) {
         continue;
       }
-
       auto& ival = pnode.Output(output_idx);
-
       // ival is allowed to be None in special cases, e.g. to_maybe_copy_out
       DCHECK(
           ival.isTensor() ||
@@ -54,13 +54,10 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
   return tensor_value_to_tensor;
 }
 
-} // namespace
-
-std::vector<StorageGroup> assignStorageToManagedTensors(
-    graph_node_list nodes,
-    const ManagedTensorRanges& ranges,
-    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor) {
+std::vector<StorageGroup> DefaultReuseStrategy::assignStorageGroups(
+    FastMap<const Value*, at::Tensor*> tensor_value_to_tensor) {
   std::vector<StorageGroup> managed_tensor_groups;
+
   // This set maps each Value* to its assigned storage group.
   FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
@@ -88,7 +85,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
     return tensor_value_to_tensor.find(value) != tensor_value_to_tensor.end();
   };
 
-  for (auto* node : nodes) {
+  for (auto* node : managed_tensor_ranges_.nodes()) {
     // Assign storage groups to outputs
     for (const auto output_idx : c10::irange(node->outputs().size())) {
       Value* output = node->output(output_idx);
@@ -104,9 +101,9 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
 
     // This node may be the last use of some managed tensors. If so, we
     // can mark the corresponding storage groups as free.
-    if (ranges.nodeFreesManagedTensors(node)) {
+    if (managed_tensor_ranges_.nodeFreesManagedTensors(node)) {
       const auto& new_free_tensors =
-          ranges.availableTensorValuesAfterNode(node);
+          managed_tensor_ranges_.availableTensorValuesAfterNode(node);
       for (auto* tensor_value : new_free_tensors) {
         // We to check this here to handle special cases like to_maybe_copy_out
         // - we don't know if the tensor value is managed until after the first
@@ -120,6 +117,26 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
     }
   }
   return managed_tensor_groups;
+}
+
+std::vector<StorageGroup> NoReuseStrategy::assignStorageGroups(
+    FastMap<const Value*, at::Tensor*> tensor_value_to_tensor) {
+  std::vector<StorageGroup> managed_tensor_groups;
+  for (auto& tensor : tensor_value_to_tensor) {
+    managed_tensor_groups.emplace_back(tensor.second);
+  }
+  return managed_tensor_groups;
+}
+
+std::unique_ptr<StorageAssignmentStrategy> storageAssignmentStrategyFactory(
+    const StaticModuleOptions& opts,
+    ManagedTensorRanges managed_tensor_ranges) {
+  if (opts.enable_out_variant && opts.optimize_memory) {
+    return std::make_unique<DefaultReuseStrategy>(
+        std::move(managed_tensor_ranges));
+  }
+
+  return std::make_unique<NoReuseStrategy>(std::move(managed_tensor_ranges));
 }
 
 namespace {
@@ -153,14 +170,15 @@ std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
 MemoryPlanner::MemoryPlanner(
     StaticRuntime* runtime,
     const ValueGroup& value_group,
-    const FastSet<const Value*>& managed_tensor_values,
     const FastSet<const Value*>& managed_output_tensor_values,
     const FastSet<const Value*>& leaked_values,
-    const ManagedTensorRanges& ranges,
+    StorageAssignmentStrategy& storage_assignment_strategy,
     bool enable_out_variant,
     bool manage_output_tensors,
     bool optimize_memory) {
   // collect unmanaged output ivalues
+  const auto& managed_tensor_values =
+      storage_assignment_strategy.managedTensorValues();
   FastSet<IValue*> unmanaged_ivalues;
   FastSet<IValue*> unmanaged_borrowed_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
@@ -218,18 +236,8 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_borrowed_ivalues.begin(),
       unmanaged_borrowed_ivalues.end());
 
-  if (enable_out_variant) {
-    const auto tensor_value_to_tensor =
-        tensorValueToTensor(runtime->nodes(), managed_tensor_values);
-    if (optimize_memory) {
-      managed_tensors_ = assignStorageToManagedTensors(
-          runtime->node_ptrs(), ranges, tensor_value_to_tensor);
-    } else {
-      for (auto& tensor : tensor_value_to_tensor) {
-        managed_tensors_.emplace_back(tensor.second);
-      }
-    }
-  }
+  managed_tensors_ =
+      storage_assignment_strategy.assignStorageGroups(runtime->nodes());
 
   if (enable_out_variant && manage_output_tensors) {
     managed_output_tensors_ =

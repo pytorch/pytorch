@@ -1219,11 +1219,19 @@ void testAssignStorageToManagedTensors(
   }
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
-  auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
-  auto groups = assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor);
+  for (const auto optimize_memory : {true, false}) {
+    StaticModuleOptions opts{
+        .cleanup_activations = true,
+        .enable_out_variant = true,
+        .optimize_memory = optimize_memory};
+    auto strategy = storageAssignmentStrategyFactory(
+        opts, ManagedTensorRanges(graph, managed_tensor_values));
+    ASSERT_NE(strategy, nullptr);
+    const auto groups = strategy->assignStorageGroups(tensor_value_to_tensor);
 
-  checkStorageGroups(groups, ranges, tensor_value_to_tensor);
+    ManagedTensorRanges ranges(graph, managed_tensor_values);
+    checkStorageGroups(groups, ranges, tensor_value_to_tensor);
+  }
 }
 
 } // namespace

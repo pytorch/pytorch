@@ -100,8 +100,8 @@ class TORCH_API ManagedTensorRanges {
  public:
   ManagedTensorRanges() = default;
   ManagedTensorRanges(
-      const std::shared_ptr<Graph>& graph,
-      const FastSet<const Value*>& managed_tensor_values);
+      std::shared_ptr<Graph> graph,
+      FastSet<const Value*> managed_tensor_values);
 
   // If true, then this node is the last use of at least one
   // managed tensor. availableTensorValuesAfterNode(node) will return a vector
@@ -115,7 +115,18 @@ class TORCH_API ManagedTensorRanges {
   // that overlap.
   bool lifetimesOverlap(const Value* v1, const Value* v2) const;
 
+  const FastSet<const Value*>& managedTensorValues() const {
+    return managed_tensor_values_;
+  }
+
+  graph_node_list nodes() const {
+    return graph_->nodes();
+  }
+
  private:
+  std::shared_ptr<Graph> graph_;
+  FastSet<const Value*> managed_tensor_values_;
+
   struct Lifetime {
     Lifetime(size_t start_, size_t end_) : start(start_), end(end_) {}
     size_t start;
@@ -200,6 +211,7 @@ struct TORCH_API StaticModuleOptions {
 ///
 
 class MemoryPlanner;
+class StorageAssignmentStrategy;
 class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
@@ -213,6 +225,14 @@ class TORCH_API StaticModule {
       const torch::jit::Module& m,
       bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
+
+  ~StaticModule();
+
+  StaticModule(const StaticModule&) = delete;
+  StaticModule& operator=(const StaticModule&) = delete;
+
+  StaticModule(StaticModule&&) = default;
+  StaticModule& operator=(StaticModule&&) = default;
 
   typedef enum {
     CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
@@ -298,10 +318,6 @@ class TORCH_API StaticModule {
     return value_group_;
   }
 
-  const FastSet<const Value*>& managed_tensor_values() const {
-    return managed_tensor_values_;
-  }
-
   const FastSet<const Value*>& managed_output_tensor_values() const {
     return managed_output_tensor_values_;
   }
@@ -310,8 +326,9 @@ class TORCH_API StaticModule {
     return leaked_values_;
   }
 
-  const ManagedTensorRanges& managed_tensor_ranges() const {
-    return managed_tensor_ranges_;
+  StorageAssignmentStrategy& storage_assignment_strategy() const {
+    DCHECK(storage_assignment_strategy_ != nullptr);
+    return *storage_assignment_strategy_;
   }
 
   bool first_input_is_self() const {
@@ -330,6 +347,7 @@ class TORCH_API StaticModule {
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
+  std::unique_ptr<StorageAssignmentStrategy> storage_assignment_strategy_;
 
   // Bookkeeping for creating new StaticRuntime instances
   // IValue table (defined by prim::Constant nodes)
@@ -345,10 +363,8 @@ class TORCH_API StaticModule {
 
   FastSet<const Node*> node_is_optimizable_container_type_;
 
-  FastSet<const Value*> managed_tensor_values_{};
   FastSet<const Value*> managed_output_tensor_values_{};
   FastSet<const Value*> leaked_values_{};
-  ManagedTensorRanges managed_tensor_ranges_{};
 };
 
 class TORCH_API StaticRuntime {
