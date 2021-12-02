@@ -78,14 +78,14 @@ class LKJCholesky(Distribution):
         new._validate_args = self._validate_args
         return new
 
-    def sample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size()):
         # This uses the Onion method, but there are a few differences from [1] Sec. 3.2:
         # - This vectorizes the for loop and also works for heterogeneous eta.
         # - Same algorithm generalizes to n=1.
         # - The procedure is simplified since we are sampling the cholesky factor of
         #   the correlation matrix instead of the correlation matrix itself. As such,
         #   we only need to generate `w`.
-        y = self._beta.sample(sample_shape).unsqueeze(-1)
+        y = self._beta.rsample(sample_shape).unsqueeze(-1)
         u_normal = torch.randn(self._extended_shape(sample_shape),
                                dtype=y.dtype,
                                device=y.device).tril(-1)
@@ -96,7 +96,7 @@ class LKJCholesky(Distribution):
         # Fill diagonal elements; clamp for numerical stability
         eps = torch.finfo(w.dtype).tiny
         diag_elems = torch.clamp(1 - torch.sum(w**2, dim=-1), min=eps).sqrt()
-        w += torch.diag_embed(diag_elems)
+        w = w + torch.diag_embed(diag_elems)
         return w
 
     def log_prob(self, value):
