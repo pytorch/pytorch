@@ -95,80 +95,82 @@ c10::optional<size_t> bufSize(BufPtr buf) {
   return size;
 }
 
-using BufRangeInfo =
-    std::unordered_map<BufPtr, std::pair<BufAccessNode, BufAccessNode>>;
-
+// This algorithm takes the list of intermediate buffers and their liveness
+// ragnes, and returns a map of these buffers to memory blocks. A memory block
+// is indicated by the buffer for which it is allocated. Specifically, we
+// linearly scan the intermediate buffers by the time they appear, and try to
+// assign it an existing non-occupied memory block. If there are no such memory
+// blocks available, we'll create memory for it. Once we are beyond the liveness
+// range of this buffer, we'll mark its corresponding memory block as "up for
+// grabs" for future reuse.
 std::vector<std::pair<BufPtr, BufPtr>> linearScan(
-    std::unordered_set<BufPtr>& bufs,
-    BufRangeInfo& buf_ranges) {
+    const std::unordered_set<BufPtr>& bufs,
+    const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>&
+        buf_ranges) {
   // Sort buffers by the time they appear.
   std::vector<BufPtr> bufs_sorted(bufs.begin(), bufs.end());
   auto sorting_function_by_start_time = [&buf_ranges](
                                             BufPtr b1, BufPtr b2) -> bool {
-    auto start1 = buf_ranges.at(b1).first;
-    auto start2 = buf_ranges.at(b2).first;
-    return std::get<2>(start1).at(0) < std::get<2>(start2).at(0);
+    return std::get<0>(buf_ranges.at(b1)) < std::get<0>(buf_ranges.at(b2));
   };
   std::sort(
       bufs_sorted.begin(), bufs_sorted.end(), sorting_function_by_start_time);
 
+  // Map intermediate buffers to the most recently used memory if any.
+  std::list<BufPtr> mem_up_for_grabs;
+  std::unordered_map<BufPtr, BufPtr> curr_buf_mem_map;
+  std::vector<std::pair<BufPtr, BufPtr>> global_buf_mem_map;
+
   auto sorting_function_by_end_time = [&buf_ranges](
                                           BufPtr b1, BufPtr b2) -> bool {
-    auto end1 = buf_ranges.at(b1).second;
-    auto end2 = buf_ranges.at(b2).second;
-    return std::get<2>(end1).at(0) < std::get<2>(end2).at(0);
+    return std::get<1>(buf_ranges.at(b1)) < std::get<1>(buf_ranges.at(b2));
   };
-
-  // Map intermediate buffers to the most recent used memory if any.
-  std::unordered_set<BufPtr> mm;
-  std::list<BufPtr> mm_free;
-  std::unordered_map<BufPtr, BufPtr> b2m;
-  std::vector<std::pair<BufPtr, BufPtr>> b2m_ret;
-
   std::vector<BufPtr> buf_to_release;
   for (auto buf : bufs_sorted) {
-    auto start = buf_ranges.at(buf).first;
-    auto end = buf_ranges.at(buf).second;
+    auto start = std::get<0>(buf_ranges.at(buf));
+    auto end = std::get<1>(buf_ranges.at(buf));
 
-    // Release memory for buffers whose live range ends before the creation time
-    // of this buf.
+    // Release memory for buffers whose liveness range ends before the creation
+    // time of this buf.
     // TODO: optimize in-place opererations and copy operations
     buf_to_release.clear();
-    for (auto& mapped : b2m) {
+    for (auto& mapped : curr_buf_mem_map) {
       auto buf_mapped = mapped.first;
-      auto end_buf_mapped = buf_ranges.at(buf_mapped).second;
-      if (std::get<2>(end_buf_mapped).at(0) < std::get<2>(start).at(0)) {
+      auto end_buf_mapped = std::get<1>(buf_ranges.at(buf_mapped));
+      if (end_buf_mapped < start) {
         buf_to_release.push_back(buf_mapped);
       }
     }
+
+    // Sort the buffers in the order of used time so the head of the release
+    // list contains the most recently used buf.
     std::sort(
         buf_to_release.begin(),
         buf_to_release.end(),
         sorting_function_by_end_time);
     for (auto& buf_rl : buf_to_release) {
-      mm_free.push_front(b2m[buf_rl]);
-      b2m.erase(buf_rl);
+      mem_up_for_grabs.push_front(curr_buf_mem_map[buf_rl]);
+      curr_buf_mem_map.erase(buf_rl);
     }
 
     // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
     // it, and there are no future reuses on its memory).
     // TODO: reuse memory for bufs with dynamic shapes
     if (!bufSize(buf)) {
-      b2m_ret.emplace_back(std::make_pair(buf, buf));
+      global_buf_mem_map.emplace_back(std::make_pair(buf, buf));
       continue;
     }
 
     bool allocated = false;
     // Check whether there are free memories that this buf can reuse.
-    for (auto it = mm_free.begin(); it != mm_free.end(); it++) {
+    for (auto it = mem_up_for_grabs.begin(); it != mem_up_for_grabs.end();
+         it++) {
       auto m = *it;
-      TORCH_INTERNAL_ASSERT(bufSize(buf) != 0);
-      TORCH_INTERNAL_ASSERT(bufSize(m) != 0);
       if (bufSize(m) >= bufSize(buf)) {
-        b2m[buf] = m;
-        b2m_ret.emplace_back(std::make_pair(buf, m));
+        curr_buf_mem_map[buf] = m;
+        global_buf_mem_map.emplace_back(std::make_pair(buf, m));
         allocated = true;
-        mm_free.erase(it);
+        mem_up_for_grabs.erase(it);
         break;
       }
     }
@@ -176,13 +178,12 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
     // If there are no memories to reuse, we'll have to allocate new memory for
     // it.
     if (!allocated) {
-      mm.insert(buf);
-      b2m[buf] = buf;
-      b2m_ret.emplace_back(std::make_pair(buf, buf));
+      curr_buf_mem_map[buf] = buf;
+      global_buf_mem_map.emplace_back(std::make_pair(buf, buf));
     }
   }
 
-  return b2m_ret;
+  return global_buf_mem_map;
 }
 
 void CodeGen::insertAllocFree(
@@ -232,16 +233,16 @@ void CodeGen::allocIntermediateBufs(const bool pre_alloc) {
   }
 
   std::unordered_set<BufPtr> interm_bufs;
-  BufRangeInfo interm_buf_ranges;
+  std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>> interm_buf_ranges;
   for (auto buf : bufs) {
     if (!bufs_allocated.count(buf) && !interm_bufs.count(buf)) {
       interm_bufs.insert(buf);
 
       // Identify the access stmts to each unallocated intermeiate buffer.
-      auto accesses = BufAccesses::find(stmt_, buf);
-      TORCH_INTERNAL_ASSERT(accesses.size() >= 1);
-      auto range =
-          std::make_pair(accesses.at(0), accesses.at(accesses.size() - 1));
+      auto range = BufLiveRange::liveRange(stmt_, buf);
+      // TORCH_INTERNAL_ASSERT(accesses.size() >= 1);
+      // auto range =
+      //    std::make_pair(accesses.at(0), accesses.at(accesses.size() - 1));
       interm_buf_ranges.emplace(buf, range);
     }
   }
