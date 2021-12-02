@@ -8,7 +8,7 @@ Each function definition here needs to following requirements:
 """
 import torch
 import yaml
-from typing import Union
+from typing import Union, List, Optional
 
 @torch.jit.script
 def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
@@ -44,18 +44,17 @@ def div__Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> to
         return self.true_divide_(other)
     return self.divide_(other, rounding_mode='trunc')
 
-# TODO: some issues with kwarg
-# @torch.jit.script
-# def full_names_0_4(size: List[int], fill_value: Union[int, float, complex], *,
-#              dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
-#              pin_memory: Optional[bool]) -> torch.Tensor:
-#     if dtype is None:
-#         fill_value = float(fill_value)
-#     return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+@torch.jit.script
+def full_names_0_4(size: List[int], fill_value: Union[int, float, complex], *,
+             dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
+             pin_memory: Optional[bool]) -> torch.Tensor:
+    if dtype is None:
+        fill_value = float(fill_value)
+    return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
 
-# @torch.jit.script
-# def full_out_0_4(size: List[int], fill_value: Union[int, float, complex], *, out: torch.Tensor) -> torch.Tensor:
-#     return torch.full(size, fill_value, out=out)
+@torch.jit.script
+def full_out_0_4(size: List[int], fill_value: Union[int, float, complex], *, out: torch.Tensor) -> torch.Tensor:
+    return torch.full(size, fill_value, out=out)
 
 def format_bytecode(table):
     # given a nested tuples, convert them to nested list
@@ -80,6 +79,8 @@ def generate_bytecode(file_name):
         {"div_out_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div_out_0_3", div_out_0_3.graph))},
         {"div__Tensor_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Tensor_0_3", div__Tensor_0_3.graph))},
         {"div__Scalar_0_3": format_bytecode(torch._C._compile_graph_to_code_table("div__Scalar_0_3", div__Scalar_0_3.graph))},
+        {"full_names_0_4": format_bytecode(torch._C._compile_graph_to_code_table("full_names_0_4", full_names_0_4.graph))},
+        {"full_out_0_4": format_bytecode(torch._C._compile_graph_to_code_table("full_out_0_4", full_out_0_4.graph))},
     ]
 
     stream = open(file_name, 'w')
@@ -91,9 +92,11 @@ def populate_upgraders_map():
         "div_Scalar_0_3": str(div_Scalar_0_3.graph),
         "div_out_0_3": str(div_out_0_3.graph),
         "div__Tensor_0_3": str(div__Tensor_0_3.graph),
-        "div__Scalar_0_3": str(div__Scalar_0_3.graph)
+        "div__Scalar_0_3": str(div__Scalar_0_3.graph),
+        "full_names_0_4": str(full_names_0_4.graph),
+        "full_out_0_4": str(full_out_0_4.graph)
     }
     torch._C.populate_upgraders_map(content)
 
 if __name__ == "__main__":
-    generate_bytecode("stuff.yaml")
+    raise RuntimeError("This file is not meant to be run directly")
