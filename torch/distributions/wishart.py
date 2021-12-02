@@ -95,6 +95,7 @@ class Wishart(Distribution):
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
+        # Gamma distribution is needed for Batlett decomposition sampling
         self.dist_gamma = torch.distributions.Gamma(
             self.df.expand(batch_shape + (self._event_shape[0],))
             - torch.arange(
