@@ -248,8 +248,6 @@ class ModifiesVarChecker : public IRVisitor {
   bool found_{false};
 };
 
-enum AccMode { READ, WRITE, BOTH };
-
 // Traverse the Block stmt to identify the live range of the specified buf. The
 // live range, indicated by a pair of integers, specifies the first and last
 // stmt in block stmts that access to the buf.
