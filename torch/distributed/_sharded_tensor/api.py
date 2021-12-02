@@ -22,6 +22,7 @@ from torch.distributed._sharding_spec._internals import (
     check_tensor,
     get_split_size,
     get_chunked_dim_size,
+    validate_non_overlapping_shards_metadata,
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
@@ -368,6 +369,105 @@ class ShardedTensor(object):
         # run post initialization, i.e. map registration, rpc initialization
         sharded_tensor._post_init()
         return sharded_tensor
+
+    @classmethod
+    def _init_from_local_shards_and_global_metadata(
+        cls,
+        local_shards: List[Shard],
+        sharded_tensor_metadata: ShardedTensorMetadata,
+        process_group=None,
+        init_rrefs=False,
+    ):
+        """
+        Initialize a ShardedTensor with local shards and a global
+        ShardedTensorMetadata built on each rank.
+
+        Warning: This API is experimental and subject to change. It does
+                 not do cross rank validations, and fully rely on the user
+                 for the correctness of sharded_tensor_metadata on each rank
+        """
+        process_group = (
+            process_group
+            if process_group is not None
+            else distributed_c10d._get_default_group()
+        )
+        current_rank = dist.get_rank(process_group)
+
+        shards_metadata = sharded_tensor_metadata.shards_metadata
+        tensor_properties = sharded_tensor_metadata.tensor_properties
+
+        if len(shards_metadata) == 0:
+            raise ValueError("shards_metadata must not be empty!")
+
+        if tensor_properties.layout != torch.strided:
+            raise ValueError('Only torch.strided layout is currently supported')
+
+        sharded_tensor = cls.__new__(cls)
+        sharded_tensor._prepare_init(process_group=process_group, init_rrefs=init_rrefs)
+
+        sharded_tensor._metadata = sharded_tensor_metadata
+
+        local_shard_metadatas = []
+
+        def _raise_if_mismatch(expected, actual, prop_name, rank, is_property=False):
+            tensor_property_or_metadata = "tensor property" if is_property else "local ShardMetadata"
+            if expected != actual:
+                raise ValueError(f"Local shards' tensor {prop_name} property is incompatible with "
+                                 f"{tensor_property_or_metadata} on rank {rank}: "
+                                 f"{tensor_property_or_metadata} {prop_name}={expected}, "
+                                 f"local shard tensor {prop_name}={actual}.")
+
+        # collect local shard metadatas from the global sharded_tensor_metadata
+        for shard_metadata in shards_metadata:  # type: ignore[attr-defined]
+            rank, local_device = _parse_and_validate_remote_device(sharded_tensor._process_group, shard_metadata.placement)
+
+            if current_rank == rank:
+                local_shard_metadatas.append(shard_metadata)
+
+        if len(local_shards) != len(local_shard_metadatas):
+            raise RuntimeError(
+                f'Number of local shards ({len(local_shards)}) does not match number of local '
+                f'shards metadata in sharded_tensor_metadata ({len(local_shard_metadatas)}) '
+                f'on rank ({current_rank}) '
+            )
+
+        for shard in local_shards:
+            shard_meta = shard.metadata
+            local_shard_tensor = shard.tensor
+            rank, local_device = _parse_and_validate_remote_device(sharded_tensor._process_group, shard_meta.placement)
+
+            # validate if shard_meta in the metadatas collected from sharded_tensor_metadata
+            assert shard_meta in local_shard_metadatas, \
+                "local shard metadata not in sharded_tensor_metadata!"
+
+            if not local_shard_tensor.is_contiguous():
+                raise ValueError('Only torch.contiguous_format memory_format is currently supported')
+
+            _raise_if_mismatch(tensor_properties.layout, local_shard_tensor.layout, "layout", current_rank, True)
+            _raise_if_mismatch(shard_meta.shard_sizes, list(local_shard_tensor.size()), "size", current_rank)
+            _raise_if_mismatch(tensor_properties.pin_memory, local_shard_tensor.is_pinned(), "pin_memory", current_rank, True)
+            _raise_if_mismatch(local_device, local_shard_tensor.device, "device", current_rank)
+            _raise_if_mismatch(tensor_properties.dtype, local_shard_tensor.dtype, "dtype", current_rank, True)
+            _raise_if_mismatch(
+                tensor_properties.requires_grad, local_shard_tensor.requires_grad, "requires_grad", current_rank, True)
+
+        # check if shards_metadata have overlap shards
+        validate_non_overlapping_shards_metadata(shards_metadata)
+
+        # check if the shards_metadata is compatible with overall size of the sharded tensor.
+        check_tensor(shards_metadata, list(sharded_tensor_metadata.size))
+
+        # done validation, add local_shards
+        sharded_tensor._local_shards = local_shards
+        # make a EnumerableShardingSpec for sharded tensors that initialized from this API.
+        # TODO: make sharding spec a ChunkShardingSpec by inferring from the metadata list.
+        #       see issue https://github.com/pytorch/pytorch/issues/67244
+        sharded_tensor._sharding_spec = EnumerableShardingSpec(shards_metadata)
+
+        # run post initialization, i.e. map registration, rpc initialization
+        sharded_tensor._post_init()
+        return sharded_tensor
+
 
     def _init_chunked(self, dims, tensor_init_params: TensorInitParams, ):
         current_rank = dist.get_rank(self._process_group)
