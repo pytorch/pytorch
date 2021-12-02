@@ -358,11 +358,11 @@ enum pytorch_qnnp_status qnnpackConv(
 
   switch (convolution->ukernel_type) {
     case pytorch_qnnp_ukernel_type_dwconv: {
-      const size_t width_step = convolution->dilation_width == 1
-          ? convolution->stride_width
-          : kernel_width;
       const uint32_t cr = pytorch_qnnp_params.q8dw9.cr;
       const size_t group_stride = (groups + (cr - 1)) & -cr;
+
+      const size_t step_height = convolution->step_height;
+      const size_t step_width = convolution->step_width;
 
       switch (kernel_size) {
         case 9: {
@@ -371,10 +371,9 @@ enum pytorch_qnnp_status qnnpackConv(
               .group_stride = group_stride,
               .indirection_buffer =
                   (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride = kernel_size +
-                  (convolution->output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = packed_weights,
               .output = output,
               .output_height = convolution->output_height,
@@ -405,10 +404,9 @@ enum pytorch_qnnp_status qnnpackConv(
               .group_stride = group_stride,
               .indirection_buffer =
                   (const uint8_t**)convolution->indirection_buffer,
-              .indirection_buffer_row_stride = kernel_size +
-                  (convolution->output_width * width_step - 1) * kernel_height,
+              .indirection_buffer_row_stride = step_height,
               .indirection_buffer_col_stride =
-                  kernel_height * width_step * sizeof(void*),
+                  kernel_height * step_width * sizeof(void*),
               .packed_weights = packed_weights,
               .output = output,
               .output_height = convolution->output_height,

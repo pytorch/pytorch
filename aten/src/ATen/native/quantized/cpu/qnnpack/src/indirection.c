@@ -136,9 +136,7 @@ void pytorch_qnnp_indirection_init_conv3d(
 
 void pytorch_qnnp_indirection_init_dwconv2d(
     pytorch_qnnp_operator_t op,
-    size_t batch_start,
-    size_t step_height,
-    size_t step_width) {
+    size_t batch_start) {
   const void** indirection_buffer = op->indirection_buffer;
   const void* input = op->input;
   const size_t input_pixel_stride = op->input_pixel_stride;
@@ -156,6 +154,8 @@ void pytorch_qnnp_indirection_init_dwconv2d(
   const size_t dilation_width = op->dilation_width;
   const size_t input_padding_height = op->input_padding_height;
   const size_t input_padding_width = op->input_padding_width;
+  const size_t step_height = op->step_height;
+  const size_t step_width = op->step_width;
 
   for (size_t image = batch_start; image < batch_size; image++) {
     for (size_t output_y = 0; output_y < output_height; output_y++) {
@@ -267,9 +267,7 @@ void pytorch_qnnp_indirection_init_deconv2d(
 
 void pytorch_qnnp_indirection_init_maxpool2d(
     pytorch_qnnp_operator_t op,
-    size_t batch_start,
-    size_t step_height,
-    size_t step_width) {
+    size_t batch_start) {
   const void** indirection_buffer = op->indirection_buffer;
   const void* input = op->input;
   const size_t input_pixel_stride = op->input_pixel_stride;
@@ -286,6 +284,8 @@ void pytorch_qnnp_indirection_init_maxpool2d(
   const size_t dilation_width = op->dilation_width;
   const size_t input_padding_height = op->input_padding_height;
   const size_t input_padding_width = op->input_padding_width;
+  const size_t step_height = op->step_height;
+  const size_t step_width = op->step_width;
 
   for (size_t image = batch_start; image < batch_size; image++) {
     for (size_t output_y = 0; output_y < output_height; output_y++) {
@@ -313,4 +313,33 @@ void pytorch_qnnp_indirection_init_maxpool2d(
       }
     }
   }
+}
+
+void pytorch_qnnp_indirection_set_step_dimensions(pytorch_qnnp_operator_t op) {
+  const size_t kernel_height = op->kernel_height;
+  const size_t kernel_width = op->kernel_width;
+  const size_t kernel_size = kernel_height * kernel_width;
+  const size_t output_width = op->output_width;
+
+  size_t step_width = 0;
+  switch (op->ukernel_type) {
+    case pytorch_qnnp_ukernel_type_dwconv:
+      step_width = op->dilation_width == 1 ? op->stride_width : kernel_width;
+      break;
+    case pytorch_qnnp_ukernel_type_average_pooling:
+      step_width = min(op->stride_width, kernel_width);
+      break;
+    case pytorch_qnnp_ukernel_type_max_pooling:
+      step_width = op->dilation_width > 1 ? kernel_width
+                                          : min(op->stride_width, kernel_width);
+      break;
+    default:
+      PYTORCH_QNNP_UNREACHABLE;
+  }
+
+  const size_t step_height =
+      kernel_size + (output_width * step_width - 1) * kernel_height;
+
+  op->step_height = step_height;
+  op->step_width = step_width;
 }

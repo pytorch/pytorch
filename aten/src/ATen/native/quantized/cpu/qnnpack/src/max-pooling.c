@@ -198,22 +198,14 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
     }
   }
 
-  const size_t pooling_height = max_pooling->kernel_height;
-  const size_t pooling_width = max_pooling->kernel_width;
-  const size_t pooling_size = pooling_height * pooling_width;
-  const size_t output_height = max_pooling->output_height;
-  const size_t output_width = max_pooling->output_width;
   /* Micro-kernel may read up to (mr - 1) elements after the end of indirection
    * buffer */
   const uint32_t mr = pytorch_qnnp_params.u8maxpool.mr;
 
-  const size_t step_width = max_pooling->dilation_width > 1
-      ? pooling_width
-      : min(max_pooling->stride_width, pooling_width);
-  const size_t step_height =
-      pooling_size + (output_width * step_width - 1) * pooling_height;
-  const size_t indirection_buffer_size =
-      sizeof(void*) * ((mr - 1) + batch_size * output_height * step_height);
+  pytorch_qnnp_indirection_set_step_dimensions(max_pooling);
+  const size_t indirection_buffer_size = sizeof(void*) *
+      ((mr - 1) +
+       batch_size * max_pooling->output_height * max_pooling->step_height);
 
   const void** indirection_buffer = (const void**)realloc(
       max_pooling->indirection_buffer, indirection_buffer_size);
@@ -225,8 +217,7 @@ enum pytorch_qnnp_status pytorch_qnnp_setup_max_pooling2d_nhwc_u8(
   }
   max_pooling->indirection_buffer = indirection_buffer;
 
-  pytorch_qnnp_indirection_init_maxpool2d(
-      max_pooling, valid_batch_size, step_height, step_width);
+  pytorch_qnnp_indirection_init_maxpool2d(max_pooling, valid_batch_size);
 
   max_pooling->last_input = input;
   max_pooling->last_input_height = input_height;
