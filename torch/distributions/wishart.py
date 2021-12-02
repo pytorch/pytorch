@@ -96,7 +96,7 @@ class Wishart(Distribution):
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
         self.dist_gamma = torch.distributions.Gamma(
-            self.df.expand([-1 for _ in batch_shape] + [self._event_shape[0],])
+            self.df.expand(batch_shape + (self._event_shape[0],))
             - torch.arange(
                 self._event_shape[0],
                 device=self._unbroadcasted_scale_tril.device
