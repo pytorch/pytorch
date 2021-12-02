@@ -223,22 +223,22 @@ class profile(kineto_profile):
             use_cuda: Optional[bool] = None):
 
         if activities:
-            activities = set(activities)
+            activities_set = set(activities)
         else:
-            activities = supported_activities()
+            activities_set = supported_activities()
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
             if use_cuda:
-                activities.add(ProfilerActivity.CUDA)
-            elif ProfilerActivity.CUDA in self.activities:
-                activities.remove(ProfilerActivity.CUDA)
+                activities_set.add(ProfilerActivity.CUDA)
+            elif ProfilerActivity.CUDA in activities_set:
+                activities_set.remove(ProfilerActivity.CUDA)
 
-        assert len(activities) > 0, "No valid profiler activities found"
+        assert len(activities_set) > 0, "No valid profiler activities found"
 
         super().__init__(
-            use_cuda=(ProfilerActivity.CUDA in activities),
-            use_cpu=(ProfilerActivity.CPU in activities),
+            use_cuda=(ProfilerActivity.CUDA in activities_set),
+            use_cpu=(ProfilerActivity.CPU in activities_set),
             record_shapes=record_shapes,
             with_flops=with_flops,
             profile_memory=profile_memory,
