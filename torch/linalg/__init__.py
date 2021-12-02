@@ -12,8 +12,6 @@ class LinAlgError(RuntimeError):
 torch._C._linalg.LinAlgErrorInternal = type("torch._C.linalg.LinAlgErrorInternal", (LinAlgError, ),
                                             dict(torch._C._linalg.LinAlgErrorInternal.__dict__))
 
-print("HELLLLLOOOOO INTERNAL: ")
-print(torch._C._linalg.LinAlgErrorInternal.__bases__)
 Tensor = torch.Tensor
 
 common_notes = {

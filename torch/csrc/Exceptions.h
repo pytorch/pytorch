@@ -267,7 +267,6 @@ namespace torch {
 
 namespace linalg {
   extern PyObject *Pytorch_LinAlgError;
-  bool initLinAlgError(PyObject *module);
 }
 
 THP_CLASS std::string processErrorMsg(std::string str);
