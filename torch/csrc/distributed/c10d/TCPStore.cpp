@@ -23,66 +23,27 @@
 #include <c10d/UnixSockUtils.hpp>
 #endif
 
+#include <c10d/socket.h>
+
 namespace c10d {
 namespace detail {
 namespace {
-
-// Offers RAII for TCP sockets.
-class TCPSocket {
- public:
-  TCPSocket() noexcept = default;
-
-  /* implicit */ TCPSocket(int handle) noexcept : handle_{handle} {}
-
-  TCPSocket(const TCPSocket& other) = delete;
-
-  TCPSocket& operator=(const TCPSocket& other) = delete;
-
-  TCPSocket(TCPSocket&& other) noexcept : handle_{other.handle_} {
-    other.handle_ = c10::nullopt;
-  }
-
-  TCPSocket& operator=(TCPSocket&& other) noexcept {
-    closeSocket();
-
-    handle_ = std::exchange(other.handle_, c10::nullopt);
-
-    return *this;
-  }
-
-  ~TCPSocket() {
-    closeSocket();
-  }
-
-  int handle() const noexcept {
-    return handle_.value_or(-1);
-  }
-
- private:
-  void closeSocket() noexcept {
-    if (handle_) {
-      tcputil::closeSocket(*handle_);
-    }
-  }
-
-  c10::optional<int> handle_{};
-};
 
 // Abstract base class to handle thread state for TCPStoreMasterDaemon and
 // TCPStoreWorkerDaemon. Contains the windows/unix implementations to signal a
 // shutdown sequence for the thread
 class BackgroundThread {
  public:
-  explicit BackgroundThread(TCPSocket&& storeListenSocket);
+  explicit BackgroundThread(Socket&& storeListenSocket);
 
   virtual ~BackgroundThread() = 0;
 
  protected:
   void dispose();
 
-  TCPSocket storeListenSocket_;
+  Socket storeListenSocket_;
   std::thread daemonThread_{};
-  std::vector<TCPSocket> sockets_{};
+  std::vector<Socket> sockets_{};
 #ifdef _WIN32
   const std::chrono::milliseconds checkTimeout_ = std::chrono::milliseconds{10};
   HANDLE ghStopEvent_{};
@@ -102,7 +63,7 @@ class BackgroundThread {
 };
 
 // Background thread parent class methods
-BackgroundThread::BackgroundThread(TCPSocket&& storeListenSocket)
+BackgroundThread::BackgroundThread(Socket&& storeListenSocket)
     : storeListenSocket_{std::move(storeListenSocket)} {
   // Signal instance destruction to the daemon thread.
   initStopSignal();
@@ -200,7 +161,7 @@ enum class WatchResponseType : uint8_t {
 // Separate thread that is only launched on master
 class TCPStoreMasterDaemon : public BackgroundThread {
  public:
-  explicit TCPStoreMasterDaemon(TCPSocket&& storeListenSocket);
+  explicit TCPStoreMasterDaemon(Socket&& storeListenSocket);
 
   ~TCPStoreMasterDaemon() override;
 
@@ -241,7 +202,7 @@ class TCPStoreMasterDaemon : public BackgroundThread {
 };
 
 // Simply start the daemon thread
-TCPStoreMasterDaemon::TCPStoreMasterDaemon(TCPSocket&& storeListenSocket)
+TCPStoreMasterDaemon::TCPStoreMasterDaemon(Socket&& storeListenSocket)
     : BackgroundThread{std::move(storeListenSocket)} {
   daemonThread_ = std::thread{&TCPStoreMasterDaemon::run, this};
 }
@@ -270,7 +231,6 @@ void TCPStoreMasterDaemon::queryFds(std::vector<struct pollfd>& fds) {
       // exception, other connections will get an exception once they try to
       // use the store. We will go ahead and close this connection whenever
       // we hit an exception here.
-      tcputil::closeSocket(fds[fdIdx].fd);
 
       // Remove all the tracking state of the close FD
       for (auto it = waitingSockets_.begin(); it != waitingSockets_.end();) {
@@ -562,8 +522,7 @@ void TCPStoreMasterDaemon::run() {
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
-      TCPSocket socket =
-          std::get<0>(tcputil::accept(storeListenSocket_.handle()));
+      Socket socket = storeListenSocket_.accept();
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
@@ -597,8 +556,7 @@ void TCPStoreMasterDaemon::run() {
             "Unexpected poll revent on the master's listening socket: " +
                 std::to_string(fds[0].revents));
       }
-      TCPSocket socket =
-          std::get<0>(tcputil::accept(storeListenSocket_.handle()));
+      Socket socket = storeListenSocket_.accept();
       int rawSocket = socket.handle();
       sockets_.emplace_back(std::move(socket));
       tcputil::addPollfd(fds, rawSocket, POLLIN);
@@ -626,7 +584,7 @@ void TCPStoreMasterDaemon::run() {
 // Right now only handles callbacks registered from watchKey()
 class TCPStoreWorkerDaemon : public BackgroundThread {
  public:
-  explicit TCPStoreWorkerDaemon(TCPSocket&& listenSocket);
+  explicit TCPStoreWorkerDaemon(Socket&& listenSocket);
   ~TCPStoreWorkerDaemon() override;
   // Set the callback to run key change
   void setCallback(std::string key, WatchKeyCallback cb);
@@ -657,7 +615,7 @@ class TCPStoreWorkerDaemon : public BackgroundThread {
 };
 
 // TCPStoreListener class methods
-TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(TCPSocket&& listenSocket)
+TCPStoreWorkerDaemon::TCPStoreWorkerDaemon(Socket&& listenSocket)
     : BackgroundThread{std::move(listenSocket)} {
   daemonThread_ = std::thread{&TCPStoreWorkerDaemon::run, this};
 }
@@ -806,10 +764,9 @@ std::mutex TCPServer::cache_mutex_{};
 
 std::shared_ptr<TCPServer> TCPServer::start(const TCPStoreOptions& opts) {
   auto startCore = [&opts]() {
-    TCPSocket socket{};
-    std::uint16_t port{};
+    Socket socket = Socket::listen(opts.port);
 
-    std::tie(socket, port) = tcputil::listen(opts.port);
+    std::uint16_t port = socket.port();
 
     auto daemon = std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
 
@@ -881,17 +838,19 @@ class TCPClient {
 
   void setTimeout(std::chrono::milliseconds value);
 
-  explicit TCPClient(TCPSocket&& socket) : socket_{std::move(socket)} {}
+  explicit TCPClient(Socket&& socket) : socket_{std::move(socket)} {}
 
  private:
-  TCPSocket socket_;
+  Socket socket_;
 };
 
 std::unique_ptr<TCPClient> TCPClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
-  TCPSocket socket =
-      tcputil::connect(addr.host, addr.port, /* wait */ true, opts.timeout);
+  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
+  Socket socket = Socket::connect(addr.host,
+                                  addr.port,
+                                  SocketOptions{}.connect_timeout(timeout));
 
   return std::make_unique<TCPClient>(std::move(socket));
 }
@@ -962,8 +921,10 @@ class TCPCallbackClient {
 std::unique_ptr<TCPCallbackClient> TCPCallbackClient::connect(
     const SocketAddress& addr,
     const TCPStoreOptions& opts) {
-  TCPSocket socket =
-      tcputil::connect(addr.host, addr.port, /*wait*/ true, opts.timeout);
+  auto timeout = std::chrono::duration_cast<std::chrono::seconds>(opts.timeout);
+  Socket socket = Socket::connect(addr.host,
+                                  addr.port,
+                                  SocketOptions{}.connect_timeout(timeout));
 
   int rawSocket = socket.handle();
 
@@ -988,6 +949,8 @@ void TCPCallbackClient::setCallback(
 
 } // namespace detail
 
+using detail::Socket;
+
 // TCPStore class methods
 TCPStore::TCPStore(
     const std::string& masterAddr,
@@ -1010,7 +973,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     : Store{opts.timeout},
       addr_{std::move(host)},
       numWorkers_{opts.numWorkers} {
-  tcputil::socketInitialize();
+  Socket::initialize();
 
   if (opts.isServer) {
     server_ = detail::TCPServer::start(opts);
@@ -1063,6 +1026,7 @@ void TCPStore::waitForWorkers() {
 }
 
 void TCPStore::set(const std::string& key, const std::vector<uint8_t>& data) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::SET, keyPrefix_ + key);
   client_->sendBytes(data);
 }
@@ -1071,6 +1035,7 @@ std::vector<uint8_t> TCPStore::compareSet(
     const std::string& key,
     const std::vector<uint8_t>& expectedValue,
     const std::vector<uint8_t>& desiredValue) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::COMPARE_SET, keyPrefix_ + key);
   client_->sendBytes(expectedValue);
   client_->sendBytes(desiredValue);
@@ -1079,6 +1044,7 @@ std::vector<uint8_t> TCPStore::compareSet(
 }
 
 std::vector<uint8_t> TCPStore::get(const std::string& key) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   return doGet(keyPrefix_ + key);
 }
 
@@ -1089,16 +1055,19 @@ std::vector<uint8_t> TCPStore::doGet(const std::string& key) {
 }
 
 int64_t TCPStore::add(const std::string& key, int64_t value) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   return incrementValueBy(keyPrefix_ + key, value);
 }
 
 bool TCPStore::deleteKey(const std::string& key) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommandForKey(detail::QueryType::DELETE_KEY, keyPrefix_ + key);
   auto numDeleted = client_->receiveValue<std::int64_t>();
   return numDeleted == 1;
 }
 
 void TCPStore::watchKey(const std::string& key, WatchKeyCallback callback) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   callbackClient_->setCallback(keyPrefix_ + key, callback);
 }
 
@@ -1109,11 +1078,13 @@ int64_t TCPStore::incrementValueBy(const std::string& key, int64_t delta) {
 }
 
 int64_t TCPStore::getNumKeys() {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   client_->sendCommand(detail::QueryType::GETNUMKEYS);
   return client_->receiveValue<std::int64_t>();
 }
 
 bool TCPStore::check(const std::vector<std::string>& keys) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
@@ -1140,6 +1111,7 @@ void TCPStore::wait(const std::vector<std::string>& keys) {
 void TCPStore::wait(
     const std::vector<std::string>& keys,
     const std::chrono::milliseconds& timeout) {
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
   std::vector<std::string> prefixedKeys{};
   prefixedKeys.reserve(keys.size());
   for (const std::string& key : keys) {
