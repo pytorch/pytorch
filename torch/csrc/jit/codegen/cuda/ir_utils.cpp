@@ -210,7 +210,7 @@ struct SubstituteInExpr : public OptInDispatch {
     auto in =
         reference_->sameAs(shift_expr->in()) ? substitute_ : shift_expr->in();
 
-    expr_ = new ShiftOp(out, in, shift_expr->offsets());
+    expr_ = new ShiftOp(out, in, shift_expr->offsets(), shift_expr->pad());
   }
 
   void handle(GatherOp* gather_expr) final {
@@ -295,9 +295,13 @@ TensorView* rfactorHelper(
 
   WelfordResult rtvs = reduction_tv->rFactor(axes, w_avg, w_var, w_n);
 
-  // TODO: this can be more generic, using avg because
-  //      WelfordOp::out() returns the avg
-  return rtvs.avg;
+  if (reduction_tv == w_n) {
+    return rtvs.n;
+  } else if (reduction_tv == w_var) {
+    return rtvs.var_sum;
+  } else {
+    return rtvs.avg;
+  }
 }
 
 namespace {
@@ -382,6 +386,15 @@ std::vector<TensorView*> allTvs(Fusion* fusion) {
   auto used_vals = fusion->usedMathVals();
   auto used_tvs = ir_utils::filterByType<TensorView>(used_vals);
   return uniqueEntries({used_tvs.begin(), used_tvs.end()});
+}
+
+std::vector<Expr*> historyOf(TensorDomain* td) {
+  return ExprSort::getExprs(
+      td->fusion(), {td->domain().begin(), td->domain().end()});
+}
+
+std::vector<Expr*> historyOf(TensorView* tv) {
+  return historyOf(tv->domain());
 }
 
 } // namespace ir_utils
