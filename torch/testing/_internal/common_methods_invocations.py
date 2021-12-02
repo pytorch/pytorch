@@ -6917,7 +6917,8 @@ def _generate_sample_shape_reduction():
 
 def sample_inputs_gaussian_nll_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    make_var = partial(make_tensor, low=0, device=device, dtype=dtype, requires_grad=requires_grad)
+    # Set low slightly above 0 so gradcheck doesn't accidentally dip below 0
+    make_var = partial(make_tensor, low=0.1, device=device, dtype=dtype, requires_grad=requires_grad)
 
     def gen_shape(shape):
         yield shape
