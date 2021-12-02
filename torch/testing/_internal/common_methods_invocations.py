@@ -7409,7 +7409,7 @@ def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, lo
     return [
         SampleInput(
             (make if logits else make_prob)(shape, requires_grad=requires_grad),
-            args=(make_prob(shape),),
+            args=(make_prob(shape, requires_grad=requires_grad),),
             kwargs=kwargs,
         )
         for shape, kwargs in shapes_and_kwargs
@@ -14053,7 +14053,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         decorators=(
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1.3e-6)}),
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
@@ -14064,6 +14064,21 @@ op_db: List[OpInfo] = [
                 unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
+            ),
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: aten::mul_(self, *extra_args) is not possible because there exists a Tensor `other` in extra_args
+            # that has more elements than `self`. This happened due to `other` being vmapped over but `self` not being
+            # vmapped over at level 1. Please try to use out-of-place operators instead of aten::mul_.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_grad",
+            ),
+            # NotImplementedError: the derivative for 'binary_cross_entropy_backward wrt `target`' is not implemented.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
             ),
         ),
     ),
@@ -14076,7 +14091,7 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         decorators=(
             DecorateInfo(
-                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1.3e-6)}),
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
