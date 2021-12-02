@@ -53,6 +53,7 @@ LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
+LABEL_CIFLOW_DOCS = "ciflow/docs"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
 LABEL_CIFLOW_LINUX = "ciflow/linux"
@@ -325,13 +326,37 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         enable_jit_legacy_test=1,
-        enable_doc_jobs=True,
-        enable_docs_test=1,
         enable_backwards_compat_test=1,
+        enable_docs_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-docs",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        enable_doc_jobs=True,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_DOCS, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-docs-push",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        enable_doc_jobs=True,
+        exclude_test=True,
+        is_scheduled="0 0 * * *",  # run pushes only on a nightly schedule
+        # NOTE: This is purposefully left without LABEL_CIFLOW_DOCS so that you can run
+        #       docs builds on your PR without the fear of anything pushing
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
     CIWorkflow(
