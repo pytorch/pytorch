@@ -59,33 +59,63 @@ def threshold_backward_decomposition(grad_output: Tensor, self: Tensor, threshol
     return aten.where(self <= threshold, aten.new_zeros(grad_output, ()), grad_output)
 
 @register_decomposition(aten.leaky_relu_backward)
-def leaky_relu_backward(grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool):
+def leaky_relu_backward_decomposition(grad_output: Tensor, self: Tensor, negative_slope: float, self_is_result: bool):
     return aten.where(self > 0, grad_output, grad_output * negative_slope)
 
+@register_decomposition(aten.gelu_backward)
+def gelu_backward_decomposition(grad: Tensor, self: Tensor):
+    M_SQRT1_2 = 0.70710678118654752440
+    M_2_SQRTPI = 1.12837916709551257390
+    kAlpha = M_SQRT1_2
+    kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5
+    cdf = 0.5 * (1 + aten.erf(self * kAlpha))
+    pdf = kBeta * aten.exp(self * self * -0.5)
+    return grad * (cdf + self * pdf)
+
+@register_decomposition(aten.mish_backward)
+def mish_backward_decomposition(grad_output: Tensor, input: Tensor):
+  input_tanh_softplus = aten.tanh(aten.softplus(input))
+  input_sigmoid = aten.sigmoid(input)
+  return grad_output * (input_tanh_softplus + (input * input_sigmoid * (1 - input_tanh_softplus * input_tanh_softplus)))
+
+# whyyyy does log_sigmoid do 2 different things for CPU and CUDA >:(
+@register_decomposition(aten.log_sigmoid_backward)
+def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> Tensor:
+    in_negative = self < 0
+    max_deriv = aten.where(in_negative, 1, 0)
+    sign = aten.where(in_negative, 1, -1)
+    if grad_output.is_cuda: # buffer is not used on CUDA
+        z = aten.exp(-aten.abs(self))
+        return grad_output * (max_deriv - sign * (z / (1 + z)))
+    else:
+        return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 @register_decomposition(aten.mse_loss_backward)
-def mse_loss_backward_decomposition(grad_output: Tensor, input: Tensor, target: Tensor, reduction: int):
+def mse_loss_backward(grad_output: Tensor, input: Tensor, target: Tensor, reduction: int):
     norm = 2./input.numel() if reduction == Reduction.MEAN.value else 2.
     return norm * (input - target) * grad_output
 
 @register_decomposition(aten.huber_loss_backward)
-def huber_loss_backward_decomposition(grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float):
+def huber_loss_backward(grad_output: Tensor, self: Tensor, target: Tensor, reduction: int, delta: float):
     norm = 1./self.numel() if reduction == Reduction.MEAN.value else 1.
     x = self - target
     return aten.where(x < -delta, -norm * grad_output * delta, aten.where(x > delta, norm * grad_output * delta, norm * x * grad_output))
 
 @register_decomposition(aten.slice_backward)
-def slice_backward_decomposition(grad_output: Tensor, input_sizes: List[int], dim: int, start: int, end: int, step:int):
+def slice_backward(grad_output: Tensor, input_sizes: List[int], dim: int, start: int, end: int, step:int):
     grad_input = aten.new_zeros(grad_output, input_sizes)
     return aten.slice_scatter(grad_input, grad_output, dim, start, end, step)
 
 @register_decomposition(aten.select_backward)
-def select_backward_decomposition(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
+def select_backward(grad_output: Tensor, input_sizes: List[int], dim: int, index: int):
     grad_input = aten.new_zeros(grad_output, input_sizes)
     return aten.select_scatter(grad_input, grad_output, dim, index)
 
-# These  2 softmax decompositions are currently not numerically identical to eager for bfloat16
-######## Fails numerically on bfloat16
+@register_decomposition(aten.diagonal_backward)
+def diagonal_backward(grad_output: Tensor, input_sizes: List[int], offset: int, dim1: int, dim2: int):
+    grad_input = aten.new_zeros(grad_output, input_sizes)
+    return aten.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
+
 @register_decomposition(aten._softmax_backward_data)
 def _softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, input_dtype: int):
     new_grad = grad_output * output
@@ -96,16 +126,13 @@ def _log_softmax_backward_data(grad_output: Tensor, output: Tensor, dim: int, in
     grad_input = grad_output - aten.exp(output) * aten.sum(grad_output, dim=dim, keepdim=True)
     return grad_input
 
-@register_decomposition(aten.gelu_backward)
-def gelu_backward(grad: Tensor, self: Tensor):
-    M_SQRT1_2 = 0.70710678118654752440
-    M_2_SQRTPI = 1.12837916709551257390
-    kAlpha = M_SQRT1_2
-    kBeta = M_2_SQRTPI * M_SQRT1_2 * 0.5
-    cdf = 0.5 * (1 + aten.erf(self * kAlpha))
-    pdf = kBeta * aten.exp(self * self * -0.5)
-    return grad * (cdf + self * pdf)
-######## 
+@register_decomposition(aten.im2col_backward)
+def im2col_backward(grad_output: Tensor, input_size: List[int], kernel_size: List[int], dilation: List[int], padding: List[int], stride: List[int]) -> Tensor:
+    return aten.col2im(grad_output, input_size, kernel_size, dilation, padding, stride)
+
+@register_decomposition(aten.native_dropout_backward)
+def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
+    return grad_output * (mask.type_as(grad_output) * scale)
 
 # @register_decomposition(aten._fused_dropout)
 # def _fused_dropout_decomposition(input, p, generator=None):
