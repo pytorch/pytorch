@@ -84,7 +84,7 @@ jobs:
         run: |
           zip -1 -r artifacts.zip dist/
       - uses: actions/upload-artifact@v2
-        name: Store PyTorch Build Artifacts on S3
+        name: Store PyTorch Build Artifacts on GHA
         with:
           name: ${{ env.BUILD_ENVIRONMENT }}
           retention-days: 14

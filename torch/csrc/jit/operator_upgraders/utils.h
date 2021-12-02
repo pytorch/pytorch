@@ -11,7 +11,7 @@ namespace jit {
 
 static c10::optional<UpgraderEntry> findUpgrader(
     std::vector<UpgraderEntry> upgraders_for_schema,
-    int current_version) {
+    size_t current_version) {
   // we want to find the entry which satisfies following two conditions:
   //    1. the version entry must be greater than current_version
   //    2. Among the version entries, we need to see if the current version
@@ -32,7 +32,7 @@ static c10::optional<UpgraderEntry> findUpgrader(
 
 static bool isOpEntryCurrent(
     std::vector<UpgraderEntry> upgraders_for_schema,
-    int current_version) {
+    size_t current_version) {
 
   for (const auto& entry: upgraders_for_schema) {
     if (entry.version_bump > current_version) {
@@ -43,7 +43,7 @@ static bool isOpEntryCurrent(
   return true;
 }
 
-static bool isOpSymbolCurrent(std::string name, int current_version) {
+static bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
   auto it = operator_version_map.find(name);
   if (it != operator_version_map.end()) {
     return isOpEntryCurrent(it->second, current_version);
