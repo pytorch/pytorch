@@ -1158,6 +1158,12 @@ void LLVMCodeGenImpl::visit(RampPtr v) {
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      vecType = llvm::VectorType::get(CharTy_, element_count);
+      break;
+    case ScalarType::QUInt8:
+      vecType = llvm::VectorType::get(ByteTy_, element_count);
+      break;
     default:
       throw std::runtime_error("invalid dtype in Ramp");
   }
@@ -1225,6 +1231,12 @@ void LLVMCodeGenImpl::visit(LoadPtr v) {
     break;
     AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, TYPE_CASE);
 #undef TYPE_CASE
+    case ScalarType::QInt8:
+      loadType = llvm::VectorType::get(CharTy_, element_count);
+      break;
+    case ScalarType::QUInt8:
+      loadType = llvm::VectorType::get(ByteTy_, element_count);
+      break;
     default:
       throw std::runtime_error("invalid dtype in Load");
   }
