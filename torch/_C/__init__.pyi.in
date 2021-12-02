@@ -983,6 +983,10 @@ class IntType(JitType):
     @staticmethod
     def get() -> IntType: ...
 
+class NumberType(JitType):
+    @staticmethod
+    def get() -> NumberType: ...
+
 class StringType(JitType):
     @staticmethod
     def get() -> StringType: ...
