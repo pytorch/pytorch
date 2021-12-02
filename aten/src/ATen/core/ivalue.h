@@ -1239,8 +1239,7 @@ c10::ClassTypePtr getCustomClassTypeImpl() {
     auto class_name = std::string(tindex.name());
     for(const auto &it: tmap) {
       if (class_name == it.first.name()) {
-          // Do not modify existing type map here as this template is supposed to be called only once per type
-          // from getCustomClassTypeImpl()
+          tmap[tindex] = it.second;
           return it.second;
       }
     }
