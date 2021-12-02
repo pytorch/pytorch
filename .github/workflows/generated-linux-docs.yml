@@ -1,7 +1,7 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-xenial-py3.6-gcc5.4
+name: linux-docs
 
 on:
   pull_request:
@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: linux-xenial-py3.6-gcc5.4
+  BUILD_ENVIRONMENT: linux-docs
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-xenial-py3.6-gcc5.4
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -32,22 +32,22 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: linux-xenial-py3.6-gcc5.4-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-docs-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
 
   ciflow_should_run:
-    runs-on: linux.large
+    runs-on: ubuntu-18.04
     timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/docs') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-    if: ${{ (github.repository_owner == 'pytorch') && (
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cpu') || contains(github.event.pull_request.labels.*.name, 'ciflow/default') || contains(github.event.pull_request.labels.*.name, 'ciflow/docs') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
             ((github.event_name == 'pull_request' && github.event.action != 'unassigned') && !contains(join(github.event.pull_request.labels.*.name), 'ciflow/')))
          }}
     steps:
@@ -61,7 +61,7 @@ jobs:
     needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: linux-xenial-py3.6-gcc5.4-build
+      JOB_BASE_NAME: linux-docs-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -254,57 +254,17 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-
-  generate-test-matrix:
-    runs-on: ubuntu-18.04
-    needs: [ciflow_should_run]
+  build-docs:
+    runs-on: linux.2xlarge
     timeout-minutes: 240
-    env:
-      TEST_RUNNER_TYPE: linux.2xlarge
-      ENABLE_DISTRIBUTED_TEST: 1
-      ENABLE_JIT_LEGACY_TEST: 1
-      ENABLE_MULTIGPU_TEST: ''
-      ENABLE_NOGPU_NO_AVX_TEST: ''
-      ENABLE_NOGPU_NO_AVX2_TEST: ''
-      ENABLE_SLOW_TEST: ''
-      ENABLE_DOCS_TEST: 1
-      ENABLE_BACKWARDS_COMPAT_TEST: 1
-      ENABLE_XLA_TEST: ''
-      ENABLE_NOARCH_TEST: ''
-      NUM_TEST_SHARDS: 2
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix, ciflow_should_run]
     strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 240
+      matrix:
+        docs_type: [cpp, python]
+    needs: [build, ciflow_should_run]
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: linux-xenial-py3.6-gcc5.4-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      DOCS_TYPE: ${{ matrix.docs_type }}
+      WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
       - name: Display EC2 information
         shell: bash
@@ -358,23 +318,6 @@ jobs:
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
-        run: |
-          bash .github/scripts/install_nvidia_utils_linux.sh
-          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-      - name: Determine shm-size
-        run: |
-          shm_size="1g"
-          case "${BUILD_ENVIRONMENT}" in
-            *cuda*)
-              shm_size="2g"
-              ;;
-            *rocm*)
-              shm_size="8g"
-              ;;
-          esac
-          echo "SHM_SIZE=${shm_size}" >> "${GITHUB_ENV}"
       - uses: seemethere/download-artifact-s3@0504774707cbc8603d7dca922e8026eb8bf3b47b
         name: Download PyTorch Build Artifacts
         with:
@@ -382,159 +325,53 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
-      - name: Output disk space left
+      - name: Build ${{ matrix.docs_type }} docs
         run: |
-          sudo df -H
-      - name: Parse ref
-        id: parse-ref
-        run: .github/scripts/parse_ref.py
-      - name: Test
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after 240 minutes
-        timeout-minutes: 240
-        run: |
-          set -x
-
-          if [[ $TEST_CONFIG == 'multigpu' ]]; then
-            TEST_COMMAND=.jenkins/pytorch/multigpu-test.sh
-          elif [[ $BUILD_ENVIRONMENT == *onnx* ]]; then
-            TEST_COMMAND=.jenkins/caffe2/test.sh
-          else
-            TEST_COMMAND=.jenkins/pytorch/test.sh
-          fi
-          PROXY_ENV=
-          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
-          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
-          #       make it so that we shouldn't have to fully disable squid for XLA tests
-          if [[ $TEST_CONFIG != 'xla' ]]; then
-            # shellcheck disable=SC2089
-            PROXY_ENV="-e http_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e https_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e no_proxy=localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock"
-          fi
+          set -ex
+          time docker pull "${DOCKER_IMAGE}" > /dev/null
+          echo "${GITHUB_REF}"
+          # TODO: Set it correctly when workflows are scheduled on tags
+          target="master"
           # detached container should get cleaned up by teardown_ec2_linux
-          # TODO: Stop building test binaries as part of the build phase
-          # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
-            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
-            -e PR_NUMBER \
             -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e GITHUB_ACTIONS \
             -e IN_CI \
-            -e IS_GHA \
-            -e BRANCH \
-            -e SHA1 \
-            -e AWS_DEFAULT_REGION \
-            -e IN_WHEEL_TEST \
-            -e SHARD_NUMBER \
-            -e JOB_BASE_NAME \
-            -e TEST_CONFIG \
-            -e NUM_TEST_SHARDS \
-            -e PYTORCH_IGNORE_DISABLED_ISSUES \
-            -e PYTORCH_RETRY_TEST_CASES \
-            -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
-            -e SCCACHE_BUCKET \
-            -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            ${PROXY_ENV} \
+            -e SHA1="$GITHUB_SHA" \
+            -e DOCS_VERSION="${target}" \
+            -e DOCS_TYPE \
+            -e PR_LABELS \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
-            --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --ipc=host \
-            --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
-            --name="${container_name}" \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "sudo chown -R jenkins . && pip install dist/*.whl && ${TEST_COMMAND}"
+          docker exec -t "${container_name}" bash -c "sudo chown -R jenkins . && pip install dist/*.whl && ./.circleci/scripts/${DOCS_TYPE}_doc_push_script.sh"
       - name: Chown workspace
-        if: always()
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Install render_test_results dependencies
-        if: always()
-        shell: bash
-        run: |
-          python3 -m pip install junitparser==2.1.1 rich==10.9.0
-      - name: "[[ Click me for rendered test results (useful for finding failing tests) ]]"
-        if: always()
-        shell: bash
-        # Encoding is weird on windows, just try to default to utf-8 if possible
-        env:
-          PYTHONIOENCODING: "utf-8"
-        run: |
-          python3 tools/render_junit.py test/
-      - name: Zip JSONs for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
-        run: |
-          # Remove any previous test jsons if they exist
-          rm -f test-jsons-*.zip
-          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
       - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Downloaded JSONs on S3
-        if: always()
+        name: Upload Python Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
         with:
           retention-days: 14
-          if-no-files-found: warn
-          path:
-            test-jsons-*.zip
-      - name: Zip test reports for upload
-        if: always()
-        env:
-          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
-        run: |
-          # Remove any previous test reports if they exist
-          rm -f test-reports-*.zip
-          zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
+          s3-bucket: doc-previews
+          if-no-files-found: error
+          path: pytorch.github.io/docs/master/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}
       - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Reports on S3
-        if: always()
+        name: Upload C++ Docs Preview
+        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
         with:
           retention-days: 14
           if-no-files-found: error
-          path:
-            test-reports-*.zip
-      - name: Display and upload test statistics (Click Me)
-        if: always()
-        # temporary hack: set CIRCLE_* vars, until we update
-        # tools/stats/print_test_stats.py to natively support GitHub Actions
-        env:
-          AWS_DEFAULT_REGION: us-east-1
-          BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: linux-xenial-py3.6-gcc5.4-test
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          TAG: ${{ steps.parse-ref.outputs.tag }}
-          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
-        shell: bash
-        run: |
-          python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.19.12
-          python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+          s3-bucket: doc-previews
+          path: cppdocs/
+          s3-prefix: pytorch/${{ github.event.pull_request.number }}/cppdocs
