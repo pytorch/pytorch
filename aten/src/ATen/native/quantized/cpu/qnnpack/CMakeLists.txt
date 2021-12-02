@@ -245,6 +245,7 @@ set(PYTORCH_QNNPACK_X86_SSE2_UKERNELS
   src/q8conv/4x4c2-sse2.c
   src/q8dwconv/mp8x25-sse2.c
   src/q8dwconv/mp8x25-sse2-per-channel.c
+  src/q8dwconv/mp8x27-sse2.c
   src/q8dwconv/up8x9-sse2.c
   src/q8dwconv/up8x9-sse2-per-channel.c
   src/q8gavgpool/mp8x7p7q-sse2.c

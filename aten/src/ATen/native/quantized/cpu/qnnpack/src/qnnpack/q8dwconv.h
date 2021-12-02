@@ -74,6 +74,8 @@ DECLARE_PYTORCH_Q8MPDWCONV_UKERNEL_FUNCTION(
 
 DECLARE_PYTORCH_Q8MPDWCONV_3D_UKERNEL_FUNCTION(
     pytorch_q8dwconv_ukernel_mp8x27__neon)
+DECLARE_PYTORCH_Q8MPDWCONV_3D_UKERNEL_FUNCTION(
+    pytorch_q8dwconv_ukernel_mp8x27__sse2)
 
 #ifdef __cplusplus
 } /* extern "C" */
