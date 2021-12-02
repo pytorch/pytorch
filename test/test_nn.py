@@ -1844,6 +1844,22 @@ class TestNN(NNTestCase):
         parameter_dict |= parameter_dict2
         check()
 
+        parameters2 = OrderedDict()
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters |= parameters2
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p12', Parameter(torch.randn(10, 10))),
+            ('p14', Parameter(torch.randn(10, 10))),
+            ('p11', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters |= parameters2
+        parameter_dict |= parameter_dict2
+        check()
+
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
