@@ -160,7 +160,8 @@ class TestQuantizedOps(TestCase):
         """
         # Retrives the default parameters from X.
         X, (scale, zero_point, torch_type) = X
-        X = torch.from_numpy(X)
+        if not isinstance(X, torch.Tensor):
+            X = torch.from_numpy(X)
         # Quantizes the reference to account for max error.
         # q_min and q_max only depend on the initial torch_type.
         q_min, q_max = torch.iinfo(torch_type).min, torch.iinfo(torch_type).max
@@ -249,10 +250,7 @@ class TestQuantizedOps(TestCase):
         self._test_activation_function(X, 'relu', relu_test_configs)
 
     """Tests the correctness of the quantized::relu6 op."""
-    @override_qengines
-    @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
-                       qparams=hu.qparams()))
-    def test_qrelu6(self, X):
+    def test_qrelu6(self):
         relu6_test_configs = [
             {
                 'quantized_fn': [
@@ -263,7 +261,15 @@ class TestQuantizedOps(TestCase):
                 'reference_fn': torch.nn.functional.relu6
             }
         ]
-        self._test_activation_function(X, 'relu6', relu6_test_configs)
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        scales = (0.05, 0.1)
+        zero_points = (0, 5)
+        test_cases = itertools.product(shapes, dtypes, scales, zero_points)
+        for shape, dtype, scale, zero_point in test_cases:
+            X = torch.randn(*shape) * 10
+            X = (X, (scale, zero_point, dtype))
+            self._test_activation_function(X, 'relu6', relu6_test_configs)
 
     """Tests the correctness of the quantized::sigmoid op."""
     @override_qengines
