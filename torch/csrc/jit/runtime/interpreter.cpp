@@ -317,7 +317,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(DROP): {
             INST_GUARD;
-            pop(stack);
+            stack.pop_back();
           }
             INST_NEXT;
           case INST(DROPR): {
