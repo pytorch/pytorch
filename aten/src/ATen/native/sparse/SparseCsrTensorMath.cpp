@@ -216,6 +216,7 @@ CREATE_UNARY_UFUNC(sqrt);
 CREATE_UNARY_UFUNC(square);
 CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
+CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
 
 // signbit, isneginf and isposinf currently don't have an inplace variant

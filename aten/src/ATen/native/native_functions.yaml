@@ -4582,6 +4582,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: trunc
+    SparseCsrCPU, SparseCsrCUDA: trunc_sparse_csr
 
 - func: trunc_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: trunc.out
@@ -4589,6 +4590,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: trunc_
+    SparseCsrCPU, SparseCsrCUDA: trunc_sparse_csr_
 
 - func: trunc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -4596,6 +4598,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: trunc_out
+    SparseCsrCPU, SparseCsrCUDA: trunc_sparse_csr_out
 
 # Alias for trunc
 - func: fix(Tensor self) -> Tensor
