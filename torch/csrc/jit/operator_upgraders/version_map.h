@@ -7,7 +7,7 @@ namespace torch {
 namespace jit {
 
 struct UpgraderEntry {
-  int version_bump;
+  size_t version_bump;
   std::string upgrader_name;
   std::string old_schema;
 };

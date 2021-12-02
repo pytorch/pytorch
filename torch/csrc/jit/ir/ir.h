@@ -1175,7 +1175,7 @@ struct Graph {
   // by default this is set to append to the top level block
   Node* insert_before_;
 
-  c10::optional<int> op_version_;
+  c10::optional<size_t> op_version_;
 
  public:
   Graph(ScopePtr scope_root = c10::make_intrusive<Scope>())
@@ -1228,11 +1228,11 @@ struct Graph {
     return current_scope_;
   }
 
-  void set_op_version(int version) {
+  void set_op_version(c10::optional<size_t> version) {
     op_version_ = version;
   }
 
-  c10::optional<int> get_op_version() {
+  c10::optional<size_t> get_op_version() {
     return op_version_;
   }
 
@@ -1672,6 +1672,10 @@ struct OperatorMap {
       }
     }
     return false;
+  }
+
+  bool contains(const Node* n) const {
+    return n->maybeOperator() && contains(n->getOperator());
   }
 
   c10::optional<T> find(const Operator& op) {

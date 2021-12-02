@@ -201,7 +201,6 @@ void SourceImporterImpl::LEGACY_import_methods(
   auto self = SimpleSelf(mod.type());
   c10::QualifiedName prefix = *mod.type()->name();
   Parser p(src);
-  std::cout << "INSERT STUFF" << std::endl;
 
   parsePossibleVersionNumber(p.lexer());
 

@@ -5,6 +5,8 @@
 namespace torch {
 namespace jit {
 
+// TODO: the internals here might change in the future, this
+// is just a placeholder
 static std::unordered_map<std::string, std::string> upgraders_graph(
     {{"div_Tensor_0_3", R"IR(graph(%self.1 : Tensor,
                                   %other.1 : Tensor):
