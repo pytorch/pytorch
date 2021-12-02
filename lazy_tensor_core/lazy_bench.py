@@ -1,5 +1,4 @@
 import argparse
-import copy
 import csv
 import functools
 import gc
@@ -18,7 +17,7 @@ from torch.jit import fuser, optimized_execution
 from os.path import abspath
 from scipy.stats import ttest_ind
 
-from caffe2.python import workspace
+# from caffe2.python import workspace
 # workspace.GlobalInit(['caffe2', '--caffe2_log_level=-5'])
 
 import lazy_tensor_core
@@ -135,7 +134,7 @@ def iter_models(args):
     from fastNLP.core import logger
 
     logger.setLevel(logging.WARNING)
-    from torchbenchmark import list_models  # noqa
+    from torchbenchmark import list_models
     for benchmark_cls in itertools.chain(list_toy_models(), list_models()):
         name = benchmark_cls.name if hasattr(benchmark_cls, 'name') else benchmark_cls.name()
         if (
@@ -252,7 +251,7 @@ def timed(args, benchmark, sync, times=1):
             results.append(call_model_with(model, example_inputs))
         elif args.test == 'train':
             benchmark.train(niter=1)
-            
+
         # for the last i, let final_sync take care of it
         if i < times - 1:
             # may be just an async 'mark_step' for lazy, or no-op for cuda
@@ -334,7 +333,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     lazy_metrics = dump_lazy_metrics(reset=True)
     if 'CachedCompile' not in lazy_metrics or lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
-    fallbacks = {k:v for (k,v) in lazy_metrics.items() if 'aten::' in k}
+    fallbacks = {k: v for (k, v) in lazy_metrics.items() if 'aten::' in k}
     if len(fallbacks):
         print("WARNING: lazy-eager fallbacks detected for ["+ ",".join(fallbacks.keys()) + ']')
     if args.dump_lazy_counters:
