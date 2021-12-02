@@ -732,9 +732,9 @@ Break and Continue
 
     for i in range(5):
         if i == 1:
-        continue
+            continue
         if i == 3:
-        break
+            break
         print(i)
 
 Return

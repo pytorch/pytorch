@@ -23,8 +23,6 @@
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
 
-#define THWStorage THStorage
-#define THWStorage_(NAME) THStorage_(NAME)
 #define THWTensor THTensor
 #define THWTensor_(NAME) THTensor_(NAME)
 
