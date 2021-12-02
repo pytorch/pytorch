@@ -626,7 +626,7 @@ class FullyShardedDataParallel(nn.Module):
                 self._fsdp_graph_order is not None
                 and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
             ):
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()
+                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
