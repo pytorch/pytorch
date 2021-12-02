@@ -647,7 +647,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const&;
-  const ivalue::Object& toObjectRef() const;
+  ivalue::Object& toObjectRef() const;
 
   torch::jit::Module toModule() const;
   bool isModule() const;
