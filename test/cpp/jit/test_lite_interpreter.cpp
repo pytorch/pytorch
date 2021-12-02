@@ -1539,5 +1539,21 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
   }
 }
 
+#if !defined FB_XPLAT_BUILD
+// The following test run in fbcode only
+TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl");
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+  std::vector<IValue> inputs = {
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
+}
+#endif // !defined(FB_XPLAT_BUILD)
+
 } // namespace jit
 } // namespace torch
