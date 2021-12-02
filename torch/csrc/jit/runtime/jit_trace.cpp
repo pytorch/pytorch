@@ -237,7 +237,7 @@ void insertTracingNodes(Block* block, std::shared_ptr<Graph>& graph, TracingData
     // we still capture the actual scripted node `n` we want to trace
     // we look at its inputs, map them to the inputs in the traced graph
     // and create a new node with `traceNode`
-    std::function<void(Stack&)> optional_profiler = [graph, n, &td](Stack& stack) {
+    std::function<void(Stack&)> optional_profiler = [n, &td](Stack& stack) {
       std::lock_guard<std::mutex> lock(td.mutex_);
 
       // frame_id is unused
