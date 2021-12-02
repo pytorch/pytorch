@@ -9,7 +9,7 @@ namespace ops {
 Select::Select(const torch::lazy::Value& input, int64_t dim, int64_t start,
                int64_t end, int64_t stride)
     : torch::lazy::TsNode(
-          ltc_select, {input},
+          torch::lazy::OpKind(at::aten::select), {input},
           [&]() {
             return MakeSelectShape(torch::lazy::GetShapeFromTsValue(input), dim,
                                    start, end, stride);

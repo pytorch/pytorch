@@ -6,10 +6,11 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 
-class UpdateSlice : public torch::lazy::TsNode {
+class NarrowViewUpdate : public torch::lazy::TsNode {
  public:
-  UpdateSlice(const torch::lazy::Value& input, const torch::lazy::Value& source,
-              c10::ArrayRef<int64_t> base_indices);
+  NarrowViewUpdate(const torch::lazy::Value& input,
+                   const torch::lazy::Value& source,
+                   c10::ArrayRef<int64_t> base_indices);
 
   std::string ToString() const override;
 
