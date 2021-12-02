@@ -5,7 +5,6 @@
 
 #include <limits>
 
-
 namespace torch {
 namespace lazy {
 
@@ -21,19 +20,25 @@ std::vector<int64_t> DropDimensions(
       new_dims.push_back(sizes[i]);
     }
   }
-  CHECK_EQ(drop_index, drop_dims.size());
+  TORCH_CHECK(drop_index == drop_dims.size());
   return new_dims;
 }
 
 int64_t GetCanonicalDimensionIndex(int64_t dim, int64_t rank) {
   int64_t min_shape_dim = -rank;
   int64_t max_shape_dim = rank - 1;
-  CHECK(min_shape_dim <= dim && dim <= max_shape_dim)
-      << "Value out of range (expected to be in range of [" << min_shape_dim
-      << ", " << max_shape_dim << "], but got " << dim << ")";
+  TORCH_CHECK(
+      min_shape_dim <= dim && dim <= max_shape_dim,
+      "Value out of range (expected to be in range of [",
+      min_shape_dim,
+      ", ",
+      max_shape_dim,
+      "], but got ",
+      dim,
+      ")");
   int64_t dim_index = dim < 0 ? rank + dim : dim;
-  CHECK_GE(dim_index, 0);
-  CHECK_LT(dim_index, rank);
+  TORCH_CHECK(dim_index >= 0);
+  TORCH_CHECK(dim_index < rank);
   return dim_index;
 }
 
@@ -97,9 +102,13 @@ std::vector<int64_t> GetPromotedShape(
   for (int64_t i = 0; i < min_size; ++i) {
     int64_t dim1 = shape1_dims[shape1_dims.size() - min_size + i];
     int64_t dim2 = shape2_dims[shape2_dims.size() - min_size + i];
-    CHECK(dim1 == dim2 || dim1 == 1 || dim2 == 1)
-        << "(" << c10::Join(", ", shape1_dims) << ") and ("
-        << c10::Join(", ", shape1_dims) << ")";
+    TORCH_CHECK(
+        dim1 == dim2 || dim1 == 1 || dim2 == 1,
+        "(",
+        c10::Join(", ", shape1_dims),
+        ") and (",
+        c10::Join(", ", shape1_dims),
+        ")");
     if (dim1 == 0 || dim2 == 0) {
       dimensions.push_back(0);
     } else {

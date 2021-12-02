@@ -46,7 +46,7 @@ BackendDataPtr TensorToDataHandle(
 std::vector<BackendDataPtr> CreateTensorsData(
     const std::vector<at::Tensor>& tensors,
     const std::vector<BackendDevice>& devices) {
-  CHECK_EQ(tensors.size(), devices.size());
+  TORCH_CHECK(tensors.size() == devices.size());
   std::vector<BackendDataPtr> result;
   result.reserve(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {

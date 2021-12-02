@@ -61,9 +61,8 @@ TORCH_API std::vector<int64_t> GetPromotedShape(
     c10::ArrayRef<int64_t> shape1_dims,
     c10::ArrayRef<int64_t> shape2_dims);
 
-TORCH_API torch::lazy::Shape GetPromotedBinaryOpShape(
-    const torch::lazy::Shape& shape1,
-    const torch::lazy::Shape& shape2);
+TORCH_API Shape
+GetPromotedBinaryOpShape(const Shape& shape1, const Shape& shape2);
 
 TORCH_API std::vector<std::string> StrSplit(c10::string_view text, char delim);
 
