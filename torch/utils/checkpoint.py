@@ -1,4 +1,5 @@
 import torch
+from contextlib import contextmanager
 import warnings
 from typing import Any, Iterable, List, Tuple, Union
 
@@ -165,12 +166,6 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     consisting of Tensors, these Tensors nested in custom structures will not
     be considered as part of autograd.
 
-    .. warning::
-        If ``use_reentrant=True`` is specified, checkpointing currently only
-        supports :func:`torch.autograd.backward` and only if its `inputs`
-        argument is not passed. :func:`torch.autograd.grad`
-        is not supported. If ``use_reentrant=False`` is specified, checkpointing
-        will work with :func:`torch.autograd.grad`.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
@@ -191,6 +186,13 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         grads are needed for model inputs, otherwise the checkpointed part of the
         model won't have gradients. At least one of the outputs needs to have
         :code:`requires_grad=True` as well.
+
+    .. warning::
+        If ``use_reentrant=True`` is specified, checkpointing currently only
+        supports :func:`torch.autograd.backward` and only if its `inputs`
+        argument is not passed. :func:`torch.autograd.grad`
+        is not supported. If ``use_reentrant=False`` is specified, checkpointing
+        will work with :func:`torch.autograd.grad`.
 
     Args:
         function: describes what to run in the forward pass of the model or
@@ -305,6 +307,14 @@ class Checkpoint(torch.nn.Module):
         self.function = function
         self.preserve_rng_state = preserve_rng_state
 
+    @contextmanager
+    def _mark_module_recomputing(self):
+        try:
+            self.function._recomputing = True
+            yield
+        finally:
+            self.function._recomputing = False
+
     def forward(self, *args):
         self.had_autocast_in_fwd = torch.is_autocast_enabled()
 
@@ -354,11 +364,8 @@ class Checkpoint(torch.nn.Module):
                     #  detached_inputs = detach_variable(tuple(inputs))
                     with torch.enable_grad(), torch.cuda.amp.autocast(self.had_autocast_in_fwd):
                         with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                            if isinstance(self.function, torch.nn.Module):
-                                self.function._recomputing = True
-                            _unused = self.function(*args)
-                            if isinstance(self.function, torch.nn.Module):
-                                self.function._recomputing = False
+                            with self._mark_module_recomputing():
+                                _unused = self.function(*args)
 
             return storage[x]
 
