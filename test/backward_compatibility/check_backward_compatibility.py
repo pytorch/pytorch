@@ -68,6 +68,7 @@ ALLOW_LIST = [
     ("aten::unbind", datetime.date(2021, 11, 20)),
     ("aten::hsplit", datetime.date(2021, 11, 20)),
     ("aten::dsplit", datetime.date(2021, 11, 20)),
+    ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("caffe2::", datetime.date(2021, 10, 23)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
