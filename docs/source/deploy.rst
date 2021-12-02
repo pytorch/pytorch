@@ -25,7 +25,7 @@ a copy of libtorch with ``torch::deploy`` enabled, follow the instructions for
 
 When running ``setup.py``, you will need to specify ``USE_DEPLOY=1``, like:
 
-.. code-block:: cmake
+.. code-block:: bash
 
     export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
     export USE_DEPLOY=1
