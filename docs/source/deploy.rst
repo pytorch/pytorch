@@ -9,7 +9,7 @@ information on how ``torch::deploy`` works internally, please see the related
 
 .. warning::
 
-    This module is experimental. Only Linux x86 is supported, and the API may
+    This is a prototype feature. Only Linux x86 is supported, and the API may
     change without warning.
 
 
@@ -90,8 +90,8 @@ Let's create a minimal C++ program to that loads the model.
 
         try {
             // Load the model from the torch.package.
-            auto package = manager.loadPackage(argv[1]);
-            auto model = package.loadPickle("model", "model.pkl");
+            torch::deploy::Package package = manager.loadPackage(argv[1]);
+            torch::deploy::ReplicatedObj model = package.loadPickle("model", "model.pkl");
         } catch (const c10::Error& e) {
             std::cerr << "error loading the model\n";
             return -1;
@@ -108,8 +108,13 @@ interpreters, allowing you to load balance across them when running your code.
 Using the ``InterpreterManager::loadPackage`` method, you can load a
 ``torch.package`` from disk and make it available to all interpreters.
 
-Finally, ``Package::loadPickle`` allows you to retrieve specific Python objects
+``Package::loadPickle`` allows you to retrieve specific Python objects
 from the package, like the ResNet model we saved earlier.
+
+Finally, the model itself is a ``ReplicatedObj``. This is an abstract handle to
+an object that is replicated across multiple interpreters. When you interact
+with a ``ReplicatedObj`` (for example, by calling ``forward``), it will select
+an free interpreter to execute that interaction.
 
 
 Building and running the application
@@ -174,6 +179,7 @@ One you have your model loaded in C++, it is easy to execute it:
     std::cout << output.slice(/*dim=*/1, /*start=*/0, /*end=*/5) << '\n';
 
 Notably, the model's forward function is executing in Python, in an embedded
-CPython interpreter. The model object itself is responsible for load balancing
-parallel requests among different interpreters, so you can feel free to to call
-the forward function from multiple threads without fear of GIL issues!
+CPython interpreter. Note that the model is a ``ReplicatedObj``, which means
+that you can call ``model()`` from multiple threads and the forward method will
+be executed on multiple independent interpreters, with no global interpreter
+lock.
