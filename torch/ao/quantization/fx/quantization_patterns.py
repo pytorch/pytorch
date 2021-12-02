@@ -1162,6 +1162,7 @@ class BatchNormQuantizeHandler(QuantizeHandler):
                 load_arg(quantized=torch.float)(self.bn_node.kwargs))
 
 @register_quant_pattern(torch.nn.qat.Embedding)
+@register_quant_pattern(torch.nn.qat.EmbeddingBag)
 @register_quant_pattern(torch.nn.Embedding)
 @register_quant_pattern(torch.nn.EmbeddingBag)
 class EmbeddingQuantizeHandler(QuantizeHandler):
