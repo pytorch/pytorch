@@ -185,18 +185,23 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         detected.
 
     .. warning::
-        If checkpointed segment contains tensors detached from the computational
-        graph by `detach()` or `torch.no_grad()`, the backward pass will raise an
-        error. This is because `checkpoint` makes all the outputs require
-        gradients which causes issues when a tensor is defined to have no
-        gradient in the model. To circumvent this, detach the tensors outside of
-        the `checkpoint` function.
+        If ``use_reentrant=True`` is specified, then if the checkpointed segment
+        contains tensors detached from the computational graph by `detach()` or
+        `torch.no_grad()`, the backward pass will raise an error. This is
+        because `checkpoint` makes all the outputs require gradients which
+        causes issues when a tensor is defined to have no gradient in the model.
+        To circumvent this, detach the tensors outside of the `checkpoint`
+        function. Note that the checkpointed segment can contain tensors
+        detached from the computational graph if ``use_reentrant=False`` is
+        specified.
 
     .. warning::
-        At least one of the inputs needs to have :code:`requires_grad=True` if
-        grads are needed for model inputs, otherwise the checkpointed part of the
-        model won't have gradients. At least one of the outputs needs to have
-        :code:`requires_grad=True` as well.
+        If ``use_reentrant=True`` is specified, at least one of the inputs needs
+        to have :code:`requires_grad=True` if grads are needed for model inputs,
+        otherwise the checkpointed part of the model won't have gradients. At
+        least one of the outputs needs to have :code:`requires_grad=True` as
+        well. Note that this does not apply if ``use_reentrant=False`` is
+        specified.
 
     .. warning::
         If ``use_reentrant=True`` is specified, checkpointing currently only
