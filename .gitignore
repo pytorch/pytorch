@@ -196,9 +196,6 @@ docs/source/scripts/activation_images/
 # PyCharm files
 .idea
 
-# OSX dir files
-.DS_Store
-
 # GDB history
 .gdb_history
 
@@ -314,3 +311,6 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# generated flatbuffer schema header
+torch/csrc/jit/serialization/mobile_bytecode_generated.h
