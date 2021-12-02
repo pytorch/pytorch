@@ -6,10 +6,11 @@
 #include <torch/csrc/jit/codegen/cuda/manager.h>
 #include <torch/csrc/jit/codegen/cuda/parser.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
-#include <torch/csrc/jit/codegen/cuda/shape_inference.h>
+#include <torch/csrc/jit/codegen/cuda/type_inference.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 
@@ -122,83 +123,6 @@ class CudaFusionManager {
     return false;
   }
 
-  TensorTypePtr mergeInputTensorType(const std::shared_ptr<Graph>& graph) {
-    // run over inputs to extract common types;
-    TensorTypePtr acc_type = TensorType::get();
-    for (const auto& input : graph->inputs()) {
-      // only check tensor types;
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        if (!input_type->dim().has_value()) {
-          // early termination when detecting undefined tensor;
-          return TensorType::get()->withUndefined();
-        }
-        if (acc_type->dim().has_value()) {
-          // TODO: I think merge cannot handle broadcast - Go verify it later;
-          // TODO: Since we are only handling permutation here, we should just
-          //       merge the stride_index_;
-          acc_type = acc_type->merge(*input_type);
-        } else {
-          acc_type = input_type;
-        }
-      }
-    }
-    return acc_type;
-  }
-
-  // return a permutation order that would undo `permuted`
-  at::DimVector restorePermutation(at::DimVector permuted) {
-    int rank = static_cast<int>(permuted.size());
-    at::DimVector permutation(rank, -1);
-    for (const auto i : c10::irange(rank)) {
-      permutation[permuted[i]] = i;
-    }
-    return permutation;
-  }
-
-  at::DimVector getSortStrideScheme(const TensorTypePtr& type) {
-    // `permute_seq` is the returned permutation to achieve sorted stride;
-    at::DimVector permute_seq;
-
-    auto stride_properties = type->stride_properties().sizes();
-
-    TORCH_INTERNAL_ASSERT(
-        stride_properties.has_value(),
-        "unknown sizes or stride_properties, collapsing shouldn't happen");
-
-    // TODO: reuse this;
-    const int rank = static_cast<int>(stride_properties->size());
-
-    // stores axes with stride_index;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::set<int> ordered_axes;
-
-    // TODO: this does not support broadcast yet;
-    for (const auto i : c10::irange(rank)) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
-      }
-    }
-
-    int unallocated_axis = 0;
-    // we push from slowest to fastest
-    for (int i = rank - 1; i >= 0; i--) {
-      if ((*stride_properties)[i].has_value() &&
-          (*stride_properties)[i]->stride_index_.has_value()) {
-        permute_seq.emplace_back(
-            (*stride_properties)[i]->stride_index_.value());
-      } else {
-        // no designated axis for this slot, so we push an axis w/o designated
-        // order;
-        while (ordered_axes.count(unallocated_axis) != 0) {
-          ++unallocated_axis;
-        }
-        permute_seq.emplace_back(unallocated_axis++);
-      }
-    }
-    return permute_seq;
-  }
-
  private:
   std::mutex mutex_;
 
@@ -237,6 +161,7 @@ void compileCudaFusionGroup(Node* fusion_node) {
     // Note that even for Profiling Executor, scalar type could still be
     // missing, especially for output tensor from a given node (as profiling
     // node only insert meta information after itself).
+    PropagateShapesOnGraph(graph);
     TypePropagate(graph);
 
     int32_t fusion_cache_id =
