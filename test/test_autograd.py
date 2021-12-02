@@ -7386,6 +7386,7 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, bar)
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
+
     def test_make_dual_inference_tensor_in_inference_mode(self):
         with torch.inference_mode():
             foo = torch.rand(2)

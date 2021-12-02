@@ -9320,8 +9320,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_eigh,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            supports_forward_ad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
                # Gradcheck for complex is not implemented yet
@@ -9397,8 +9395,6 @@ op_db: List[OpInfo] = [
            check_batched_grad=False,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_linalg_multi_dot,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
@@ -9600,8 +9596,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu_solve,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
@@ -10269,8 +10263,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='circular'),
            supports_forward_ad=True,
            check_batched_grad=False,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            skips=(
                # Doesn't have a corresponding aten operator.
                # RuntimeError: falseINTERNAL ASSERT FAILED at
@@ -11453,8 +11445,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_legacy_solve,
            check_batched_gradgrad=False,
            supports_forward_ad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[skipCUDAIfNoMagma]),
     UnaryUfuncInfo('trunc',
