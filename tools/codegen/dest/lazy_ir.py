@@ -29,7 +29,8 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
         if isinstance(arg.type, VectorCType) and isinstance(arg.type.elem, BaseCType):
             return f"std::vector<{arg.type.elem.type}>({arg.name}.begin(), {arg.name}.end())"
         elif (isinstance(arg.type, OptionalCType) and
-                isinstance(arg.type.elem, VectorCType)):
+                isinstance(arg.type.elem, VectorCType) and
+                isinstance(arg.type.elem.elem, BaseCType)):
             return f"torch::lazy::ToOptionalVector<{arg.type.elem.elem.type}>({arg.name})"
         else:
             return f"{arg.name}"
@@ -89,7 +90,7 @@ class LazyIR:
 }}""")
             else:
                 members_to_string.append(f'ss << ", {t.name}=" << {t.name}_;')
-        members_to_string = "\n    ".join(members_to_string)
+        members_to_string_str = "\n    ".join(members_to_string)
 
         return [f"""\
 // TODO(alanwaketan): Public members don't need to have _ suffix.
@@ -109,7 +110,7 @@ class {schema.node_name} : public {self.node_base} {{
   std::string ToString() const override {{
     std::stringstream ss;
     ss << TsNode::ToString();
-    {members_to_string}
+    {members_to_string_str}
     return ss.str();
   }}
 
@@ -168,7 +169,7 @@ class GenLazyNativeFuncDefinition:
         if func.structured or func.structured_delegate is not None:
             meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
-                def this_shape(i):
+                def this_shape(i: int) -> str:
                     return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
                 shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"

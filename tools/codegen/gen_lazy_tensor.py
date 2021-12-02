@@ -3,12 +3,12 @@ import argparse
 import os
 import yaml
 from collections import namedtuple
-from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator
-from tools.codegen.gen import FileManager, get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey,
+from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
+from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
+from tools.codegen.model import (DispatchKey, FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
-from tools.codegen.utils import concatMap, YamlLoader
+from tools.codegen.utils import concatMap, YamlLoader, FileManager
 import tools.codegen.dest as dest
 from .gen_backend_stubs import (parse_backend_yaml, error_on_missing_kernels,
                                 gen_dispatchkey_nativefunc_headers,
@@ -118,7 +118,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         """
         generated = set()
 
-        def gen_key(func: NativeFunction):
+        def gen_key(func: FunctionSchema) -> Tuple[str, str]:
             # we want to generate unique entries for overloads of functional variants,
             # but not for inplace variants unless explicitly told `codegenInplaceVariant`
             return (func.name.name.base, func.name.overload_name)
@@ -192,8 +192,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "torch/csrc/lazy/core/shape.h",
                 "vector",
             ]],
-            'lazy_ir_inc': [f'#include "{path}"' for path in [
-            ]],
+            'lazy_ir_inc': [],
             'DispatchKey': backend_dispatch_key,
             'dispatch_namespace': backend_dispatch_key.lower(),
             'func_declarations': list(concat_map_codegen(
