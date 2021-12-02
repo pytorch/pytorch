@@ -3103,3 +3103,10 @@ def get_cycles_per_ms() -> float:
         vals.append(measure())
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
+
+
+def first_sample(self, samples):
+    try:
+        return next(iter(samples))
+    except StopIteration:
+        self.skipTest('Skipped! Need at least 1 sample input')
