@@ -1,6 +1,6 @@
 #include <torch/csrc/lazy/core/view_ops/select.h>
 
-#include <torch/csrc/lazy/core/view_ops/ltc_ops.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
 namespace torch {
 namespace lazy {
