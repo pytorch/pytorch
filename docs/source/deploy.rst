@@ -25,7 +25,7 @@ a copy of libtorch with ``torch::deploy`` enabled, follow the instructions for
 
 When running ``setup.py``, you will need to specify ``USE_DEPLOY=1``, like:
 
-::
+.. code-block:: cmake
 
     export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
     export USE_DEPLOY=1
@@ -42,7 +42,7 @@ Creating a model package in Python
 
 For now, let's create a simple model that we can load and run in ``torch::deploy``.
 
-::
+.. code-block:: py
 
     from torch.package import PackageExporter
     import torchvision
@@ -71,7 +71,7 @@ Loading and running the model in C++
 
 Let's create a minimal C++ program to that loads the model.
 
-::
+.. code-block:: cpp
 
     #include <torch/deploy.h>
     #include <torch/script.h>
@@ -123,7 +123,7 @@ Building and running the application
 Assuming the above C++ program was stored in a file called, `example-app.cpp`, a
 minimal CMakeLists.txt file would look like:
 
-::
+.. code-block:: cmake
 
     cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
     project(deploy_tutorial)
@@ -138,7 +138,7 @@ minimal CMakeLists.txt file would look like:
 The last step is configuring and building the project. Assuming that our code
 directory is laid out like this:
 
-::
+.. code-block:: none
 
     example-app/
         CMakeLists.txt
@@ -147,7 +147,7 @@ directory is laid out like this:
 We can now run the following commands to build the application from within the
 ``example-app/`` folder:
 
-::
+.. code-block:: bash
 
     mkdir build
     cd build
@@ -158,7 +158,7 @@ We can now run the following commands to build the application from within the
 
 Now we can run our app:
 
-::
+.. code-block:: bash
 
         ./example-app /path/to/my_package.pt
 
@@ -168,7 +168,7 @@ Executing ``forward`` in C++
 
 One you have your model loaded in C++, it is easy to execute it:
 
-::
+.. code-block:: cpp
 
     // Create a vector of inputs.
     std::vector<torch::jit::IValue> inputs;
