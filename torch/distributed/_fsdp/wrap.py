@@ -205,7 +205,7 @@ def auto_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable] = None, **
             (default: wrap if > 100M parameters)
     """
     if ConfigAutoWrap.in_autowrap_context:
-        wrapped_module, remainder = ConfigAutoWrap.recursive_wrap(module, auto_wrap_policy=auto_wrap_policy, **kwargs)
+        wrapped_module, _ = ConfigAutoWrap.recursive_wrap(module, auto_wrap_policy=auto_wrap_policy, **kwargs)
         return wrapped_module
     return module
 
@@ -233,7 +233,7 @@ class ConfigAutoWrap:
             )
         ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys()
+        assert "wrapper_cls" in kwargs.keys(), "Expected to pass in wrapper_cls arg into ConfigAutoWrap."
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
@@ -254,7 +254,12 @@ class ConfigAutoWrap:
         self.disable_autowrap_context()
 
     @staticmethod
-    def recursive_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable], **kwargs: Any) -> Tuple[nn.Module, int]:
+    def recursive_wrap(
+        module: nn.Module,
+        auto_wrap_policy: Optional[Callable],
+        only_wrap_children: bool = False,
+        **kwargs: Any
+    ) -> Tuple[nn.Module, int]:
         """
         Automatically wrap child modules of *module* that meet the given
         criteria with :func:`auto_wrap`.
@@ -264,6 +269,11 @@ class ConfigAutoWrap:
                 module to recursively wrap
             auto_wrap_policy (Callable, Optional):
                 optionally, override the :func:`auto_wrap_policy` from the context.
+            only_wrap_children (bool, Optional):
+                If ``True``, will not wrap the passed in (i.e. outer-most)
+                module passed into ``recursive_wrap``. This is useful if the
+                function is being called from FSDP constructor which takes care
+                of wrapping the outer-most user module.
 
         Returns:
             (nn.Module, int):
@@ -293,7 +303,7 @@ class ConfigAutoWrap:
             # decide if we need to wrap the current module,
             # since the left over parameters exceed the number of params to wrap
             remainder = num_params - total_wrapped_params
-            if auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
+            if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
                 # Leaf node or final wrapping of the remainder both happen here.
                 return wrap(module, **kwargs), num_params
             else:

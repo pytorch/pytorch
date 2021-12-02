@@ -1408,9 +1408,7 @@ def acc_ops_sigmoid(network, target, args, kwargs, name):
             "of the TensorRT region!"
         )
 
-    layer = network.add_activation(input=input_val, type=trt.ActivationType.SIGMOID)
-    set_layer_name(layer, target, name)
-    return layer.get_output(0)
+    return add_activation_layer(network, input_val, trt.ActivationType.SIGMOID, target, name)
 
 
 @tensorrt_converter(acc_ops.permute)
@@ -1677,3 +1675,22 @@ def acc_ops_cumsum(network, target, args, kwargs, name):
     set_layer_name(loop_output, target, f"{name}_loop_output")
     loop_output.set_input(1, trip_limit)
     return loop_output.get_output(0)
+
+
+@tensorrt_converter(acc_ops.hardtanh)
+def acc_ops_hardtanh(network, target, args, kwargs, name):
+    input_val = kwargs["input"]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"hardtanh received input {input_val} that is not part "
+                           "of the TensorRT region!")
+
+    return add_activation_layer(
+        network,
+        input_val,
+        trt.ActivationType.CLIP,
+        target,
+        name,
+        alpha=kwargs["min_val"],
+        beta=kwargs["max_val"],
+    )

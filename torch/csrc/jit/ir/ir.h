@@ -1581,6 +1581,7 @@ TORCH_API std::vector<Node*> findAllNodes(
 
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
+  std::vector<std::shared_ptr<Operator>> getOps() const;
 
  private:
   friend struct Node;
@@ -1611,6 +1612,12 @@ struct OperatorMap {
     erase(op);
     map[Symbol::fromQualString(op->schema().name())].emplace_back(
         std::make_pair(op, val));
+  }
+
+  void insert(const OperatorSet& op_set, T val) {
+    for (auto& op : op_set.getOps()) {
+      insert(op, val);
+    }
   }
 
   void insert(
@@ -1653,6 +1660,10 @@ struct OperatorMap {
       }
     }
     return false;
+  }
+
+  bool contains(const Node* n) const {
+    return n->maybeOperator() && contains(n->getOperator());
   }
 
   c10::optional<T> find(const Operator& op) {
