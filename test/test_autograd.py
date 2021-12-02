@@ -4311,7 +4311,8 @@ for shape in [(1,), ()]:
         mean_combined.backward()
 
     @slowTest
-    def test_checkpointing_without_reentrant(self):
+    @parametrize("input_requires_grad", [True, False])
+    def test_checkpointing_without_reentrant(self, input_requires_grad):
         """
         Basic test for checkpoint without reentrant autograd.
         """
@@ -4331,7 +4332,7 @@ for shape in [(1,), ()]:
         for r in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
-            data_r.requires_grad = True
+            data_r.requires_grad = input_requires_grad
             feat_r = checkpoint(module, data_r, use_reentrant=False)
             feat_combined.append(feat_r)
 
