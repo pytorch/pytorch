@@ -30,9 +30,9 @@ void checkCustomClassType(const Type* expected_type, const Type* actual_type) {
   // Type's, this needs to be changed!
   TORCH_CHECK(actual_type == expected_type,
               "Tried to convert an IValue of type ",
-              actual_type ? actual_type->repr_str() : std::string("*NULL*"),
+              actual_type->repr_str(),
               " to custom class type ",
-              expected_type ? expected_type->repr_str() : std::string("*NULL*"));
+              expected_type->repr_str());
 }
 
 TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(

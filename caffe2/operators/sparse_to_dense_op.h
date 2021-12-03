@@ -89,7 +89,7 @@ class SparseToDenseOp final : public Operator<Context> {
     const auto block_nitems = sparse_values.size_from_dim(1);
     const TData* sparse_values_vec = sparse_values.template data<TData>();
 
-    for (const auto i : c10::irange(sparse_indices_len)) {
+    for (int32_t i = 0; i < sparse_indices_len; i++) {
       const TInd idx = sparse_indices_vec[i];
       CAFFE_ENFORCE_GE(idx, 0);
       CAFFE_ENFORCE_LT(idx, output_first_dim);
