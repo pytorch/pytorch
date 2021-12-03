@@ -8,7 +8,7 @@ Each function definition here needs to following requirements:
 """
 import torch
 import yaml
-from typing import List, Optional, Union
+from typing import List, no_type_check, Optional, Union
 
 @torch.jit.script
 def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
@@ -17,7 +17,7 @@ def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return self.divide(other, rounding_mode='trunc')
 
 @torch.jit.script
-def div_Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> torch.Tensor:
+def div_Scalar_0_3(self: torch.Tensor, other: Union[int, float]) -> torch.Tensor:
     if (self.is_floating_point() or isinstance(other, float)):
         return self.true_divide(other)
     return self.divide(other, rounding_mode='trunc')
@@ -26,7 +26,7 @@ def div_Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> tor
 def div_out_0_3(self: torch.Tensor, other: torch.Tensor, *, out: torch.Tensor) -> torch.Tensor:
     if (self.is_floating_point() or other.is_floating_point() or out.is_floating_point()):
         return self.true_divide(other, out=out)
-    return self.divide(other, rounding_mode='trunc', out=out)
+    return self.divide(other, rounding_mode='trunc', out=out)  # type: ignore[call-overload]
 
 @torch.jit.script
 def div__Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
@@ -35,21 +35,27 @@ def div__Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     return self.divide_(other, rounding_mode='trunc')
 
 @torch.jit.script
-def div__Scalar_0_3(self: torch.Tensor, other: Union[int, float, complex]) -> torch.Tensor:
+def div__Scalar_0_3(self: torch.Tensor, other: Union[int, float]) -> torch.Tensor:
     if (self.is_floating_point() or isinstance(other, float)):
         return self.true_divide_(other)
     return self.divide_(other, rounding_mode='trunc')
 
+# TODO: since TS relies on typecheck comment of mypy
+# adding type: ignore at specific lines in this function
+# messes up our type refinement. For now, let's not check
+# type here.
+@no_type_check
 @torch.jit.script
-def full_names_0_4(size: List[int], fill_value: Union[int, float, complex], *,
+def full_names_0_4(size: List[int], fill_value: Union[int, float], *,
                    dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
                    pin_memory: Optional[bool]) -> torch.Tensor:
     if dtype is None:
         fill_value = float(fill_value)
-    return torch.full(size, fill_value, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory)
+    return torch.full(size, fill_value, dtype=dtype, layout=layout,
+                      device=device, pin_memory=pin_memory)
 
 @torch.jit.script
-def full_out_0_4(size: List[int], fill_value: Union[int, float, complex], *, out: torch.Tensor) -> torch.Tensor:
+def full_out_0_4(size: List[int], fill_value: Union[int, float], *, out: torch.Tensor) -> torch.Tensor:
     return torch.full(size, fill_value, out=out)
 
 def format_bytecode(table):
