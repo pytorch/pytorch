@@ -22,6 +22,7 @@ from ..utils import (
     get_qconfig_dtypes,
     activation_dtype,
     get_qparam_dict,
+    module_has_sparse_params,
 )
 
 from torch.ao.quantization.quantize import (
@@ -955,7 +956,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # 2. select corresponding quantized linear class for the float linear class
                 if activation_int8_quantized:
                     additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                    if weight_is_sparse(qconfig)
+                    if module_has_sparse_params(self.linear):
                         mapping_fn = get_static_sparse_quant_module_class
                     else:
                         mapping_fn = get_static_quant_module_class
@@ -967,7 +968,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         (torch.float32, torch.float16, None),
                     ], f"dtype {dtypes} not supported yet"
                     additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
-                    if weight_is_sparse(qconfig)
+                    if module_has_sparse_params(self.linear):
                         mapping_fn = get_dynamic_sparse_quant_module_class
                     else:
                         mapping_fn = get_dynamic_quant_module_class
