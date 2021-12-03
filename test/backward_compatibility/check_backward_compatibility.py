@@ -55,6 +55,8 @@ ALLOW_LIST = [
     ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
