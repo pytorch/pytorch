@@ -14,6 +14,7 @@ import operator
 import os
 import inspect
 from functorch._C import CompileCache
+from functools import partial
 from typing import Callable
 
 from .python_key import pythonkey_decompose

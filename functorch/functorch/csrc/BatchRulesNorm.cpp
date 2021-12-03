@@ -236,10 +236,10 @@ native_layer_norm_batch_rule(
   auto input_ = moveBatchDimToFront(input, input_bdim);
   if (!weight_bdim && !bias_bdim) {
     const auto result = at::native_layer_norm(input_, normalized_shape, weight_opt, bias_opt, eps);
-    const auto mean = std::move(std::get<1>(result));
-    const auto rstd = std::move(std::get<2>(result));
+    const auto mean = std::get<1>(result);
+    const auto rstd = std::get<2>(result);
     const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
-    return std::make_tuple(std::move(std::get<0>(result)), 0, mean, stats_bdim, rstd, stats_bdim);
+    return std::make_tuple(std::get<0>(result), 0, mean, stats_bdim, rstd, stats_bdim);
   }
 
   // See [Note: hacky wrapper removal for optional tensor]
@@ -251,9 +251,9 @@ native_layer_norm_batch_rule(
 
   const auto input_logical_rank = rankWithoutBatchDim(input, input_bdim);
   const auto result = at::native_layer_norm(input_, normalized_shape, nullopt, nullopt, eps);
-  auto result0 = std::move(std::get<0>(result));
-  const auto mean = std::move(std::get<1>(result));
-  const auto rstd = std::move(std::get<2>(result));
+  auto result0 = std::get<0>(result);
+  const auto mean = std::get<1>(result);
+  const auto rstd = std::get<2>(result);
   const auto stats_bdim = compute_stat_bdim(input_bdim, mean);
 
   if (weight.defined()) {
