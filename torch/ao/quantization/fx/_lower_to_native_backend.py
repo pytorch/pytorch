@@ -24,8 +24,8 @@ def _lower_ref(model: QuantizedGraphModule, ref_class: type) -> QuantizedGraphMo
     q_class = _lower_module_map[ref_class]
 
     pattern = (torch.quantize_per_tensor,
-        (ref_class, "dequantize"),
-        MatchAllNode, MatchAllNode, MatchAllNode)
+               (ref_class, "dequantize"),
+               MatchAllNode, MatchAllNode, MatchAllNode)
     modules = dict(model.named_modules())
     nodes = list(model.graph.nodes)
     # TODO: maybe orgnize this better (e.g. break down to more functions)

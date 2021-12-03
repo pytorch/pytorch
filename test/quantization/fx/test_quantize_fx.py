@@ -3200,20 +3200,19 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(out_ref, out)
 
     def test_conv_lowering(self):
-        convs = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
-        qconvs = [nn.quantized.Conv1d, nn.quantized.Conv2d, nn.quantized.Conv3d]
+        convs = {1: nn.Conv1d, 2: nn.Conv2d, 3: nn.Conv3d}
+        qconvs = {1: nn.quantized.Conv1d, 2: nn.quantized.Conv2d, 3: nn.quantized.Conv3d}
 
         class M(torch.nn.Module):
-            def __init__(self, i):
+            def __init__(self, dim):
                 super().__init__()
-                self.conv = convs[i](3, 3, 3)
+                self.conv = convs[dim](3, 3, 3)
 
             def forward(self, x):
                 return self.conv(x)
 
-        for i in range(len(convs)):
-            dim = i + 1
-            m = M(i).eval()
+        for dim in range(1, len(convs) + 1):
+            m = M(dim).eval()
             m = prepare_fx(m, {"": default_qconfig})
             m_ref = copy.deepcopy(m)
             m_ref = convert_fx(m_ref, is_reference=True)
@@ -3224,7 +3223,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # check that reference pattern for quantized conv module is fused
             expected_node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 1,
-                ns.call_module(qconvs[i]): 1,
+                ns.call_module(qconvs[dim]): 1,
                 ns.call_method("dequantize"): 1
             }
             self.checkGraphModuleNodes(m, expected_node_occurrence=expected_node_occurrence)
