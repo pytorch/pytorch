@@ -1,3 +1,4 @@
+#include <c10/util/Optional.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -1469,4 +1470,67 @@ void TensorExprKernel::runFast(
 
   // Call the kernel.
   codegen_->call_raw(args);
+}
+
+void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
+  std::vector<void*> args;
+  // stack includes both inputs and outputs
+  args.reserve(stack.size() + constants_.size());
+  auto nOutputs = stack.size() - nInputs_;
+
+  std::vector<int64_t> int_inputs(nInputs_);
+  for (auto i : c10::irange(nInputs_)) {
+    auto inp = stack[i + nOutputs];
+    if (inp.isInt()) {
+      int_inputs[i] = inp.toInt();
+      args.emplace_back(&int_inputs[i]);
+    } else if (inp.isTensor()) {
+      args.emplace_back(inp.toTensor().data_ptr());
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false, "Unhandled input type while calling TensorExprKernel");
+    }
+  }
+
+  if (has_symbolic_shapes_) {
+    // TODO: This code is mostly same as the code in `prepareRunArgs()`.
+    // Refactor this into a function and reuse here.
+    TORCH_INTERNAL_ASSERT(
+        tensorOutputSymbolicSizes_.size() == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(tensorOutputSizes_.size() == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(tensorOutputStrides_.size() == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(nOutputs == bufOutputs_.size());
+    for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
+      tensorOutputSizes_[i].clear();
+      for (auto t : tensorOutputSymbolicSizes_[i]) {
+        if (t.AsNode<LongImm>()) {
+          tensorOutputSizes_[i].emplace_back(immediateAs<int64_t>(t.node()));
+        } else {
+          auto input_pos = shapeSymbolInputPos_.at(t.node());
+          TORCH_INTERNAL_ASSERT(input_pos < nInputs_);
+          TORCH_INTERNAL_ASSERT(stack[input_pos + nOutputs].isInt());
+          tensorOutputSizes_[i].emplace_back(
+              stack[input_pos + nOutputs].toInt());
+        }
+      }
+      auto& out = stack[i].toTensor();
+      at::native::resize_(out, tensorOutputSizes_[i], c10::nullopt);
+      args.emplace_back(out.data_ptr());
+    }
+  } else {
+    for (auto i : c10::irange(nOutputs)) {
+      args.emplace_back(stack[i].toTensor().data_ptr());
+    }
+  }
+
+  for (auto c : constants_) {
+    args.emplace_back(c.ptr);
+  }
+
+  // Call the kernel.
+  codegen_->call_raw(args);
+
+  // Remove the inputs from the stack. The outputs are already at the bottom
+  // of the stack.
+  drop(stack, nInputs_);
 }
