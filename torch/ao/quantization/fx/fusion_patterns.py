@@ -4,11 +4,11 @@ from .pattern_utils import (
     register_fusion_pattern,
 )
 from .utils import _parent_name
-from .quantization_types import QuantizerCls, NodePattern
+from .quantization_types import QuantizerCls, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional, Union
 from .match_utils import MatchAllNode
 
 # ---------------------
@@ -117,7 +117,10 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
 class ModuleReLUFusion(FuseHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(
+            self,
+            quantizer: QuantizerCls,
+            node: Node):
         super().__init__(quantizer, node)
         self.relu_node = node
         assert isinstance(node.args[0], Node)
@@ -130,7 +133,8 @@ class ModuleReLUFusion(FuseHandler):
              load_arg: Callable,
              root_node: Node,
              matched_node_pattern: NodePattern,
-             fuse_custom_config_dict: Dict[str, Any]) -> Node:
+             fuse_custom_config_dict: Dict[str, Any],
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
         root_module = quantizer.modules[root_node.target]
@@ -153,7 +157,7 @@ class ModuleReLUFusion(FuseHandler):
 
         matched_module_types = tuple(map(get_type, matched_modules))
         module_parent_name, module_name = _parent_name(root_node.target)
-        fuser_method = get_fuser_method_new(matched_module_types)
+        fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
         fused_module = fuser_method(*matched_modules)

@@ -15,6 +15,9 @@ from .pattern_utils import (
     get_default_fusion_patterns,
 )
 
+from .backend_config_dict.utils import get_fusion_pattern_to_fuse_handler_cls
+from .backend_config_dict.utils import get_fuser_method_mapping
+
 from .fusion_patterns import *  # noqa: F401,F403
 
 from typing import Callable, Tuple, Dict, Any, Optional, List
@@ -23,7 +26,10 @@ from .quantization_types import Pattern, NodePattern
 
 class Fuser:
     def fuse(
-        self, model: GraphModule, fuse_custom_config_dict: Optional[Dict[str, Any]] = None
+        self,
+        model: GraphModule,
+        fuse_custom_config_dict: Optional[Dict[str, Any]] = None,
+        backend_config_dict: Optional[Dict[str, Any]] = None,
     ) -> GraphModule:
         if fuse_custom_config_dict is None:
             fuse_custom_config_dict = {}
@@ -32,13 +38,18 @@ class Fuser:
         input_graph = model.graph
         self.modules = dict(input_root.named_modules())
 
-        additional_fusion_patterns = \
-            fuse_custom_config_dict.get("additional_fusion_pattern", {})
-        fusion_patterns = get_combined_dict(
-            get_default_fusion_patterns(), additional_fusion_patterns)
+        if backend_config_dict is None:
+            additional_fusion_patterns = \
+                fuse_custom_config_dict.get("additional_fusion_pattern", {})
+            fusion_pattern_to_fuse_handler_cls = get_combined_dict(
+                get_default_fusion_patterns(), additional_fusion_patterns)
+            fuser_method_mapping = None
+        else:
+            fusion_pattern_to_fuse_handler_cls = get_fusion_pattern_to_fuse_handler_cls(backend_config_dict)
+            fuser_method_mapping = get_fuser_method_mapping(backend_config_dict)
         # find fusion
         fusion_pairs = self._find_matches(
-            input_root, input_graph, fusion_patterns)
+            input_root, input_graph, fusion_pattern_to_fuse_handler_cls)
         self.fused_graph = Graph()
         env: Dict[Any, Any] = {}
 
@@ -56,7 +67,7 @@ class Fuser:
                 root_node = matched_node_pattern[-1]  # type: ignore[index]
                 env[node.name] = obj.fuse(
                     self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
-                    fuse_custom_config_dict)
+                    fuse_custom_config_dict, fuser_method_mapping)
             elif maybe_last_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
