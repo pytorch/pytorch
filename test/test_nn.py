@@ -1839,6 +1839,15 @@ class TestNN(NNTestCase):
         parameters.clear()
         check()
 
+        parameters['p17'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p17'] = parameters['p17']
+        self.assertIs(parameters['p17'], parameter_dict.get('p17'))
+        temp_param = Parameter(torch.randn(10, 10))
+        self.assertIs(parameters['p17'], parameter_dict.get('p17', temp_param))
+        self.assertIs(None, parameter_dict.get('p18'))
+        self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
+        check()
+
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
         for fn in methods_to_test:
