@@ -528,17 +528,6 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
-        # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
-        x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
-        x = x_base[1:]
-        self.assertTrue(x.is_pinned())
-        self.assertTrue(x_base.is_pinned())
-        self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
-        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
-        y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
-
-
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
