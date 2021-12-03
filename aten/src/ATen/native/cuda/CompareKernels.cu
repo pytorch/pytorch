@@ -18,7 +18,6 @@ struct CompareFunctor{
   CompareFunctor(OpType op): op_(op) {};
   OpType op_;
   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-    //printf("vals %ld %ld\n", a, b);
     if (op_ == OpType::GE) {
       return a >= b;
     } else if (op_ == OpType::GT) {
@@ -40,19 +39,19 @@ void ge_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void gt_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "gt_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(OpType::GT));
   });
 }
 
 void le_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "le_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(OpType::LE));
   });
 }
 
 void lt_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ge_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "lt_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareFunctor<scalar_t>(OpType::LT));
   });
 }

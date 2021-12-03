@@ -18,7 +18,6 @@ struct CompareEqFunctor{
   CompareEqFunctor(EqOpType op): op_(op) {}
   const EqOpType op_;
   __device__ __forceinline__ bool operator() (scalar_t a, scalar_t b) const {
-    //printf("vals %ld %ld\n", a, b);
     if (op_ == EqOpType::EQ) {
       return a == b;
     } else { //NE
@@ -36,7 +35,7 @@ void eq_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void ne_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "eq_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "ne_cuda", [&]() {
     gpu_kernel_with_scalars(iter, CompareEqFunctor<scalar_t>(EqOpType::NE));
   });
 }
