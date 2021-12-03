@@ -28,12 +28,12 @@ TORCH_API std::vector<BackendDataPtr> CreateTensorsData(
     const std::vector<BackendDevice>& devices);
 
 // Makes a deep copy of an ATEN tensor.
-static inline at::Tensor CopyTensor(const at::Tensor& ref) {
+inline at::Tensor CopyTensor(const at::Tensor& ref) {
   return ref.to(ref.options(), /*non_blocking=*/false, /*copy=*/true);
 }
 
 // Same as above, with an additional cast.
-static inline at::Tensor CopyTensor(
+inline at::Tensor CopyTensor(
     const at::Tensor& ref,
     at::ScalarType dest_type,
     bool copy = true) {
@@ -46,9 +46,7 @@ T OptionalOr(const c10::optional<S>& value, T defval) {
 }
 
 // Unwraps tensor to target dtype if it's a wrapped number.
-static inline at::Tensor UnwrapNumber(
-    const at::Tensor& tensor,
-    at::ScalarType dtype) {
+inline at::Tensor UnwrapNumber(const at::Tensor& tensor, at::ScalarType dtype) {
   return tensor.unsafeGetTensorImpl()->is_wrapped_number() ? tensor.to(dtype)
                                                            : tensor;
 }
