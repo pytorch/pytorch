@@ -52,7 +52,7 @@ class IOSNightlyJob:
             props_dict["name"] = self.gen_job_name()
             props_dict["use_metal"] = miniutils.quote(str(int(True)))
             props_dict["use_coreml"] = miniutils.quote(str(int(True)))
-            if self.is_full_jit: 
+            if self.is_full_jit:
                 props_dict["lite_interpreter"] = miniutils.quote(str(int(False)))
 
         template_name = "_".join([
