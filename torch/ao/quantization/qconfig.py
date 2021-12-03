@@ -173,7 +173,7 @@ Fused version of `default_qat_config`, has performance benefits.
 """
 
 default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
-                                      weight=default_reuse_input_observer)
+                                      weight=NoopObserver)
 """
 Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
@@ -381,4 +381,4 @@ def activation_is_memoryless(qconfig: QConfig):
 def is_reuse_input_qconfig(qconfig: Union[QConfig, QConfigDynamic, None]):
     return qconfig is not None and \
         isinstance(qconfig.activation(), ReuseInputObserver) and \
-        isinstance(qconfig.weight(), ReuseInputObserver)
+        isinstance(qconfig.weight(), NoopObserver)
