@@ -12,8 +12,6 @@ template <typename T> struct THPTypeInfo {};
 
 namespace torch {
 
-typedef THStorage THVoidStorage;
-
 typedef THTensor THVoidTensor;
 
 }  // namespace torch
