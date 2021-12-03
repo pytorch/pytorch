@@ -635,6 +635,12 @@ class ParameterDict(Module):
         del self[key]
         return v
 
+    def popitem(self) -> Tuple[str, 'Parameter']:
+        """Remove and return the last inserted `(key, parameter)` pair
+        from the ParameterDict
+        """
+        return self._parameters.popitem()
+
     def get(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter | None':
         r"""Return the parameter associated with key if present.
             Otherwise return default if provided, None if not.

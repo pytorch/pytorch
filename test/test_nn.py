@@ -1834,12 +1834,19 @@ class TestNN(NNTestCase):
         parameters.pop('p4')
         check()
 
+        p = Parameter(torch.randn(10, 10))
+        parameter_dict['p12'] = p
+        p_popitem = parameter_dict.popitem()
+        self.assertEqual(p_popitem[0], 'p12')
+        self.assertIs(p_popitem[1], p)
+
         parameters['p11'] = Parameter(torch.randn(10, 10))
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
 
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+
         check()
 
         parameter_dict.clear()
