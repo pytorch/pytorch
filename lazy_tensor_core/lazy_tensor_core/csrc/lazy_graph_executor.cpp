@@ -17,6 +17,7 @@
 #include <torch/csrc/lazy/core/thread_pool.h>
 
 #include "lazy_tensors/computation_client/sys_util.h"
+#include <string>
 
 namespace torch_lazy_tensors {
 namespace {
@@ -173,8 +174,23 @@ class DataCacheArena {
     if (device_data == nullptr) {
       at::Tensor tensor_copy = torch::lazy::CopyTensor(tensor);
       device_data = TensorToDataHandle(tensor_copy, device);
+<<<<<<< HEAD
       cache->Add(std::move(tensor_copy), device_data);
       TORCH_LAZY_COUNTER("DeviceDataCacheMiss", 1);
+=======
+      auto queryVar = []() -> const char* {
+        const auto disable_cache = std::getenv("LTC_DISABLE_CACHE"); 
+        std::cerr << "querying cache: " << ((disable_cache) ? "disabled" : "enabled") << std::endl;
+        return disable_cache;
+      };
+
+      static auto const DISABLE_CACHE = queryVar();
+      
+      if (!DISABLE_CACHE) {
+        cache->Add(std::move(tensor_copy), device_data);
+      }
+      LTC_COUNTER("DeviceDataCacheMiss", 1);
+>>>>>>> 9db8be05b9 (out of memory invest)
     }
     return device_data;
   }
@@ -395,6 +411,14 @@ LazyGraphExecutor* LazyGraphExecutor::Get() {
 }
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+  if (VERBOSE_DATA) {
+    std::cerr << "LazyGraphExecutor::RegisterTensor " << data->unique_id << std::endl;
+  }
+  static const auto tid = std::getenv("LTC_DUMP_STACK");
+  if (tid && std::to_string(data->unique_id) == tid) {
+    TORCH_CHECK(false, "triggering LTC_DUMP_STACK");
+  }
   DeviceContextArena::Get()->RegisterTensor(data);
 }
 

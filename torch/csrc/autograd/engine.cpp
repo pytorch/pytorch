@@ -37,6 +37,9 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
+#include "c10/core/DeviceType.h"
+#include <TH/TH.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 namespace torch { namespace autograd {
 
@@ -420,6 +423,18 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
           GraphTaskGuard guard(local_graph_task);
           NodeGuard ndguard(task.fn_);
           {
+            static const auto VERBOSE_AUTOGRAD = std::getenv("VERBOSE_AUTOGRAD");
+            if (VERBOSE_AUTOGRAD) {
+              const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+              size_t bytes = stats.allocated_bytes[static_cast<size_t>(c10::cuda::CUDACachingAllocator::StatType::AGGREGATE)].allocated;
+              size_t ONE_MB = 1024 * 1024;
+              std::cerr << "executing " << task.fn_.get()->name() << "bytes " 
+                << bytes << " mb " << (bytes * 1.0 / ONE_MB) <<std::endl;
+              static const auto VERBOSE_AUTOGRAD_OP = std::getenv("VERBOSE_AUTOGRAD_OP");
+              if (VERBOSE_AUTOGRAD_OP && task.fn_.get()->name() == VERBOSE_AUTOGRAD_OP) {
+                task.fn_->metadata()->print_stack(task.fn_.get()->name());
+              }
+            }
             RECORD_FUNCTION(
                 c10::str(
                     "autograd::engine::evaluate_function: ",

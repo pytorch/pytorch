@@ -314,18 +314,25 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
                                            const at::Tensor& dst,
                                            bool non_blocking) {
   TORCH_LAZY_FN_COUNTER("lazy::");
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
   auto dst_tensor = TryGetLtcTensor(dst);
   auto self_tensor = TryGetLtcTensor(self);
   if (!self_tensor) {
     static bool sync_update =
         lazy_tensors::sys_util::GetEnvBool("XLA_TENSOR_UPDATE_SYNC", true);
     CHECK(dst_tensor);
+    if (VERBOSE_DATA) {
+      std::cerr << "LazyNativeFunctions::_copy_from: dst_tensor " << dst_tensor.GetUniqueId() << " self " << self.data_ptr() << std::endl;
+    }
     dst_tensor.UpdateFromTensor(self, /*sync=*/sync_update);
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
         torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
+    if (VERBOSE_DATA) {
+      std::cerr << "LazyNativeFunctions::_copy_from: self_tensor " << self_tensor.GetUniqueId() << " dst " << dst.data_ptr() << std::endl;
+    }
   } else {
     if (!dst_tensor.CurrentIrValue()) {
       auto dst_tensor_data = dst_tensor.CurrentTensorData();

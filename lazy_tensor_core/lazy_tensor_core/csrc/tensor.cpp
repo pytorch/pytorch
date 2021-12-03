@@ -24,11 +24,21 @@ LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
 }
 }  // namespace
 
-LazyTensor::Data::~Data() { LazyGraphExecutor::Get()->UnregisterTensor(this); }
+LazyTensor::Data::~Data() { 
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+  if (VERBOSE_DATA) {
+    std::cerr << "Destroying " << this->unique_id << std::endl;
+  }
+  LazyGraphExecutor::Get()->UnregisterTensor(this); 
+}
 
 LazyTensor LazyTensor::Create(const at::Tensor& tensor, const torch::lazy::BackendDevice& device) {
   CHECK_NE(tensor.device().type(), at::kLazy);
   LazyTensor xtensor(tensor, device);
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+  if (VERBOSE_DATA) {
+    std::cerr << "LazyTensor::Create: xtensor " << xtensor.GetUniqueId() << " tensor " << tensor.data_ptr() << " size " << (tensor.nbytes()) << std::endl;
+  }
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;
 }
