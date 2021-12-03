@@ -252,7 +252,7 @@ option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 cmake_dependent_option(
     USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_LESS \"3.16\"" OFF)
+    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
@@ -667,7 +667,7 @@ endif()
 
 include(cmake/Dependencies.cmake)
 
-if((CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
+if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
   # CUDA < 10.2 doesn't support compiling and extracting header dependencies in
   # one call, so instead CMake calls nvcc twice with && in between.
   # However, on windows cmd.exe has a 8191 character limit for commands which we
