@@ -30,6 +30,14 @@ static char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
+static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
+  if (tensor.is_conj()) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number
@@ -48,15 +56,6 @@ static inline Tensor cloneBatchedColumnMajor(const Tensor& src) {
   auto result = src.mT().clone(at::MemoryFormat::Contiguous);
   result.transpose_(-2, -1);
   return result;
-}
-
-/*
- * contig chooses between C-contig (true) and F-contig (false)
- */
-static inline c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig) {
-  return cond ? c10::MaybeOwned<Tensor>::borrowed(borrow)
-              : c10::MaybeOwned<Tensor>::owned(contig ? clone.clone(MemoryFormat::Contiguous)
-                                                      : cloneBatchedColumnMajor(clone));
 }
 
 /*
@@ -280,11 +279,6 @@ static inline void singleCheckErrors(int64_t info, const char* name, int64_t bat
     } else if (strstr(name, "lstsq")) {
       TORCH_CHECK(false, name, batch_string,
           ": The least squares solution could not be computed because the input matrix does not have full rank (error code: ", info, ").");
-    } else if (strstr(name, "lu_factor")) {
-      TORCH_CHECK(false, name, batch_string,
-          ": U[", info, ",", info, "] is zero and using it on lu_solve would result in a division by zero. "
-          "If you still want to perform the factorization, consider calling linalg.lu(A, pivot) or "
-          "linalg.lu_factor_ex(A, pivot)");
     } else {
       TORCH_INTERNAL_ASSERT(false, name, ": Unknown error code: ", info, ".");
     }
