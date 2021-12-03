@@ -6,32 +6,43 @@
 namespace torch {
 namespace jit {
 
-std::unordered_map<std::string, std::string> UpgradersMap::content = std::unordered_map<std::string, std::string>();
-std::mutex UpgradersMap::lock;
-bool UpgradersMap::isPopulated = false;
+void UpgradersMap::set_content(
+    const std::unordered_map<std::string, std::string>& content) {
+  // make sure we populate the map only once
+  std::lock_guard<std::mutex> _(lock);
+  if (isPopulated) {
+    return;
+  }
 
-void populate_upgraders_map(const std::unordered_map<std::string, std::string>& content) {
-    // make sure we populate the map only once
-    std::lock_guard<std::mutex> lock(UpgradersMap::lock);
-    if (UpgradersMap::isPopulated) {
-        UpgradersMap::lock.unlock();
-        return;
-    }
-    for (const auto& entry: content) {
-        UpgradersMap::content.insert(entry);
-    }
-    UpgradersMap::isPopulated = true;
+  for (const auto& entry : content) {
+    content_.insert(entry);
+  }
+
+  isPopulated = true;
 }
 
-int get_upgraders_map_size() {
-  std::lock_guard<std::mutex> lock(UpgradersMap::lock);
-  return UpgradersMap::content.size();
+int UpgradersMap::count() {
+  std::lock_guard<std::mutex> _(lock);
+  return content_.size();
 }
 
 // this is used for testing, so copying is not a perf issue
+std::unordered_map<std::string, std::string> UpgradersMap::get_content() {
+  std::lock_guard<std::mutex> _(lock);
+  return content_;
+}
+
+void populate_upgraders_map(
+    const std::unordered_map<std::string, std::string>& content) {
+  upgradersMap.set_content(content);
+}
+
+int get_upgraders_map_size() {
+  return upgradersMap.count();
+}
+
 std::unordered_map<std::string, std::string> dump_upgraders_map() {
-  std::lock_guard<std::mutex> lock(UpgradersMap::lock);
-  return UpgradersMap::content;
+  return upgradersMap.get_content();
 }
 
 } // namespace jit
