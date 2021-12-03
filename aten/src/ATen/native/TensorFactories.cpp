@@ -349,9 +349,10 @@ Tensor empty_like(
     namedinference::propagate_names(result, self.names());
   }
 
-  // never propagate Conjugate and Negative dispatch key
+  // never propagate Conjugate, Negative, and ZeroTensor dispatch key
   result._set_conj(false);
   result._set_neg(false);
+  result._set_zero(false);
   return result;
 }
 
@@ -1057,6 +1058,20 @@ Tensor zeros(IntArrayRef size,
   return result.zero_();
 }
 
+Tensor _efficientzerotensor(IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
+  Tensor tensor = detail::make_tensor<TensorImpl>(c10::DispatchKeySet({at::DispatchKey::ZeroTensor}), dtype_, device);
+  // Default TensorImpl has size [0]
+  if (size.size() != 1 || size[0] != 0) {
+    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
+  }
+  return tensor;
+}
+
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
   if (result.is_sparse()) {
     result.sparse_resize_and_clear_(size, size.size(), 0.);
@@ -1427,7 +1442,11 @@ Tensor clone(const Tensor& src, c10::optional<c10::MemoryFormat> optional_memory
     self = at::empty_like(src, src.options(), memory_format);
   }
 
-  self.copy_(src);
+  if (src._is_zerotensor()) {
+    self.zero_();
+  } else {
+    self.copy_(src);
+  }
   return self;
 }
 
