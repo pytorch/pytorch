@@ -17,6 +17,21 @@ def relu_replacement(x, scale, zero_point):
     x = torch.nn.functional.relu(x)
     return x
 
+######## Match Filters ##########
+def second_input_is_scalar(match, pattern_graph, replacement_graph):
+    """ check the node that's matched to the second input of the pattern graph
+    is a scalar number
+    """
+    input_idx = 0
+    for node in pattern_graph.nodes:
+        if node.op == "placeholder":
+            if input_idx == 1:
+                num_node = node
+            input_idx += 1
+    if not isinstance(match.nodes_map[num_node], (int, float)):
+        return False
+    return True
+
 # pattern and replacement for binary_op + relu module
 def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
     class BinaryOpReLUPattern(torch.nn.Module):
@@ -85,9 +100,9 @@ def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
             return x
 
     return [
-        (BinaryOpReLUPattern(), BinaryOpReLUReplacement()),
-        (BinaryOpScalarReLU1Pattern(), BinaryOpScalarReLUReplacement()),
-        (BinaryOpScalarReLU2Pattern(), BinaryOpScalarReLUReplacement()),
+        (BinaryOpReLUPattern(), BinaryOpReLUReplacement(), []),
+        (BinaryOpScalarReLU1Pattern(), BinaryOpScalarReLUReplacement(), [second_input_is_scalar]),
+        (BinaryOpScalarReLU2Pattern(), BinaryOpScalarReLUReplacement(), [second_input_is_scalar]),
     ]
 
 def get_binary_op_frelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
@@ -144,12 +159,12 @@ def get_binary_op_frelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
         return qbinary_oprelu(x, num)
 
     return [
-        (binary_op_relu_inplace_pattern, binary_op_relu_replacement),
-        (binary_op_relu_non_inplace_pattern, binary_op_relu_replacement),
-        (binary_op_scalar_relu_1_inplace_pattern, binary_op_scalar_relu_replacement),
-        (binary_op_scalar_relu_1_non_inplace_pattern, binary_op_scalar_relu_replacement),
-        (binary_op_scalar_relu_2_inplace_pattern, binary_op_scalar_relu_replacement),
-        (binary_op_scalar_relu_2_non_inplace_pattern, binary_op_scalar_relu_replacement),
+        (binary_op_relu_inplace_pattern, binary_op_relu_replacement, []),
+        (binary_op_relu_non_inplace_pattern, binary_op_relu_replacement, []),
+        (binary_op_scalar_relu_1_inplace_pattern, binary_op_scalar_relu_replacement, [second_input_is_scalar]),
+        (binary_op_scalar_relu_1_non_inplace_pattern, binary_op_scalar_relu_replacement, [second_input_is_scalar]),
+        (binary_op_scalar_relu_2_inplace_pattern, binary_op_scalar_relu_replacement, [second_input_is_scalar]),
+        (binary_op_scalar_relu_2_non_inplace_pattern, binary_op_scalar_relu_replacement, [second_input_is_scalar]),
     ]
 
 
@@ -187,9 +202,9 @@ def get_binary_op_pttn_and_rplcmnt(binary_op, qbinary_op):
         return x
 
     return [
-        (binary_op_pattern, binary_op_replacement),
-        (binary_op_scalar_1_pattern, binary_op_scalar_1_replacement),
-        (binary_op_scalar_2_pattern, binary_op_scalar_2_replacement),
+        (binary_op_pattern, binary_op_replacement, []),
+        (binary_op_scalar_1_pattern, binary_op_scalar_1_replacement, [second_input_is_scalar]),
+        (binary_op_scalar_2_pattern, binary_op_scalar_2_replacement, [second_input_is_scalar]),
     ]
 
 def get_binary_op_pattern_and_replacements():
@@ -220,11 +235,12 @@ def get_binary_op_pattern_and_replacements():
 def _get_all_patterns_and_replacements():
     return [
         *get_binary_op_pattern_and_replacements(),
-        (relu_inplace_pattern, relu_replacement),
-        (relu_non_inplace_pattern, relu_replacement),
+        (relu_inplace_pattern, relu_replacement, []),
+        (relu_non_inplace_pattern, relu_replacement, []),
     ]
 
 
+# TODO: rename to include match filters
 def get_fbgemm_patterns_and_replacements():
     return _get_all_patterns_and_replacements()
 
