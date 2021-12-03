@@ -49,6 +49,8 @@ full_codegen:
   - mean.dim
   - mm
   - mv
+  - native_dropout
+  - native_dropout_backward
   - native_layer_norm
   - native_layer_norm_backward
   - ne.Scalar
