@@ -11177,6 +11177,7 @@ dedent """
         out_dims = fn(torch.tensor(0.3923)).ndim
         self.assertEqual(graph.findNode("aten::unfold").output().type().dim(), out_dims)
 
+    @unittest.skip("Enabling profiling")
     def test_mm_batching(self):
 
         with enable_profiling_mode_for_profiling_tests():

@@ -896,6 +896,7 @@ class TestTracer(JitTestCase):
         self.run_ge_tests(False, False)
 
     @unittest.skipIf(IS_SANDCASTLE, "NYI: fuser support for Sandcastle")
+    @unittest.skip("Enabling profiling")
     @enable_cpu_fuser
     def test_ge_optimized(self):
         with enable_profiling_mode_for_profiling_tests():

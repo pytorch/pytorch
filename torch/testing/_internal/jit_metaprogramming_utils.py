@@ -380,6 +380,8 @@ EXCLUDE_SCRIPT = {
     'test_norm_nuc',
     'test_norm_fro',
     'test_norm_nuc_batched',
+    'test_nn_gumbel_softmax',
+    'test_nn_gumbel_softmax_hard',
 
     # aten op has additional cudnn argument
     'test_nn_unfold',
