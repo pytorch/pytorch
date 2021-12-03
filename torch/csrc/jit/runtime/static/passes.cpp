@@ -8,6 +8,11 @@
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
+C10_DEFINE_bool(
+    enable_clip_ranges_gather_fusions,
+    true,
+    "If on, static runtime or optimize_sparse_nn_model will fuse clip ranges gather ops.");
+
 namespace torch {
 namespace jit {
 namespace {
@@ -337,17 +342,21 @@ void FuseInferenceOpsForSparseNN(std::shared_ptr<torch::jit::Graph>& graph) {
   CastedBatchOneHotLengths(graph);
   ConcatBatchMatMulBatchGather(graph);
 
-  ClipRangesGatherRangesLengthsToOffsets(graph);
+  if (FLAGS_enable_clip_ranges_gather_fusions) {
+    ClipRangesGatherRangesLengthsToOffsets(graph);
+  }
   ClipRangesGatherSigridHash(graph);
   ClipRangesGatherRangesSigridHash(graph);
 
   ClipRangesGatherRangesX2SigridHashPrecompute(graph);
 
-  // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
-  // clip_ranges+gather_ranges
-  ClipRangesGather(graph);
+  if (FLAGS_enable_clip_ranges_gather_fusions) {
+    // prioritize clip_ranges+gather_ranges+sigrid_hash fusion over
+    // clip_ranges+gather_ranges
+    ClipRangesGather(graph);
 
-  ClipRangesToGatherToOffsets(graph);
+    ClipRangesToGatherToOffsets(graph);
+  }
 #endif
 }
 
@@ -360,6 +369,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::flatten_copy.using_ints(Tensor self, int start_dim=0, int end_dim=-1) -> Tensor",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::expand_dims_copy(Tensor input, int[] dims) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
   m.def(torch::schema(
       "static_runtime::to_copy.prim_dtype(Tensor self, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor",
@@ -382,6 +394,9 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
       c10::AliasAnalysisKind::CONSERVATIVE));
   m.def(torch::schema(
       "static_runtime::fused_equally_split(Tensor input, int num_split, int dim) -> ...",
+      c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema(
+      "static_runtime::dequantize_copy.self(Tensor self) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
 }
 
@@ -470,6 +485,7 @@ void ReplaceWithCopy(
   const FastMap<c10::Symbol, c10::Symbol> supported = {
 #ifdef FBCODE_CAFFE2
       OP_PAIR("aten::permute", "static_runtime::permute_copy"),
+      OP_PAIR("fb::expand_dims", "static_runtime::expand_dims_copy"),
 #endif
       OP_PAIR("aten::narrow", "aten::narrow_copy"),
       OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
@@ -485,7 +501,9 @@ void ReplaceWithCopy(
        fromQualString("static_runtime::to_copy")},
       {torch::schema(
            "aten::to.other(Tensor(a) self, Tensor other, bool non_blocking=False, bool copy=False, MemoryFormat? memory_format=None) -> Tensor(a)"),
-       fromQualString("static_runtime::to_copy")}};
+       fromQualString("static_runtime::to_copy")},
+      {torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+       fromQualString("static_runtime::dequantize_copy")}};
 
   auto match_schema = [&supported_schema](
                           const Node* node, c10::Symbol& out_matched_symbol) {
