@@ -156,7 +156,7 @@ struct TORCH_API StaticModuleOptions {
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
   // enable fusion of ops at model loading time
-  bool enable_fusion{false};
+  bool enable_te_fusion{false};
 };
 
 /// The static runime supports two execution modes.
