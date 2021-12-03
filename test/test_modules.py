@@ -11,7 +11,8 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
+    TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck,
+    GRADCHECK_NONDET_TOL)
 from unittest.mock import patch
 
 
@@ -396,6 +397,11 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
+        # Set some backend-specific validation settings.
+        gradcheck_nondet_tol = 0.0
+        if torch.backends.cudnn.is_available():
+            # cuDNN introduces non-determinism
+            gradcheck_nondet_tol = GRADCHECK_NONDET_TOL
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
@@ -429,7 +435,7 @@ class TestModule(TestCase):
                 with freeze_rng_state():
                     return m(*new_input_args, **new_kwargs, **other_kwargs)
 
-            self.assertTrue(check(fn_to_gradcheck, grad_input))
+            self.assertTrue(check(fn_to_gradcheck, grad_input, nondet_tol=gradcheck_nondet_tol))
 
 
     @modules(module_db, allowed_dtypes=[torch.double])
