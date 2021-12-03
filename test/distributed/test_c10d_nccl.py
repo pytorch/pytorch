@@ -33,6 +33,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
+    requires_gloo,
     requires_nccl_version,
     skip_if_lt_x_gpu,
     get_timeout,
@@ -1626,7 +1627,7 @@ class DistributedDataParallelTest(
             not TEST_WITH_ROCM
             and BFLOAT16_AVAILABLE
             and c10d.is_nccl_available()
-            and torch.cuda.nccl.version() >= (2, 9, 7)
+            and torch.cuda.nccl.version() >= (2, 10)
         ):
             hook_options.append(default.bf16_compress_hook)
         for hook in hook_options:
@@ -1797,7 +1798,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper()
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
@@ -1907,7 +1908,7 @@ class DistributedDataParallelTest(
         self._test_fp16_compress_wrapper(gradient_as_bucket_view=True)
 
     @requires_nccl()
-    @requires_nccl_version((2, 9, 7), "Need NCCL 2.9.7+ for BF16_COMPRESS")
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
     @sandcastle_skip_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
@@ -2023,6 +2024,9 @@ class DistributedDataParallelTest(
     # Most of the tests are referred to
     # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
+        """
+        Runs checkpoint for a single layer in the model.
+        """
         def __init__(self):
             super().__init__()
             self.l1 = nn.Linear(20, 20)
@@ -2034,8 +2038,27 @@ class DistributedDataParallelTest(
             return x
 
     class CheckpointTwiceModule(CheckpointOnceModule):
+        """
+        Runs checkpoint for the same layer twice in a model. This simulates use
+        cases such as pipeline parallel where the same layer can be checkpointed
+        more than one time.
+        """
         def __init__(self):
             super().__init__()
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x)
+            x = checkpoint(self.l2, x)
+            return x
+
+    class CheckpointTwiceModuleWeightSharing(CheckpointTwiceModule):
+        """
+        Similar to CheckpointTwiceModule but the weights are shared.
+        """
+        def __init__(self):
+            super().__init__()
+            self.l1.weight = self.l2.weight
 
         def forward(self, inp):
             x = self.l1(inp)
@@ -2071,7 +2094,7 @@ class DistributedDataParallelTest(
         static_graph=False,
         run_checkpoint=False,
     ):
-        # to reprodce the same training results
+        # to reproduce the same training results
         torch.cuda.set_device(self.rank)
         torch.manual_seed(31415)
         model = copy.deepcopy(input_model).cuda()
@@ -2116,8 +2139,19 @@ class DistributedDataParallelTest(
                 use_bucket_view=use_bucket_view,
                 static_graph=static_graph,
             )
+            if static_graph:
+                # find_unused_parameters does not make a difference, since it is
+                # ignored for static graph.
+                self._test_ddp_checkpointing(
+                    self.CheckpointOnceModule(),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    find_unused_parameters=True,
+                )
 
-    # DDP will fail when there are unused_parameters in the model
+    # DDP will fail when there are unused_parameters in the model and we are not
+    # using static graph training.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_unused_params(self):
@@ -2133,34 +2167,44 @@ class DistributedDataParallelTest(
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     find_unused_parameters=True,
-                    static_graph=False,
                 )
-            # test passes when static_graph is true
-            model = self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                find_unused_parameters=True,
-                static_graph=True,
-            )
 
-    # DDP will fail when the same layer is checkponted twice
+    # DDP will fail when the same layer is checkpointed twice, for both settings
+    # of find_unused_parameters, and non-static graph.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_twice(self):
+    def test_ddp_checkpointing_twice_non_static_graph(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
+            error_ctx = self.assertRaisesRegex(
                 RuntimeError,
                 "Expected to mark a variable ready only once.",
-            ):
+            )
+
+            with error_ctx:
                 model = self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     static_graph=False,
                 )
+
+            with error_ctx:
+                model = self._test_ddp_checkpointing(
+                    self.CheckpointTwiceModule(),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=False,
+                    find_unused_parameters=True,
+                )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpointing_twice_static_graph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
             model = self._test_ddp_checkpointing(
                 self.CheckpointTwiceModule(),
                 process_group=process_group,
@@ -2168,7 +2212,8 @@ class DistributedDataParallelTest(
                 static_graph=True,
             )
 
-    # DDP works as expected if there is weight sharing among layers
+    # DDP works as expected if there is weight sharing among layers and we
+    # checkpoint once.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_weight_sharing(self):
@@ -2188,6 +2233,24 @@ class DistributedDataParallelTest(
                 static_graph=static_graph,
                 run_checkpoint=True,
             )
+
+    # Checkpointing should work with static graph
+    # in the case of checkpointing same layer twice and
+    # having weights shared across layers.
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpoint_twice_weight_sharing(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        torch.cuda.set_device(self.rank)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.CheckpointTwiceModuleWeightSharing(),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=True,
+            )
+
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
@@ -2366,15 +2429,28 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("2147483647")
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
-    def _wait_for_comm_abort(self, process_group):
+    def _check_valid_comm_exception(self, e):
+        exception_str = str(e)
+        valid_exceptions = [
+            "NCCL communicator was aborted",
+            "NCCL communicator encountered error",
+            "Caught collective operation timeout"
+        ]
+        return any(exc in exception_str for exc in valid_exceptions)
+
+    def _wait_for_comm_abort(self, process_group, timeout=None):
         """
         Waits for the watchdog thread to abort communicators for the process group.
         """
         while True:
             try:
-                process_group.allreduce(torch.rand(10).cuda(self.rank))
+                if not timeout:
+                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
+                else:
+                    assert isinstance(timeout, timedelta)
+                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
             except Exception as e:
-                if "NCCL communicator was aborted" in str(e):
+                if self._check_valid_comm_exception(e):
                     return
                 else:
                     raise e
@@ -2382,6 +2458,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @with_nccl_blocking_wait
     @requires_nccl()
+    @requires_gloo()
     @skip_if_lt_x_gpu(3)
     def test_nccl_timeout(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -2390,18 +2467,28 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupNCCL(
             store, self.rank, self.world_size, timeout=timedelta(seconds=10)
         )
+        # Control gloo pg used as go-ahead signal/barrier
+        # to coordinate btwn ranks.
+        pg_gloo = c10d.ProcessGroupGloo(store, self.rank, self.world_size)
+        failed_collective_timeout = timedelta(milliseconds=100)
         process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=5))
 
         if self.rank == 0:
             # This should timeout in about 1 second.
             # Watchdog may abort timed out work resulting in NCCL error instead of operation timed out.
             with self.assertRaisesRegex(RuntimeError, self.blocking_wait_error_msg):
-                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timedelta(seconds=1))
+                process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=failed_collective_timeout)
+            # Now do a barrier to tell other rank to go ahead.
+            pg_gloo.barrier().wait()
         else:
-            # Sleep to ensure timeout.
-            time.sleep(10)
-
-            self._wait_for_comm_abort(process_group)
+            # Wait on rank 0 to fail.
+            try:
+                pg_gloo.barrier().wait()
+            except Exception as e:
+                raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}")
+            # Now verify communicators on this rank have
+            # been aborted by watchdog.
+            self._wait_for_comm_abort(process_group, failed_collective_timeout)
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):

@@ -7,7 +7,8 @@ import tempfile
 from operator import methodcaller
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCUDA
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
@@ -24,10 +25,13 @@ class TestModule(TestCase):
         # Check device placement and dtype for created parameters and buffers.
         # Only verify floating point dtypes since that's what the kwarg or methods
         # such as `float()` applies to.
-        def _check_module(items, name):
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
+
+        def _check_module(items, name, device=device, dtype=dtype):
             for item_name, item in items:
                 self.assertEqual(
-                    str(item.device), device,
+                    item.device, device,
                     f'{name} {item_name} is on device {item.device} instead of the expected device {device}')
                 if item.dtype.is_floating_point:
                     self.assertEqual(
@@ -436,6 +440,72 @@ class TestModule(TestCase):
              allowed_dtypes=[torch.double])
     def test_gradgrad(self, device, dtype, module_info):
         self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
+
+    @onlyCUDA
+    @toleranceOverride({torch.float32: tol(5e-2, 0),
+                        torch.float64: tol(4e-4, 0)})
+    @modules(module_db)
+    def test_cpu_gpu_parity(self, device, dtype, module_info):
+        # Test cpu and gpu results are the same
+        module_cls = module_info.module_cls
+        module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
+                                                           requires_grad=True)
+
+        def _to_device(obj):
+            if isinstance(obj, torch.Tensor):
+                res = obj.detach().to(device=device)
+                res.requires_grad = obj.requires_grad
+                return res
+            elif isinstance(obj, tuple):
+                return tuple(_to_device(o) for o in obj)
+            elif isinstance(obj, dict):
+                return {key: _to_device(o) for key, o in obj.items()}
+            else:
+                return deepcopy(obj)
+
+        for module_input in module_inputs_cpu:
+
+            # === Move input from cpu to device ===
+            cpu_forward_args = module_input.forward_input.args
+            cpu_forward_kwargs = module_input.forward_input.kwargs
+
+            gpu_forward_args, gpu_forward_kwargs = _to_device((cpu_forward_args, cpu_forward_kwargs))
+
+            self._retain_grad((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
+
+            # === Construct module on cpu and gpu ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            cpu_module = module_cls(*args, **kwargs).to(dtype).to("cpu")
+            gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
+
+            for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                gpu_p.data.copy_(cpu_p)
+
+            # === Compare forward output between cpu and gpu ===
+            cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+            gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+
+            self.assertEqual(cpu_output, gpu_output)
+
+            # === Run backwards on CPU and GPU and compare results ===
+            for _ in range(5):
+                cpu_grad_output = cpu_output.clone().normal_()
+                gpu_grad_output = cpu_grad_output.type_as(gpu_output)
+
+                cpu_output.backward(cpu_grad_output, retain_graph=True)
+                gpu_output.backward(gpu_grad_output, retain_graph=True)
+
+                cpu_grad_input = self._get_grads(cpu_forward_args)
+                gpu_grad_input = self._get_grads(gpu_forward_args)
+                self.assertEqual(cpu_grad_input, gpu_grad_input)
+
+                for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                    self.assertEqual(cpu_p.grad, gpu_p.grad)
+
+                cpu_grad_kwarg_input = self._get_grads(cpu_forward_kwargs)
+                gpu_grad_kwarg_input = self._get_grads(gpu_forward_kwargs)
+                self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
 
 instantiate_device_type_tests(TestModule, globals())

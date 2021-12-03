@@ -4,6 +4,8 @@ import unittest
 import torch
 import torch.fx
 
+from torch.testing._internal.common_utils import TestCase
+
 
 class MyModuleBase(torch.nn.Module):
     def forward(self, x):
@@ -81,7 +83,7 @@ class MyModuleParamNElement(MyModuleBase):
 
 
 
-class TestConstParamShapeInControlFlow(unittest.TestCase):
+class TestConstParamShapeInControlFlow(TestCase):
 
     def verify_mm_relu_mods(self, mm_only_mod, relu_mod):
         """

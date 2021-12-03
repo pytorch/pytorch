@@ -12,6 +12,7 @@ import torch.nn.quantized as nnq
 import torch.nn.quantized._reference as nnqr
 import torch.nn.quantized.dynamic as nnqd
 import torch.nn.qat as nnqat
+import torch.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
@@ -41,6 +42,7 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv3d: nnq.Conv3d,
     nn.ConvTranspose1d: nnq.ConvTranspose1d,
     nn.ConvTranspose2d: nnq.ConvTranspose2d,
+    nn.ConvTranspose3d: nnq.ConvTranspose3d,
     nn.ELU: nnq.ELU,
     nn.Embedding: nnq.Embedding,
     nn.EmbeddingBag: nnq.EmbeddingBag,
@@ -76,7 +78,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
     nnqat.Conv3d: nnq.Conv3d,
-    nnqat.EmbeddingBag: nnq.EmbeddingBag,
 }
 
 # Default map for swapping float module to qat modules
@@ -84,7 +85,6 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
-    nn.EmbeddingBag: nnqat.EmbeddingBag,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
@@ -102,6 +102,7 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
 DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.GRUCell: nnqd.GRUCell,
     nn.Linear: nnqd.Linear,
+    nnqatd.Linear: nnqd.Linear,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqd.Linear,
     nn.LSTM: nnqd.LSTM,
     nn.GRU: nnqd.GRU,
@@ -110,6 +111,12 @@ DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nni.LinearReLU: nniqd.LinearReLU,
     nn.EmbeddingBag: nnq.EmbeddingBag,
     nn.Embedding: nnq.Embedding,
+    nn.Conv1d: nnqd.Conv1d,
+    nn.Conv2d: nnqd.Conv2d,
+    nn.Conv3d: nnqd.Conv3d,
+    nn.ConvTranspose1d: nnqd.ConvTranspose1d,
+    nn.ConvTranspose2d: nnqd.ConvTranspose2d,
+    nn.ConvTranspose3d: nnqd.ConvTranspose3d,
 }
 
 # Allowlist for propagating the qconfig
@@ -146,6 +153,15 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+
+def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping, including mapping for embedding QAT
+    '''
+    mapping = copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+    mapping[nnqat.EmbeddingBag] = nnq.EmbeddingBag
+    mapping[nnqat.Embedding] = nnq.Embedding
+    return mapping
+
 
 def get_static_quant_module_class(
         float_module_class: Callable,
@@ -184,6 +200,16 @@ def get_default_qat_module_mappings() -> Dict[Callable, Any]:
     ''' Get default module mapping for quantization aware training
     '''
     return copy.deepcopy(DEFAULT_QAT_MODULE_MAPPINGS)
+
+def get_embedding_qat_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping for quantization aware training
+        This is includes default values in addition to
+        enabling qat for embeddings.
+    '''
+    mapping = copy.deepcopy(DEFAULT_QAT_MODULE_MAPPINGS)
+    mapping[nn.EmbeddingBag] = nnqat.EmbeddingBag
+    mapping[nn.Embedding] = nnqat.Embedding
+    return mapping
 
 def get_default_dynamic_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training dynamic quantization

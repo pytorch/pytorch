@@ -102,6 +102,36 @@ uint64_t _get_model_bytecode_version(
   TORCH_CHECK(false, "Failed to get bytecode version.");
 }
 
+/********************** Operator Version **********************/
+
+uint64_t _get_model_operator_version(
+    PyTorchStreamReader& reader); // Forward Declare
+
+uint64_t _get_model_operator_version(std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  return _get_model_operator_version(reader);
+}
+
+uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
+  return reader.version();
+}
+
 /********************** Operators and Info **********************/
 
 // Forward declare
@@ -274,7 +304,9 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
   auto model_info = _get_model_ops_and_info(bytecode_values);
   std::unordered_set<std::string> type_table =
       _get_mobile_model_contained_types(bytecode_values);
-  return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
+  uint64_t operator_version = _get_model_operator_version(reader);
+  return ModelCompatibilityInfo{
+      model_bytecode_version, model_info, type_table, operator_version};
 }
 
 ModelCompatCheckResult is_compatible(
@@ -283,11 +315,22 @@ ModelCompatCheckResult is_compatible(
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
-  if (model_info.bytecode_version > runtime_info.bytecode_version) {
+  if (model_info.bytecode_version >
+      runtime_info.min_max_supported_bytecode_version.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "model bytecode version " << model_info.bytecode_version
-      << "is greater than the runtimes " << runtime_info.bytecode_version;
+      << "is greater than the max supported bytecode version in runtimes "
+      << runtime_info.min_max_supported_bytecode_version.second;
+    result.errors.emplace_back(s.str());
+  } else if (
+      model_info.bytecode_version <
+      runtime_info.min_max_supported_bytecode_version.first) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "model bytecode version " << model_info.bytecode_version
+      << "is less than the minimum supported bytecode version in runtime "
+      << runtime_info.min_max_supported_bytecode_version.first;
     result.errors.emplace_back(s.str());
   }
 
@@ -338,6 +381,7 @@ ModelCompatCheckResult is_compatible(
         if (model_op_info.num_schema_args.has_value() &&
             (model_op_info.num_schema_args.value() >
              runtime_op_info.num_schema_args.value())) {
+          result.status = ModelCompatibilityStatus::ERROR;
           std::ostringstream s;
           s << "Operator schema for'" << op_name << "' has "
             << model_op_info.num_schema_args.value()
@@ -348,6 +392,21 @@ ModelCompatCheckResult is_compatible(
       }
     }
   }
+
+  // Check Operator Versions
+  if (model_info.operator_version <
+          runtime_info.min_max_supported_opperator_versions.first ||
+      model_info.operator_version >
+          runtime_info.min_max_supported_opperator_versions.second) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "Model Operator Version " << model_info.operator_version
+      << "is not within supported version range of the runtime "
+      << runtime_info.min_max_supported_opperator_versions.first << " to "
+      << runtime_info.min_max_supported_opperator_versions.second;
+    result.errors.push_back(s.str());
+  }
+
   return result;
 }
 

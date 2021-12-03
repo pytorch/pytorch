@@ -1,9 +1,7 @@
-# Owner(s): ["oncall: fx"]
-
 import torch
 import torch.fx.experimental.fx_acc.acc_ops as acc_ops
 import torch.nn as nn
-from caffe2.torch.fb.fx2trt.tests.test_utils import AccTestCase, InputTensorSpec
+from torch.testing._internal.common_fx2trt import AccTestCase, InputTensorSpec
 
 
 class TestGELU(AccTestCase):
@@ -12,7 +10,7 @@ class TestGELU(AccTestCase):
             def forward(self, x):
                 return nn.functional.gelu(x)
 
-        inputs = [torch.randn(1, 10)]
+        inputs = [torch.randn(3, 10, 20)]
         self.run_test(
             TestModule(),
             inputs,

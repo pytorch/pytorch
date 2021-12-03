@@ -32,10 +32,12 @@ LINUX_RUNNERS = {
     LINUX_CUDA_TEST_RUNNER,
 }
 
-MACOS_TEST_RUNNER = "macos-10.15"
+MACOS_TEST_RUNNER_10_15 = "macos-10.15"
+MACOS_TEST_RUNNER_11 = "macos-11"
 
 MACOS_RUNNERS = {
-    MACOS_TEST_RUNNER
+    MACOS_TEST_RUNNER_10_15,
+    MACOS_TEST_RUNNER_11,
 }
 
 CUDA_RUNNERS = {
@@ -157,12 +159,14 @@ class CIWorkflow:
     enable_doc_jobs: bool = False
     exclude_test: bool = False
     build_generates_artifacts: bool = True
+    build_with_debug: bool = False
     is_scheduled: str = ''
     num_test_shards: int = 1
     only_run_smoke_tests_on_pull_request: bool = False
     num_test_shards_on_pull_request: int = -1
     distributed_test: bool = True
     timeout_after: int = 240
+    xcode_version: str = ''
 
     # The following variables will be set as environment variables,
     # so it's easier for both shell and Python scripts to consume it if false is represented as the empty string.
@@ -220,6 +224,8 @@ class CIWorkflow:
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
             assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
+        if self.build_with_debug:
+            assert self.build_environment.endswith("-debug")
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
@@ -369,17 +375,6 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-custom-build-dynamic",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
         build_environment="linux-xenial-py3-clang5-mobile-custom-build-static",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
@@ -387,17 +382,6 @@ LINUX_WORKFLOWS = [
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE, LABEL_CIFLOW_DEFAULT},
-        ),
-    ),
-    CIWorkflow(
-        arch="linux",
-        build_environment="linux-xenial-py3-clang5-mobile-code-analysis",
-        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang5-android-ndk-r19c",
-        test_runner_type=LINUX_CPU_TEST_RUNNER,
-        build_generates_artifacts=False,
-        exclude_test=True,
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_LINUX, LABEL_CIFLOW_MOBILE},
         ),
     ),
     CIWorkflow(
@@ -451,6 +435,27 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
+        build_environment="linux-bionic-cuda11.5-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        build_generates_artifacts=False,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
         build_environment="linux-xenial-cuda11.3-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
@@ -472,10 +477,11 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="periodic-linux-xenial-cuda11.1-py3.6-gcc7",
+        build_environment="periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.1-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        build_with_debug=True,
         is_scheduled="45 0,4,8,12,16,20 * * *",
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA}
@@ -501,6 +507,7 @@ LINUX_WORKFLOWS = [
         num_test_shards=2,
         distributed_test=False,
         enable_noarch_test=1,
+        enable_xla_test=1,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU, LABEL_CIFLOW_XLA, LABEL_CIFLOW_NOARCH},
         ),
@@ -571,6 +578,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -579,6 +587,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-coreml",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -587,6 +596,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-full-jit",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -595,6 +605,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-custom-ops",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -603,6 +614,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-arm64-metal",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -611,6 +623,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -619,6 +632,7 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-coreml",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
@@ -627,9 +641,45 @@ IOS_WORKFLOWS = [
     CIWorkflow(
         arch="macos",
         build_environment="ios-12-5-1-x86-64-full-jit",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
         exclude_test=True,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_IOS, LABEL_CIFLOW_MACOS},
+        ),
+    ),
+]
+
+MACOS_WORKFLOWS = [
+    # Distributed tests are still run on MacOS, but part of regular shards
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-11-py3-x86-64",
+        xcode_version="12.4",
+        test_runner_type=MACOS_TEST_RUNNER_11,
+        num_test_shards=2,
+        distributed_test=False,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-lite-interpreter-x86-64",
+        xcode_version="12",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        exclude_test=True,
+        build_generates_artifacts=False,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
+        ),
+    ),
+    CIWorkflow(
+        arch="macos",
+        build_environment="macos-10-15-py3-arm64",
+        test_runner_type=MACOS_TEST_RUNNER_10_15,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_MACOS},
         ),
     ),
 ]
@@ -667,6 +717,7 @@ def main() -> None:
         (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
         (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
         (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
+        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
     ]

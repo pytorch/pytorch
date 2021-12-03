@@ -4,6 +4,7 @@
 {%- set squid_proxy    = "http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -%}
 {# squid_no_proxy is a list of common set of fixed domains or IPs that we don't need to proxy. See https://docs.aws.amazon.com/AmazonECS/latest/developerguide/http_proxy_config.html#windows-proxy #}
 {%- set squid_no_proxy = "localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" -%}
+{%- set timeout_minutes = 240 -%}
 
 {%- macro concurrency(build_environment) -%}
 concurrency:
@@ -40,23 +41,23 @@ concurrency:
         run: .github/scripts/parse_ref.py
 {%- endmacro -%}
 
-{%- macro upload_test_statistics(build_environment) -%}
+{%- macro upload_test_statistics(build_environment, when="always()") -%}
       - name: Display and upload test statistics (Click Me)
-        if: always()
+        if: !{{ when }}
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:
           AWS_DEFAULT_REGION: us-east-1
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
           JOB_BASE_NAME: !{{ build_environment }}-test
-          CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-          CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-          CIRCLE_TAG: ${{ steps.parse-ref.outputs.tag }}
-          CIRCLE_WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          TAG: ${{ steps.parse-ref.outputs.tag }}
+          WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
         shell: bash
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install boto3==1.16.34
+          python3 -m pip install boto3==1.19.12
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 {%- endmacro -%}
 
@@ -118,11 +119,11 @@ concurrency:
 {%- endmacro -%}
 
 
-{%- macro upload_test_reports(name) -%}
+{%- macro upload_test_reports(name, artifact_name="", use_s3=True) -%}
       - name: Zip test reports for upload
         if: always()
         env:
-{%- if name == 'linux' or name == 'windows' %}
+{%- if name == 'linux' or name == 'windows' or name == 'macos' %}
           FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
 {%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
@@ -138,10 +139,18 @@ concurrency:
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
 {%- endif %}
+{%- if use_s3 %}
       - uses: !{{ upload_artifact_s3_action }}
         name: Store Test Reports on S3
+{%- else %}
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on Github
+{%- endif %}
         if: always()
         with:
+{%- if artifact_name != "" %}
+          name: !{{ artifact_name }}
+{%- endif %}
           retention-days: 14
           if-no-files-found: error
           path:
@@ -167,6 +176,7 @@ concurrency:
 {%- macro ciflow_should_run_job(ciflow_config) %}
   !{{ ciflow_config.root_job_name }}:
     runs-on: ubuntu-18.04
+    timeout-minutes: !{{ timeout_minutes }}
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
       LABEL_CONDITIONS: ${{ !{{ ciflow_config.label_conditions }} }}
@@ -229,4 +239,20 @@ concurrency:
         run: |
           export IMAGE_NAME=${DOCKER_IMAGE_BASE#308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/}
           ./build_docker.sh
+{%- endmacro -%}
+
+{%- macro setup_miniconda(python_version) -%}
+      - name: Setup miniconda
+        uses: conda-incubator/setup-miniconda@v2
+        with:
+          auto-update-conda: true
+          python-version: !{{ python_version }}
+          activate-environment: build
+{%- endmacro -%}
+
+{%- macro set_xcode_version(xcode_version) -%}
+{%- if xcode_version != '' %}
+  # Set xcode xcode version to !{{ xcode_version }}
+  DEVELOPER_DIR: /Applications/Xcode_!{{ xcode_version }}.app/Contents/Developer
+{%- endif %}
 {%- endmacro -%}

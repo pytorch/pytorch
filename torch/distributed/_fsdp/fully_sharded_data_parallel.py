@@ -5,6 +5,7 @@ from enum import Enum, auto
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     Dict,
     List,
     Optional,
@@ -23,13 +24,14 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
+from .wrap import ConfigAutoWrap
+
 from .utils import (
     _apply_to_tensors,
 )
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
-
 
 
 @dataclass
@@ -88,29 +90,73 @@ class FullyShardedDataParallel(nn.Module):
         process_group (Optional[ProcessGroup]):
             process group for sharding
         cpu_offload (Optional [CPUOffload]):
-            CPU offloading config. Currently, only parameter and grad CPU
+            CPU offloading config. Currently, only parameter and gradient CPU
             offload is supported. It can be enabled via passing in
-            cpu_offload=CPUOffload(offload_params=True). Note that this
+            ``cpu_offload=CPUOffload(offload_params=True)``. Note that this
             currently implicitly enables gradient offloading to CPU in order for
             params and grads to be on same device to work with optimizer. This
-            API is subject to change.
+            API is subject to change. Default is ``None`` in which case there
+            will be no offloading.
+        fsdp_auto_wrap_policy: (Optional [callable]):
+            A callable specifying a policy to recursively wrap layers with FSDP.
+            Note that this policy currently will only apply to child modules of
+            the passed in module. The remainder modules are always wrapped in
+            the returned FSDP root instance.
     """
 
     def __init__(
         self,
         module: nn.Module,
         process_group: Optional[ProcessGroup] = None,
-        cpu_offload: Optional[CPUOffload] = None
+        cpu_offload: Optional[CPUOffload] = None,
+        fsdp_auto_wrap_policy: Optional[Callable] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        # if fsdp_auto_wrap_policy is specified, submodules should not be
+        # already wrapped, otherwise we'd attempt to double wrap them resulting
+        # in errors.
+        if fsdp_auto_wrap_policy is not None:
+            self._check_wrapped(
+                module,
+                check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
+                err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
+            )
+            # TODO: refactor recursive_wrap so that it is not dependent on
+            # ConfigAutoWrap.
+            config_auto_wrap = ConfigAutoWrap(
+                auto_wrap_policy=fsdp_auto_wrap_policy,
+                wrapper_cls=FullyShardedDataParallel  # type: ignore[arg-type]
+            )
+            with config_auto_wrap:
+                assert ConfigAutoWrap.in_autowrap_context
+                assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
+                assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
+                # This will only wrap the children, and then constructor will
+                # run for root module.
+                ConfigAutoWrap.recursive_wrap(
+                    module,
+                    auto_wrap_policy=fsdp_auto_wrap_policy,
+                    # Note that we have the recursive_wrap skip wrapping for
+                    # the outermost (this) module otherwise it will result in a
+                    # double-wrap causing issues.
+                    only_wrap_children=True,
+                    # FSDP arguments follow.
+                    process_group=process_group,
+                    cpu_offload=cpu_offload,
+                    # Note that recursive_wap should not call FSDP with wrapping
+                    # enabled, as this recursive call handles all wrapping,
+                    # including for nested children.
+                    fsdp_auto_wrap_policy=None,
+                )
+            assert not ConfigAutoWrap.in_autowrap_context
+
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -162,6 +208,12 @@ class FullyShardedDataParallel(nn.Module):
         if self.cpu_offload.offload_params:
             for p in self.params:
                 self._offload_to_cpu(p)
+
+    @classmethod
+    def _check_wrapped(cls, begin_module, check_fn, err_fn):
+        for _, mod in begin_module.named_modules():
+            if not check_fn(mod):
+                raise ValueError(err_fn(mod))
 
     @property
     def module(self) -> FlattenParamsWrapper:
@@ -378,20 +430,36 @@ class FullyShardedDataParallel(nn.Module):
         assert hasattr(p, "_is_sharded") and hasattr(
             p, "_orig_size"
         ), "Parameters should have been sharded during construction."
+        # If _local_shard has been set in the first lazy init and
+        # current parameter is pointed to _local_shard, no need to
+        # set the _local_shard again.
         if hasattr(p, "_local_shard"):
+            assert p.data_ptr() == p._local_shard.data_ptr(), (  # type: ignore[attr-defined]
+                "Parameter storage is changed after first iteration outside FSDP, this use case "
+                "is not supported right now as parameter may be mutated and "
+                "is pointed to a non-sharded tensor or an invalid shard."
+            )
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU."  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU, "  # type: ignore[attr-defined]
+                    f"but it's on {p._local_shard.device}"  # type: ignore[attr-defined]
+                )
             return
 
         # A single shard of the parameters. Also makes p._local_shard to be on
         # CPU if we are CPU offloading, since p.data would be on CPU during
         # init.
         if self.cpu_offload.offload_params:
-            assert p.device == torch.device("cpu"), "Expected param to be on CPU when cpu_offloading is enabled."
+            assert p.device == torch.device(
+                "cpu"
+            ), ("Expected param to be on CPU when cpu_offloading is enabled. "
+                "If CPU offloading is enabled correctly, you may be "
+                "accidentally moving the model to CUDA after FSDP initialization."
+                )
         p._local_shard = p.data  # type: ignore[attr-defined]
         # If CPU offloading, pin the memory to enable faster CPU -> GPU device
         # transfer.
@@ -403,8 +471,7 @@ class FullyShardedDataParallel(nn.Module):
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
             p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p,
-                device=torch.device("cpu")
+                p, device=torch.device("cpu")
             ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
@@ -416,7 +483,7 @@ class FullyShardedDataParallel(nn.Module):
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
-                dtype=self.compute_dtype,
+                dtype=p.dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
@@ -732,9 +799,10 @@ class FullyShardedDataParallel(nn.Module):
         torch.cuda.current_stream().wait_stream(self._streams["post_backward"])
         if self.cpu_offload.offload_params:
             # We need to wait for the non-blocking GPU ->
-            # CPU grad transfers to finish. TODO investigate why this is needed
-            # and if we can remove it, as we've done transfer on post_backward
-            # stream and synchronized it above.
+            # CPU grad transfers to finish. We need to do this for GPU -> CPU
+            # copies because when grad is on CPU, it won't wait for any CUDA
+            # stream to finish GPU -> CPU copies unless we explicitly block the
+            # host-side with synchronize().
             torch.cuda.current_stream().synchronize()
 
         # A backward pass is done, clean up below.
@@ -875,15 +943,17 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
         """Use local shard for a list of params. Also implicitly offloads
-           parameters back to CPU if we are CPU offloading."""
+        parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU"  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU"
+                )
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
@@ -920,17 +990,6 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda")
 
-def _get_data_type(module: nn.Module) -> torch.dtype:
-    """Try to infer data type from module parameters."""
-    try:
-        dtype = next(module.parameters()).dtype
-        return dtype
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return torch.float32.
-    except StopIteration:
-        pass
-    # Fall back to torch.float32
-    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""

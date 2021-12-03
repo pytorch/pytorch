@@ -58,6 +58,7 @@
 
 #include <fmt/format.h>
 #include <torch/csrc/deploy/loader.h>
+#include <torch/csrc/deploy/mem_file.h>
 
 namespace torch {
 namespace deploy {
@@ -215,51 +216,6 @@ struct GnuHash {
 // which appears to include frame information relative to that address.
 extern "C" void __register_frame(void*);
 extern "C" void __deregister_frame(void*);
-
-// Memory maps a file into the address space read-only, and manages the lifetime
-// of the mapping. Used in the loader to read in initial image, and to inspect
-// ELF files for dependencies before callling dlopen.
-struct MemFile {
-  MemFile(const char* filename_) : fd_(0), mem_(nullptr), n_bytes_(0) {
-    fd_ = open(filename_, O_RDONLY);
-    DEPLOY_CHECK(
-        fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
-    struct stat s = {0};
-    if (-1 == fstat(fd_, &s)) {
-      close(fd_); // destructors don't run during exceptions
-      DEPLOY_ERROR("failed to stat {}: {}", filename_, strerror(errno));
-    }
-    n_bytes_ = s.st_size;
-    mem_ = mmap(nullptr, n_bytes_, PROT_READ, MAP_SHARED, fd_, 0);
-    if (MAP_FAILED == mem_) {
-      close(fd_);
-      DEPLOY_ERROR("failed to mmap {}: {}", filename_, strerror(errno));
-    }
-  }
-  MemFile(const MemFile&) = delete;
-  const char* data() const {
-    return (const char*)mem_;
-  }
-  ~MemFile() {
-    if (mem_) {
-      munmap((void*)mem_, n_bytes_);
-    }
-    if (fd_) {
-      close(fd_);
-    }
-  }
-  size_t size() {
-    return n_bytes_;
-  }
-  int fd() const {
-    return fd_;
-  }
-
- private:
-  int fd_;
-  void* mem_;
-  size_t n_bytes_;
-};
 
 typedef void (*linker_dtor_function_t)();
 typedef void (*linker_ctor_function_t)(int, const char**, char**);

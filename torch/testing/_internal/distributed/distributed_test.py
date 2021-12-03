@@ -5427,11 +5427,7 @@ class DistributedTest:
             self.assertEqual(len(indices_list), local_num_samples)
             validate_global_samples(local_num_samples)
 
-        @require_backend({"nccl", "gloo"})
-        @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
-        )
-        def test_allgather_object(self):
+        def _test_allgather_object(self, subgroup=None):
             # Only set device for NCCL backend since it must use GPUs.
             backend = os.environ["BACKEND"]
             if backend == "nccl":
@@ -5447,32 +5443,47 @@ class DistributedTest:
 
             output_gathered = [None for _ in range(dist.get_world_size())]
             dist.all_gather_object(
-                output_gathered, gather_objects[self.rank % len(gather_objects)]
+                output_gathered,
+                gather_objects[self.rank % len(gather_objects)],
+                group=subgroup,
             )
 
             for i, val in enumerate(output_gathered):
                 expected = gather_objects[i % len(gather_objects)]
                 self.assertEqual(val, expected)
 
-                output_gathered = [None for _ in range(dist.get_world_size())]
-                dist.all_gather_object(
-                    output_gathered, gather_objects[self.rank % len(gather_objects)]
-                )
+        @require_backend({"nccl", "gloo"})
+        @require_n_gpus_for_nccl_backend(
+            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
+        )
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
+        def test_all_gather_object_default_pg(self):
+            return self._test_allgather_object()
 
-        @require_backend({"gloo"})
-        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather")
-        def test_gather_object(self):
+        @require_backend({"nccl", "gloo"})
+        @require_n_gpus_for_nccl_backend(
+            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
+        )
+        @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        def test_all_gather_object_subgroup(self):
+            default = _get_default_group()
+            backend = dist.get_backend(default)
+            subgroup = dist.new_group(backend=backend)
+            return self._test_allgather_object(subgroup=subgroup)
+
+        def _test_gather_object(self, pg=None):
             # Ensure stateful objects can be gathered
             gather_objects = COLLECTIVES_OBJECT_TEST_LIST
-            output_gathered = [None for _ in range(dist.get_world_size())]
+            output_gathered = [None for _ in range(dist.get_world_size(pg))]
             gather_on_rank = 0
-            my_rank = dist.get_rank()
+            my_rank = dist.get_rank(pg)
             dist.gather_object(
                 gather_objects[self.rank % len(gather_objects)],
                 object_gather_list=output_gathered
                 if my_rank == gather_on_rank
                 else None,
                 dst=gather_on_rank,
+                group=pg
             )
             if my_rank != gather_on_rank:
                 self.assertEqual(
@@ -5493,11 +5504,29 @@ class DistributedTest:
                 dist.all_gather_object(
                     [None for _ in range(dist.get_world_size())],
                     gather_objects[self.rank],
+                    group=pg
                 )
+
+
+        @require_backend({"gloo"})
+        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather")
+        @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        def test_gather_object(self):
+            return self._test_gather_object()
+
+        @require_backend({"gloo"})
+        @sandcastle_skip_if(BACKEND == "nccl", "NCCL does not support gather")
+        @with_dist_debug_levels(levels=["DETAIL", "OFF", "INFO"])
+        def test_gather_object_subgroup(self):
+            default = _get_default_group()
+            backend = dist.get_backend(default)
+            subgroup = dist.new_group(backend=backend)
+            return self._test_gather_object(subgroup)
 
         @require_backend({"nccl"})
         @require_backends_available({"nccl"})
         @skip_if_lt_x_gpu(2)
+        @with_dist_debug_levels(levels=["OFF", "INFO", "DETAIL"])
         def test_nccl_gather_object_err(self):
             output_gathered = [None for _ in range(dist.get_world_size())]
             gather_on_rank = 0
@@ -5703,6 +5732,7 @@ class DistributedTest:
             IS_MACOS or IS_WINDOWS,
             "torch.profiler not enabled for mac/windows: https://github.com/pytorch/pytorch/pull/56124",
         )
+        @skip_if_rocm
         def test_ddp_profiling_torch_profiler(self):
             cpu_act = torch.profiler.ProfilerActivity.CPU
             cuda_act = torch.profiler.ProfilerActivity.CUDA
@@ -6185,11 +6215,8 @@ class DistributedTest:
                     loss = out.sum()
                     loss.backward()
 
-        @require_backend({"nccl", "gloo"})
-        @require_n_gpus_for_nccl_backend(
-            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
-        )
-        def test_broadcast_object_list(self):
+
+        def _test_broadcast_object_list(self, group=None):
             # Only set device for NCCL backend since it must use GPUs.
             # Case where rank != GPU device.
             next_rank = (self.rank + 1) % int(self.world_size)
@@ -6216,7 +6243,7 @@ class DistributedTest:
                         single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
                     )
                 dist.broadcast_object_list(
-                    single_obj_list, src=0, group=None, device=torch.device("cpu")
+                    single_obj_list, src=0, group=group, device=torch.device("cpu")
                 )
                 self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
@@ -6230,7 +6257,7 @@ class DistributedTest:
                         single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
                     )
                 dist.broadcast_object_list(
-                    single_obj_list, src=0, group=None, device=torch.device(next_rank)
+                    single_obj_list, src=0, group=group, device=torch.device(next_rank)
                 )
                 self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
@@ -6242,7 +6269,7 @@ class DistributedTest:
                         single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0]
                     )
                 dist.broadcast_object_list(
-                    single_obj_list, src=0, group=None, device=torch.device(next_rank)
+                    single_obj_list, src=0, group=group, device=torch.device(next_rank)
                 )
                 self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
@@ -6250,14 +6277,33 @@ class DistributedTest:
             single_obj_list = [objects[0]]
             if self.rank != src_rank:
                 self.assertNotEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
-            dist.broadcast_object_list(single_obj_list, src=0)
+            dist.broadcast_object_list(single_obj_list, src=0, group=group)
             self.assertEqual(single_obj_list[0], COLLECTIVES_OBJECT_TEST_LIST[0])
 
             # Multiple input objects test
             if self.rank != src_rank:
                 self.assertNotEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
-            dist.broadcast_object_list(objects, src=0)
+            dist.broadcast_object_list(objects, src=0, group=group)
             self.assertEqual(objects, COLLECTIVES_OBJECT_TEST_LIST)
+
+        @require_backend({"nccl", "gloo"})
+        @require_n_gpus_for_nccl_backend(
+            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
+        )
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def test_broadcast_object_list(self):
+            return self._test_broadcast_object_list()
+
+        @require_backend({"nccl", "gloo"})
+        @require_n_gpus_for_nccl_backend(
+            int(os.environ["WORLD_SIZE"]), os.environ["BACKEND"]
+        )
+        @with_dist_debug_levels(levels=["DETAIL"])
+        def _test_broadcast_object_list_subgroup(self):
+            default = _get_default_group()
+            backend = dist.get_backend(default)
+            subgroup = dist.new_group(backend=backend)
+            return self._test_broadcast_object_list(subgroup)
 
         def _test_ddp_ignore_params_arg(self, static_graph=False):
             class TestModel(nn.Module):
@@ -6702,7 +6748,11 @@ class DistributedTest:
                 RuntimeError,
                 "Expected to have finished reduction in the prior iteration "
                 "before starting a new one. This error indicates that your "
-                "training graph has changed in this iteration",
+                "training graph has changed in this iteration, "
+                "e.g., one parameter is used in first iteration, "
+                "but then got unused in the second iteration. "
+                "this is not compatible with static_graph set to True.\n"
+                "Parameter indices which did not receive grad for"
             ):
                 for i in range(2):
                     if i % 2 != 0:
@@ -7692,6 +7742,7 @@ class DistributedTest:
             "Only Nccl & Gloo backend support DistributedDataParallel",
         )
         @skip_if_lt_x_gpu(2)
+        @skip_if_rocm
         def test_ddp_sync_bn_training_vs_eval(self):
             rank = self.rank
             torch.cuda.set_device(rank)
