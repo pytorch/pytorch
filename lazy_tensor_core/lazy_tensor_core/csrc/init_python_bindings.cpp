@@ -685,6 +685,9 @@ void InitLtcModuleBindings(py::module m) {
   //   return GetMemoryInfo(device);
   // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
+  m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
+    LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
+  });
 }  // namespace
 
 }  // namespace

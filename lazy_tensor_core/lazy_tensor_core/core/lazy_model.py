@@ -970,3 +970,6 @@ def get_memory_info(device):
       memory in KB) keys.
     """
     return lazy_tensor_core._LAZYC._ltc_memory_info(str(device))
+
+def set_noop_execution_mode(enable):
+    return lazy_tensor_core._LAZYC._ltc_set_noop_execution_mode(enable)

@@ -96,6 +96,10 @@ class LazyGraphExecutor {
       const at::Scalar& value, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device);
 
+  // Configure the executor treat compile/execute API calls as no-ops
+  // for use when profiling lazy trace overheads
+  void SetNoOpExecutionMode(bool enable_noop) { noop_execution_mode_ = enable_noop; }
+
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
@@ -218,6 +222,8 @@ class LazyGraphExecutor {
   std::vector<torch::lazy::BackendDataPtr> GatherTensorsData(
       const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
       c10::ArrayRef<torch::lazy::BackendDataPtr> tensors_data);
+
+  bool noop_execution_mode_ = false;
 };
 
 }  // namespace torch_lazy_tensors

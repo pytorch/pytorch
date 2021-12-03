@@ -886,7 +886,11 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       coll, std::move(parameters_data), std::move(tensors_data),
       std::move(cached_computation));
 
-  auto syncfn = [async, hash = coll->hash]() {
+  auto syncfn = [this, async, hash = coll->hash]() {
+    // For profiling lazy trace overhead
+    if (noop_execution_mode_)
+      return;
+
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";

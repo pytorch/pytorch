@@ -244,6 +244,11 @@ def timed(args, benchmark, sync, times=1):
     if args.test == 'eval':
         model, example_inputs = benchmark.get_module()
 
+    if current_device == 'lazy':
+        torch.cuda.set_sync_debug_mode(2)
+    else:
+        torch.cuda.set_sync_debug_mode(0)
+
     # keep the lazy tensor results alive until the final sync
     t0 = time.perf_counter()
     for i in range(times):
@@ -256,6 +261,8 @@ def timed(args, benchmark, sync, times=1):
         if i < times - 1:
             # may be just an async 'mark_step' for lazy, or no-op for cuda
             sync.iter_sync(results)
+
+    torch.cuda.set_sync_debug_mode(0)
 
     # should be a hard sync for lazy and cuda
     # unless strictly measuring lazy trace overhead, then no-op
@@ -366,6 +373,24 @@ def check_fuser(args):
     if args.fuser == 'fuser1':
         assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) without building torch with llvm."
 
+def run_tracing_execute_noops(test, lazy_benchmark):
+    ltm.set_noop_execution_mode(True)
+    if test == 'eval':
+        model, example_inputs = lazy_benchmark.get_module()
+    # doesn't actualyl collect a profile, but runs just the lazy trace
+    # so you can use a profiler on top of the program.
+    # note: depends on making the backend do a 'no-op' for executecomputation
+    results = []
+    for i in range(300):
+        if test == 'eval':
+            results.append(call_model_with(model, example_inputs))
+        elif test == 'train':
+            lazy_benchmark.train(niter=1)
+        # we still do a mark step, to preserve the ratio of how often we split the graph
+        # and run through the process of 'compile and execute' (even though these are now noops)
+        ltm.mark_step()
+    ltm.set_noop_execution_mode(False)
+
 if __name__ == "__main__" :
     parser = argparse.ArgumentParser()
     parser.add_argument("--filter", "-k", action="append", default=["HardSwish", "DivAddMul", "hf_Bert", "hf_Bart"], help="filter benchmarks")
@@ -378,6 +403,7 @@ if __name__ == "__main__" :
     parser.add_argument("--test", type=str, choices=['eval', 'train'], default='eval')
     parser.add_argument("--torchbench_dir", type=str, help="path to torchbenchmark repo")
     parser.add_argument("--dump_lazy_counters", action='store_true', help="dump lazy counter values after each timing run")
+    parser.add_argument("--run_tracing_execute_noops", action='store_true', help="Run the tracing portion only, with noop backend, useful for running under a profiler.")
     args = parser.parse_args()
     results = []
 
@@ -391,6 +417,11 @@ if __name__ == "__main__" :
 
         if device == 'cuda':
             assert 'LTC_TS_CUDA' in os.environ and bool(os.environ['LTC_TS_CUDA'])
+
+        if args.run_tracing_execute_noops:
+            run_tracing_execute_noops(args.test, lazy_benchmark)
+            # when profiling, we really don't want to do anything else
+            exit(0)
 
         with pick_grad(args, name):
             try:
@@ -425,6 +456,7 @@ if __name__ == "__main__" :
                 # using LazySync
                 lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                 lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
+
 
                 """Alternate ways of synchronizing for timing- calling .to() on output tensors -
                    Used initially to corroborate the results of timing via mark_step.  Should be debuged further as calling .to() appears
