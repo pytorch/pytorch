@@ -69,7 +69,15 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(default_device_type_.c10Type());
-    return std::make_shared<TSData>(tensor.to(options), shape, device);
+    if (tensor.device().type() == default_device_type_.c10Type()) {
+      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
+    } else if (tensor.numel() == 1) {
+      // TODO(whc) seemed like these should have been 'wrapped numbers' but
+      // tensor.unsafeGetTensorImpl()->is_wrapped_number() was returning false
+      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
+    } else {
+      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/false), shape, device);
+    }
   }
 
   std::string GetComputationBackendText(
