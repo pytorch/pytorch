@@ -18,6 +18,8 @@
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-cuda11.5-py3.6-gcc7",
       "linux-bionic-py3.6-clang9",
+      "linux-docs",
+      "linux-docs-push",
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
@@ -51,6 +53,8 @@
     "ciflow/cpu": [
       "caffe2-linux-xenial-py3.6-gcc5.4",
       "linux-bionic-py3.6-clang9",
+      "linux-docs",
+      "linux-docs-push",
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-py3.6-clang7-asan",
       "linux-xenial-py3.6-clang7-onnx",
@@ -79,6 +83,7 @@
     "ciflow/default": [
       "linux-bionic-cuda11.5-py3.6-gcc7",
       "linux-bionic-py3.6-clang9",
+      "linux-docs",
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
@@ -93,6 +98,9 @@
       "win-vs2019-cpu-py3",
       "win-vs2019-cuda11.3-py3",
       "win-vs2019-cuda11.5-py3"
+    ],
+    "ciflow/docs": [
+      "linux-docs"
     ],
     "ciflow/ios": [
       "ios-12-5-1-arm64",
@@ -118,6 +126,8 @@
       "linux-bionic-cuda10.2-py3.9-gcc7",
       "linux-bionic-cuda11.5-py3.6-gcc7",
       "linux-bionic-py3.6-clang9",
+      "linux-docs",
+      "linux-docs-push",
       "linux-vulkan-bionic-py3.6-clang9",
       "linux-xenial-cuda11.3-py3.6-gcc7",
       "linux-xenial-py3-clang5-mobile-build",
@@ -161,6 +171,7 @@
       "linux-xenial-py3.6-clang7-asan"
     ],
     "ciflow/scheduled": [
+      "linux-docs-push",
       "periodic-libtorch-linux-xenial-cuda11.1-py3.6-gcc7",
       "periodic-linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck",
       "periodic-linux-xenial-cuda11.1-py3.6-gcc7-debug",
