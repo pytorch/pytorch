@@ -128,7 +128,7 @@ class Wishart(Distribution):
     @lazy_property
     def covariance_matrix(self):
         return torch.einsum(
-            "ik,jk->ij",
+            "...ik,...jk->...ij",
             self._unbroadcasted_scale_tril,
             self._unbroadcasted_scale_tril
         ).expand(self._batch_shape + self._event_shape)
@@ -160,7 +160,7 @@ class Wishart(Distribution):
         # Implemented Sampling using Bartlett decomposition
         noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
         noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
-        chol = torch.einsum("ik,...kj->...ij", self._unbroadcasted_scale_tril, noise)
+        chol = torch.einsum("...ik,...kj->...ij", self._unbroadcasted_scale_tril, noise)
         return torch.einsum("...ik,...jk->...ij", chol, chol)
 
     def log_prob(self, value):
@@ -175,7 +175,7 @@ class Wishart(Distribution):
             - (
                 - (nu - p - 1) * value.logdet()
                 + nu * p * math.log(2)
-                + torch.einsum("ik,...kj->...ij", V.inverse(), value).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
+                + torch.einsum("...ik,...kj->...ij", V.inverse(), value).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
             ) / 2
         )
 
