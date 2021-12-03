@@ -9,7 +9,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
-
 namespace at {
 namespace native {
 
