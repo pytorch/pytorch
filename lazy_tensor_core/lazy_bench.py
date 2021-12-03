@@ -194,8 +194,9 @@ class NoOpSync:
         pass
 
 class LazySync:
-    def __init__(self, sync_every_iter=False):
+    def __init__(self, sync_every_iter=False, skip_final_sync=False):
         self.sync_every_iter = sync_every_iter
+        self.skip_final_sync = skip_final_sync
 
     def iter_sync(self, results):
         ltm.mark_step()
@@ -206,6 +207,8 @@ class LazySync:
 
     def final_sync(self, results):
         ltm.mark_step()
+        if self.skip_final_sync:
+            return
         ltm.wait_device_ops()
         if current_device == 'cuda':
             torch.cuda.synchronize()
@@ -304,7 +307,11 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
         _, timings[rep, 0] = timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
-        _, timings[rep, 1] = timed(args, lazy_benchmark, sync=NoOpSync())
+        _, timings[rep, 1] = timed(args, lazy_benchmark, sync=LazySync(skip_final_sync=True))
+        ltm.wait_device_ops()
+        if current_device == 'cuda':
+            torch.cuda.synchronize()
+
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     overhead = median[1] / median[0]
@@ -412,7 +419,6 @@ if __name__ == "__main__" :
     torchbench_dir = abspath(args.torchbench_dir) if args.torchbench_dir else abspath("../../benchmark")
     assert os.path.exists(os.path.join(torchbench_dir, "torchbenchmark")), "set --torchbench_dir to installed torchbench repo"
     sys.path.append(torchbench_dir)
-
     for device, name, benchmark, lazy_benchmark in iter_models(args):
 
         if device == 'cuda':
