@@ -112,8 +112,8 @@ def module_has_sparse_params(module: torch.nn.Module):
     """Given a module, checks if it has sparse parameters attached to it.
 
     The parameters for the sparse and sparse quantized layers are stored in the
-    modules' `sparse_params` layers. This checks if those parameters exist,
-    which is a good indicator if the layer is sparsified.
+    modules' `sparse_params` attribute. This checks if that attribute exists,
+    which is an indicator if the layer is sparsified.
 
     TODO: Should check the level of the sparsity and set to dense if it is 0.
     """
