@@ -192,7 +192,6 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
 
 // Exhaustive list of the unary ufuncs supported by sparse CSR
-CREATE_UNARY_UFUNC(abs);
 CREATE_UNARY_UFUNC(angle);
 CREATE_UNARY_UFUNC(asin);
 CREATE_UNARY_UFUNC(asinh);
@@ -221,10 +220,17 @@ CREATE_UNARY_UFUNC(conj_physical);
 CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
 CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
 CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+CREATE_UNARY_UFUNC_NO_INPLACE(abs);
 
 // isnan and isinf don't have an out variant
 CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
 CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
+
+// abs inplace does not support complex inputs
+Tensor& abs_sparse_csr_(Tensor& self) {
+    TORCH_CHECK(!self.is_complex(), "In-place abs is not supported for complex tensors.");
+    return abs_sparse_csr_out(self, self);
+}
 
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {

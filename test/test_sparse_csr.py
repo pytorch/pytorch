@@ -1180,6 +1180,11 @@ class TestSparseCSR(TestCase):
                     op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
                 continue
 
+            if sample.input.is_complex() and op.name == "abs":
+                with self.assertRaisesRegex(RuntimeError, "not supported"):
+                    op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
+                continue
+
             actual = op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
 
             self.assertIs(actual, sample.input)
