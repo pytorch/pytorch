@@ -34,8 +34,10 @@ std::string::size_type SkipTagSeparator(
 c10::optional<AttrTag> ParseAttrTag(
     const std::string& node_string,
     std::string::size_type pos) {
+  // NOLINTNEXTLINE
   const std::regex tag_regex("^([a-zA-Z0-9_]+)=");
   std::smatch match;
+  // NOLINTNEXTLINE
   if (!std::regex_search(
           node_string.begin() + pos, node_string.end(), match, tag_regex)) {
     return c10::nullopt;
