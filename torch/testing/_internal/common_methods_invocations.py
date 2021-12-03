@@ -7196,6 +7196,8 @@ def sample_inputs_tensorsolve(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_loss(op_info, device, dtype, requires_grad, **kwargs):
     _make_tensor = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    # Although most losses also support the reduce and size_average combination instead of reduce, the former is
+    # deprecated since 0.4.1 and thus is not tested
     shapes_and_kwargs = [
         ((), None),
         ((S,), dict(reduction="mean")),
@@ -7221,6 +7223,7 @@ def sample_inputs_l1_loss(op_info, device, dtype, requires_grad, **kwargs):
 
     sample_inputs.extend(
         [
+            # In addition to the regular test cases, we add two for mixed floating point and complex inputs
             SampleInput(make(dtype=dtype), args=(make(dtype=float_dtype),)),
             SampleInput(make(dtype=float_dtype), args=(make(dtype=dtype),)),
         ]
@@ -7234,6 +7237,8 @@ def sample_inputs_smooth_l1_loss(op_info, device, dtype, requires_grad, **kwargs
     make = partial(make_tensor, (S, S), device=device, dtype=dtype, requires_grad=requires_grad)
     sample_inputs.extend(
         [
+            # This test case always triggers the smooth condition, since absolute difference of input and target
+            # is smaller than beta
             SampleInput(make(low=0, high=2), args=(make(low=-2, high=0),), kwargs=dict(beta=5)),
             SampleInput(make(), args=(make(),), kwargs=dict(beta=0))
         ]
@@ -7546,7 +7551,10 @@ def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
 
     sample_inputs = []
     for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
+        # input should be log-probability, i.e. lie in (-inf, 0]
         input = make(shape, low=None, high=0)
+        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
+        # i.e. lie in (-inf, 0]
         target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
         sample_inputs.append(
             SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
@@ -7557,6 +7565,7 @@ def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     return [
+        SampleInput(make_input(())),
         SampleInput(make_input((2,))),
         SampleInput(make_input((2, 2))),
         SampleInput(make_input((2,)), kwargs=dict(offset=1)),
