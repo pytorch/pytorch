@@ -30,6 +30,12 @@
 #include <folly/json.h>
 #endif
 
+// used in test only
+C10_DEFINE_bool(
+    static_runtime_disable_debug_memory_overlap_check,
+    false,
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
+
 namespace torch {
 namespace jit {
 
@@ -876,6 +882,7 @@ StaticModule::StaticModule(
     bool check_outputs_for_overlap =
         !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
         containTensorsOnly(node->outputs());
+    // new ProcessedFunction
     functions_.emplace_back(
         node, opts.enable_out_variant, check_outputs_for_overlap);
   }
@@ -1275,7 +1282,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
       for (size_t i = 0; i < n.outputs().size(); i++) {
         at::Tensor& t = n.Output(i).toTensor();
         if (planner_->overlapWithInternalBuffer(t.data_ptr())) {
-          VLOG(1) << "Detected alias for node: " << PrintNode(n.node());
+          DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
           n.Output(i) = at::native::clone(t, c10::nullopt);
           // set flag if overlap detected
           overlap_detected_with_fast_check = true;
@@ -1867,11 +1874,14 @@ void StaticRuntime::disableManageOutputTensors() {
 ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
-    bool check_memory_overlap) {
+    bool check_memory_overlap)
+    : check_memory_overlap_(check_memory_overlap) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kOutVariant;
+      // do not check memory overlap for out variants
+      check_memory_overlap_ = false;
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
@@ -1880,6 +1890,10 @@ ProcessedFunction::ProcessedFunction(
     f_ = getNativeOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kNativeFunction;
+#ifdef NDEBUG
+      // skip this check in opt mode because these ops are better vetted
+      check_memory_overlap_ = false;
+#endif
       VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
       return;
     }
@@ -1907,7 +1921,6 @@ ProcessedFunction::ProcessedFunction(
       }
     };
     kind_ = ProcessedFunction::Kind::kInterpreterFallback;
-    check_memory_overlap_ = check_memory_overlap;
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1964,7 +1977,12 @@ void ProcessedNode::run() {
   fn_->f()(this);
 #endif
 #ifndef NDEBUG
-  verify_no_memory_overlap();
+  if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
+    // run check but do not enforce
+    verify_no_memory_overlap();
+  } else {
+    DCHECK(verify_no_memory_overlap());
+  }
 #endif
 }
 
@@ -1980,9 +1998,20 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   return true;
 }
 
-bool ProcessedNode::verify_no_memory_overlap() const {
+bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
+  const static std::array<c10::Symbol, 3> special_case_ops = {
+      fromQualString("prim::TypeCheck"),
+      fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::dict_unpack")};
+  if (!force_check &&
+      std::find(
+          begin(special_case_ops), end(special_case_ops), node()->kind()) !=
+          end(special_case_ops)) {
+    return true;
+  }
+
   return verify_outputs_dont_overlap_each_other() &&
-      verify_inputs_dont_overlap_outputs();
+      verify_inputs_dont_overlap_outputs(force_check);
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
@@ -2006,12 +2035,23 @@ bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
   return true;
 }
 
-bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
+bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   auto schema = node()->maybeSchema();
-  // skip memory overlap check for mutable ops with only one output
-  if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
+  // skip memory overlap check for mutable or view ops with only one output
+  bool skip_check = !schema ||
+      ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
+       num_outputs_ == 1);
+  if (!force_check && skip_check) {
+    if (!schema) {
+      VLOG(2) << "Detected that op schema is null";
+      return true;
+    }
+    VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
+            << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
+            << ", num_outputs_: " << num_outputs_;
     return true;
   }
+
   for (const auto i : c10::irange(inputs_.size())) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
@@ -2045,7 +2085,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
     for (const auto j : c10::irange(num_outputs_)) {
       const auto& out_t = Output(j).toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
-        VLOG(1) << "Detected alias for node: " << PrintNode(node());
+        DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
         Output(i) = at::native::clone(out_t, c10::nullopt);
         set_outputs_memory_overlap_detected();
       }
