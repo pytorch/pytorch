@@ -341,14 +341,14 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
 
 
 def main(argv):
-    parser = argparse.ArgumentParser(description="Generate used operators YAML")
+    parser = argparse.ArgumentParser(description="Give a yaml input file including"
+    "upgrader bytecode, generate a cpp file upgrader_mobile.h accordingly.")
+
     options = get_parser_options(parser)
 
     upgrader_bytecode_yaml = options.input_upgrader_bytecode_yaml
-    # version_map_yaml = options.input_version_map_yaml
     output_path = options.output_path
 
-    # parse_version_map(version_map_yaml)
     upgrader_dict = parse_upgrader(upgrader_bytecode_yaml)
     write_cpp(options.output_path, upgrader_dict)
 
