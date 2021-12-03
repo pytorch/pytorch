@@ -2313,7 +2313,7 @@ triangular such that the returned tensor is
     inv = (u^T u)^{{-1}}
 
 Supports input of float, double, cfloat and cdouble dtypes.
-Also supports batches of matrices, and if A is a batch of matrices then the output has the same batch dimensions.
+Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
 
 Args:
     input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
