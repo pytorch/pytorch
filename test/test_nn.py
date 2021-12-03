@@ -1883,21 +1883,21 @@ class TestNN(NNTestCase):
         parameter_dict = parameter_dict2 | parameter_dict
         check()
 
-        parameters2 = dict([
-            ('p26', Parameter(torch.randn(10, 10))),
-            ('p27', Parameter(torch.randn(10, 10))),
-            ('p28', Parameter(torch.randn(10, 10))),
-        ])
+        parameters2 = {
+            'p26': Parameter(torch.randn(10, 10)),
+            'p27': Parameter(torch.randn(10, 10)),
+            'p28': Parameter(torch.randn(10, 10))
+        }
         parameter_dict2 = nn.ParameterDict(parameters2)
         parameters = parameters | parameters2
         parameter_dict = parameter_dict | parameter_dict2
         check()
 
-        parameters2 = dict([
-            ('p29', Parameter(torch.randn(10, 10))),
-            ('p30', Parameter(torch.randn(10, 10))),
-            ('p31', Parameter(torch.randn(10, 10))),
-        ])
+        parameters2 = {
+            'p29': Parameter(torch.randn(10, 10)),
+            'p30': Parameter(torch.randn(10, 10)),
+            'p31': Parameter(torch.randn(10, 10))
+        }
         parameter_dict2 = nn.ParameterDict(parameters2)
         parameters = parameters2 | parameters
         parameter_dict = parameter_dict2 | parameter_dict

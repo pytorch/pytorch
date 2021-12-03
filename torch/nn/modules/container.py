@@ -709,5 +709,5 @@ class ParameterDict(Module):
 
     def __ror__(self, other: Mapping[str, 'Parameter']) -> 'ParameterDict':
         copy = ParameterDict(other)
-        copy.update(self)
+        copy.update(self._parameters)
         return copy
