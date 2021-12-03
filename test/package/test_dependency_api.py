@@ -12,8 +12,6 @@ from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
-import pdb
-
 
 try:
     from .common import PackageTestCase
@@ -413,7 +411,6 @@ class TestDependencyAPI(PackageTestCase):
             )
 
         buffer.seek(0)
-        # pdb.set_trace()
         hi = PackageImporter(buffer)
         import package_b
         foo = hi.import_module("foo")
@@ -500,6 +497,7 @@ class TestDependencyAPI(PackageTestCase):
                 "import torch;"
             )
         buffer.seek(0)
+        # pdb.set_trace()
         hi = PackageImporter(buffer)
 
         foo = hi.import_module("foo")

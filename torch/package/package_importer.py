@@ -89,7 +89,8 @@ class PackageImporter(Importer):
                     f"but that module has been disallowed"
                 )
             self._add_extern(extern_module)
-
+        for package in self.selective_extern_packages:
+            self._add_selective_extern(package)
         for fname in self.zip_reader.get_all_records():
             self._add_file(fname)
 
@@ -650,10 +651,10 @@ class PackageImporter(Importer):
         package.children[last] = _ExternNode()
 
     def _add_selective_extern(self, selective_extern_name: str):
-        *prefix, last = selective_extern_name.split(".")
-        package = self._get_or_create_package(prefix)
-        assert not isinstance(package, _SelectiveExternNode)
-        package.children[last] = _SelectiveExternNode()
+
+        atoms = selective_extern_name.split(".")
+        assert(len(atoms) == 1)
+        package = self._get_or_create_package(atoms)
 
 
 _NEEDS_LOADING = object()
