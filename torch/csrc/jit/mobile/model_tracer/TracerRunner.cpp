@@ -78,8 +78,9 @@ void call_setup_methods() {
       at::kLong};
   for (const auto dtype : all_dtypes_for_copy) {
     auto tensor1 = at::empty({10}, dtype);
-    tensor1.copy_(at::zeros({10}, at::kFloat));
     tensor1.copy_(at::zeros({10}, at::kBool));
+    tensor1.copy_(at::zeros({10}, at::kFloat));
+    tensor1.copy_(at::zeros({10}, at::kInt));
   }
 
   torch::zeros({0, 0}, torch::ScalarType::Float);
