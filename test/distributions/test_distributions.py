@@ -491,7 +491,7 @@ EXAMPLES = [
         },
         {
             'covariance_matrix': torch.tensor([[5.0, -0.5], [-0.5, 1.5]]),
-            'df': torch.tensor([1.0]),
+            'df': torch.tensor([2.0]),
         },
     ]),
     Example(MixtureSameFamily, [
