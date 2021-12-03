@@ -7,6 +7,10 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Deprecated.h>
 
+namespace c10 {
+struct Device;
+}
+
 namespace torch {
 namespace lazy {
 
@@ -23,7 +27,7 @@ class TORCH_API BackendDevice {
   // The default constructor will set both the device type and ordinal
   // to backend specific defaults.
   BackendDevice();
-  BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int ordinal);
+  BackendDevice(std::shared_ptr<BackendDeviceType>&& type, int64_t ordinal);
 
   int8_t type() const;
   int64_t ordinal() const { return ordinal_;  }
@@ -46,6 +50,10 @@ class TORCH_API BackendDevice {
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& os, const BackendDevice& device);
+
+// Helpers for converting a c10::Device to BackendDevice and vice versa.
+TORCH_API BackendDevice atenDeviceToBackendDevice(const c10::Device& device);
+TORCH_API c10::Device backendDeviceToAtenDevice(const BackendDevice& device);
 
 }  // namespace lazy
 }  // namespace torch
