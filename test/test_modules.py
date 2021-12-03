@@ -508,10 +508,10 @@ class TestModule(TestCase):
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
     @onlyCUDA
-    @modules([m for m in module_db if m.supports_channels_last or m.supports_channels_last_3d],
-             allowed_dtypes=[torch.float16, torch.float32])
-    def test_memory_format_cuda(self, device, dtype, module_info):
+    @modules([m for m in module_db if m.supports_channels_last or m.supports_channels_last_3d])
+    def test_memory_format(self, device, dtype, module_info):
         module_cls = module_info.module_cls
+        name = module_info.module_cls.__name__
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         channels_last = torch.channels_last if module_info.supports_channels_last else torch.channels_last_3d
@@ -539,9 +539,11 @@ class TestModule(TestCase):
 
         def _check_out_mem_format(output, input_mem_format, module_mem_format):
             if isinstance(output, torch.Tensor):
-                if (output.dim() == 4 and (input_mem_format == torch.channels_last or module_mem_format == torch.channels_last)):
+                if (output.dim() == 4 and (input_mem_format == torch.channels_last
+                    or (module_mem_format == torch.channels_last and 'Conv' in name))):  # noqa: E129
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
-                elif (output.dim() == 5 and (input_mem_format == torch.channels_last_3d or module_mem_format == torch.channels_last_3d)):
+                elif (output.dim() == 5 and (input_mem_format == torch.channels_last_3d
+                      or (module_mem_format == torch.channels_last_3d and 'Conv' in name))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
@@ -562,15 +564,16 @@ class TestModule(TestCase):
                 m.to(device).to(dtype)
 
                 for input_mem_format, module_mem_format in product(input_mem_formats, module_mem_formats):
-                    if (input_mem_format == torch.channels_last and not _check_dims(module_input.forward_input, 4)):
+                    if (input_mem_format == torch.channels_last and not _check_dims(module_input.forward_input.args, 4)):
                         continue
 
-                    if (input_mem_format == torch.channels_last_3d and not _check_dims(module_input.forward_input, 5)):
+                    if (input_mem_format == torch.channels_last_3d and not _check_dims(module_input.forward_input.args, 5)):
                         continue
 
                     # === Change memformat of input. ===
                     module_input.forward_input.args = _to_mem_format(module_input.forward_input.args, input_mem_format)
-                    module_input.forward_input.kwargs = _to_mem_format(module_input.forward_input.kwargs, input_mem_format)
+                    module_input.forward_input.kwargs = _to_mem_format(module_input.forward_input.kwargs,
+                                                                       input_mem_format)
 
                     # === Change memformat of module ===
                     m.to(memory_format=module_mem_format)
@@ -588,7 +591,6 @@ class TestModule(TestCase):
 
                     # === Check mem format of output ===
                     _check_out_mem_format(outputs, input_mem_format, module_mem_format)
-
 
 
 instantiate_device_type_tests(TestModule, globals())
