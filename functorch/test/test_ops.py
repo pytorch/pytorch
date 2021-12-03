@@ -446,6 +446,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.conv1d', device_type='cuda'),
         xfail('fft.rfft2'),
         xfail('lu'),
+        xfail('qr'),
         xfail('_masked.prod'), # calls aten::item
     })
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
