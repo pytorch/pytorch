@@ -660,14 +660,13 @@ class ParameterDict(Module):
         return self._parameters.get(key, default)
 
     def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict':
-        r"""Make self into a new dictionary with the keys provided
+        r"""Return a new ParameterDict with the keys provided
 
         Args:
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        self._parameters.fromkeys(keys, default)
-        return self
+        return ParameterDict(self._parameters.fromkeys(keys, default))
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
@@ -742,16 +741,16 @@ class ParameterDict(Module):
 
         return super(ParameterDict, self)._replicate_for_data_parallel()
 
-    def __or__(self, other: Mapping[str, 'Parameter']) -> 'ParameterDict':
+    def __or__(self, other: 'ParameterDict') -> 'ParameterDict':
         copy = self.copy()
-        copy.update(other)
+        copy.update(other._parameters)
         return copy
 
-    def __ror__(self, other: Mapping[str, 'Parameter']) -> 'ParameterDict':
-        copy = ParameterDict(other)
+    def __ror__(self, other: 'ParameterDict') -> 'ParameterDict':
+        copy = other.copy()
         copy.update(self._parameters)
         return copy
 
-    def __ior__(self, parameter_dict2 : 'ParameterDict') -> 'ParameterDict':
-        self.update(parameter_dict2._parameters)
+    def __ior__(self, other : 'ParameterDict') -> 'ParameterDict':
+        self.update(other._parameters)
         return self
