@@ -3,7 +3,6 @@
 #include <atomic>
 #include <functional>
 #include <mutex>
-#include <shared_mutex>
 #include <thread>
 
 namespace c10 {
