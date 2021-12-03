@@ -9711,7 +9711,6 @@
   structured: True
   dispatch:
     CPU: _upsample_bicubic2d_aa_out_cpu
-    # CUDA: _upsample_bicubic2d_aa_out_cuda
 
 - func: _upsample_bicubic2d_aa(Tensor self, int[2] output_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
@@ -9722,7 +9721,6 @@
   structured: True
   dispatch:
     CPU: _upsample_bicubic2d_aa_backward_out_cpu
-    # CUDA: _upsample_bicubic2d_aa_backward_out_cuda
 
 - func: _upsample_bicubic2d_aa_backward(Tensor grad_output, int[2] output_size, int[4] input_size, bool align_corners, float? scales_h=None, float? scales_w=None) -> Tensor
   python_module: nn
