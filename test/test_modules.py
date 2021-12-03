@@ -589,7 +589,7 @@ class TestModule(TestCase):
                         ref_outputs = reference_fn(m, *args, **kwargs)
                         self.assertEqual(outputs, ref_outputs)
 
-                    # === Check mem format of output ===
+                    # === Check mem format of output. ===
                     _check_out_mem_format(outputs, input_mem_format, module_mem_format)
 
 
