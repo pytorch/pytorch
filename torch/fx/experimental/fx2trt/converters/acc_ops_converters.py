@@ -28,6 +28,7 @@ from .converter_utils import (
     add_activation_layer,
     extend_attr_to_tuple,
     get_positive_dim,
+    trunc_div,
 )
 
 
@@ -873,9 +874,21 @@ def acc_ops_sub(network, target, args, kwargs, name):
 
 @tensorrt_converter(acc_ops.div)
 def acc_ops_div(network, target, args, kwargs, name):
-    return add_binary_elementwise_layer(
-        network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
-    )
+    if kwargs["rounding_mode"] == "trunc":
+        inputs = kwargs["input"]
+        other = kwargs["other"]
+        return trunc_div(inputs, other, network, target, name)
+    elif kwargs["rounding_mode"] == "floor":
+        return add_binary_elementwise_layer(
+            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.FLOOR_DIV, target, name
+        )
+    elif kwargs["rounding_mode"] is None:
+        return add_binary_elementwise_layer(
+            network, kwargs["input"], kwargs["other"], trt.ElementWiseOperation.DIV, target, name
+        )
+    else :
+        mode = kwargs["rounding_mode"]
+        raise RuntimeError(f"Div received mode {mode} that is not supported!")
 
 
 @tensorrt_converter(acc_ops.mul)
