@@ -10795,9 +10795,8 @@ dedent """
         modelA = torch.jit.script(A())
         self.assertEqual(modelA(), 9)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
-            modelB = torch.jit.script(B())
-            modelB()
+        modelB = torch.jit.script(B())
+        self.assertEqual(modelB(), 9)
 
     def test_addmm_grad(self):
         """ This test checks several things:
