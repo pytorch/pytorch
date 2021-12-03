@@ -30,6 +30,12 @@
 #include <folly/json.h>
 #endif
 
+// used in test only
+C10_DEFINE_bool(
+    static_runtime_disable_debug_memory_overlap_check,
+    false,
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
+
 namespace torch {
 namespace jit {
 
@@ -170,10 +176,11 @@ bool mayContainAlias(
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
-std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+template <typename Map>
+std::string dumpMapFromValuesToListsOrSetsOfOtherValues(const Map& map) {
   std::ostringstream oss;
   oss << "{";
-  for (const auto& p : liveness_map) {
+  for (const auto& p : map) {
     oss << "{%" << p.first->debugName() << ": {";
     for (const auto* val : p.second) {
       oss << "%" << val->debugName() << ", ";
@@ -183,6 +190,10 @@ std::string dumpLivenessMap(const LivenessMap& liveness_map) {
   oss << "}";
   return oss.str();
 }
+
+std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+  return dumpMapFromValuesToListsOrSetsOfOtherValues(liveness_map);
+};
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
@@ -262,7 +273,12 @@ LivenessMap GetLivenessMap(
     // for all the values in the alias set,
     // we set them "alive"
     for (auto* aliased_v : refined_aliases) {
-      GRAPH_DEBUG("aliased_v: %", aliased_v->debugName());
+      GRAPH_DEBUG(
+          "aliased_v: %",
+          aliased_v->debugName(),
+          " (for %",
+          v->debugName(),
+          ")");
       add_live_value_fn(aliased_v);
     }
   };
@@ -274,6 +290,11 @@ LivenessMap GetLivenessMap(
         live_values_use_chain[v].erase(node);
         if (!live_values_use_chain[v].size()) {
           // v is now dead
+          GRAPH_DEBUG(
+              "%",
+              v->debugName(),
+              " is now dead after ",
+              node->output(0)->debugName())
           live_values_use_chain.erase(v);
         }
       }
@@ -529,6 +550,10 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     }
     seen.emplace_back(v);
   }
+
+  GRAPH_DEBUG(
+      "same_storage_values: ",
+      dumpMapFromValuesToListsOrSetsOfOtherValues(same_storage_values));
 
   return same_storage_values;
 }
@@ -845,51 +870,39 @@ StaticModule::StaticModule(
   // memory optimization pass (LivenessMap) is
   // aware of the new order!
 
-  // Fill constants first, so we have a std::vector<IValue> we can reference
-  // later
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() != prim::Constant) {
-      continue;
-    }
-    auto* v = node->output();
-    TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
-    constants_.emplace_back(toIValue(v).value());
-  }
   {
-    // construct SSA definition for constant nodes
-    int i = 0;
+    size_t nodes_size = 0, constants_size = 0;
     for (Node* node : graph_->nodes()) {
-      if (node->kind() != prim::Constant) {
-        continue;
-      }
-      auto* v = node->output();
-      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i++);
+      ++(node->kind() == prim::Constant ? constants_size : nodes_size);
     }
-  }
 
-  int nodes_size = 0;
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() == prim::Constant) {
-      continue;
-    }
-    ++nodes_size;
+    constants_.reserve(constants_size);
+    functions_.reserve(nodes_size);
+    nodes_.reserve(nodes_size);
   }
-  functions_.reserve(nodes_size);
-  nodes_.reserve(nodes_size);
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
+  // Construct constant and function nodes
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
+      auto* v = node->output();
+      TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
+      // construct SSA definition for constant nodes
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, constants_.size());
+      constants_.emplace_back(toIValue(v).value());
       continue;
     }
+
     // see [Check and correct bad schema alias info at runtime]
     bool check_outputs_for_overlap =
         !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
         containTensorsOnly(node->outputs());
+    // new ProcessedFunction
     functions_.emplace_back(
         node, opts.enable_out_variant, check_outputs_for_overlap);
   }
@@ -1289,7 +1302,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
       for (size_t i = 0; i < n.outputs().size(); i++) {
         at::Tensor& t = n.Output(i).toTensor();
         if (planner_->overlapWithInternalBuffer(t.data_ptr())) {
-          VLOG(1) << "Detected alias for node: " << PrintNode(n.node());
+          DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
           n.Output(i) = at::native::clone(t, c10::nullopt);
           // set flag if overlap detected
           overlap_detected_with_fast_check = true;
@@ -1881,11 +1894,14 @@ void StaticRuntime::disableManageOutputTensors() {
 ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
-    bool check_memory_overlap) {
+    bool check_memory_overlap)
+    : check_memory_overlap_(check_memory_overlap) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kOutVariant;
+      // do not check memory overlap for out variants
+      check_memory_overlap_ = false;
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
@@ -1894,6 +1910,10 @@ ProcessedFunction::ProcessedFunction(
     f_ = getNativeOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kNativeFunction;
+#ifdef NDEBUG
+      // skip this check in opt mode because these ops are better vetted
+      check_memory_overlap_ = false;
+#endif
       VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
       return;
     }
@@ -1921,7 +1941,6 @@ ProcessedFunction::ProcessedFunction(
       }
     };
     kind_ = ProcessedFunction::Kind::kInterpreterFallback;
-    check_memory_overlap_ = check_memory_overlap;
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1978,7 +1997,12 @@ void ProcessedNode::run() {
   fn_->f()(this);
 #endif
 #ifndef NDEBUG
-  verify_no_memory_overlap();
+  if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
+    // run check but do not enforce
+    verify_no_memory_overlap();
+  } else {
+    DCHECK(verify_no_memory_overlap());
+  }
 #endif
 }
 
@@ -1994,9 +2018,20 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   return true;
 }
 
-bool ProcessedNode::verify_no_memory_overlap() const {
+bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
+  const static std::array<c10::Symbol, 3> special_case_ops = {
+      fromQualString("prim::TypeCheck"),
+      fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::dict_unpack")};
+  if (!force_check &&
+      std::find(
+          begin(special_case_ops), end(special_case_ops), node()->kind()) !=
+          end(special_case_ops)) {
+    return true;
+  }
+
   return verify_outputs_dont_overlap_each_other() &&
-      verify_inputs_dont_overlap_outputs();
+      verify_inputs_dont_overlap_outputs(force_check);
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
@@ -2020,12 +2055,23 @@ bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
   return true;
 }
 
-bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
+bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   auto schema = node()->maybeSchema();
-  // skip memory overlap check for mutable ops with only one output
-  if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
+  // skip memory overlap check for mutable or view ops with only one output
+  bool skip_check = !schema ||
+      ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
+       num_outputs_ == 1);
+  if (!force_check && skip_check) {
+    if (!schema) {
+      VLOG(2) << "Detected that op schema is null";
+      return true;
+    }
+    VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
+            << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
+            << ", num_outputs_: " << num_outputs_;
     return true;
   }
+
   for (const auto i : c10::irange(inputs_.size())) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
@@ -2059,7 +2105,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
     for (const auto j : c10::irange(num_outputs_)) {
       const auto& out_t = Output(j).toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
-        VLOG(1) << "Detected alias for node: " << PrintNode(node());
+        DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
         Output(i) = at::native::clone(out_t, c10::nullopt);
         set_outputs_memory_overlap_detected();
       }
