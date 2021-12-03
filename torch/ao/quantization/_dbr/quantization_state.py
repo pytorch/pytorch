@@ -111,6 +111,12 @@ class AutoQuantizationState(torch.nn.Module):
 
         self.idx_to_op_convert_info: Dict[int, OpConvertInfo] = {}
 
+        # If this is True, module outputs will be checked and converted
+        # to the dtype specified by the user. If this is False, module outputs
+        # will be returned as is. This value can be precalculated and it is set
+        # to its final value after tracing.
+        self.needs_dtype_transform_on_outputs = True
+
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
 
@@ -184,7 +190,7 @@ class AutoQuantizationState(torch.nn.Module):
             expected_op = seen_op_info.type
         except IndexError:
             _raise_obs_not_found_error(cur_op)
-        if not ops_are_related(cur_op, expected_op):
+        if not ops_are_related(cur_op, expected_op, seen_op_info.type_is_module):
             _raise_obs_op_mismatch(cur_op, expected_op)
 
     def mark_cur_op_complete(self, cur_op: Callable) -> None:
@@ -552,6 +558,23 @@ class AutoQuantizationState(torch.nn.Module):
             pass
         return outputs
 
+    def set_needs_dtype_transform_on_outputs(self):
+        """
+        Calculates whether a dtype transform on module outputs is needed
+        and stores it. This is used to skip the outputs hook if it is not
+        needed.
+        """
+        self.needs_dtype_transform_on_outputs = False
+        qtensor_info = self.output_qtensor_infos[0]
+        if self.output_dtypes is not None:
+            assert qtensor_info is not None
+            # check the output dtype, and do the conversion if needed
+            output_dtype = self.output_dtypes[0]
+            if qtensor_info.inf_dtype != output_dtype:
+                assert output_dtype is torch.float, \
+                    'non-float output dtypes not handled yet'
+                self.needs_dtype_transform_on_outputs = True
+
     def _maybe_mod_outputs_dtype_transform(
         self,
         outputs: Any,
@@ -562,6 +585,9 @@ class AutoQuantizationState(torch.nn.Module):
         tensors it has to return, does the dtype conversion. Otherwise,
         does nothing.
         """
+        if not self.needs_dtype_transform_on_outputs:
+            return outputs
+
         if isinstance(outputs, torch.Tensor):
             qtensor_info = self.output_qtensor_infos[0]
             if self.output_dtypes is not None:
@@ -688,9 +714,10 @@ class AutoQuantizationState(torch.nn.Module):
                         kwarg_name_on_module
 
         if self.idx not in self.idx_to_seen_op_infos:
-            op_type = op if not isinstance(op, torch.nn.Module) else type(op)
+            op_type_is_module = isinstance(op, torch.nn.Module)
+            op_type = type(op) if op_type_is_module else op
             self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
-                self.idx, op_type, fqn, arg_tensor_infos, [],
+                self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
                 op_packing_only_uses_module_attributes)
