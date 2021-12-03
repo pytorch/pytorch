@@ -384,7 +384,7 @@ void initJITBindings(PyObject* module) {
             optimize_for_inference(module, other_methods);
           },
           py::arg("module"),
-          py::arg("other_methods") = std::vector<std:;string>())
+          py::arg("other_methods") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
