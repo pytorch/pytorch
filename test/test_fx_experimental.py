@@ -1463,8 +1463,10 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
@@ -1482,6 +1484,7 @@ class TestNormalizeOperators(JitTestCase):
             "nn.functional.conv2d",
             "nn.functional.dropout",
             "nn.functional.embedding",  # Implemented with a lambda
+            "nn.functional.embedding_bag",  # Implemented with a lambda
             "nn.functional.rrelu",  # Implemented with a lambda
             "nonzero",
             "polygamma",
@@ -1491,6 +1494,7 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
             "unique",
             "unique_consecutive",
@@ -1531,6 +1535,9 @@ class TestNormalizeOperators(JitTestCase):
             '__ror__',
             '__rxor__',
             "__rmatmul__",
+            "atleast_1d",
+            "atleast_2d",
+            "atleast_3d",
         }
 
         # Unsupported input types
