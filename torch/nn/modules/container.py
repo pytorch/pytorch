@@ -733,3 +733,7 @@ class ParameterDict(Module):
                       "on each GPU except the original one.")
 
         return super(ParameterDict, self)._replicate_for_data_parallel()
+
+    def __ior__(self, parameter_dict2 : 'ParameterDict') -> 'ParameterDict':
+        self.update(parameter_dict2._parameters)
+        return self
