@@ -413,7 +413,6 @@ jobs:
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
-            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \

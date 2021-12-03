@@ -298,7 +298,9 @@ jobs:
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+{%- if 'rocm' not in test_runner_type %}
             --ipc=host \
+{%- endif %}
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
