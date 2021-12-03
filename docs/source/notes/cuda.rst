@@ -791,8 +791,8 @@ lets us capture and run graph-safe sections as graphs regardless::
     module3 = torch.nn.Linear(H, D_out).cuda()
 
     loss_fn = torch.nn.MSELoss()
-    optimizer = torch.optim.SGD(chain(module1.parameters() +
-                                      module2.parameters() +
+    optimizer = torch.optim.SGD(chain(module1.parameters(),
+                                      module2.parameters(),
                                       module3.parameters()),
                                 lr=0.1)
 
