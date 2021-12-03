@@ -13,6 +13,8 @@
 #include <tuple>
 #include <vector>
 
+// TODO: Consolidate this file with util.h
+
 namespace torch {
 namespace lazy {
 
