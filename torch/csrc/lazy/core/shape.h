@@ -23,6 +23,7 @@ class TORCH_API Shape {
   c10::ArrayRef<int64_t> sizes() const { return sizes_; }
   int64_t size(int64_t dim) const { return sizes_.at(dim); }
   void set_size(int64_t dim, int64_t size) { sizes_.at(dim) = size; }
+  size_t numel() const;
 
   bool operator==(const Shape& other) const;
 

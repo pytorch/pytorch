@@ -4,13 +4,15 @@
 
 #ifdef THC_GENERIC_FILE
 #include <c10/cuda/CUDAGuard.h>
+#else
+#include <c10/core/CPUAllocator.h>
 #endif
 
 // save_save is necessary since the old eager format saved storages as
 // [size + data], but the v1.5 eager format removes this since size is saved in
 // the filesize.
 template <class io>
-void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size, uint64_t element_size)
+void THPStorage_(writeFileRaw)(c10::StorageImpl *self, io fd, bool save_size, uint64_t element_size)
 {
 #ifdef THC_GENERIC_FILE
   c10::cuda::CUDAGuard guard(self->device());
@@ -84,16 +86,17 @@ void THPStorage_(writeFileRaw)(THWStorage *self, io fd, bool save_size, uint64_t
   }
 }
 
-template void THPStorage_(writeFileRaw<int>)(THWStorage *self, int fd, bool save_size, uint64_t element_size);
-template void THPStorage_(writeFileRaw<PyObject*>)(THWStorage *self, PyObject* fd, bool save_size, uint64_t element_size);
+template void THPStorage_(writeFileRaw<int>)(c10::StorageImpl *self, int fd, bool save_size, uint64_t element_size);
+template void THPStorage_(writeFileRaw<PyObject*>)(c10::StorageImpl *self, PyObject* fd, bool save_size, uint64_t element_size);
 
 template <class io>
-THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t element_size)
+c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw)(
+    io file, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size)
 {
 #ifdef THC_GENERIC_FILE
   c10::cuda::OptionalCUDAGuard guard;
-  if (_storage != nullptr) {
-    guard.set_device(_storage->device());
+  if (storage.defined()) {
+    guard.set_device(storage->device());
   }
 #endif
 
@@ -111,17 +114,23 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
     torch::utils::THP_decodeInt64Buffer(
         &nbytes, (const uint8_t*)&nsize, torch::utils::THP_nativeByteOrder(), 1);
   }
-  THWStoragePtr storage;
-  if (_storage == nullptr) {
-    storage = THWStorage_(newWithSize)(LIBRARY_STATE nbytes);
+  if (!storage.defined()) {
+    storage = c10::make_intrusive<at::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(),
+      nbytes,
+#if defined(THC_GENERIC_FILE)
+      c10::cuda::CUDACachingAllocator::get(),
+#else
+      c10::GetDefaultCPUAllocator(),
+#endif
+      /*resizable=*/true);
   } else {
-    int64_t _storage_nbytes = _storage->nbytes();
-    THPUtils_assert(
+    int64_t _storage_nbytes = storage->nbytes();
+    TORCH_CHECK(
         _storage_nbytes == nbytes,
         "storage has wrong byte size: expected %ld got %ld",
         nbytes,
         _storage_nbytes);
-    storage = _storage;
   }
 
 #ifndef THC_GENERIC_FILE
@@ -173,10 +182,12 @@ THWStorage * THPStorage_(readFileRaw)(io file, THWStorage *_storage, uint64_t el
 #ifdef THC_GENERIC_FILE
   C10_CUDA_CHECK(cudaMemcpy(storage->data<scalar_t>(), data, nbytes, cudaMemcpyHostToDevice));
 #endif
-  return storage.release();
+  return storage;
 }
 
-template THWStorage* THPStorage_(readFileRaw<int>)(int fd, THWStorage* storage, uint64_t element_size);
-template THWStorage* THPStorage_(readFileRaw<PyObject*>)(PyObject* fd, THWStorage* storage, uint64_t element_size);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<int>)(
+    int fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
+template c10::intrusive_ptr<c10::StorageImpl> THPStorage_(readFileRaw<PyObject*>)(
+    PyObject* fd, c10::intrusive_ptr<c10::StorageImpl> storage, uint64_t element_size);
 
 #endif
