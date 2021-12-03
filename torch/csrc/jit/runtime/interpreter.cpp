@@ -332,16 +332,16 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(GET_ATTR): {
             INST_GUARD;
-            auto userObj = pop(stack).toObject();
-            auto value = userObj->getSlot(inst.X);
-            push(stack, std::move(value));
+            const auto& userObj = stack.back().toObjectRef();
+            stack.back() = userObj.getSlot(inst.X);
           }
             INST_NEXT;
           case INST(SET_ATTR): {
             INST_GUARD;
             auto v = pop(stack);
-            auto userObj = pop(stack).toObject();
-            userObj->setSlot(inst.X, std::move(v));
+            auto& userObj = stack.back().toObjectRef();
+            userObj.setSlot(inst.X, std::move(v));
+            stack.pop_back();
           }
             INST_NEXT;
           case INST(JF): {
