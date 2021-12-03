@@ -108,16 +108,18 @@ static NSString* gModelCacheDirectory = @"";
   if ([self _shouldRecompileModel]) {
     if (@available(iOS 11.0, macOS 10.13, *)) {
       NSURL* temporaryFileURL =
-          [MLModel compileModelAtURL:[NSURL URLWithString:_modelPath]
+          [MLModel compileModelAtURL:[NSURL fileURLWithPath:_modelPath]
                                error:&error];
-      // move the model to the cache directory
-      NSFileManager* fileManager = [NSFileManager defaultManager];
-      if ([fileManager fileExistsAtPath:compiledModelPath.path]) {
-        [fileManager removeItemAtURL:compiledModelPath error:&error];
+      if (!error) {
+        // move the model to the cache directory
+        NSFileManager* fileManager = [NSFileManager defaultManager];
+        if ([fileManager fileExistsAtPath:compiledModelPath.path]) {
+          [fileManager removeItemAtURL:compiledModelPath error:&error];
+        }
+        [fileManager moveItemAtURL:temporaryFileURL
+                             toURL:compiledModelPath
+                             error:&error];
       }
-      [fileManager moveItemAtURL:temporaryFileURL
-                           toURL:compiledModelPath
-                           error:&error];
     } else {
       TORCH_CHECK(false, "CoreML is not available on your deivce");
     }
