@@ -617,7 +617,7 @@ class ParameterDict(Module):
         """
         if key in self._parameters:
             return self._parameters[key]
-        self[key] = default
+        self[key] = default # type: ignore
         return self._parameters[key]
 
     def clear(self) -> None:
