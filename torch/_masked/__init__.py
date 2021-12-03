@@ -144,6 +144,7 @@ Example::
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        normalize=(('ord__required', 'dim__as_int',), ('eps=1e-12', 'dtype=None', 'mask=None')),
     )
 
     argument_declarations = dict(
@@ -154,12 +155,15 @@ dim (int or tuple of ints, optional): the dimension or dimensions to reduce.
 dim (int): the dimension along which {operation name} is computed.''',
         ord='''\
 ord (int, float, optional): the order of vector norm. Default: 2.
-  See :func:`torch.linalg.vector_norm` for a list of supported norms.
-''',
+  See :func:`torch.linalg.vector_norm` for a list of supported norms.''',
+        ord__required='''\
+ord (int, float): the order of vector norm. Default: 2.
+  See :func:`torch.linalg.vector_norm` for a list of supported norms.''',
+        eps='''\
+eps (float, optional): small value to avoid division by zero. Default: {default}.''',
         keepdim='''\
 keepdim (bool, optional): whether the output tensor has
-  :attr:`dim` retained or not. Default: {default}.
-''',
+  :attr:`dim` retained or not. Default: {default}.''',
         dtype='''\
 dtype (:class:`torch.dtype`, optional): the desired data type
   of returned tensor.  If specified, the input tensor is
@@ -183,7 +187,11 @@ defined as ``log(exp(x[i])/sum(exp(x)))``.''',
         softmin='''\
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
 of the :attr:`input` tensor. Softmin of i-th element in ``x`` is
-defined as ``exp(-x[i])/sum(exp(-x))``.''')
+defined as ``exp(-x[i])/sum(exp(-x))``.''',
+        normalize='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
+defined as ``x[i]/max(norm(x, p), eps)``.''')
 
     reduction_names = dict(
         sum='sum',
@@ -196,7 +204,8 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
     normalization_names = dict(
         softmax='softmax',
         log_softmax='log_softmax',
-        softmin='softmin')
+        softmin='softmin',
+        normalize='normalize')
 
     operation_names = dict()
     operation_names.update(reduction_names)
@@ -207,7 +216,7 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''')
     example_input = torch.tensor([[-3, -2, -1], [0, 1, 2]])
     example_mask = torch.tensor([[True, False, True], [False, False, False]])
     example_args: Tuple[Any, ...]
-    if func.__name__ == 'norm':
+    if func.__name__ in {'norm', 'normalize'}:
         example_args = (2.0, example_dim)
         example_input = example_input.to(dtype=torch.float32)
     else:
@@ -375,11 +384,11 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """
     if callable(op):
         is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'mean', 'norm'}
-        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
-                    args = args[1:]  # lstrip p argument
+                    args = args[1:]  # lstrip ord argument
             dim = args[0] if args else kwargs.get('dim')
             outmask = _input_mask(input, *args, **kwargs)
             keepdim = kwargs.get('keepdim', False)
@@ -618,3 +627,27 @@ def softmin(input: Tensor,
         return torch.nn.functional.softmin(mask_input, dim_, dtype=dtype)
     else:
         raise ValueError(f'masked softmin expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def normalize(input: Tensor,
+              ord: float,
+              dim: int,
+              *,
+              eps: float = 1e-12,
+              dtype: Optional[DType] = None,
+              mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    if input.layout == torch.strided:
+        nrm_ = norm(input, ord, dim, keepdim=True, dtype=dtype, mask=mask)
+        # TODO: replace torch.maximum with masked maximum when available.
+        denom = torch.maximum(nrm_, nrm_.new_full([], eps))
+        # TODO: eliminate mask_input as unnecessary when using masked divide.
+        inmask = _input_mask(input, mask=mask)
+        mask_input = input if mask is None else torch.where(inmask, input, input.new_zeros([]))
+        # TODO: replace torch.divide with masked divide when available.
+        return torch.divide(mask_input, denom)
+    else:
+        raise ValueError(f'masked normalize expects strided tensor (got {input.layout} tensor)')

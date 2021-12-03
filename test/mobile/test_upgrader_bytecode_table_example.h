@@ -28,18 +28,38 @@ struct Upgrader {
 };
 
 // From operator_versions.yaml
+
 const std::unordered_map<std::string, std::vector<Upgrader>> kOperatorVersionMap(
     {
-        {std::string("aten::div.Tensor"),
-         std::vector<Upgrader>({Upgrader({0, 3, "div_Tensor_0_3", 0})})},
-        {std::string("aten::div.Scalar"),
-         std::vector<Upgrader>({Upgrader({0, 3, "div_Scalar_0_3", 1})})},
-        {std::string("aten::div.out"),
-         std::vector<Upgrader>({Upgrader({0, 3, "div_out_0_3", 2})})},
-        {std::string("aten::div_.Tensor"),
-         std::vector<Upgrader>({Upgrader({0, 3, "div__Tensor_0_3", 3})})},
-        {std::string("aten::div_.Scalar"),
-         std::vector<Upgrader>({Upgrader({0, 3, "div__Scalar_0_3", 4})})},
+
+            {std::string("aten::full.names"),
+                std::vector<Upgrader>({
+
+                })},
+            {std::string("aten::div_.Tensor"),
+                std::vector<Upgrader>({
+                    Upgrader({0, 3, "div__Tensor_0_3", 3})
+                })},
+            {std::string("aten::div.out"),
+                std::vector<Upgrader>({
+                    Upgrader({0, 3, "div_out_0_3", 2})
+                })},
+            {std::string("aten::full.out"),
+                std::vector<Upgrader>({
+
+                })},
+            {std::string("aten::div.Scalar"),
+                std::vector<Upgrader>({
+                    Upgrader({0, 3, "div_Scalar_0_3", 1})
+                })},
+            {std::string("aten::div_.Scalar"),
+                std::vector<Upgrader>({
+                    Upgrader({0, 3, "div__Scalar_0_3", 4})
+                })},
+            {std::string("aten::div.Tensor"),
+                std::vector<Upgrader>({
+                    Upgrader({0, 3, "div_Tensor_0_3", 0})
+                })},
     });
 
 struct OperatorString {
