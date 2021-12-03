@@ -298,6 +298,62 @@ $6 = torch._ops.aten.add_($1, $5)''')
         self.assertEqual(type(torch.full_like(MyTensor(2), 1.)), MyTensor)
         self.assertEqual(type(torch.randint_like(MyTensor(2), high=3)), MyTensor)
 
+    def test_make_wrapper_subclass_propagates_metadata(self) -> None:
+        class WrapperTensor(torch.Tensor):
+            elem: torch.Tensor
+
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad,
+                    strides=elem.stride(), storage_offset=elem.storage_offset())
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                raise RuntimeError("NYI")
+
+        # non-contiguous strides, non-zero storage offset
+        x = torch.randn(4, 6).t().diagonal(offset=2)
+        y = WrapperTensor(x)
+        self.assertEqual(y.size(), x.size())
+        self.assertEqual(y.stride(), x.stride())
+        self.assertEqual(y.storage_offset(), x.storage_offset())
+
+    def test_index_put_where_only_index_is_subclass(self) -> None:
+        called_funcs = []
+
+        class MyTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+            elem: torch.Tensor
+            __slots__ = ['elem']
+
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad
+                )
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                called_funcs.append(func)
+                return MyTensor(torch.tensor(3))
+
+        x = torch.randn(3, 3)
+        idxs = (MyTensor(torch.tensor(0)),)
+        v = torch.randn(1)
+        res = x.index_put_(idxs, v)
+        self.assertEqual(called_funcs, [torch.ops.aten.index_put_])
+
     def test_enable_python_mode_error(self) -> None:
         with self.assertRaisesRegex(ValueError, "__torch_dispatch__"):
             with enable_python_mode(torch.Tensor):
@@ -384,7 +440,7 @@ $6 = torch._ops.aten.add_($1, $5)''')
             self.assertEqual(x, None)
 
     def test_enable_python_mode_subclass_autograd_device_check(self) -> None:
-        class NonWrapperSublass(torch.Tensor):
+        class NonWrapperSubclass(torch.Tensor):
             elem: torch.Tensor
 
             __slots__ = ['elem']
@@ -400,25 +456,71 @@ $6 = torch._ops.aten.add_($1, $5)''')
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
                 def unwrap(e):
-                    return e.elem if isinstance(e, NonWrapperSublass) else e
+                    return e.elem if isinstance(e, NonWrapperSubclass) else e
 
                 def wrap(e):
-                    return NonWrapperSublass(e) if isinstance(e, torch.Tensor) else e
+                    return NonWrapperSubclass(e) if isinstance(e, torch.Tensor) else e
 
                 # no_dispatch is only needed if you use enable_python_mode.
                 # It prevents infinite recursion.
                 with no_dispatch():
                     rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
-                logging.getLogger("NonWrapperSublass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
+                logging.getLogger("NonWrapperSubclass").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
                 return rs
 
-        x = NonWrapperSublass(torch.tensor([3.0, 4.0], requires_grad=True))
+        x = NonWrapperSubclass(torch.tensor([3.0, 4.0], requires_grad=True))
         y = torch.randn(2, requires_grad=True)
         z = x * y
-        self.assertIsInstance(z, NonWrapperSublass)
+        self.assertIsInstance(z, NonWrapperSubclass)
         z.sum().backward(torch.tensor(1))
         self.assertEqual(x.grad, y)
         self.assertEqual(y.grad, x)
+
+    def test_none_wrapping(self):
+        # A Tensor subclass that returns None when doing add
+        # See LoggingTensor above for more details on the subclass
+        class SubclassWithNone(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem, *args, **kwargs):
+                r = torch.Tensor._make_wrapper_subclass(
+                    cls, elem.size(),
+                    dtype=elem.dtype, layout=elem.layout,
+                    device=elem.device, requires_grad=elem.requires_grad
+                )
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    return e.elem if isinstance(e, SubclassWithNone) else e
+
+                def wrap(e):
+                    return SubclassWithNone(e) if isinstance(e, torch.Tensor) else e
+
+                # no_dispatch is only needed if you use enable_python_mode.
+                # It prevents infinite recursion.
+                with no_dispatch():
+                    rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                if func.__name__ == "add":
+                    return None
+                else:
+                    return rs
+
+        x = SubclassWithNone(torch.rand(2))
+        # Make sure both run without error
+        self.assertIsInstance(x * 2, SubclassWithNone)
+        self.assertIsNone(x + 2)
+
+        x.requires_grad_()
+        out = x.acos().sum()
+
+        # The backward of acos does add then rsqrt so here we make sure that the
+        # undefined Tensor generated by the user code is nicely handled.
+        # If acos formula changes in the future, this can be replaced by any other
+        # function that does add then something in the backward in a composite way
+        with self.assertRaisesRegex(RuntimeError, "found an undefined Tensor"):
+            out.backward()
 
 if __name__ == '__main__':
     run_tests()

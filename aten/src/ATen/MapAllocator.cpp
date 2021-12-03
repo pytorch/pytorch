@@ -255,19 +255,19 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
         if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode");
+          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
         }
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
         if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
-          TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode");
+          TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", strerror(errno), " (", errno, ")");
         }
 #else
         TORCH_CHECK(false, "unable to open file <", filename_, "> in sharedmem mode, shm_open unavailable on this platform");
 #endif
       } else {
         if ((fd = open(filename_.c_str(), O_RDONLY)) == -1) {
-          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-only mode");
+          TORCH_CHECK(false, "unable to open file <", filename_, "> in read-only mode: ", strerror(errno), " (", errno, ")");
         }
       }
     } else {
@@ -275,29 +275,32 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
     }
 
     if (fstat(fd, &file_stat) == -1) {
+      int last_err = errno;
       if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
         ::close(fd);
       }
-      TORCH_CHECK(false, "unable to stat the file <", filename_, ">");
+      TORCH_CHECK(false, "unable to stat the file <", filename_, ">: ", strerror(last_err), " (", last_err, ")");
     }
 
     if (size > 0) {
       if (static_cast<int64_t>(size) > file_stat.st_size) {
         if (flags_) {
           if (ftruncate(fd, size) == -1) {
-            TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size");
+            TORCH_CHECK(false, "unable to resize file <", filename_, "> to the right size: ", strerror(errno), " (", errno, ")");
           }
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < static_cast<int64_t>(size)) {
+            int last_err = errno;
             ::close(fd);
-            TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size");
+            TORCH_CHECK(false, "unable to stretch file <", filename_, "> to the right size: ", strerror(last_err), " (", last_err, ")");
           }
 /* on macOS write returns with errno 45 (Opperation not supported) when used
  * with a file descriptor obtained via shm_open
  */
 #ifndef __APPLE__
           if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
+            int last_err = errno;
             ::close(fd);
-            TORCH_CHECK(false, "unable to write to file <", filename_, ">");
+            TORCH_CHECK(false, "unable to write to file <", filename_, ">: ", strerror(last_err), " (", last_err, ")");
           }
 #endif
         } else {
@@ -327,7 +330,7 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
       fd_ = fd;
     } else {
       if (::close(fd) == -1) {
-        TORCH_CHECK(false, "Error closing file <", filename_, ">");
+        TORCH_CHECK(false, "Error closing file <", filename_, ">: ", strerror(errno), " (", errno, ")");
       }
       fd_ = -1;
     }
@@ -336,14 +339,14 @@ MapAllocator::MapAllocator(WithFd, std::string filename, int fd, int flags, size
       if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_UNLINK
         if (shm_unlink(filename_.c_str()) == -1) {
-          TORCH_CHECK(false, "could not unlink the shared memory file ", filename_);
+          TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", strerror(errno), " (", errno, ")");
         }
 #else
         TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
 #endif
       } else {
         if (unlink(filename_.c_str()) == -1)
-          TORCH_CHECK(false, "could not unlink file %s", filename_);
+          TORCH_CHECK(false, "could not unlink file ", filename_, " : ", strerror(errno), " (", errno, ")");
       }
     }
 
@@ -397,19 +400,19 @@ void MapAllocator::close() {
 #else /* _WIN32 */
   if (flags_ & ALLOCATOR_MAPPED_KEEPFD) {
     if (::close(fd_) == -1) {
-      TORCH_CHECK(false, "could not close file descriptor ", fd_);
+      TORCH_CHECK(false, "could not close file descriptor ", fd_, " :", strerror(errno), " (", errno, ")" );
     }
   }
 
   if (munmap(base_ptr_, size_)) {
-    TORCH_CHECK(false, "could not unmap the shared memory file");
+    TORCH_CHECK(false, "could not unmap the shared memory file: ", strerror(errno), " (", errno, ")");
   }
 
   if (!(flags_ & (ALLOCATOR_MAPPED_FROMFD | ALLOCATOR_MAPPED_UNLINK))) {
     if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_UNLINK
       if (shm_unlink(filename_.c_str()) == -1) {
-        TORCH_CHECK(false, "could not unlink the shared memory file ", filename_);
+        TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, " : ", strerror(errno), " (", errno, ")");
       }
 #else
       TORCH_CHECK(false, "could not unlink the shared memory file ", filename_, ", shm_unlink not available on platform");
