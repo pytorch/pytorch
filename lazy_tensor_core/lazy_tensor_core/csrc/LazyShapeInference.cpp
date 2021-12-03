@@ -167,6 +167,14 @@ std::vector<Shape> compute_shape_mv(const at::Tensor& self, const at::Tensor& ve
   return {Shape(self.scalar_type(), {self.size(0)})};
 }
 
+std::vector<Shape> compute_shape_native_dropout(const at::Tensor & input, double p, c10::optional<bool> train) {
+  return {Shape(input.scalar_type(), input.sizes().vec()), Shape(c10::ScalarType::Bool, input.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_native_dropout_backward(const at::Tensor & grad_output, const at::Tensor & mask, double scale) {
+  return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_relu(const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
