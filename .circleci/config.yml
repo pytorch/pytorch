@@ -7723,6 +7723,7 @@ workflows:
       - binary_ios_upload:
           build_environment: libtorch-ios-full_jit-12.5.1-nightly-binary-build-upload
           context: org-member
+          lite_interpreter: "0"
           requires:
             - pytorch_ios_full_jit_12_5_1_nightly_x86_64_build
             - pytorch_ios_full_jit_12_5_1_nightly_arm64_build
