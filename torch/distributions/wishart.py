@@ -82,9 +82,6 @@ class Wishart(Distribution):
             self.precision_matrix = precision_matrix
         self.df = df.expand(batch_shape)
 
-        assert self.df.gt(event_shape[-1] - 1).all(), \
-            f"Expected parameter 'df' to have value greater than {event_shape[-1] - 1}."
-
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
