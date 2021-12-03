@@ -1581,6 +1581,31 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(concat_dp[index], (list(range(10)) + list(range(5)))[index])
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
+    def test_zip_datapipe(self):
+        input_dp1 = dp.map.SequenceWrapper(range(10))
+        input_dp2 = dp.map.SequenceWrapper(range(5))
+        input_dp3 = dp.map.SequenceWrapper(range(15))
+
+        # Functional Test: requires at least one input DataPipe
+        with self.assertRaisesRegex(ValueError, r"Expected at least one DataPipe"):
+            dp.map.Zipper()
+
+        # Functional Test: all inputs must be MapDataPipes
+        with self.assertRaisesRegex(TypeError, r"Expected all inputs to be `MapDataPipe`"):
+            dp.map.Zipper(input_dp1, ())  # type: ignore[arg-type]
+
+        # Functional Test: Zip the elements up as a tuples
+        zip_dp = input_dp1.zip(input_dp2, input_dp3)
+        self.assertEqual([(i, i, i) for i in range(5)], [zip_dp[i] for i in range(5)])
+
+        # Functional Test: Raise IndexError when index equal or exceed the length of the shortest DataPipe
+        with self.assertRaisesRegex(IndexError, r"out of range"):
+            input_dp1.zip(input_dp2, input_dp3)[5]
+
+        # __len__ Test: returns the length of the shortest DataPipe
+        zip_dp = input_dp1.zip(input_dp2, input_dp3)
+        self.assertEqual(5, len(zip_dp))
+
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)
@@ -1611,6 +1636,32 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
+
+    def test_batch_datapipe(self):
+        arr = list(range(13))
+        input_dp = dp.map.SequenceWrapper(arr)
+
+        # Functional Test: batches top level by default
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12]], list(batch_dp))
+
+        # Functional Test: drop_last on command
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2, drop_last=True)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(batch_dp))
+
+        # Functional Test: nested batching
+        batch_dp_2 = batch_dp.batch(batch_size=3)
+        self.assertEqual([[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]], list(batch_dp_2))
+
+        # Reset Test:
+        n_elements_before_reset = 3
+        res_before_reset, res_after_reset = reset_after_n_next_calls(batch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5]], res_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], res_after_reset)
+
+        # __len__ Test:
+        self.assertEqual(6, len(batch_dp))
+        self.assertEqual(2, len(batch_dp_2))
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9

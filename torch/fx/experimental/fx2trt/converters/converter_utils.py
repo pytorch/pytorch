@@ -36,6 +36,24 @@ def get_trt_plugin(
     return plugin
 
 
+def get_positive_dim(dim: int, dim_size: int) -> int:
+    """
+    Given an integer number that represents a dimension in the array,
+    transform it to a positive integer dim if it's negative. Otherwise, do
+    nothing.
+
+    Args:
+        dim (int): A integer number that represents a dimension in an array.
+        dim_size (int): The size of the dimension in the array.
+
+    Returns:
+        A positive integer that represent the same dimension as the given dim.
+    """
+    if dim < 0:
+        return dim % dim_size
+    return dim
+
+
 def set_layer_name(layer: trt.ILayer, target: Target, name: str) -> None:
     """
     Set the TensorRT layer name to "[TensorRT Layer Type]_[Original Op Name]_[FX Node Name with Suffix]"
@@ -296,6 +314,7 @@ def broadcast(
 
     return a, b
 
+
 def add_binary_elementwise_layer(
     network: trt.INetworkDefinition,
     lhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
@@ -395,6 +414,8 @@ def add_activation_layer(
     operation_type: trt.ActivationType,
     target: Target,
     name: str,
+    alpha: Optional[Any] = None,
+    beta: Optional[Any] = None,
 ) -> trt.tensorrt.ITensor:
     """
     Add a TensorRT Activation layer to `network`.
@@ -407,6 +428,10 @@ def add_activation_layer(
             operation.
         target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
+        alpha (Optional[Any]): If not None, we will use it to set the alpha
+            attribute of the created TensorRT activation layer.
+        beta (Optional[Any]): If not None, we will use it to set the beta
+            attribute of the created TensorRT activation layer.
 
     Returns:
         The output of TensorRT Activation layer.
@@ -417,6 +442,10 @@ def add_activation_layer(
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
+    if alpha:
+        layer.alpha = alpha
+    if beta:
+        layer.beta = beta
     set_layer_name(layer, target, name)
     return layer.get_output(0)
 
@@ -458,3 +487,57 @@ def get_inputs_from_args_and_kwargs(args, kwargs, input_names):
         else:
             inputs.append(kwargs[key])
     return inputs
+
+
+def trunc_div(
+    input: trt.tensorrt.ITensor,
+    other: trt.tensorrt.ITensor,
+    network: trt.INetworkDefinition,
+    target: Target,
+    name: str
+) -> trt.tensorrt.ITensor:
+    """
+    Perform trunc divide on Tensor, result of divide will be round toward zero.
+    This means for positive number, it will be floor round; for negative number,
+    it will be ceil round. Example: [2.1, 0.8, -3.2] -> [2, 0, -3].
+    Args:
+        input: divisor.
+        other: dividend.
+        network: INetworkDefinition.
+        target: node target.
+        name: namespace for the op
+    Returns:
+        A TensorRT tensor represent the result of trunc divide.
+    """
+    prod_output = add_binary_elementwise_layer(network, input, other, trt.ElementWiseOperation.PROD, target, f"{name}_prod")
+
+    # get sign:
+    # x = input * other
+    # sign = (exp(x) // exp(abs(x))) * 2 - 1
+    # For positive number and 0, (exp(x) // exp(abs(x))) yield 1; for negative number, (exp(x) // exp(abs(x))) yield 0.
+    # With multiply 2, the value become 2(for pos and 0) and 0(for neg).
+    # Finally minus 1, the value become 1(for pos and 0) and -1(for neg).
+    prod_exp_output = add_unary_layer(network, prod_output, trt.UnaryOperation.EXP, target, f"{name}_prod_exp")
+    prod_abs_output = add_unary_layer(network, prod_output, trt.UnaryOperation.ABS, target, f"{name}_prod_abs")
+    prod_abs_exp_output = add_unary_layer(network, prod_abs_output, trt.UnaryOperation.EXP, target, f"{name}_prod_abs_exp")
+    floor_div_output = add_binary_elementwise_layer(network, prod_abs_output, prod_abs_exp_output,
+                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_exp_floor_div")
+    double_floor_div_output = add_binary_elementwise_layer(network, floor_div_output, 2,
+                                                           trt.ElementWiseOperation.PROD, target, f"{name}_double_floor_div")
+    sign_output = add_binary_elementwise_layer(network, double_floor_div_output, 1,
+                                               trt.ElementWiseOperation.SUB, target, f"{name}_binary_sign")
+
+    # Convert constant input into ITensor for UnaryOperation
+    if not isinstance(input, trt.tensorrt.ITensor):
+        input = get_trt_tensor(network, input, f"{name}_input")
+    if not isinstance(other, trt.tensorrt.ITensor):
+        other = get_trt_tensor(network, other, f"{name}_other", dtype=torch_dtype_from_trt(input.dtype))
+
+    abs_a_output = add_unary_layer(network, input, trt.UnaryOperation.ABS, target, f"{name}_abs_a")
+    abs_b_output = add_unary_layer(network, other, trt.UnaryOperation.ABS, target, f"{name}_abs_b")
+    abs_floor_output = add_binary_elementwise_layer(network, abs_a_output, abs_b_output,
+                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_floor_div")
+    output = add_binary_elementwise_layer(network, abs_floor_output, sign_output,
+                                          trt.ElementWiseOperation.PROD, target, f"{name}_output")
+
+    return output

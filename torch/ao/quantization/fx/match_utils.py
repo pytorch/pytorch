@@ -76,8 +76,6 @@ def is_match(
         return False
 
     if (
-        # This is True if we are not at the last node in the pattern
-        max_uses < sys.maxsize and
         # The following two lines are True if the current module has
         # more than one node using it
         node.op == 'call_module' and

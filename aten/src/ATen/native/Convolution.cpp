@@ -827,11 +827,10 @@ ConvBackend select_conv_backend(
   check_shape_forward(input, weight.sizes(), bias, params);
 
   // Expand 1d -> 2d.
-  if (k == 3) {
+  // This is only done for backends that don't natively support 1d spatial input.
+  if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input.is_mkldnn()) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -1019,11 +1018,10 @@ at::Tensor _convolution(
   check_shape_forward(input, weight_sizes, bias, params);
 
   // Expand 1d -> 2d.
-  if (k == 3) {
+  // This is only done for backends that don't natively support 1d spatial input.
+  if (k == 3 && !input.is_mkldnn()) {
     // avoid accidentally going through NHWC for permuted 3d input.
-    if (!input.is_mkldnn()) {
-      input = input.contiguous();
-    }
+    input = input.contiguous();
     params.view1d_as_2d();
     input = view4d(input);
     weight = view4d(weight);
@@ -1172,7 +1170,7 @@ at::Tensor _convolution(
       break;
   }
 
-  if (k == 3) {
+  if (k == 3 && !input.is_mkldnn()) {
     output = view3d(output);
   }
 
@@ -1190,81 +1188,6 @@ at::Tensor _convolution(
   const Tensor& bias_r = *bias_r_maybe_owned;
 
   return at::_convolution(input_r, weight_r, bias_r, stride_, padding_, dilation_, transposed_, output_padding_, groups_, benchmark, deterministic, cudnn_enabled, at::globalContext().allowTF32CuDNN());
-}
-
-// A generic function for convolution implementations which don't
-// natively implement groups (e.g., not CuDNN).
-at::Tensor _convolution_nogroup(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-
-
-  ConvParams params;
-  params.stride = stride.vec();
-  params.padding = padding.vec();
-  params.dilation = dilation.vec();
-  params.transposed = transposed;
-  params.output_padding = output_padding.vec();
-  params.groups = 1;
-  params.benchmark = false;
-  params.deterministic = false;
-  params.cudnn_enabled = false;
-
-  auto dim = input.ndimension();
-  auto dilated = params.is_dilated();
-  auto kernel_size = weight.sizes().slice(2);
-
-  if (params.transposed) {
-    if (dim == 4) {
-      return at::slow_conv_transpose2d(
-          input, weight, kernel_size, bias,
-          stride, padding, output_padding, dilation);
-    } else if (dim == 5) {
-      return at::slow_conv_transpose3d(
-        input, weight, kernel_size, bias,
-        stride, padding, output_padding, dilation);
-      }
-  } else {  /* Not transposed */
-    if (dim == 4) {
-      if (dilated) {
-        return at::slow_conv_dilated2d(
-            input, weight, kernel_size, bias,
-            stride, padding, dilation);
-      } else {  /* dim == 4, non-dilated */
-        if (params.use_nnpack(input, weight)) {
-#if AT_NNPACK_ENABLED()
-          return at::_nnpack_spatial_convolution(
-              input, weight, bias, padding, stride);
-#endif
-        } else {
-          /* CPU implementation has specialized MM kernels
-             for non-dilated case here */
-          return at::thnn_conv2d(
-              input, weight, kernel_size, bias,
-              stride, padding);
-        }
-      }
-    } else if (dim == 5 && (input.is_cuda() || dilated)) {
-      return at::slow_conv_dilated3d(
-          input, weight, kernel_size, bias,
-          stride, padding, dilation);
-    } else if (dim == 5) { /* dim == 5, CPU, non-dilated */
-      /* CPU implementation has specialized MM kernels
-         for non-dilated case here */
-
-      // This path is already overwritten with the fast impl in _convolution
-      // See: https://github.com/pytorch/pytorch/pull/3635
-      return at::slow_conv3d(
-          input, weight, kernel_size, bias,
-          stride, padding);
-    }
-  }
-
-  AT_ERROR("unsupported ConvNd parameters");
 }
 
 std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
