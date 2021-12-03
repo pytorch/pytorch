@@ -764,7 +764,7 @@ BAD_EXAMPLES = [
     Example(Wishart, [
         {
             'covariance_matrix': torch.tensor([[1.0, 0.0], [0.0, -2.0]], requires_grad=True),
-            'df': torch.tensor([1.], requires_grad=True),
+            'df': torch.tensor([1.5], requires_grad=True),
         },
         {
             'covariance_matrix': torch.tensor([[1.0, 1.0], [1.0, -2.0]], requires_grad=True),
