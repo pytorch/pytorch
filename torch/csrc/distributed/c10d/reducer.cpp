@@ -1589,10 +1589,12 @@ void Reducer::sync_bucket_indices(
   at::TensorOptions options;
   options = options.dtype(at::kInt);
   options = options.device(params_[0].device());
-
+  auto pin_memory = params_[0].device().is_cuda();
   // Group indices and num_bucket together into indices_tensor
   // Broadcast this tensor first, as its size is equal among all processes
-  auto indices_tensor = at::empty({total_size + 1}, at::kInt);
+  auto indices_tensor = at::empty(
+      {total_size + 1},
+      at::TensorOptions().dtype(at::kInt).pinned_memory(pin_memory));
   auto indices_accessor = indices_tensor.accessor<int, 1>();
   auto indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
@@ -1615,7 +1617,9 @@ void Reducer::sync_bucket_indices(
   num_buckets = indices_accessor[indices_accessor_Index];
 
   // Broadcast bucket_sizes
-  auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
+  auto bucket_sizes_tensor = at::empty(
+      {(int64_t)num_buckets},
+      at::TensorOptions().dtype(at::kInt).pinned_memory(pin_memory));
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
   for (const auto i : c10::irange(num_buckets)) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
