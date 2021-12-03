@@ -472,15 +472,7 @@ Tensor view_as_complex_batching_rule(const Tensor& self) {
 // Checks that the smallest batch stride is greater than the largest example
 // stride. This is something we can support but we choose not to because it's
 // potentially error prone.
-static void checkBatchDimsAtFrontInLayout(
-    IntArrayRef physical_strides,
-    IntArrayRef physical_sizes,
-    int64_t num_batch_dims,
-    std::string func_name) {
-  if (std::find(physical_sizes.begin(), physical_sizes.end(), 0) != physical_sizes.end()) {
-    // The tensor has zero numel
-    return;
-  }
+static void checkBatchDimsAtFrontInLayout(IntArrayRef physical_strides, int64_t num_batch_dims) {
   auto smallest_batch_stride = std::min_element(
       physical_strides.begin(), physical_strides.begin() + num_batch_dims);
   auto largest_example_stride = std::max_element(
@@ -490,7 +482,7 @@ static void checkBatchDimsAtFrontInLayout(
     return;
   }
   TORCH_CHECK(*smallest_batch_stride >= *largest_example_stride,
-    "vmap: Calling ", func_name, " is not supported unless the batch dims being ",
+    "vmap: Calling Tensor.as_strided is not supported unless the batch dims being ",
     "vmapped over are at the front of the tensor (in memory layout). When they are ",
     "not at the front of the tensor this operation can be error prone so we "
     "actively discourage it; please file us a bug report and/or try to ",
@@ -566,18 +558,18 @@ Tensor _new_zeros_with_same_feature_meta_batching_rule(
   auto self_physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
   const auto& self_physical_tensor = self_physical_view.tensor();
   int64_t num_batch_dims = self_physical_view.numBatchDims();
-  checkBatchDimsAtFrontInLayout(
-      self_physical_tensor.strides(), self_physical_tensor.sizes(),num_batch_dims, "_new_zeros_with_same_feature_meta");
+  checkBatchDimsAtFrontInLayout(self_physical_tensor.strides(), num_batch_dims);
   auto result = at::_new_zeros_with_same_feature_meta(self_physical_tensor, other, num_batch_dims);
   return self_physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
-int64_t _storage_numel_batching_rule(const Tensor& self) {
-  auto physical_view = at::MultiBatchVmapTransform::logicalToPhysical(self);
-  auto num_batch_dims = physical_view.numBatchDims();
-  const auto& physical_tensor = physical_view.tensor();
-  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims, "_storage_numel");
-  return physical_tensor.strides()[num_batch_dims - 1];
+bool _has_same_storage_numel_batching_rule(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(isBatchedTensor(self) && !isBatchedTensor(other),
+    "Only the 'batched grad' use case is supported in PyTorch core.");
+  // The _has_same_storage_numel check is skipped if the tangent is a batched
+  // tensor because using as_strided to access storage locations not indexable
+  // by the input tensor is not supported in vmap
+  return true;
 }
 
 // What are the semantics of as_strided inside of vmap?
@@ -624,8 +616,7 @@ Tensor as_strided_batching_rule(
   // 2. as_strided(sizes, strides, storage_offset + tensor[i].offset() - tensor.offset())
   // is valid for a slice of the input tensor.
   // See Note: [When will the as_strided batching rule fail?] for details.
-  checkBatchDimsAtFrontInLayout(
-      physical_tensor.strides(), physical_tensor.sizes(), num_batch_dims, "Tensor.as_strided");
+  checkBatchDimsAtFrontInLayout(physical_tensor.strides(), num_batch_dims);
   checkBasicAsStridedValidForSlice(
       physical_tensor, num_batch_dims, sizes, strides, storage_offset);
 
@@ -1078,7 +1069,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("_add_batch_dim", native::_add_batch_dim);
   m.impl("_remove_batch_dim", native::_remove_batch_dim);
   m.impl("_make_dual", _make_dual_batching_rule);
-  m.impl("_storage_numel", _storage_numel_batching_rule);
+  m.impl("_has_same_storage_numel", _has_same_storage_numel_batching_rule);
   m.impl("is_same_size", native::is_same_size);
   m.impl("_new_zeros_with_same_feature_meta", _new_zeros_with_same_feature_meta_batching_rule);
 

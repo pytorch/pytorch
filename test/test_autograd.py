@@ -7244,7 +7244,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertIs(x_tangent, tangent)
         self.assertIs(view_tangent, tangent)
 
-
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
         tangent = torch.zeros([2, 2, 2])
@@ -7260,6 +7259,28 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertIs(view_tangent._base, base_tangent)
         self.assertIs(x_tangent, tangent)
         self.assertIsNot(view_tangent, tangent)
+
+    def test_metadata_check_for_storage_numel_skipped(self):
+        # See: test_metadata_check_checks_storage_numel for the reverse of this test
+        primal = torch.randn(5)[:4].detach()
+        self.assertEqual(len(primal.storage()), 5)
+        tangent = torch.randn(10, 4)
+
+        def jvp(tangent):
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(primal, tangent)
+                _, unpacked_tangent = fwAD.unpack_dual(dual)
+
+                # No copy is made
+                self.assertIs(tangent, unpacked_tangent)
+
+                # as_strided raises
+                with self.assertRaisesRegex(RuntimeError, "can access memory outside of `tensor`"):
+                    dual.as_strided((5,), (1,), 0)
+            return unpacked_tangent
+
+        torch._vmap_internals._vmap(jvp, 0, 0)(tangent)
+
 
 class TestAutogradForwardMode(TestCase):
     def tearDown(self):
@@ -7314,9 +7335,8 @@ class TestAutogradForwardMode(TestCase):
 
             dual = fwAD.make_dual(foo, tangent[1:])
 
-    def test_layout_check(self):
-        # Check that a copy is performed when _set_fw_grad detects a layout mismatch
-        primal = torch.randn(5).resize_(4)
+    def test_metadata_check_checks_storage_numel(self):
+        primal = torch.randn(5)[:4].detach()
         self.assertEqual(len(primal.storage()), 5)
         tangent = torch.randn(4)
 
@@ -7324,12 +7344,15 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(primal, tangent)
             _, unpacked_tangent = fwAD.unpack_dual(dual)
 
-            # Verify that mutating unpacked tangent does not affect the original tangent
+            # # Verify that mutating unpacked tangent does not affect the original tangent
             tangent_clone = tangent.clone()
             unpacked_tangent *= 2
             self.assertTrue(torch.allclose(tangent_clone, tangent))
 
-    def test_layout_check_for_primal_with_conj_bit(self):
+            # as_strided runs without error
+            dual.as_strided((5,), (1,), 0)
+
+    def test_metadata_check_when_primal_has_conj_bit(self):
         # Make sure the _has_same_meta is a fallthrough, so that
         # conj bit does not materialize. If it materializes it would
         # cause the layout check to fail for views that do not index the
@@ -7409,11 +7432,11 @@ class TestAutogradForwardMode(TestCase):
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if func == torch.ops.aten._make_dual:
+                if func == torch.ops.aten.alias:
                     counter[0] += 1
 
                     with no_dispatch():
-                        return MySubclass(torch.ops.aten._make_dual(*args))
+                        return MySubclass(torch.ops.aten.alias(*args))
 
                 with no_dispatch():
                     return func(*args, **kwargs)
@@ -7423,9 +7446,9 @@ class TestAutogradForwardMode(TestCase):
 
         with fwAD.dual_level():
             fwAD.make_dual(s, torch.rand_like(s))
+            self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
-
-        self.assertEqual(counter[0], 2)
+            self.assertEqual(counter[0], 2)
 
     def test_print(self):
         with fwAD.dual_level() as level:
