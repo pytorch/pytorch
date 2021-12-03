@@ -597,8 +597,6 @@ class TORCH_API ProcessedNode {
   }
 #endif
 
-  bool verify_no_memory_overlap() const;
-
   bool check_outputs_for_memory_overlap() const {
     return fn_->checkMemoryOverlap();
   }
@@ -621,11 +619,13 @@ class TORCH_API ProcessedNode {
   C10_NODISCARD uint16_t output_ivalue_index(uint16_t i) const {
     return outputs_offset_ + i;
   }
+  // used in debug mode
+  bool verify_no_memory_overlap(bool force_check = false) const;
 
  private:
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
-  C10_NODISCARD bool verify_inputs_dont_overlap_outputs() const;
+  C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
 
   Node* node_;
   const ProcessedFunction* fn_;
