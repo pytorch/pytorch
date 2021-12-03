@@ -72,7 +72,7 @@ default_auto_wrap_policy.FORCE_LEAF_MODULES = {nn.MultiheadAttention}  # type: i
 
 
 @contextlib.contextmanager
-def enable_wrap(**wrapper_kwargs: Any) -> Generator[None, None, None]:
+def enable_wrap(*, wrapper_cls: Any, **wrapper_kwargs: Any) -> Generator[None, None, None]:
     """
     Context manager to wrap modules using a wrapper.
 
@@ -85,16 +85,23 @@ def enable_wrap(**wrapper_kwargs: Any) -> Generator[None, None, None]:
 
     Usage::
 
-        with enable_wrap(**params):
+        with enable_wrap(wrapper_cls, **params):
             # Wraps layer in FSDP by default if within context
             self.l1 = wrap(torch.nn.Linear(5, 5))
 
     Args:
+        wrapper_cls:
+            Class that `wrap` annotation will `wrap` modules with, such as
+            `FullyShardedDataParallel`.
         **wrapper_kwargs:
             Configuration settings that will be passed to all ``wrap``
             instances inside the context
     """
-    with ConfigAutoWrap(**wrapper_kwargs):
+    kwargs = {
+        **{"wrapper_cls": wrapper_cls},
+        **wrapper_kwargs,
+    }
+    with ConfigAutoWrap(**kwargs):
         yield
 
 
