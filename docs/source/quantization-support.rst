@@ -1,7 +1,7 @@
 Quantization API Reference
 -------------------------------
 
-torch.quantization
+torch.ao.quantization
 ~~~~~~~~~~~~~~~~~~
 
 This module contains Eager mode quantization APIs.
@@ -51,7 +51,7 @@ Utility functions
     default_eval_fn
     get_observer_dict
 
-torch.quantization.quantize_fx
+torch.ao.quantization.quantize_fx
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains FX graph mode quantization APIs (prototype).
@@ -126,13 +126,13 @@ regular full-precision tensor.
     topk
 
 
-torch.quantization.observer
+torch.ao.quantization.observer
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module contains observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
 
-.. currentmodule:: torch.quantization.observer
+.. currentmodule:: torch.ao.quantization.observer
 
 .. autosummary::
     :toctree: generated
@@ -159,7 +159,7 @@ the values observed during calibration (PTQ) or training (QAT).
     default_dynamic_quant_observer
     default_float_qparams_observer
 
-torch.quantization.fake_quantize
+torch.ao.quantization.fake_quantize
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module implements modules which are used to perform fake quantization
@@ -188,7 +188,7 @@ during QAT.
     disable_observer
     enable_observer
 
-torch.quantization.qconfig
+torch.ao.quantization.qconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This module defines `QConfig` and `QConfigDynamic` objects which are used
@@ -441,9 +441,9 @@ support per channel quantization for weights of the **conv** and **linear**
 operators. Furthermore the minimum and the maximum of the input data is
 mapped linearly to the minimum and the maximum of the quantized data
 type such that zero is represented with no quantization error. This is slightly altered
-for symmetric qschemes, which instead use the negative and positive of the `maximum absolute
-value of the input data` in place of the minimum and maximum. For more info see how
-scale and zero point are calculated by `torch.quantization.MinMaxObserver`
+for symmetric qschemes, which instead use the negative and positive of the maximum absolute
+value of the input data in place of the normal minimum and maximum for the input data. For more info see how
+scale and zero point are calculated by :class:`~torch.ao.quantization.observer.MinMaxObserver`.
 
 Additional data types and quantization schemes can be implemented through
 the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_script_custom_ops.html>`_.
