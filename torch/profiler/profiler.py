@@ -9,8 +9,179 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
-from torch.autograd.profiler import profile as kineto_profile
-from torch.autograd import kineto_available, ProfilerActivity
+from torch.autograd import ProfilerActivity, kineto_available
+
+
+def supported_activities():
+    """
+    Returns a set of supported profiler tracing activities.
+
+    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
+    In case when CUDA is enabled but CUPTI is not available, passing
+    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
+    profiling code (same as in the legacy ``torch.autograd.profiler``).
+    This, in turn, results in including CUDA time in the profiler table output,
+    but not in the JSON trace.
+    """
+    return torch.autograd._supported_activities()
+
+
+class kineto_profile(object):
+    """Low-level profiler wrap the autograd profile
+
+    Args:
+        activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+        record_shapes (bool): save information about operator's input shapes.
+        profile_memory (bool): track tensor memory allocation/deallocation.
+        with_stack (bool): record source information (file and line number) for the ops.
+        with_flops (bool): use formula to estimate the FLOPS of specific operators
+            (matrix multiplication and 2D convolution).
+        with_modules (bool): record module hierarchy (including function names)
+            corresponding to the callstack of the op. e.g. If module A's forward call's
+            module B's forward which contains an aten::add op,
+            then aten::add's module hierarchy is A.B
+            Note that this support exist, at the moment, only for TorchScript models
+            and not eager mode models.
+
+    .. note::
+        Enabling shape and stack tracing results in additional overhead.
+        When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
+        that may further prevent certain optimizations that depend on the reference count and introduce
+        extra tensor copies.
+    """
+    def __init__(
+            self,
+            *,
+            activities: Optional[Iterable[ProfilerActivity]] = None,
+            record_shapes: bool = False,
+            profile_memory: bool = False,
+            with_stack: bool = False,
+            with_flops: bool = False,
+            with_modules: bool = False):
+        if activities:
+            self.activities = set(activities)
+        else:
+            self.activities = supported_activities()
+        self.record_shapes = record_shapes
+        self.with_flops = with_flops
+        self.profile_memory = profile_memory
+        self.with_stack = with_stack
+        self.with_modules = with_modules
+        self.profiler: Optional[prof.profile] = None
+
+    def start(self):
+        self.prepare_trace()
+        self.start_trace()
+
+    def stop(self):
+        self.stop_trace()
+
+    def prepare_trace(self):
+        self.profiler = prof.profile(
+            use_cuda=(ProfilerActivity.CUDA in self.activities),
+            use_cpu=(ProfilerActivity.CPU in self.activities),
+            record_shapes=self.record_shapes,
+            with_flops=self.with_flops,
+            profile_memory=self.profile_memory,
+            with_stack=self.with_stack,
+            with_modules=self.with_modules,
+            use_kineto=True,
+        )
+        self.profiler._prepare_trace()
+
+    def start_trace(self):
+        assert self.profiler is not None
+        self.profiler._start_trace()
+
+        if kineto_available():
+            dist_info = self._get_distributed_info()
+            if dist_info:
+                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
+
+    def stop_trace(self):
+        assert self.profiler is not None
+        self.profiler.__exit__(None, None, None)
+
+    def export_chrome_trace(self, path: str):
+        """
+        Exports the collected trace in Chrome JSON format.
+        """
+        assert self.profiler
+        if path.endswith('.gz'):
+            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+            fp.close()
+            retvalue = self.profiler.export_chrome_trace(fp.name)
+            with open(fp.name) as fin:
+                with gzip.open(path, 'wt') as fout:
+                    fout.writelines(fin)
+            os.remove(fp.name)
+            return retvalue
+        else:
+            return self.profiler.export_chrome_trace(path)
+
+    def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
+        """Save stack traces in a file in a format suitable for visualization.
+
+        Args:
+            path (str): save stacks file to this location;
+            metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+
+        .. note::
+            Example of using FlameGraph tool:
+
+            - git clone https://github.com/brendangregg/FlameGraph
+            - cd FlameGraph
+            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
+        """
+        assert self.profiler
+        return self.profiler.export_stacks(path, metric)
+
+    def key_averages(self, group_by_input_shape: bool = False, group_by_stack_n: int = 0):
+        """Averages events, grouping them by operator name and (optionally) input shapes and
+        stack.
+
+        .. note::
+            To use shape/stack functionality make sure to set record_shapes/with_stack
+            when creating profiler context manager.
+        """
+        assert self.profiler
+        return self.profiler.key_averages(group_by_input_shape, group_by_stack_n)
+
+    def events(self):
+        """
+        Returns the list of unaggregated profiler events,
+        to be used in the trace callback or after the profiling is finished
+        """
+        assert self.profiler
+        return self.profiler.function_events
+
+    def add_metadata(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a string value
+        into the trace file
+        """
+        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
+        torch.autograd._add_metadata_json(key, wrapped_value)
+
+    def add_metadata_json(self, key: str, value: str):
+        """
+        Adds a user defined metadata with a string key and a valid json value
+        into the trace file
+        """
+        torch.autograd._add_metadata_json(key, value)
+
+    def _get_distributed_info(self):
+        import torch.distributed as dist
+        if not dist.is_available() or not dist.is_initialized():
+            return None
+
+        return {
+            "backend": dist.get_backend(),
+            "rank": dist.get_rank(),
+            "world_size": dist.get_world_size()
+        }
 
 
 class ProfilerAction(Enum):
@@ -87,19 +258,6 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
     return handler_fn
-
-def supported_activities():
-    """
-    Returns a set of supported profiler tracing activities.
-
-    Note: profiler uses CUPTI library to trace on-device CUDA kernels.
-    In case when CUDA is enabled but CUPTI is not available, passing
-    ``ProfilerActivity.CUDA`` to profiler results in using the legacy CUDA
-    profiling code (same as in the legacy ``torch.autograd.profiler``).
-    This, in turn, results in including CUDA time in the profiler table output,
-    but not in the JSON trace.
-    """
-    return torch.autograd._supported_activities()
 
 
 class profile(kineto_profile):
@@ -226,6 +384,7 @@ class profile(kineto_profile):
             activities_set = set(activities)
         else:
             activities_set = supported_activities()
+        assert len(activities_set) > 0, "No valid profiler activities found"
 
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
@@ -234,17 +393,13 @@ class profile(kineto_profile):
             elif ProfilerActivity.CUDA in activities_set:
                 activities_set.remove(ProfilerActivity.CUDA)
 
-        assert len(activities_set) > 0, "No valid profiler activities found"
-
         super().__init__(
-            use_cuda=(ProfilerActivity.CUDA in activities_set),
-            use_cpu=(ProfilerActivity.CPU in activities_set),
+            activities=activities,
             record_shapes=record_shapes,
-            with_flops=with_flops,
             profile_memory=profile_memory,
             with_stack=with_stack,
-            with_modules=with_modules,
-            use_kineto=True
+            with_flops=with_flops,
+            with_modules=with_modules
         )
 
         if schedule:
@@ -262,40 +417,40 @@ class profile(kineto_profile):
         self.action_map: Dict[Tuple[ProfilerAction, Optional[ProfilerAction]], List[Any]] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
-            (ProfilerAction.NONE, ProfilerAction.WARMUP): [self._prepare_trace],
-            (ProfilerAction.NONE, ProfilerAction.RECORD): [self._prepare_trace, self._start_trace],
-            (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [self._prepare_trace, self._start_trace],
+            (ProfilerAction.NONE, ProfilerAction.WARMUP): [self.prepare_trace],
+            (ProfilerAction.NONE, ProfilerAction.RECORD): [self.prepare_trace, self.start_trace],
+            (ProfilerAction.NONE, ProfilerAction.RECORD_AND_SAVE): [self.prepare_trace, self.start_trace],
             (ProfilerAction.WARMUP, ProfilerAction.NONE): [
                 partial(warn, "Incorrect schedule: WARMUP followed by NONE"),
-                self._start_trace,
-                super().stop],
+                self.start_trace,
+                self.stop_trace],
             (ProfilerAction.WARMUP, ProfilerAction.WARMUP): [],
-            (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self._start_trace],
-            (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self._start_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.RECORD): [self.start_trace],
+            (ProfilerAction.WARMUP, ProfilerAction.RECORD_AND_SAVE): [self.start_trace],
             (ProfilerAction.RECORD, ProfilerAction.NONE): [
                 partial(warn, "Incorrect schedule: RECORD followed by NONE"),
-                super().stop],
+                self.stop_trace],
             (ProfilerAction.RECORD, ProfilerAction.WARMUP): [
                 partial(warn, "Incorrect schedule: RECORD followed by WARMUP"),
-                super().stop],
+                self.stop_trace],
             (ProfilerAction.RECORD, ProfilerAction.RECORD): [],
             (ProfilerAction.RECORD, ProfilerAction.RECORD_AND_SAVE): [],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [super().stop, self._trace_ready],
-            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [super().stop, self._trace_ready, self._prepare_trace],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.NONE): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.WARMUP): [self.stop_trace, self._trace_ready, self.prepare_trace],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD): [
-                super().stop,
+                self.stop_trace,
                 self._trace_ready,
-                self._prepare_trace,
-                self._start_trace],
+                self.prepare_trace,
+                self.start_trace],
             (ProfilerAction.RECORD_AND_SAVE, ProfilerAction.RECORD_AND_SAVE): [
-                super().stop,
+                self.stop_trace,
                 self._trace_ready,
-                self._prepare_trace,
-                self._start_trace],
+                self.prepare_trace,
+                self.start_trace],
             # used for exit action
-            (ProfilerAction.WARMUP, None): [self._start_trace, super().stop],
-            (ProfilerAction.RECORD, None): [super().stop, self._trace_ready],
-            (ProfilerAction.RECORD_AND_SAVE, None): [super().stop, self._trace_ready]
+            (ProfilerAction.WARMUP, None): [self.start_trace, self.stop_trace],
+            (ProfilerAction.RECORD, None): [self.stop_trace, self._trace_ready],
+            (ProfilerAction.RECORD_AND_SAVE, None): [self.stop_trace, self._trace_ready]
         }
 
     def __enter__(self):
@@ -316,14 +471,6 @@ class profile(kineto_profile):
             self.step_rec_fn.__exit__(None, None, None)
         self._transit_action(self.current_action, None)
 
-    def _start_trace(self):
-        super()._start_trace()
-
-        if kineto_available():
-            dist_info = self._get_distributed_info()
-            if dist_info:
-                self.add_metadata_json("distributedInfo", json.dumps(dist_info))
-
     def step(self):
         """
         Signals the profiler that the next profiling step has started.
@@ -339,55 +486,6 @@ class profile(kineto_profile):
         if self.record_steps:
             self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
             self.step_rec_fn.__enter__()
-
-    def export_chrome_trace(self, path: str):
-        """
-        Exports the collected trace in Chrome JSON format.
-        """
-        if path.endswith('.gz'):
-            fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
-            fp.close()
-            retvalue = super().export_chrome_trace(fp.name)
-            with open(fp.name) as fin:
-                with gzip.open(path, 'wt') as fout:
-                    fout.writelines(fin)
-            os.remove(fp.name)
-            return retvalue
-        else:
-            return super().export_chrome_trace(path)
-
-    def events(self):
-        """
-        Returns the list of unaggregated profiler events,
-        to be used in the trace callback or after the profiling is finished
-        """
-        return self.function_events
-
-    def add_metadata(self, key: str, value: str):
-        """
-        Adds a user defined metadata with a string key and a string value
-        into the trace file
-        """
-        wrapped_value = "\"" + value.replace('"', '\\"') + "\""
-        torch.autograd._add_metadata_json(key, wrapped_value)
-
-    def add_metadata_json(self, key: str, value: str):
-        """
-        Adds a user defined metadata with a string key and a valid json value
-        into the trace file
-        """
-        torch.autograd._add_metadata_json(key, value)
-
-    def _get_distributed_info(self):
-        import torch.distributed as dist
-        if not dist.is_available() or not dist.is_initialized():
-            return None
-
-        return {
-            "backend": dist.get_backend(),
-            "rank": dist.get_rank(),
-            "world_size": dist.get_world_size()
-        }
 
     def _trace_ready(self):
         if self.on_trace_ready:
