@@ -13,7 +13,8 @@ def _mvdigamma(x, p) -> torch.Tensor:
 
 class Wishart(Distribution):
     r"""
-    Creates a Wishart distribution parameterized by a square root matrix of symmetric matrix.
+    Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
+    or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
     The Wishart distribution can be parameterized either in terms of
     an outer product of general square root matrix e,g.,
     :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top` or
