@@ -1006,6 +1006,7 @@ def sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwar
 
     return inputs
 
+
 def sample_inputs_masked_norm(op_info, device, dtype, requires_grad, **kwargs):
     """Sample inputs for masked norm.
     """
@@ -5821,6 +5822,17 @@ def sample_inputs_masked_softmax(op_info, device, dtype, requires_grad, with_dty
                                       args=sample_input_args, kwargs=sample_input_kwargs))
     return inputs
 
+
+def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwargs):
+    """Sample inputs for masked normalize.
+    """
+    inputs: List[SampleInput] = []
+    for ord in [2.0, 1, float('inf'), float('-inf'), 0]:
+        for sample_input in sample_inputs_softmax_variant(op_info, device, dtype, requires_grad, **kwargs):
+            sample_input_args, sample_input_kwargs = (ord,) + sample_input.args, sample_input.kwargs.copy()
+            inputs.append(SampleInput(sample_input.input.detach().clone().requires_grad_(requires_grad),
+                                      args=sample_input_args, kwargs=sample_input_kwargs))
+    return inputs
 
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
@@ -13782,6 +13794,22 @@ op_db: List[OpInfo] = [
             # functions can't take variable number of arguments or
             # use keyword-only arguments with defaults
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+        ),
+        gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        supports_out=False),
+    OpInfo(
+        '_masked.normalize',
+        method_variant=None,
+        dtypes=floating_types_and(torch.half, torch.bfloat16),
+        sample_inputs_func=sample_inputs_masked_normalize,
+        skips=(
+            # torch.jit.frontend.NotSupportedError: Compiled
+            # functions can't take variable number of arguments or
+            # use keyword-only arguments with defaults
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+            # RuntimeError: "clamp_min_cpu" not implemented for 'Half'
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_reference_masked',
+                         device_type='cpu', dtypes=[torch.half]),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
         supports_out=False),
