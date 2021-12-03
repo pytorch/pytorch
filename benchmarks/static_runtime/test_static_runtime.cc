@@ -969,6 +969,20 @@ TEST(StaticRuntime, to) {
         return (c)
   )JIT";
 
+  const auto to_script_fails_managed_output_check = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float()
+        return e
+  )JIT";
+
+  const auto to_script_memory_planning_fail = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float().relu()
+        return e
+  )JIT";
+
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
     auto other = at::randn({4, 3, 1, 2}, b);
@@ -988,6 +1002,8 @@ TEST(StaticRuntime, to) {
     }
     testStaticRuntime(to_script_other, args2);
     testStaticRuntime(to_script_alias, {a});
+    testStaticRuntime(to_script_memory_planning_fail, {a, a});
+    testStaticRuntime(to_script_fails_managed_output_check, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
