@@ -176,7 +176,7 @@ def replace_pattern(
         gm: GraphModule,
         pattern: Callable,
         replacement: Callable,
-        is_match_filters: Optional[List[Callable]]=None) -> List[Match]:
+        is_match_filters: Optional[List[Callable]] = None) -> List[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
     data dependencies (``pattern``) in the Graph of a GraphModule
