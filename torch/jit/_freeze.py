@@ -213,7 +213,7 @@ def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]]
         other_methods = []
 
     if hasattr(mod, "training"):
-        mod = freeze(mod.eval(), preserved_attrs = other_methods)
+        mod = freeze(mod.eval(), preserved_attrs=other_methods)
 
     torch._C._jit_pass_optimize_for_inference(mod._c, other_methods)
 
