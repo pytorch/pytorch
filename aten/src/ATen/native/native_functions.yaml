@@ -428,7 +428,6 @@
     SparseCPU, SparseCUDA: add_sparse
     SparseCsrCPU, SparseCsrCUDA: add_sparse_csr
     MkldnnCPU: mkldnn_add
-    ZeroTensor: add_zerotensor
 
 - func: add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -695,7 +694,7 @@
 - func: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   variants: function, method
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta: as_strided_tensorimpl
+    CPU, CUDA, Meta: as_strided_tensorimpl
     QuantizedCPU, QuantizedCUDA: as_strided_qtensorimpl
   device_check: NoCheck
   device_guard: False
@@ -2428,11 +2427,6 @@
   device_guard: False
   manual_cpp_binding: True
 
-- func: _is_zerotensor(Tensor self) -> bool
-  variants: function, method
-  device_guard: False
-  manual_cpp_binding: True
-
 - func: is_neg(Tensor self) -> bool
   variants: function, method
   device_guard: False
@@ -3166,7 +3160,6 @@
   dispatch:
     SparseCPU, SparseCUDA: mul_sparse
     MkldnnCPU: mkldnn_mul
-    ZeroTensor: mul_zerotensor
 
 - func: mul_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3629,7 +3622,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor: _reshape_alias
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: _reshape_alias
     # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
@@ -4771,10 +4764,6 @@
   device_check: NoCheck
   device_guard: False
 
-- func: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  dispatch:
-    CompositeExplicitAutograd: _efficientzerotensor
-
 - func: zeros(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: zeros.out(int[] size, *, Tensor(a!) out) -> Tensor(a!)
@@ -5834,7 +5823,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    ZeroTensor, CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA: view
     MkldnnCPU: mkldnn_view
 
 # Warning: If you want to change the name or overload name of this
