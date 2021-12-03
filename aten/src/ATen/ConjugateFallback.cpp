@@ -50,6 +50,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("baddbmm.out", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
+  TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
 }
 
