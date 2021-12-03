@@ -378,6 +378,7 @@ def activation_is_memoryless(qconfig: QConfig):
     else:
         return _is_memoryless(act)
 
-def is_reuse_input_qconfig(qconfig: QConfig):
-    return isinstance(qconfig.activation(), ReuseInputObserver) and \
+def is_reuse_input_qconfig(qconfig: Union[QConfig, QConfigDynamic, None]):
+    return qconfig is not None and \
+        isinstance(qconfig.activation(), ReuseInputObserver) and \
         isinstance(qconfig.weight(), ReuseInputObserver)
