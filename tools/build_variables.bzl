@@ -367,6 +367,7 @@ core_sources_full = core_sources_full_mobile + [
 
 lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
@@ -636,7 +637,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
-    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
@@ -907,6 +907,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/TensorNames.cpp",
     "aten/src/ATen/TensorUtils.cpp",
     "aten/src/ATen/ThreadLocalState.cpp",
+    "aten/src/ATen/FuncTorchTLS.cpp",
     "aten/src/ATen/Utils.cpp",
     "aten/src/ATen/Version.cpp",
     "aten/src/ATen/VmapMode.cpp",
