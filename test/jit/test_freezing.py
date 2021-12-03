@@ -2175,7 +2175,7 @@ class TestFrozenOptimizations(JitTestCase):
         class Net(nn.Module):
             def __init__(self, in_channels, out_channels, **kwargs):
                 super(Net, self).__init__()
-                self.conv = nn.Conv2d(in_channels, out_channels, bias=use_bias, **kwargs)
+                self.conv = nn.Conv2d(in_channels, out_channels, bias=None, **kwargs)
                 self.relu = nn.ReLU(inplace=True)
 
             def forward(self, x):
