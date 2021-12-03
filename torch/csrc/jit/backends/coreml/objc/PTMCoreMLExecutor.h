@@ -19,8 +19,6 @@ API_AVAILABLE(ios(11.0), macos(10.13))
 API_AVAILABLE(ios(11.0), macos(10.13))
 @interface PTMCoreMLExecutor : NSObject
 
-@property(nonatomic, readonly, copy) NSString* modelPath;
-@property(nonatomic, readonly, copy) NSString* compiledModelPath;
 @property(nonatomic, copy) NSString* backend;
 @property(nonatomic, assign) BOOL allowLowPrecision;
 @property(nonatomic, assign) NSUInteger coreMLVersion;
