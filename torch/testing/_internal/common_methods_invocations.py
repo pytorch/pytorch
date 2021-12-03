@@ -2595,6 +2595,10 @@ def sample_inputs_linalg_pinv_singular(op_info, device, dtype, requires_grad=Fal
 
 
 def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False, **kwargs):
+    """
+    This function produces two tensors of shape (*, m, k) and (*, n, k) with k <= min(m, n).
+    Their matrix product could be used to generate tensor of shape (*, m, n) of rank k.
+    """
 
     batches = [(), (0, ), (2, ), (1, 1)]
     size = [1, 5, 10]
@@ -2610,6 +2614,11 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
 
 
 def clone_sample(sample, **kwargs):
+    """
+    Given a SampleInput, this function analyzes its input, args and kwargs,
+    and produces a copy with each non-Tensor entry being shallow copied,
+    and with each Tensor entry cloned with `t.detach().clone().requires_grad_(t.requires_grad)`
+    """
 
     def clone_tensor(t):
         if isinstance(t, torch.Tensor):
