@@ -233,7 +233,7 @@ def gather(g, self, dim, index, sparse_grad=False):
 def scatter(g, self, dim, index, src):
     from torch.onnx.symbolic_opset9 import expand_as
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return _graph_at(g, "scatter", self, dim, index, src)
+        return _graph_at(g, "scatter", self, dim, index, src, overload_name_s='src')
     src_type = src.type().scalarType()
     src = sym_help._maybe_get_scalar(src)
     if sym_help._is_value(src):
@@ -615,7 +615,7 @@ def mm(g, self, other):
 
 def index(g, self, index):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return _graph_at(g, "index", self, index)
+        return _graph_at(g, "index", self, index, overload_name_s='Tensor')
 
     if sym_help._is_packed_list(index):
         indices = sym_help._unpack_list(index)
@@ -636,7 +636,7 @@ def index(g, self, index):
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return _graph_at(g, "index_fill", self, index, value, dim_i=dim_value)
+        return _graph_at(g, "index_fill", self, index, value, dim_i=dim_value, overload_name_s="int_Scalar")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)

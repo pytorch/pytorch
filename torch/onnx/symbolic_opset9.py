@@ -549,7 +549,7 @@ def transpose(g, self, dim0, dim1):
         # if we don't have dim information we cannot
         # output a permute so use ATen instead
         if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-            return _graph_at(g, "transpose", self, dim0_i=dim0, dim1_i=dim1)
+            return _graph_at(g, "transpose", self, dim0_i=dim0, dim1_i=dim1, overload_name_s="int")
         else:
             raise RuntimeError("Unsupported: ONNX export of transpose for tensor "
                                "of unknown rank.")
@@ -1493,7 +1493,7 @@ def index_put(g, self, indices_list_value, values, accumulate):
 def index_fill(g, self, dim, index, value):
     dim_value = sym_help._parse_arg(dim, "i")
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return _graph_at(g, "index_fill", self, index, value, dim_i=dim_value)
+        return _graph_at(g, "index_fill", self, index, value, dim_i=dim_value, overload_name_s="int_Scalar")
     expanded_index_shape, expanded_index = sym_help._index_fill_reshape_helper(g, self, dim, index)
     value = sym_help._maybe_get_scalar(value)
     value = sym_help._if_scalar_type_as(g, value, self)
@@ -2788,7 +2788,7 @@ def masked_fill(g, self, mask, value):
 
 def index(g, self, index):
     if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
-        return _graph_at(g, "index", self, index)
+        return _graph_at(g, "index", self, index, overload_name_s='Tensor')
 
     if sym_help._is_packed_list(index):
         indices = sym_help._unpack_list(index)

@@ -228,14 +228,10 @@ def _optimize_graph(graph, operator_export_type, _disable_torch_constant_prop=Fa
         torch._C._jit_pass_onnx_set_dynamic_input_shape(graph, dynamic_axes, input_names)
     torch._C._jit_pass_onnx_lint(graph)
     graph = torch._C._jit_pass_onnx(graph, operator_export_type)
-    print('1'*1024)
-    print(graph)
     torch._C._jit_pass_onnx_lint(graph)
     torch._C._jit_pass_lint(graph)
 
-    print('2'*1024)
     torch._C._jit_pass_onnx_scalar_type_analysis(graph, True, _export_onnx_opset_version)
-    print('3'*1024)
     torch._C._jit_pass_lint(graph)
 
     torch._C._jit_pass_onnx_peephole(graph, _export_onnx_opset_version, fixed_batch_size)
