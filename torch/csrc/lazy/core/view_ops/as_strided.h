@@ -29,15 +29,10 @@ class AsStrided : public TsNode {
     return storage_offset_;
   }
 
-  static bool StrideIsSupported(
-      const Shape& input_shape,
-      c10::ArrayRef<int64_t> size,
-      c10::ArrayRef<int64_t> stride,
-      int64_t storage_offset);
+  static bool StrideIsSupported(c10::ArrayRef<int64_t> stride);
 
   static std::vector<int64_t> GetArrayStridePermutation(
-      c10::ArrayRef<int64_t> stride,
-      c10::ArrayRef<int64_t> size);
+      c10::ArrayRef<int64_t> stride);
 
  private:
   std::vector<int64_t> size_;

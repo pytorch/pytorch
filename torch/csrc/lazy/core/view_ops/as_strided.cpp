@@ -33,19 +33,14 @@ std::string AsStrided::ToString() const {
   return ss.str();
 }
 
-bool AsStrided::StrideIsSupported(
-    const Shape& input_shape,
-    c10::ArrayRef<int64_t> size,
-    c10::ArrayRef<int64_t> stride,
-    int64_t storage_offset) {
+bool AsStrided::StrideIsSupported(c10::ArrayRef<int64_t> stride) {
   std::vector<int64_t> sorted_stride(stride.begin(), stride.end());
   std::sort(sorted_stride.begin(), sorted_stride.end());
   return stride.empty() || sorted_stride.front() == 1;
 }
 
 std::vector<int64_t> AsStrided::GetArrayStridePermutation(
-    c10::ArrayRef<int64_t> stride,
-    c10::ArrayRef<int64_t> size) {
+    c10::ArrayRef<int64_t> stride) {
   std::vector<int64_t> permutation = Iota<int64_t>(stride.size());
   std::sort(permutation.begin(), permutation.end(), [&](int64_t a, int64_t b) {
     return stride[a] > stride[b];

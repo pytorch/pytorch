@@ -10,7 +10,7 @@ namespace lazy {
 
 class OpKindWrapper {
  public:
-  OpKindWrapper(const char* name) : name_(name) {}
+  explicit OpKindWrapper(const char* name) : name_(name) {}
 
   const OpKind& operator*() const {
     return get();
