@@ -1852,14 +1852,14 @@ class TestNN(NNTestCase):
             self.assertEqual(parameter_dict[key], copy[key])
         check()
 
-        parameters["p15"] = Parameter(torch.randn(10, 10))
-        parameter_dict["p15"] = parameters["p15"]
-        copy["p16"] = Parameter(torch.randn(9, 10))
+        parameter_dict["p20"] = Parameter(torch.randn(10, 10))
+        copy["p21"] = Parameter(torch.randn(9, 10))
 
-        self.assertTrue("p15" in parameter_dict)
-        self.assertFalse("p15" in copy)
-        self.assertFalse("p16" in parameter_dict)
-        self.assertTrue("p16" in copy)
+        self.assertTrue("p20" in parameter_dict)
+        self.assertFalse("p20" in copy)
+        self.assertFalse("p21" in parameter_dict)
+        self.assertTrue("p21" in copy)
+        parameter_dict.pop("p20")
         check()
 
         p = Parameter(torch.randn(10, 10))
@@ -1874,7 +1874,6 @@ class TestNN(NNTestCase):
 
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
-
         check()
 
         parameters2 = OrderedDict([
