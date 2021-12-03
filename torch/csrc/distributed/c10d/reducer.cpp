@@ -1589,10 +1589,12 @@ void Reducer::sync_bucket_indices(
   at::TensorOptions options;
   options = options.dtype(at::kInt);
   options = options.device(params_[0].device());
-
+  auto pin_memory = params_[0].device().is_cuda();
   // Group indices and num_bucket together into indices_tensor
   // Broadcast this tensor first, as its size is equal among all processes
-  auto indices_tensor = at::empty({total_size + 1}, at::kInt);
+  auto indices_tensor = at::empty(
+      {total_size + 1},
+      at::TensorOptions().dtype(at::kInt).pinned_memory(pin_memory));
   auto indices_accessor = indices_tensor.accessor<int, 1>();
   auto indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
@@ -1615,7 +1617,9 @@ void Reducer::sync_bucket_indices(
   num_buckets = indices_accessor[indices_accessor_Index];
 
   // Broadcast bucket_sizes
-  auto bucket_sizes_tensor = at::empty({(int64_t)num_buckets}, at::kInt);
+  auto bucket_sizes_tensor = at::empty(
+      {(int64_t)num_buckets},
+      at::TensorOptions().dtype(at::kInt).pinned_memory(pin_memory));
   auto bucket_sizes_accessor = bucket_sizes_tensor.accessor<int, 1>();
   for (const auto i : c10::irange(num_buckets)) {
     // For rank != 0, it is possible that local num buckets bucket_sizes.size()
@@ -1770,15 +1774,6 @@ void Reducer::ensure_prior_reduction_finished() {
   // The variable `require_finalize_` is true until all gradients
   // have been computed and reduction of all buckets has been kicked off.
   if (require_finalize_) {
-    REDUCER_CHECK(
-        !static_graph_,
-        logger_,
-        "Expected to have finished reduction in the prior iteration before "
-        "starting a new one. "
-        "This error indicates that your training graph has changed ",
-        "in this iteration, e.g., one parameter is used in first ",
-        "iteration, but then got unused in the second iteration. ",
-        "this is not compatible with static_graph set to True.");
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
@@ -1805,7 +1800,15 @@ void Reducer::ensure_prior_reduction_finished() {
         "value of `forward` of your module when reporting this issue (e.g. "
         "list, dict, iterable).";
 
-    if (!find_unused_parameters_) {
+    if (static_graph_) {
+      kBaseErrorMsg =
+          "Expected to have finished reduction in the prior iteration before "
+          "starting a new one. "
+          "This error indicates that your training graph has changed "
+          "in this iteration, e.g., one parameter is used in first "
+          "iteration, but then got unused in the second iteration. "
+          "this is not compatible with static_graph set to True.";
+    } else if (!find_unused_parameters_) {
       // Parameters may have been unused in forward pass, or not all outputs
       // were used in producing loss.
       kBaseErrorMsg +=

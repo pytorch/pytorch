@@ -9,8 +9,6 @@
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
-#include <THC/THC.h>
-
 namespace at {
 namespace native {
 

@@ -453,6 +453,7 @@ void initTensorExprBindings(PyObject* module) {
 
   py::class_<LoopNest>(te, "LoopNest")
       .def(py::init<const std::vector<Tensor>&>())
+      .def(py::init<const std::vector<Tensor>&, const std::vector<Tensor>&>())
       .def(py::init([](StmtPtr s, const std::vector<BufHandle>& bufs) {
         std::unordered_set<BufPtr> buf_nodes;
         for (auto& buf : bufs) {
@@ -623,7 +624,7 @@ void initTensorExprBindings(PyObject* module) {
             return LoopNest::compressBuffer(buf.node(), stmt);
           },
           py::return_value_policy::reference)
-      .def(
+      .def_static(
           "cache_accesses",
           [](const BufHandle& producer,
              const std::string& name,
@@ -633,7 +634,7 @@ void initTensorExprBindings(PyObject* module) {
             return std::make_pair(BufHandle(ret.first), ret.second);
           },
           py::return_value_policy::reference)
-      .def(
+      .def_static(
           "compute_at",
           [](StmtPtr s, ForPtr at) { LoopNest::computeAt(s, at); })
       .def(
@@ -808,7 +809,8 @@ void initTensorExprBindings(PyObject* module) {
           [](TensorExprKernel& self, const std::string& attr = "") {
             return self.getCodeText(attr);
           },
-          py::arg("attr") = "");
+          py::arg("attr") = "")
+      .def("recompile", [](TensorExprKernel& self) { self.recompile(); });
 
   py::class_<CodeGen>(te, "CodeGen")
       .def(
@@ -885,6 +887,21 @@ void initTensorExprBindings(PyObject* module) {
       });
   te.def("annotate_input_shapes", &tensorexpr::annotateInputShapes);
   te.def("remove_unused_self_argument", &tensorexpr::removeUnusedSelfArgument);
+  te.def("make_shapes_symbolic", &tensorexpr::makeShapesSymbolic);
+#ifdef TORCH_ENABLE_LLVM
+  te.def("set_llvm_target_triple", [](const c10::optional<std::string>& val) {
+    tensorexpr::LLVMTargetTriple() = val;
+  });
+  te.def("set_llvm_target_cpu", [](const c10::optional<std::string>& val) {
+    tensorexpr::LLVMTargetCPU() = val;
+  });
+  te.def("set_llvm_target_attrs", [](const c10::optional<std::string>& val) {
+    tensorexpr::LLVMTargetAttrs() = val;
+  });
+  te.def("set_llvm_aot_workflow", [](bool val) {
+    tensorexpr::LLVMAOTWorkflow() = val;
+  });
+#endif
 }
 } // namespace jit
 } // namespace torch
