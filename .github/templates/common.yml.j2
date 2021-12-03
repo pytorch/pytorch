@@ -123,7 +123,7 @@ concurrency:
       - name: Zip test reports for upload
         if: always()
         env:
-{%- if name == 'linux' or name == 'windows' %}
+{%- if name == 'linux' or name == 'windows' or name == 'macos' %}
           FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
 {%- else %}
           FILE_SUFFIX: '!{{ name }}-${{ github.job }}'
@@ -175,7 +175,7 @@ concurrency:
 
 {%- macro ciflow_should_run_job(ciflow_config) %}
   !{{ ciflow_config.root_job_name }}:
-    runs-on: ubuntu-18.04
+    runs-on: linux.large
     timeout-minutes: !{{ timeout_minutes }}
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == '!{{ ciflow_config.trigger_action }}') && (github.event.assigneed.login == '!{{ ciflow_config.trigger_actor }}') }}
