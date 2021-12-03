@@ -373,6 +373,8 @@ def replace_pattern(
         is_match_filters = []
 
     def is_match(match: Match):
+        # for mypy
+        assert is_match_filters is not None
         for filter in is_match_filters:
             if not filter(match, pattern_graph, replacement_graph):
                 return False
