@@ -108,6 +108,11 @@ def weight_is_statically_quantized(qconfig):
     """
     return weight_dtype(qconfig) in [torch.quint8, torch.qint8]
 
+def weight_is_sparse(qconfig):
+    """Given a qconfig, checks if it has sparse parameters attached to it."""
+    # TODO: Should check the level of the sparsity and set to dense if it is 0.
+    return hasattr(qconfig.weight(), 'sparse_params')
+
 def get_qconfig_dtypes(qconfig):
     r""" returns the qconfig tuple for qconfig:
     (activation_dtype, weight_dtype, activation_compute_dtype)

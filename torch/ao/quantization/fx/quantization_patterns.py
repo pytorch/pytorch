@@ -920,8 +920,6 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # TODO: include the configuration in backend_config_dict
                 # we can have a map from module to reference module
                 # and allow user to register new ones
-                if hasattr(float_linear, 'sparse_params'):
-                    warnings.warn("Reference module for sparse Linear is not implemented, using quantized Linear")
                 qlinear_cls = get_static_quant_module_class(
                     type(float_linear), is_reference=True)
                 ref_linear = qlinear_cls.from_float(float_linear, weight_qparams)
@@ -957,7 +955,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 # 2. select corresponding quantized linear class for the float linear class
                 if activation_int8_quantized:
                     additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
-                    if hasattr(self.linear, 'sparse_params'):
+                    if weight_is_sparse(qconfig)
                         mapping_fn = get_static_sparse_quant_module_class
                     else:
                         mapping_fn = get_static_quant_module_class
@@ -969,7 +967,7 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                         (torch.float32, torch.float16, None),
                     ], f"dtype {dtypes} not supported yet"
                     additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
-                    if hasattr(self.linear, 'sparse_params'):
+                    if weight_is_sparse(qconfig)
                         mapping_fn = get_dynamic_sparse_quant_module_class
                     else:
                         mapping_fn = get_dynamic_quant_module_class

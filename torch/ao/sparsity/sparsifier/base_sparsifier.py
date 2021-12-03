@@ -1,7 +1,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Dict, Tuple, Union
+from typing import Dict, Tuple
 
 import torch
 from torch import nn
