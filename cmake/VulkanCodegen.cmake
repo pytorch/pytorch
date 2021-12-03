@@ -9,7 +9,7 @@ set(VULKAN_GEN_ARG_ENV "")
 if(USE_VULKAN_RELAXED_PRECISION)
   string(APPEND VULKAN_GEN_ARG_ENV "precision=mediump")
 endif()
-if (USE_VULKAN_FP16_INFERENCE)
+if(USE_VULKAN_FP16_INFERENCE)
   string(APPEND VULKAN_GEN_ARG_ENV "format=rgba16f")
 endif()
 
