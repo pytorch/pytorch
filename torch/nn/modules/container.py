@@ -606,6 +606,20 @@ class ParameterDict(Module):
     def __contains__(self, key: str) -> bool:
         return key in self._parameters
 
+    def setdefault(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter':
+        """If key is in the ParameterDict, return its parameter.
+        If not, insert `key` with a parameter `default` and return `default`.
+        `default` defaults to `None`.
+
+        Args:
+            key (string): key to set default for
+            default (:class:`~torch.nn.Parameter`): the parameter set to the key
+        """
+        if key in self._parameters:
+            return self._parameters[key]
+        self[key] = default
+        return self._parameters[key]
+
     def clear(self) -> None:
         """Remove all items from the ParameterDict.
         """
@@ -626,6 +640,16 @@ class ParameterDict(Module):
         from the ParameterDict
         """
         return self._parameters.popitem()
+
+    def get(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter | None':
+        r"""Return the parameter associated with key if present.
+            Otherwise return default if provided, None if not.
+
+        Args:
+            key (string): key to get from the ParameterDict
+            default (Parameter, optional): value to return if key not present
+        """
+        return self._parameters.get(key, default)
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
