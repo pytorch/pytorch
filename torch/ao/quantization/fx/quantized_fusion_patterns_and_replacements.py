@@ -17,7 +17,9 @@ def relu_replacement(x, scale, zero_point):
     x = torch.nn.functional.relu(x)
     return x
 
-######## Match Filters ##########
+#
+# Match Filters
+#
 def second_input_is_scalar(match, pattern_graph, replacement_graph):
     """ check the node that's matched to the second input of the pattern graph
     is a scalar number
