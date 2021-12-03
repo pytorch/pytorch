@@ -660,14 +660,13 @@ class ParameterDict(Module):
         return self._parameters.get(key, default)
 
     def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict':
-        r"""Make self into a new dictionary with the keys provided
+        r"""Return a new ParameterDict with the keys provided
 
         Args:
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        self._parameters = self._parameters.fromkeys(keys, default)
-        return self
+        return ParameterDict(self._parameters.fromkeys(keys, default))
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.

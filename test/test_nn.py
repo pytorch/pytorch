@@ -1938,11 +1938,13 @@ class TestNN(NNTestCase):
         parameters.clear()
         check()
 
-        parameter_dict = parameter_dict.fromkeys(['p19', 'p20'])
-        self.assertEqual({'p19': None, 'p20': None}, parameter_dict)
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertEqual({'p19': None, 'p20': None}, parameter_dict2)
+        check()
 
-        parameter_dict = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
-        self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict)
+        parameter_dict2 = parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertEqual({'p19': temp_param, 'p20': temp_param}, parameter_dict2)
+        check()
 
     def test_add_module(self):
         methods_to_test = ['add_module', 'register_module']
