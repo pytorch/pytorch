@@ -133,6 +133,10 @@ class TORCH_API TensorExprKernel {
   void runFast(
       const std::vector<void*>& inputs,
       const std::vector<void*>& outputs);
+  // Expected format of stack:
+  //  [<outputs>] <inputs>
+  // i.e., output IValues must be at the bottom of the stack.
+  void runWithAllocatedOutputs(Stack& stack);
 
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
