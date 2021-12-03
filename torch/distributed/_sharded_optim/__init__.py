@@ -7,7 +7,7 @@ from torch.distributed._sharded_tensor import (
     ShardedTensor
 )
 
-def module_named_params_with_sharded_tensor(
+def named_params_with_sharded_tensor(
     module: nn.Module,
     prefix: str = '',
     recurse: bool = True,
@@ -15,8 +15,8 @@ def module_named_params_with_sharded_tensor(
 
     r"""Returns an iterator over module parameters (together with the
     ShardedTensor parameters), yielding both the name of the parameter
-    as well as the parameter itself. This is typically passed to an
-    ShardedOptimizer
+    as well as the parameter itself. This is typically passed to a
+    :class:torch.distributed._sharded_optim.ShardedOptimizer
 
     Args:
         prefix (str): prefix to prepend to all parameter names.
@@ -30,9 +30,11 @@ def module_named_params_with_sharded_tensor(
 
     Example::
 
-        >>> for name, param in self.named_parameters():
-        >>>    if name in ['bias']:
-        >>>        print(param.size())
+        >>> model = torch.nn.Linear(*linear_size)
+        >>> shard_parameter(model, "weight", spec)
+        >>> for name, param in named_params_with_sharded_tensor(model):
+        >>>    if name in ['weight']:
+        >>>        print(param.sharding_spec())
 
     """
     modules = module.named_modules(prefix=prefix) if recurse else [(prefix, module)]
@@ -41,12 +43,6 @@ def module_named_params_with_sharded_tensor(
     for mod_prefix, mod in modules:
         # find all sharded tensor params
         for name, val in vars(mod).items():
-            if name.startswith("__"):
-                continue
-
-            if val is None:
-                continue
-
             if isinstance(val, ShardedTensor):
                 memo.add(val)
                 name = mod_prefix + ('.' if mod_prefix else '') + name
