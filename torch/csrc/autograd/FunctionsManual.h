@@ -325,9 +325,10 @@ Tensor i1e_backward(
     const Tensor& result);
 std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& grad,
-  const Tensor& self,
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots
+  const Tensor& LU_pivots,
+  const std::array<bool, 2>& grad_input_mask
 );
 Tensor lu_solve_jvp(
   const Tensor& X,
@@ -366,13 +367,13 @@ Tensor lu_backward_base(
   const Tensor& L,
   const Tensor& U
 );
-Tensor lu_factor_ex_backward(
+Tensor _lu_with_info_backward(
   const Tensor& grad,
   const Tensor& self,
   const Tensor& LU,
   const Tensor& pivs
 );
-Tensor lu_factor_ex_jvp(
+Tensor _lu_with_info_jvp(
   const Tensor& dX,
   const Tensor& LU,
   const Tensor& pivs

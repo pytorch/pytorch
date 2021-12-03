@@ -66,7 +66,7 @@ class C10_API intrusive_ptr_target {
   //      plus one more if refcount > 0
   //    An invariant: refcount > 0  =>  weakcount > 0
   //
-  //  - THStorage stays live as long as there are any strong
+  //  - c10::StorageImpl stays live as long as there are any strong
   //    or weak pointers to it (weakcount > 0, since strong
   //    references count as a +1 to weakcount)
   //
@@ -75,7 +75,7 @@ class C10_API intrusive_ptr_target {
   //  - Once refcount == 0, it can never again be > 0 (the transition
   //    from > 0 to == 0 is monotonic)
   //
-  //  - When you access THStorage via a weak pointer, you must
+  //  - When you access c10::StorageImpl via a weak pointer, you must
   //    atomically increment the use count, if it is greater than 0.
   //    If it is not, you must report that the storage is dead.
   //
