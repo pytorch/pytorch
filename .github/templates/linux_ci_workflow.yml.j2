@@ -322,7 +322,11 @@ jobs:
 {%- endif %}
       !{{ common.render_test_results() }}
       !{{ common.upload_downloaded_files(name='linux') }}
+{%- if 'rocm' in test_runner_type %}
+      !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False) }}
+{%- else %}
       !{{ common.upload_test_reports(name='linux') }}
+{%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
 {%- if 'rocm' in test_runner_type %}
       !{{ common.teardown_rocm_linux() }}

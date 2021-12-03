@@ -469,10 +469,11 @@ jobs:
           # Remove any previous test reports if they exist
           rm -f test-reports-*.zip
           zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Reports on S3
+      - uses: actions/upload-artifact@v2
+        name: Store Test Reports on Github
         if: always()
         with:
+          name: test-reports
           retention-days: 14
           if-no-files-found: error
           path:
