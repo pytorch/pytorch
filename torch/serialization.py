@@ -431,13 +431,17 @@ def _legacy_save(obj, f, pickle_module, pickle_protocol) -> None:
                 dtype = torch.uint8
                 storage_numel = cast(Storage, storage).nbytes()
 
-            if storage.data_ptr() in storage_dtypes:
-                if storage_dtype != storage_dtypes[storage.data_ptr()]:
-                    raise RuntimeError(
-                        'Cannot save multiple tensors or storages that '
-                        'view the same data as different types')
-            else:
-                storage_dtypes[storage.data_ptr()] = storage_dtype
+            # If storage is allocated, ensure that any other saved storages
+            # pointing to the same data all have the same dtype. If storage is
+            # not allocated, don't perform this check
+            if storage.data_ptr() != 0:
+                if storage.data_ptr() in storage_dtypes:
+                    if storage_dtype != storage_dtypes[storage.data_ptr()]:
+                        raise RuntimeError(
+                            'Cannot save multiple tensors or storages that '
+                            'view the same data as different types')
+                else:
+                    storage_dtypes[storage.data_ptr()] = storage_dtype
 
             view_metadata: Optional[Tuple[str, int, int]]
             storage = cast(Storage, storage)
@@ -554,13 +558,17 @@ def _save(obj, zip_file, pickle_module, pickle_protocol):
 
             storage = cast(Storage, storage)
 
-            if storage.data_ptr() in storage_dtypes:
-                if storage_dtype != storage_dtypes[storage.data_ptr()]:
-                    raise RuntimeError(
-                        'Cannot save multiple tensors or storages that '
-                        'view the same data as different types')
-            else:
-                storage_dtypes[storage.data_ptr()] = storage_dtype
+            # If storage is allocated, ensure that any other saved storages
+            # pointing to the same data all have the same dtype. If storage is
+            # not allocated, don't perform this check
+            if storage.data_ptr() != 0:
+                if storage.data_ptr() in storage_dtypes:
+                    if storage_dtype != storage_dtypes[storage.data_ptr()]:
+                        raise RuntimeError(
+                            'Cannot save multiple tensors or storages that '
+                            'view the same data as different types')
+                else:
+                    storage_dtypes[storage.data_ptr()] = storage_dtype
 
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
             location = location_tag(storage)
