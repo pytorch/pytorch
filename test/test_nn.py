@@ -1852,13 +1852,55 @@ class TestNN(NNTestCase):
             self.assertEqual(parameter_dict[key], copy[key])
         check()
 
-        parameter_dict["p15"] = Parameter(torch.randn(10, 10))
+        parameters["p15"] = Parameter(torch.randn(10, 10))
+        parameter_dict["p15"] = parameters["p15"]
         copy["p16"] = Parameter(torch.randn(9, 10))
 
         self.assertTrue("p15" in parameter_dict)
         self.assertFalse("p15" in copy)
         self.assertFalse("p16" in parameter_dict)
         self.assertTrue("p16" in copy)
+        check()
+
+        # Check __or__ and __ror__ works
+        parameters2 = OrderedDict([
+            ('p20', Parameter(torch.randn(10, 10))),
+            ('p21', Parameter(torch.randn(10, 10))),
+            ('p22', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters | parameters2
+        parameter_dict = parameter_dict | parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p23', Parameter(torch.randn(10, 10))),
+            ('p24', Parameter(torch.randn(10, 10))),
+            ('p25', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters2 | parameters
+        parameter_dict = parameter_dict2 | parameter_dict
+        check()
+
+        parameters2 = dict([
+            ('p26', Parameter(torch.randn(10, 10))),
+            ('p27', Parameter(torch.randn(10, 10))),
+            ('p28', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters | parameters2
+        parameter_dict = parameter_dict | parameter_dict2
+        check()
+
+        parameters2 = dict([
+            ('p29', Parameter(torch.randn(10, 10))),
+            ('p30', Parameter(torch.randn(10, 10))),
+            ('p31', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters2 | parameters
+        parameter_dict = parameter_dict2 | parameter_dict
         check()
 
         parameter_dict.clear()

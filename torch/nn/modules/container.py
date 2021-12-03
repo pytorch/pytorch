@@ -701,3 +701,13 @@ class ParameterDict(Module):
                       "on each GPU except the original one.")
 
         return super(ParameterDict, self)._replicate_for_data_parallel()
+
+    def __or__(self, other: Mapping[str, 'Parameter']) -> 'ParameterDict':
+        copy = self.copy()
+        copy.update(other)
+        return copy
+
+    def __ror__(self, other: Mapping[str, 'Parameter']) -> 'ParameterDict':
+        copy = ParameterDict(other)
+        copy.update(self)
+        return copy
