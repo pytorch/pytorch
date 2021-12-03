@@ -181,7 +181,7 @@ jobs:
         run: |
           python3 tools/render_junit.py test/
       - name: Zip JSONs for upload
-        if: always()
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         env:
           FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         run: |
@@ -190,7 +190,7 @@ jobs:
           zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
       - uses: seemethere/upload-artifact-s3@v3
         name: Store Test Downloaded JSONs on S3
-        if: always()
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
           retention-days: 14
           if-no-files-found: warn
