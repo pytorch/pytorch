@@ -1,5 +1,6 @@
 from itertools import product
 from typing import Tuple
+from unittest.case import expectedFailure
 
 import torch
 from torch import complex32, float32, float64, int32, int64
@@ -10,6 +11,17 @@ from torch.testing._internal.common_methods_invocations import (
 )
 from torch.testing._internal.common_utils import set_default_dtype
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
+from torch.testing._internal.common_device_type import (
+    ops,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_methods_invocations import op_db
+
+"""
+Dtype Analysis relies on symbolic shape analysis, which is still in beta
+"""
+
 
 if __name__ == "__main__":
     raise RuntimeError(
@@ -19,8 +31,59 @@ if __name__ == "__main__":
     )
 
 
-# XXX: Relies on Symbolic Shape Analysis, which is still a prototype
-class TestDtypeAnalysis(JitTestCase):
+custom_rules_works_list = {
+    "nn.functional.adaptive_avg_pool1d",
+    "nn.functional.adaptive_avg_pool2d",
+    "nn.functional.adaptive_avg_pool3d",
+    "nn.functional.adaptive_max_pool1d",
+    "nn.functional.adaptive_max_pool2d",
+    "avg_pool1d",
+    "avg_pool3d",
+    "conv_transpose2d",
+    "conv1d",
+    "conv2d",
+    "hardswish",
+    "avg_pool2d",
+    "max_pool1d",
+    "max_pool2d",
+    "max_pool3d",
+    "nn.functional.prelu",
+    "batch_norm",
+    "batch_norm",
+}
+
+custom_rules_expected_failure_list = {
+    # create_traced_fn generates prim::NumToTensor nodes in graph (not supported yet)
+    "nn.functional.adaptive_max_pool3d",
+}
+
+# These ops seem to not be in opinfos
+custom_rules_not_tested_list = [
+    "conv3d",
+    "conv_tbc",
+    "conv_transpose1d",
+    "conv_transpose3d",
+    "convolution",
+    "_convolution",
+    "max_unpool2d",
+    "max_unpool3d",
+    "reflection_pad1d",
+    "reflection_pad2d",
+    "reflection_pad3d",
+    "replication_pad1d",
+    "replication_pad2d",
+    "replication_pad3d",
+    "upsample_bilinear2d",
+    "upsample_linear1d",
+    "upsample_nearest1d",
+    "upsample_nearest2d",
+    "upsample_nearest3d",
+    "upsample_trilinear3d",
+    "flatten",
+]
+
+
+class TestDtypeBase(JitTestCase):
     SCALAR = "SCALAR"  # To mark unary vs 0 dim tensor
 
     def setUp(self):
@@ -36,11 +99,22 @@ class TestDtypeAnalysis(JitTestCase):
 
     @staticmethod
     def node_output_dtype(graph):
-        graph_out = list(graph.outputs())
-        assert len(graph_out) == 1
-        return graph_out[0].type().dtype()
+        dtypes = []
+        for out in graph.outputs():
+            if isinstance(out.type(), torch._C.TensorType):
+                dtypes.append(out.type().dtype())
+            else:
+                dtypes.append(None)
+        return dtypes
+
+    @staticmethod
+    def node_output_dtype_single(graph):
+        dtypes = TestDtypeBase.node_output_dtype(graph)
+        assert len(dtypes) == 1
+        return dtypes[0]
 
     def prop_dtype_on_graph(self, graph, example_inputs):
+        # Intentionally ignoring the kwargs, and not treating them as tensors for now
         graph_inputs = list(graph.inputs())
 
         # We need to clear shape information because torch.jit.script
@@ -77,7 +151,7 @@ class TestDtypeAnalysis(JitTestCase):
         # Run the Dtype Analysis
         graph = torch.jit.script(fn).graph  # Note this is a cached graph
         self.prop_dtype_on_graph(graph, args)
-        actual_dtype = self.node_output_dtype(graph)
+        actual_dtype = self.node_output_dtype_single(graph)
 
         self.assertEqual(actual_dtype, expected_dtype, "Failed Verification")
 
@@ -102,6 +176,8 @@ class TestDtypeAnalysis(JitTestCase):
         self.assertEqual(rand_tensor.dtype, dtype)
         return rand_tensor
 
+
+class TestDtypeAnalysis(TestDtypeBase):
     def test_unary(self):
         # Testing the Unary Implementation that uses metatensors
 
@@ -226,9 +302,8 @@ class TestDtypeAnalysis(JitTestCase):
         # Check that we also don't propagate
         graph = torch.jit.script(conv2d_fn).graph  # Note this is a cached graph
         self.prop_dtype_on_graph(graph, [conv_in.input, weight, bias])
-        actual_dtype = self.node_output_dtype(graph)
+        actual_dtype = self.node_output_dtype_single(graph)
         self.assertEqual(actual_dtype, None)
-
 
     def test_combined(self):
         # Test a case with both custom rules and metatensors
@@ -245,3 +320,87 @@ class TestDtypeAnalysis(JitTestCase):
         y_val = torch.rand((1,), dtype=torch.float32)
         input_args = [conv_in.input, *conv_in.args, y_val]
         self.assert_dtype_equal_custom_args(func, input_args)
+
+
+class TestDtypeCustomRules(TestDtypeBase):
+    def assert_output_dtype_equal(self, expected_res, prop_graph):
+        actual_dtype = self.node_output_dtype(prop_graph)
+        if len(actual_dtype) == 1:
+            self.assert_tensor_dtype_equal(expected_res, actual_dtype[0])
+        else:
+            self.assertEqual(len(expected_res), len(actual_dtype))
+            for expected, actual in zip(expected_res, actual_dtype):
+                self.assert_tensor_dtype_equal(expected, actual)
+
+    def assert_tensor_dtype_equal(self, tensor_output, graph_dtype):
+        if not isinstance(tensor_output, torch.Tensor):
+            return
+        self.assertEqual(tensor_output.dtype, graph_dtype)
+
+    @ops([op for op in op_db if op.aten_name in custom_rules_works_list])
+    def test_custom_rules(self, device, dtype, op):
+        # Return fn, inputs_fn for all
+        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+        input_args = [sample_input.input, *sample_input.args]
+        expected_res = op(*input_args, **sample_input.kwargs)
+        func = op.get_op()
+        traced_fn = create_traced_fn(self, func)
+
+        # Have to run the traced function to actually generate the trace
+        traced_fn(sample_input.input, *sample_input.args, **sample_input.kwargs)
+
+        # Run the Dtype Analysis
+        graph = traced_fn.graph  # Note this is a cached graph
+        input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
+        self.prop_dtype_on_graph(graph, input_tensors)
+        self.assert_output_dtype_equal(expected_res, graph)
+
+    @ops([op for op in op_db if op.aten_name in custom_rules_works_list])
+    def test_custom_rules_ints(self, device, dtype, op):
+        # This is done because opinfos currently only runs on floats.
+        # Return fn, inputs_fn for all
+        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+
+        if dtype == torch.float32:
+            dtype = torch.int32
+        else:
+            dtype = torch.int64
+
+        input_args = [sample_input.input, *sample_input.args]
+        expected_res = op(*input_args, **sample_input.kwargs)
+        func = op.get_op()
+        traced_fn = create_traced_fn(self, func)
+
+        # Have to run the traced function to actually generate the trace
+        traced_fn(sample_input.input, *sample_input.args, **sample_input.kwargs)
+
+        # Run the Dtype Analysis
+        graph = traced_fn.graph  # Note this is a cached graph
+        input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
+        self.prop_dtype_on_graph(graph, input_tensors)
+        self.assert_output_dtype_equal(expected_res, graph)
+
+    @expectedFailure
+    @ops([op for op in op_db if op.aten_name in custom_rules_expected_failure_list])
+    def test_custom_rules_expected_failure(self, device, dtype, op):
+        # Return fn, inputs_fn for all
+        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+        input_args = [sample_input.input, *sample_input.args]
+        expected_res = op(*input_args, **sample_input.kwargs)
+        func = op.get_op()
+        traced_fn = create_traced_fn(self, func)
+
+        # Have to run the traced function to actually generate the trace
+        traced_fn(sample_input.input, *sample_input.args, **sample_input.kwargs)
+
+        # Run the Dtype Analysis
+        graph = traced_fn.graph  # Note this is a cached graph
+        input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
+        self.prop_dtype_on_graph(graph, input_tensors)
+        self.assert_output_dtype_equal(expected_res, graph)
+
+
+TestDtypeCustomRulesCPU = None
+instantiate_device_type_tests(TestDtypeCustomRules, globals(), only_for=("cpu",))
+# This creates TestDtypeCustomRulesCPU
+assert TestDtypeCustomRulesCPU
