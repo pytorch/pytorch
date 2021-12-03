@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
+import os
 import unittest
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'

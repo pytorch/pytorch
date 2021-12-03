@@ -27,6 +27,7 @@ from common_utils import (
     skip,
     skipOps,
     check_vmap_fallback,
+    IS_FBCODE,
 )
 import types
 from torch.utils._pytree import tree_flatten, tree_unflatten, tree_map
@@ -776,6 +777,7 @@ run_decompositions = set()
 run_ops = set()
 class TestDecompositionOpInfo(TestCase):
 
+    @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=[torch.float32, torch.float64, torch.float16, torch.bfloat16] + [*integral_types()] )
     # entries in here need don't work and need to be fixed.
     # Each one of these is a bug (or needs to be investigated)
@@ -927,6 +929,7 @@ class TestDecompositionOpInfo(TestCase):
                 return
             raise e
 
+    @unittest.skipIf(IS_FBCODE, "__torch_dispatch__ is buggy")
     def test_placeholder(self):
         global run_ops, run_decompositions
         with open('op_analysis/run_ops.txt', 'w') as f:
