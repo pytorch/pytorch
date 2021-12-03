@@ -1901,11 +1901,46 @@ class TestNN(NNTestCase):
         parameters |= parameters2
         parameter_dict |= parameter_dict2
         check()
-
-        parameter_dict.clear()
-        self.assertEqual(len(parameter_dict), 0)
-        parameters.clear()
+  
+        # Check __or__ and __ror__ works
+        parameters2 = OrderedDict([
+            ('p20', Parameter(torch.randn(10, 10))),
+            ('p21', Parameter(torch.randn(10, 10))),
+            ('p22', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters | parameters2
+        parameter_dict = parameter_dict | parameter_dict2
         check()
+
+        parameters2 = OrderedDict([
+            ('p23', Parameter(torch.randn(10, 10))),
+            ('p24', Parameter(torch.randn(10, 10))),
+            ('p25', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters2 | parameters
+        parameter_dict = parameter_dict2 | parameter_dict
+        check()
+
+        parameters2 = {
+            'p26': Parameter(torch.randn(10, 10)),
+            'p27': Parameter(torch.randn(10, 10)),
+            'p28': Parameter(torch.randn(10, 10))
+        }
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters | parameters2
+        parameter_dict = parameter_dict | parameter_dict2
+        check()
+
+        parameters2 = {
+            'p29': Parameter(torch.randn(10, 10)),
+            'p30': Parameter(torch.randn(10, 10)),
+            'p31': Parameter(torch.randn(10, 10))
+        }
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters = parameters2 | parameters
+        parameter_dict = parameter_dict2 | parameter_dict
 
         parameters['p17'] = Parameter(torch.randn(10, 10))
         parameter_dict['p17'] = parameters['p17']
@@ -1922,6 +1957,11 @@ class TestNN(NNTestCase):
 
         parameter_dict.fromkeys(['p19', 'p20'], temp_param)
         self.assertEquals({'p19': temp_param, 'p20': temp_param}, parameter_dict)
+        check()
+        
+        parameter_dict.clear()
+        self.assertEqual(len(parameter_dict), 0)
+        parameters.clear()
         check()
 
     def test_add_module(self):
