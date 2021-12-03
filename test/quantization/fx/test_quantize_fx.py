@@ -3212,7 +3212,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return self.conv(x)
 
         for i in range(len(convs)):
-            dim = i+1
+            dim = i + 1
             m = M(i).eval()
             m = prepare_fx(m, {"": default_qconfig})
             m_ref = copy.deepcopy(m)
