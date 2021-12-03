@@ -1834,8 +1834,23 @@ class TestNN(NNTestCase):
         parameters.pop('p4')
         check()
 
+        p = Parameter(torch.randn(10, 10))
+        parameter_dict['p12'] = p
+        p_popitem = parameter_dict.popitem()
+        self.assertEqual(p_popitem[0], 'p12')
+        self.assertIs(p_popitem[1], p)
+
+        parameters['p11'] = Parameter(torch.randn(10, 10))
+        p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
+        self.assertIs(p_setdefault, parameters['p11'])
+
+        p = Parameter(torch.randn(10, 10))
+        self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        
+        check()
+        
         parameters2 = OrderedDict([
-            ('p11', Parameter(torch.randn(10, 10))),
+            ('p13', Parameter(torch.randn(10, 10))),
             ('p2', Parameter(torch.randn(10, 10))),
             ('p3', Parameter(torch.randn(10, 10))),
         ])
@@ -1851,9 +1866,9 @@ class TestNN(NNTestCase):
         check()
 
         parameters2 = OrderedDict([
-            ('p12', Parameter(torch.randn(10, 10))),
             ('p14', Parameter(torch.randn(10, 10))),
-            ('p11', Parameter(torch.randn(10, 10))),
+            ('p15', Parameter(torch.randn(10, 10))),
+            ('p13', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
         parameters |= parameters2
@@ -1863,6 +1878,23 @@ class TestNN(NNTestCase):
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
+        check()
+
+        parameters['p17'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p17'] = parameters['p17']
+        self.assertIs(parameters['p17'], parameter_dict.get('p17'))
+        temp_param = Parameter(torch.randn(10, 10))
+        self.assertIs(parameters['p17'], parameter_dict.get('p17', temp_param))
+        self.assertIs(None, parameter_dict.get('p18'))
+        self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
+        check()
+
+        parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertIs({'p19': None, 'p20': None}, parameter_dict)
+        check()
+
+        parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertEquals({'p19': temp_param, 'p20': temp_param}, parameter_dict)
         check()
 
     def test_add_module(self):
@@ -11246,6 +11278,10 @@ class TestNN(NNTestCase):
             fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
             fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
 
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
+        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
+            fold(torch.randn(1, 12, 12))
+
     def test_unfold_invalid_arg(self):
         # input wrong dimension
 
@@ -16963,6 +16999,24 @@ class TestNNDeviceType(NNTestCase):
         output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
         output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
         self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_layernorm_weight_bias(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.float32) * 0.1
+        normalized_shape = (width,)
+        data = torch.randn(width, device="cuda", dtype=torch.float32)
+        weight = torch.ones(width, device="cuda", dtype=torch.float32)
+        bias = torch.zeros(width, device="cuda", dtype=torch.float32)
+        eps = 1e-5
+
+        out_none_weight = torch.layer_norm(input, normalized_shape, None, data, eps)
+        out_one_weight = torch.layer_norm(input, normalized_shape, weight, data, eps)
+        self.assertEqual(out_none_weight, out_one_weight)
+
+        out_none_bias = torch.layer_norm(input, normalized_shape, data, None, eps)
+        out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
+        self.assertEqual(out_none_bias, out_zero_bias)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10

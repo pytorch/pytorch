@@ -606,6 +606,20 @@ class ParameterDict(Module):
     def __contains__(self, key: str) -> bool:
         return key in self._parameters
 
+    def setdefault(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter':
+        """If key is in the ParameterDict, return its parameter.
+        If not, insert `key` with a parameter `default` and return `default`.
+        `default` defaults to `None`.
+
+        Args:
+            key (string): key to set default for
+            default (:class:`~torch.nn.Parameter`): the parameter set to the key
+        """
+        if key in self._parameters:
+            return self._parameters[key]
+        self[key] = default
+        return self._parameters[key]
+
     def clear(self) -> None:
         """Remove all items from the ParameterDict.
         """
@@ -620,6 +634,32 @@ class ParameterDict(Module):
         v = self[key]
         del self[key]
         return v
+
+    def popitem(self) -> Tuple[str, 'Parameter']:
+        """Remove and return the last inserted `(key, parameter)` pair
+        from the ParameterDict
+        """
+        return self._parameters.popitem()
+
+    def get(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter | None':
+        r"""Return the parameter associated with key if present.
+            Otherwise return default if provided, None if not.
+
+        Args:
+            key (string): key to get from the ParameterDict
+            default (Parameter, optional): value to return if key not present
+        """
+        return self._parameters.get(key, default)
+
+    def fromkeys(self, keys: Iterable['str'], default: Optional['Parameter'] = None) -> 'ParameterDict':
+        r"""Make self into a new dictionary with the keys provided
+
+        Args:
+            keys (iterable, string): keys to make the new ParameterDict from
+            default (Parameter, optional): value to set for all keys
+        """
+        self._parameters.fromkeys(keys, default)
+        return self
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
