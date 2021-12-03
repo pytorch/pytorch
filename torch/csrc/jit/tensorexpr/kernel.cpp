@@ -954,7 +954,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         bufferArgs_.emplace_back(bufHandle);
         break;
       }
-      if (false && isContiguous(input) && !outputs_set.count(input)) {
+      if (isContiguous(input) && !outputs_set.count(input)) {
         BufHandle inBuffer(
             "t" + input_name_map_[input],
             toExprHandles(*tt->sizes().concrete_sizes()),

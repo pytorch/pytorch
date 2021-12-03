@@ -1,12 +1,10 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/jit_opt_limit.h>
+#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
-
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 
 namespace torch {
 namespace jit {
@@ -422,7 +420,7 @@ std::shared_ptr<Graph> replaceListOutputWithTuple(
   return graph;
 }
 
-bool tryTrimmingGraph(const std::shared_ptr<Graph>& graph) {
+bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   Node* ret = graph->return_node();
   std::unordered_set<Value*> graph_inputs(
       graph->inputs().begin(), graph->inputs().end());
@@ -431,15 +429,19 @@ bool tryTrimmingGraph(const std::shared_ptr<Graph>& graph) {
   bool changed = false;
   for (int idx = 0; idx < ret->inputs().size(); idx++) {
     auto v = ret->inputs()[idx];
-    if (graph_inputs.count(v))
+    if (graph_inputs.count(v)) {
       continue;
-
+    }
+    // Delete the graph output IDX and add all inputs of the node producing that
+    // value to the graph outputs
     graph->eraseOutput(idx);
     for (auto v_ins : v->node()->inputs()) {
-      if (outputs.count(v_ins))
+      if (outputs.count(v_ins)) {
         continue;
-      if (v_ins->node()->kind() == prim::Constant)
+      }
+      if (v_ins->node()->kind() == prim::Constant) {
         continue;
+      }
 
       graph->registerOutput(v_ins);
     }
@@ -457,10 +459,7 @@ std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
       if (!tt->scalarType() || !c10::isQIntType(*tt->scalarType())) {
         continue;
       }
-      std::cerr << "NODE: " << *v->node() << "\n";
-      std::cerr << "TYPE: " << *tt << "\n";
-      Node* deq =
-          graph->create(c10::Symbol::fromQualString("aten::dequantize"), {v});
+      Node* deq = graph->create(aten::dequantize, {v});
       graph->appendNode(deq);
       deq->output()->setType(tt->withScalarType(c10::kFloat));
       v->replaceAllUsesAfterNodeWith(deq, deq->output());
@@ -469,14 +468,13 @@ std::shared_ptr<Graph> dequantizeResults(const std::shared_ptr<Graph>& graph) {
   return graph;
 }
 
-std::shared_ptr<Graph> trimGraph(const std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> trimGraph(
+    const std::shared_ptr<Graph>& graph,
+    int64_t iters) {
   bool changed = true;
-  int max_iters = 1000;
-  int iter = 0;
-  while (changed && iter++ < max_iters) {
-    if (!JIT_OPT_ALLOWED)
-      break;
-    changed = tryTrimmingGraph(graph);
+  int64_t iter = 0;
+  while (changed && iter++ < iters) {
+    changed = trimGraphOnce(graph);
     EliminateDeadCode(graph->block());
   }
   dequantizeResults(graph);

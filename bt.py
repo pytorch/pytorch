@@ -1,5 +1,6 @@
 import torch
 import sys
+import os
 
 model = torch.load("btq.pt")
 
@@ -89,17 +90,18 @@ def prepare_graph(g, inputs, dynamic_dims):
   sym_indices = torch._C._te.make_shapes_symbolic(g, dynamic_dims)
   torch._C._jit_pass_lower_all_tuples(g)
 
+  # Trim the graph (used for debugging)
+  trim_iters = os.environ.get('TRIM_GRAPH')
+  g = torch._C._te.trim_graph(g, int(trim_iters) if trim_iters else 0)
+
   # Print the final graph
   print(g)
-
-#   g = torch._C._te.trim_graph(g)
   return g, sym_indices
 
 g = model.graph
 g, sym_indices = prepare_graph(g, ii, [115])
 
 print(sym_indices)
-print(g)
 torch._C._jit_set_te_must_use_llvm_cpu(False)
 
 # Now, compile it with NNC!
@@ -121,17 +123,14 @@ else:
   kernel = torch._C._te.TensorExprKernel(g, dict(), sym_indices)
   extended_inputs = tuple(list(*ii) + [115])
   nnc_res = kernel.run(tuple(extended_inputs))
-  ref_res = model(*tuple(*ii))[0]
   graph_res = torch._C._jit_interpret_graph(g, tuple(extended_inputs))
+  if os.environ.get('TRIM_GRAPH'):
+      ref_res = graph_res
+  else:
+      ref_res = model(*tuple(*ii))[0]
 
   # Compare results with the reference
   for i in range(len(graph_res)):
-    exp = nnc_res[i]
-    ref = ref_res[i]
-    if exp.dtype == torch.quint8:
-        exp.dequantize()
-        ref.dequantize()
-
     assert(torch.allclose(nnc_res[i], ref_res[i], rtol=1e-5, atol=1e-5))
     assert(torch.allclose(graph_res[i], nnc_res[i], rtol=1e-5, atol=1e-5))
   print("SUCCESS!")
