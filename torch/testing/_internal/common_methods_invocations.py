@@ -2616,7 +2616,7 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
 def clone_sample(sample, **kwargs):
     """
     Given a SampleInput, this function analyzes its input, args and kwargs,
-    and produces a copy with each non-Tensor entry being shallow copied,
+    and produces a copy with each non-Tensor entry being copied by reference,
     and with each Tensor entry cloned with `t.detach().clone().requires_grad_(t.requires_grad)`
     """
 
