@@ -302,6 +302,18 @@ class TORCH_API StaticModule {
     return value_group_;
   }
 
+  const FastSet<const Value*>& managed_tensor_values() const {
+    return managed_tensor_values_;
+  }
+
+  const FastSet<const Value*>& managed_output_tensor_values() const {
+    return managed_output_tensor_values_;
+  }
+
+  const FastSet<const Value*>& leaked_values() const {
+    return leaked_values_;
+  }
+
   bool first_input_is_self() const {
     return module_.has_value();
   }
@@ -309,6 +321,10 @@ class TORCH_API StaticModule {
   StaticRuntime& runtime();
 
  private:
+  // Initialize various attributes that the memory planner will need.
+  // To be called at the tail of the ctor.
+  void prepareForMemoryPlanner();
+
   StaticModuleOptions opts_;
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
@@ -332,6 +348,10 @@ class TORCH_API StaticModule {
       value_to_same_storage_values_;
 
   FastSet<const Node*> node_is_optimizable_container_type_;
+
+  FastSet<const Value*> managed_tensor_values_{};
+  FastSet<const Value*> managed_output_tensor_values_{};
+  FastSet<const Value*> leaked_values_{};
 };
 
 class TORCH_API StaticRuntime {
@@ -430,7 +450,8 @@ class TORCH_API StaticRuntime {
 
   bool checkOutputTensorMemoryLeaks();
 
-  bool isManagedOutputTensor(const IValue& ivalue);
+  bool isManagedOutputTensor(const IValue& ivalue) const;
+  bool isManagedOutputTensorValue(const Value* value) const;
 
   void disableManageOutputTensors();
 

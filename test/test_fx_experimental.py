@@ -1463,8 +1463,10 @@ class TestNormalizeOperators(JitTestCase):
         # Sorted and one entry on each line to minimize merge conflicts.
         op_skip = {
             # See: https://github.com/pytorch/pytorch/issues/64997
+            "as_strided",
             "block_diag",
             "broadcast_tensors",
+            "cartesian_prod",
             "contiguous",
             "einsum",
             "expand",
@@ -1492,6 +1494,7 @@ class TestNormalizeOperators(JitTestCase):
             "resize_",
             "resize_as_",
             "special.zeta",
+            "sum_to_size",
             "to_sparse",
             "unique",
             "unique_consecutive",

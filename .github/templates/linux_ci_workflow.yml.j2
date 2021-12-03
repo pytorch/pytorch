@@ -313,6 +313,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
+      WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
@@ -358,6 +359,17 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+{%- if is_scheduled %}
+      - name: Generate netrc (only for docs-push)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > ~/.netrc
+          echo "login pytorchbot" >> ~/.netrc
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> ~/.netrc
+{%- endif %}
       - uses: !{{ common.upload_artifact_s3_action }}
         name: Upload Python Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}
