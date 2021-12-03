@@ -819,7 +819,7 @@ lets us capture and run graph-safe sections as graphs regardless::
         else:
             tmp = module3(tmp)  # forward ops run as a graph
 
-        loss = loss_fn(tmp, y)
+        loss = loss_fn(tmp, target)
         # module2's or module3's (whichever was chosen) backward ops,
         # as well as module1's backward ops, run as graphs
         loss.backward()
