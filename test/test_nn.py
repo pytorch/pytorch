@@ -1862,6 +1862,47 @@ class TestNN(NNTestCase):
         self.assertTrue("p16" in copy)
         check()
 
+        p = Parameter(torch.randn(10, 10))
+        parameter_dict['p12'] = p
+        p_popitem = parameter_dict.popitem()
+        self.assertEqual(p_popitem[0], 'p12')
+        self.assertIs(p_popitem[1], p)
+
+        parameters['p11'] = Parameter(torch.randn(10, 10))
+        p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
+        self.assertIs(p_setdefault, parameters['p11'])
+
+        p = Parameter(torch.randn(10, 10))
+        self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        
+        check()
+        
+        parameters2 = OrderedDict([
+            ('p13', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+            ('p3', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters |= parameters2
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict()
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters |= parameters2
+        parameter_dict |= parameter_dict2
+        check()
+
+        parameters2 = OrderedDict([
+            ('p14', Parameter(torch.randn(10, 10))),
+            ('p15', Parameter(torch.randn(10, 10))),
+            ('p13', Parameter(torch.randn(10, 10))),
+        ])
+        parameter_dict2 = nn.ParameterDict(parameters2)
+        parameters |= parameters2
+        parameter_dict |= parameter_dict2
+        check()
+  
         # Check __or__ and __ror__ works
         parameters2 = OrderedDict([
             ('p20', Parameter(torch.randn(10, 10))),
@@ -1901,8 +1942,24 @@ class TestNN(NNTestCase):
         parameter_dict2 = nn.ParameterDict(parameters2)
         parameters = parameters2 | parameters
         parameter_dict = parameter_dict2 | parameter_dict
+
+        parameters['p17'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p17'] = parameters['p17']
+        self.assertIs(parameters['p17'], parameter_dict.get('p17'))
+        temp_param = Parameter(torch.randn(10, 10))
+        self.assertIs(parameters['p17'], parameter_dict.get('p17', temp_param))
+        self.assertIs(None, parameter_dict.get('p18'))
+        self.assertIs(temp_param, parameter_dict.get('p18', temp_param))
         check()
 
+        parameter_dict.fromkeys(['p19', 'p20'])
+        self.assertIs({'p19': None, 'p20': None}, parameter_dict)
+        check()
+
+        parameter_dict.fromkeys(['p19', 'p20'], temp_param)
+        self.assertEquals({'p19': temp_param, 'p20': temp_param}, parameter_dict)
+        check()
+        
         parameter_dict.clear()
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
