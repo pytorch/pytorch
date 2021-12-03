@@ -46,7 +46,7 @@ class Wishart(Distribution):
     arg_constraints = {
         'covariance_matrix': constraints.positive_definite,
         'precision_matrix': constraints.positive_definite,
-        'scale_tril': constraints.positive_definite,
+        'scale_tril': constraints.lower_cholesky,
         'df': constraints.greater_than(0),
     }
     support = constraints.positive_definite
