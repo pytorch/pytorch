@@ -252,6 +252,7 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+{%- if 'rocm' not in test_runner_type %}
           PROXY_ENV=
           # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
           #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
@@ -260,6 +261,7 @@ jobs:
             # shellcheck disable=SC2089
             PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
           fi
+{%- endif %}
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
