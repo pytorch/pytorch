@@ -446,7 +446,7 @@ class FunctionSchema:
     ...
 
 class _UpgraderEntry:
-    version_bump: _int
+    bumped_at_version: _int
     upgrader_name: str
     old_schema: str
 
