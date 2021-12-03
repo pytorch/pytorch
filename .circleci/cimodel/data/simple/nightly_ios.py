@@ -19,7 +19,7 @@ class IOSNightlyJob:
 
         extra_name_suffix = [self.get_phase_name()] if self.is_upload else []
 
-        extra_name = ["fulljit"] if self.is_full_jit else []
+        extra_name = ["full_jit"] if self.is_full_jit else []
 
         common_name_pieces = [
             "ios",

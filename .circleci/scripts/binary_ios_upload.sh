@@ -23,7 +23,7 @@ do
     fi
 done
 lipo -i ${ZIP_DIR}/install/lib/*.a
-echo "BUILD_LITE_INTERPRETER: $(BUILD_LITE_INTERPRETER)"
+echo "BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}"
 export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}
 # copy the umbrella header and license
 if [ BUILD_LITE_INTERPRETER ]; then
