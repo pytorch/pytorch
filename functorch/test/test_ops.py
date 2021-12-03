@@ -597,6 +597,7 @@ class TestOperators(TestCase):
         xfail('linalg.matrix_power'),
         xfail('linalg.norm'),
         xfail('linalg.pinv'),
+        xfail('linalg.qr'),
         xfail('linalg.pinv', 'hermitian'),
         xfail('linalg.slogdet'),
         xfail('linalg.solve'),
