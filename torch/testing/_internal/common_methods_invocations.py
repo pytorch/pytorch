@@ -13284,6 +13284,11 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
             # Probably because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
