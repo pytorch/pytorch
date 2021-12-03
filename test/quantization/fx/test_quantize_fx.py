@@ -56,11 +56,32 @@ from torch.ao.quantization import (
     PerChannelMinMaxObserver,
     QConfigDynamic,
     FixedQParamsFakeQuantize,
+    FixedQParamsObserver,
     FusedMovingAvgObsFakeQuantize,
     FakeQuantize,
     MovingAverageMinMaxObserver,
     HistogramObserver,
     QConfig,
+)
+
+from torch.ao.quantization.fx.pattern_utils import (
+    DEFAULT_FUSION_PATTERNS,
+    DEFAULT_QUANTIZATION_PATTERNS,
+    DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP,
+    DEFAULT_OUTPUT_OBSERVER_MAP,
+    register_fusion_pattern,
+    register_quant_pattern,
+    get_default_output_activation_post_process_map
+)
+
+from torch.ao.quantization.fake_quantize import (
+    default_affine_fixed_qparams_fake_quant,
+    default_symmetric_fixed_qparams_fake_quant,
+)
+
+from torch.ao.quantization.observer import (
+    default_affine_fixed_qparams_observer,
+    default_symmetric_fixed_qparams_observer,
 )
 
 # test utils
@@ -3273,6 +3294,55 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_occurrence=node_occurrence,
                 expected_node_list=order_check)
 
+    def _assertFixedQParamsFakeQuantizeEqual(self, fq1, fq2):
+        self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
+
+    def test_fixed_qparams_patterns(self):
+        hard_sigmoid_keys = [torch.nn.Hardsigmoid, torch.nn.functional.hardsigmoid, "hardsigmoid", "hardsigmoid_"]
+        sigmoid_keys = [torch.nn.Sigmoid, torch.sigmoid, "sigmoid", "sigmoid_"]
+        tanh_keys = [torch.nn.Tanh, torch.tanh, "tanh", "tanh_"]
+        for k in hard_sigmoid_keys + sigmoid_keys:
+            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_affine_fixed_qparams_observer)
+            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
+                                                      default_affine_fixed_qparams_fake_quant)
+        for k in tanh_keys:
+            self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP[k], default_symmetric_fixed_qparams_observer)
+            self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP[k],
+                                                      default_symmetric_fixed_qparams_fake_quant)
+
+    def test_register_patterns(self):
+        @register_fusion_pattern("dummy_fusion")
+        class DummyFusion():
+            pass
+
+        @register_quant_pattern("dummy_quant")
+        class DummyQuant():
+            pass
+
+        @register_quant_pattern("dummy_quant2", default_affine_fixed_qparams_observer)
+        class DummyQuant2():
+            pass
+
+        @register_quant_pattern("dummy_quant3", default_symmetric_fixed_qparams_observer)
+        class DummyQuant3():
+            pass
+
+        self.assertEqual(DEFAULT_FUSION_PATTERNS["dummy_fusion"], DummyFusion)
+        self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant"], DummyQuant)
+        self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant2"], DummyQuant2)
+        self.assertEqual(DEFAULT_QUANTIZATION_PATTERNS["dummy_quant3"], DummyQuant3)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"], default_affine_fixed_qparams_observer)
+        self.assertEqual(DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"], default_symmetric_fixed_qparams_observer)
+        self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"],
+                                                  default_affine_fixed_qparams_fake_quant)
+        self._assertFixedQParamsFakeQuantizeEqual(DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"],
+                                                  default_symmetric_fixed_qparams_fake_quant)
+        self.assertTrue(get_default_output_activation_post_process_map(is_training=True) is
+                        DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP)
+        self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
+                        DEFAULT_OUTPUT_OBSERVER_MAP)
+
+
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
     def setUp(self):
@@ -4860,14 +4930,11 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = self.hardsigmoid(x)
                 x = F.hardsigmoid(x)
                 x = F.hardsigmoid(x, inplace=True)
-                x = x.hardsigmoid()
-                x.hardsigmoid_()
                 x = self.tanh(x)
                 # F.tanh is deprecated
                 x = torch.tanh(x)
                 x = x.tanh()
                 x.tanh_()
-                x = self.conv(x)
                 return x
 
         for eval_mode in [True, False]:
@@ -4878,20 +4945,26 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 m.eval()
                 qconfig = default_qconfig
                 prepare = prepare_fx
-                fq_count = 13
+                fq_count = 11
             else:
                 m.train()
                 qconfig = default_qat_qconfig
                 prepare = prepare_qat_fx
-                fq_count = 13
+                fq_count = 11
 
             # nothing to fuse so skipping the fuse step
+            m_copy = copy.deepcopy(m)
             qconfig_dict = {'': qconfig}
             prepared = prepare(m, qconfig_dict)
             prepared_copy = copy.deepcopy(prepared)
+            # check that prepare does not change model result
+            if eval_mode:
+                r = torch.rand(3, 3, 3, 3)
+                self.assertEqual(m_copy(r), prepared_copy(r))
             # check the correct number of activation_post_process is inserted
+            expected_activation_post_process = FixedQParamsObserver if eval_mode else FixedQParamsFakeQuantize
             count_check = {
-                ns.call_module(FixedQParamsFakeQuantize) : fq_count,
+                ns.call_module(expected_activation_post_process) : fq_count,
             }
             self.checkGraphModuleNodes(
                 prepared,
@@ -4912,7 +4985,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_module(nnq.Conv2d),
                 ns.call_module(nn.Sigmoid),
-                ns.call_module(nnq.Conv2d),
                 ns.call_method('dequantize'),
             ]
             self.checkGraphModuleNodes(
@@ -4921,8 +4993,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 expected_node_list=order_check)
 
             reference_count_check = {
-                ns.call_function(torch.quantize_per_tensor) : 16,
-                ns.call_method('dequantize') : 13
+                ns.call_function(torch.quantize_per_tensor) : 13,
+                ns.call_method('dequantize') : 11
             }
             reference_order_check = [
                 ns.call_function(torch.quantize_per_tensor),
@@ -4931,9 +5003,6 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
                 ns.call_module(nn.Sigmoid),
-                ns.call_function(torch.quantize_per_tensor),
-                ns.call_method('dequantize'),
-                ns.call_module(nnqr.Conv2d),
                 ns.call_function(torch.quantize_per_tensor),
                 ns.call_method('dequantize'),
             ]
