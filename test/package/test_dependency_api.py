@@ -12,6 +12,7 @@ from torch.package.package_exporter import PackagingError
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests
 
+import pdb
 
 
 try:
@@ -334,7 +335,6 @@ class TestDependencyAPI(PackageTestCase):
             exporter.intern("package_a")
             exporter.mock("**")
             exporter.save_source_string("foo", "import package_a")
-            # pdb.set_trace()
 
         buffer2.seek(0)
         importer2 = PackageImporter(buffer2)
@@ -413,12 +413,13 @@ class TestDependencyAPI(PackageTestCase):
             )
 
         buffer.seek(0)
+        # pdb.set_trace()
         hi = PackageImporter(buffer)
         import package_b
-
         foo = hi.import_module("foo")
 
         # subpackage_0 should be interned, subpackage_1 should not.
+        self.assertIsNot(package_b, foo.package_b)
         self.assertIsNot(package_b.subpackage_0, foo.subpackage_0)
         self.assertIsNot(
             foo.subpackage_0.subsubpackage_0, package_b.subpackage_0.subsubpackage_0
@@ -496,9 +497,8 @@ class TestDependencyAPI(PackageTestCase):
         with PackageExporter(buffer) as he:
             he.save_source_string(
                 "foo",
-                "import torch"
+                "import torch;"
             )
-
         buffer.seek(0)
         hi = PackageImporter(buffer)
 

@@ -8,7 +8,6 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from string import Template
 from typing import (
     Any,
     BinaryIO,
@@ -245,16 +244,8 @@ class PackageExporter:
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
         self._selective_interns: Dict[str, [str]] = {}
-        self._inverse_default_selective_intern_list = {}
         for (package_name, interned_packages) in DEFAULT_SELECTIVE_INTERN_LIST.items():
-            if self._module_exists(package_name):
-                self._selective_intern(
-                    package_name, interned_packages, allow_empty=True
-                )
-            for interned_package in interned_packages:
-                self._inverse_default_selective_intern_list[
-                    interned_package
-                ] = package_name
+            self._selective_intern(package_name, interned_packages, allow_empty=True)
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -497,16 +488,16 @@ class PackageExporter:
                 if action == _ModuleProviderAction.SELECTIVE_EXTERN:
                     module_obj = self._import_module(module_name)
                     is_package = hasattr(module_obj, "__path__")
-                    source = self._get_source_of_module(module_obj)
 
-                    assert is_package
-                    assert source
+                    if not is_package:
+                        raise RuntimeError(
+                            f"{module_name} is selectively externed but is not a package"
+                        )
 
                     self.dependency_graph.add_node(
                         module_name,
                         action=_ModuleProviderAction.SELECTIVE_EXTERN,
                         provided=True,
-                        source=source,
                         is_package=is_package,
                     )
                 return
@@ -737,7 +728,6 @@ class PackageExporter:
                 before any modules match that pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
 
         """
-        assert self._module_exists(package_name), package_name
         if package_name not in self._selective_interns:
             self._selective_interns[package_name] = set()
         self._selective_interns[package_name].update(interned_modules)
@@ -986,7 +976,6 @@ class PackageExporter:
         extern_modules = []
         for module_name, attrs in self.dependency_graph.nodes.items():
             action = attrs["action"]
-            is_selective_extern = self._check_if_selectively_externed(module_name)
             if action == _ModuleProviderAction.EXTERN:
                 for hook in self._extern_hooks.values():
                     hook(self, module_name)
@@ -1020,33 +1009,7 @@ class PackageExporter:
                 source = attrs["source"]
                 self._write_source_string(module_name, source, is_package)
             elif action == _ModuleProviderAction.SELECTIVE_EXTERN:
-                is_package = attrs["is_package"]
-                source = attrs["source"]
-                selective_extern_template_file = str(
-                    Path(__file__).parent / "_selective_extern.py"
-                )
-                selective_extern_file_template = Template(
-                    _read_file(selective_extern_template_file)
-                )
-
-                matches = self._selective_interns[module_name]
-                original_init = self._get_source_of_module(
-                    self._import_module(module_name)
-                )
-                assert original_init
-                interned_modules = ", ".join(
-                    f'"{match[len(module_name) + 1:]}"' for match in matches
-                )
-                source = "\n\n".join(
-                    [
-                        selective_extern_file_template.substitute(
-                            interned_modules=interned_modules,
-                            package_name=f'"{module_name}"',
-                        )
-                    ]
-                )
-                self._write_source_string(module_name, source, is_package)
-
+                continue
             elif action == _ModuleProviderAction.REPACKAGED_MOCK_MODULE:
                 self._write_mock_file()
             elif action == _ModuleProviderAction.SKIP:
@@ -1092,8 +1055,6 @@ class PackageExporter:
 
     def _can_implicitly_extern(self, module_name: str) -> bool:
         top_level_package_name = module_name.partition(".")[0]
-        if self._check_if_selectively_externed(module_name):
-            return False
         return top_level_package_name not in _DISALLOWED_MODULES and is_stdlib_module(
             top_level_package_name
         )

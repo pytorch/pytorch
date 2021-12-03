@@ -27,7 +27,6 @@ from .file_structure_representation import Directory, _create_directory_from_fil
 from .glob_group import GlobPattern
 from .importer import Importer
 
-
 class PackageImporter(Importer):
     """Importers allow you to load code written to packages by :class:`PackageExporter`.
     Code is loaded in a hermetic way, using files from the package
@@ -89,10 +88,7 @@ class PackageImporter(Importer):
                     f"package '{file_or_buffer}' needs the external module '{extern_module}' "
                     f"but that module has been disallowed"
                 )
-            if extern_module in self.selective_extern_packages:
-                self._add_selective_extern(extern_module)
-            else:
-                self._add_extern(extern_module)
+            self._add_extern(extern_module)
 
         for fname in self.zip_reader.get_all_records():
             self._add_file(fname)
@@ -330,9 +326,34 @@ class PackageImporter(Importer):
         ns["__builtins__"] = self.patched_builtins
         ns["__torch_package__"] = True
 
-        if is_package and name in self.selective_extern_packages:
-            # assert not parent
+        node = self._get_node_from_name(name)
+        if isinstance(node, _SelectiveExternNode):
             ns["_extern_copy"] = importlib.import_module(name)
+
+            def get_selectively_interned_module_names(cur_node, name):
+                if isinstance(cur_node, _ExternNode):
+                    return []
+                elif isinstance(cur_node, (_PackageNode, _SelectiveExternNode)):
+                    module_names = []
+                    if isinstance(cur_node, _PackageNode):
+                        module_names.append(name)
+                    for child_name, child_node in cur_node.children.items():
+                        module_names.extend(get_selectively_interned_module_names(child_node, f"{name}.{child_name}"))
+                    return module_names
+                elif isinstance(cur_node, _ModuleNode):
+                    return [name]
+            interned_modules = set(get_selectively_interned_module_names(node, name))
+
+            def __getattr__(self, name_):
+                if name_ not in interned_modules:
+                    return getattr(ns['_extern_copy'], name_)
+                self.import_module(f'{name}.{name_}')
+                return globals().get(name_)
+
+            module.__getattr__ = types.MethodType(__getattr__, module)
+
+            # replace getattr function in selective extern module
+
 
         # Add this module to our private global registry. It should be unique due to mangling.
         assert module.__name__ not in _package_imported_modules
@@ -354,27 +375,38 @@ class PackageImporter(Importer):
 
         return module
 
+    def _check_if_viable_parent(self, cur, child, name):
+        if not isinstance(cur, (_PackageNode, _SelectiveExternNode)) or child not in cur.children:
+            raise ModuleNotFoundError(
+                f'No module named "{name}" with in self-contained archive "{self.filename}"'
+                f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
+                name=name,
+            )
+
+    def _get_node_from_name(self, name: str):
+        cur: _PathNode = self.root
+        atoms = name.split(".")
+        for atom in atoms[:-1]:
+            self._check_if_viable_parent(cur, atom, name)
+            cur = cur.children[atom]
+            if isinstance(cur, _ExternNode):
+                return cur
+
+        self._check_if_viable_parent(cur, atoms[-1], name)
+        return cur.children[atoms[-1]]
+
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
         for atom in name.split("."):
-            if isinstance(cur, _SelectiveInternNode):
-                if atom not in cur.children:
-                    cur.children[atom] = _ExternNode()
-            elif not isinstance(cur, _PackageNode) or atom not in cur.children:
-                raise ModuleNotFoundError(
-                    f'No module named "{name}" in self-contained archive "{self.filename}"'
-                    f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
-                    name=name,
-                )
+            self._check_if_viable_parent(cur, atom, name)
             cur = cur.children[atom]
-            if isinstance(cur, (_ExternNode, _SelectiveExternNode)):
+            if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
-
         return self._make_module(
             name,
             cur.source_file,
-            isinstance(cur, (_SelectiveInternNode, _PackageNode)),
+            isinstance(cur, (_PackageNode, _SelectiveExternNode)),
             parent,
         )  # type: ignore[attr-defined]
 
@@ -562,30 +594,30 @@ class PackageImporter(Importer):
         else:
             return f"{name.replace('.', '/')}"
 
-    # TODO: properly assign SELECTIVE_EXTERN Nodes
     def _get_or_create_package(
         self, atoms: List[str]
-    ) -> "Union[_PackageNode, _ExternNode, _SelectiveInternNode, _SelectiveExternNode]":
+    ) -> "Union[_PackageNode, _ExternNode, _SelectiveExternNode]":
         cur = self.root
         if (
             len(atoms) == 1
             and atoms[0] in self.selective_extern_packages
             and atoms[0] not in cur.children
         ):
-            node = cur.children[atoms[0]] = _SelectiveInternNode()
+            node = cur.children[atoms[0]] = _SelectiveExternNode(None)
+
             return node
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)
             if node is None:
                 node = cur.children[atom] = _PackageNode(None)
-            if isinstance(node, (_ExternNode, _SelectiveExternNode)):
+            if isinstance(node, _ExternNode):
                 return node
             if isinstance(node, _ModuleNode):
                 name = ".".join(atoms[:i])
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
-            assert isinstance(node, (_PackageNode, _SelectiveInternNode))
+            assert isinstance(node, (_PackageNode, _SelectiveExternNode))
             cur = node
         return cur
 
@@ -599,7 +631,7 @@ class PackageImporter(Importer):
         if len(prefix) > 1 and prefix[0] == ".data":
             return
         package = self._get_or_create_package(prefix)
-        if isinstance(package, _ExternNode):
+        if isinstance(package, (_ExternNode)):
             raise ImportError(
                 f"inconsistent module structure. package contains a module file {filename}"
                 f" that is a subpackage of a module marked external."
@@ -620,8 +652,7 @@ class PackageImporter(Importer):
     def _add_selective_extern(self, selective_extern_name: str):
         *prefix, last = selective_extern_name.split(".")
         package = self._get_or_create_package(prefix)
-        if isinstance(package, _SelectiveExternNode):
-            return  # the shorter extern covers this extern case
+        assert not isinstance(package, _SelectiveExternNode)
         package.children[last] = _SelectiveExternNode()
 
 
@@ -659,17 +690,12 @@ class _ExternNode(_PathNode):
 
 
 class _SelectiveExternNode(_PathNode):
-    def __repr__(self):
-        return "Selective Extern"
-
-
-class _SelectiveInternNode(_PathNode):
-    def __init__(self, source_file: Optional[str] = None):
+    def __init__(self, source_file: Optional[str]):
         self.source_file = source_file
         self.children: Dict[str, _PathNode] = {}
 
     def __repr__(self):
-        return "SelectiveIntern"
+        return "Selective Extern"
 
 
 # A private global registry of all modules that have been package-imported.
