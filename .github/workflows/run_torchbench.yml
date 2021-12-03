@@ -35,7 +35,7 @@ jobs:
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
           conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate gitpython
-          conda install -y pytorch torchvision torchaudio cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
+          conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
