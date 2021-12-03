@@ -95,7 +95,7 @@ class Wishart(Distribution):
 
         # Gamma distribution is needed for Batlett decomposition sampling
         self.dist_gamma = torch.distributions.Gamma(
-            self.df.expand(batch_shape + (self._event_shape[0],))
+            self.df.unsqueeze(-1)
             - torch.arange(
                 self._event_shape[0],
                 device=self._unbroadcasted_scale_tril.device
