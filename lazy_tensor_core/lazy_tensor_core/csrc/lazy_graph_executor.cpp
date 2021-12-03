@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include <c10/util/Logging.h>
+#include <string>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
@@ -168,7 +169,17 @@ class DataCacheArena {
     if (device_data == nullptr) {
       at::Tensor tensor_copy = CopyTensor(tensor);
       device_data = TensorToDataHandle(tensor_copy, device);
-      cache->Add(std::move(tensor_copy), device_data);
+      auto queryVar = []() -> const char* {
+        const auto disable_cache = std::getenv("LTC_DISABLE_CACHE"); 
+        std::cerr << "querying cache: " << ((disable_cache) ? "disabled" : "enabled") << std::endl;
+        return disable_cache;
+      };
+
+      static auto const DISABLE_CACHE = queryVar();
+      
+      if (!DISABLE_CACHE) {
+        cache->Add(std::move(tensor_copy), device_data);
+      }
       LTC_COUNTER("DeviceDataCacheMiss", 1);
     }
     return device_data;
@@ -390,6 +401,14 @@ LazyGraphExecutor* LazyGraphExecutor::Get() {
 }
 
 void LazyGraphExecutor::RegisterTensor(std::shared_ptr<LazyTensor::Data> data) {
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+  if (VERBOSE_DATA) {
+    std::cerr << "LazyGraphExecutor::RegisterTensor " << data->unique_id << std::endl;
+  }
+  static const auto tid = std::getenv("LTC_DUMP_STACK");
+  if (tid && std::to_string(data->unique_id) == tid) {
+    TORCH_CHECK(false, "triggering LTC_DUMP_STACK");
+  }
   DeviceContextArena::Get()->RegisterTensor(data);
 }
 

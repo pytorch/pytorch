@@ -213,9 +213,20 @@ convolution_backward_overrideable(
           std::move(stride), std::move(padding), std::move(dilation),
           transposed, std::move(output_padding), groups,
           std::move(output_mask));
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+
   LazyTensor grad_input = out_backprop.CreateFrom(torch::lazy::Value(node, 0));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_input " << grad_input.GetUniqueId() << std::endl;
+  }
   LazyTensor grad_weight = out_backprop.CreateFrom(torch::lazy::Value(node, 1));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_weight " << grad_weight.GetUniqueId() << std::endl;
+  }
   LazyTensor grad_bias = out_backprop.CreateFrom(torch::lazy::Value(node, 2));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_bias " << grad_bias.GetUniqueId() << std::endl;
+  }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
 }
@@ -313,9 +324,19 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> ts_native_batch_norm_backward(
         save_mean.GetIrValue(), save_invstd.GetIrValue(), training, eps,
         std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
   }
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
   LazyTensor grad_input = input.CreateFrom(torch::lazy::Value(node, 0));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_input " << grad_input.GetUniqueId() << std::endl;
+  }
   LazyTensor grad_weight = input.CreateFrom(torch::lazy::Value(node, 1));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_weight " << grad_weight.GetUniqueId() << std::endl;
+  }
   LazyTensor grad_bias = input.CreateFrom(torch::lazy::Value(node, 2));
+  if (VERBOSE_DATA) {
+    std::cerr << "created grad_bias " << grad_bias.GetUniqueId() << std::endl;
+  }
   return std::make_tuple(std::move(grad_input), std::move(grad_weight),
                          std::move(grad_bias));
 }

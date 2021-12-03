@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <csignal>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +11,13 @@ namespace ops {
 Constant::Constant(lazy_tensors::Literal value)
     : TsNode(OpKind(at::prim::Constant), value.shape(), /*num_outputs=*/1,
            value.Hash()),
-      value_(std::move(value)) {}
+      value_(std::move(value)) {
+        static const auto THROW_ON_CONSTANT = std::getenv("LTC_THROW_ON_CONSTANT"); 
+        if (THROW_ON_CONSTANT) {
+          raise(SIGINT);
+          //TORCH_CHECK(false);
+        }
+      }
 
 std::string Constant::ToString() const {
   // The Literal to string conversion produces \n separated content, which we do
