@@ -14,6 +14,7 @@ from functorch_additional_op_db import additional_op_db
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 import unittest
 
+IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     outs = []
