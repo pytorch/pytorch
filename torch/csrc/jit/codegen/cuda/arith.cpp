@@ -657,8 +657,8 @@ TensorView* reductionOp(
   if (keep_dim) {
     auto tv_root = TensorDomain::noReductions(tv->getRootDomain());
     std::vector<bool> is_broadcast(tv_root.size(), false);
-    for (int axis : axes) {
-      is_broadcast[axis] = true;
+    for (auto axis : uint_axes) {
+      is_broadcast.at(axis) = true;
     }
 
     out = broadcast(out, is_broadcast);

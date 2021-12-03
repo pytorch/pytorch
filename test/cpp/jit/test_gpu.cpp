@@ -7249,7 +7249,7 @@ TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
   TensorView* tv0 = makeConcreteTensor({2, 3, 4, 5, 6});
   fusion.addInput(tv0);
 
-  TensorView* tv1 = sum(tv0, {0, 2, 4}, /*keep_dim=*/true);
+  TensorView* tv1 = sum(tv0, {0, 2, -1}, /*keep_dim=*/true);
 
   fusion.addOutput(tv1);
 
@@ -7258,7 +7258,7 @@ TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
 
   at::Tensor aten_input = at::randn({2, 3, 4, 5, 6}, options);
   auto aten_output =
-      aten_input.to(at::kDouble).sum({0, 2, 4}, /*keepdim=*/true);
+      aten_input.to(at::kDouble).sum({0, 2, -1}, /*keepdim=*/true);
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);
