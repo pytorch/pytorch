@@ -1024,6 +1024,56 @@ StaticModule::StaticModule(
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, value_group_, values, alias_db);
   }
+
+  prepareForMemoryPlanner();
+}
+
+void StaticModule::prepareForMemoryPlanner() {
+  if (!opts_.enable_out_variant) {
+    return;
+  }
+
+  // Never manage graph outputs so that we can do std::move(output_ivalue).
+  // This does not affect performance if the graph returns a collection object.
+  FastSet<const Value*> graph_output_values(
+      graph_->outputs().begin(), graph_->outputs().end());
+
+  // collect register indices of outputs of ops with out variant
+  for (ProcessedNode& pnode : nodes_) {
+    if (!pnode.has_out_variant()) {
+      continue;
+    }
+    auto outputs = pnode.node()->outputs();
+    for (const auto i : c10::irange(outputs.size())) {
+      const Value* out_v = outputs[i];
+      // Types are stored in the underlying TorchScript IR
+      bool is_tensor_type = out_v->type()->castRaw<TensorType>();
+      if (opts_.manage_output_tensors && is_tensor_type &&
+          graph_output_values.find(out_v) == graph_output_values.end() &&
+          value_group_.isOutputAlias(out_v)) {
+        managed_output_tensor_values_.insert(out_v);
+        continue;
+      }
+      if (value_group_.isAlwaysAlive(out_v)) {
+        continue;
+      }
+      if (is_tensor_type) {
+        managed_tensor_values_.insert(out_v);
+      } else if (is_optimizable_container_type(pnode.node())) {
+        // We "leak" certain container types because their allocations
+        // take a long time
+        leaked_values_.insert(out_v);
+      }
+    }
+  }
+
+  for (const Value* output : graph_->outputs()) {
+    managed_tensor_values_.erase(output);
+  }
+  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values_));
+  GRAPH_DEBUG(
+      "managed_output_tensor_values_: ",
+      dumpValueSet(managed_output_tensor_values_));
 }
 
 const StaticModuleOptions& StaticModule::opts() const {
@@ -1181,6 +1231,9 @@ void StaticRuntime::create_memory_planner() {
         this,
         static_module_.values_share_same_storage(),
         static_module_.value_group(),
+        static_module_.managed_tensor_values(),
+        static_module_.managed_output_tensor_values(),
+        static_module_.leaked_values(),
         static_module_.opts().enable_out_variant,
         manage_output_tensors_enabled_);
   }
@@ -1790,7 +1843,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (planner_ && planner_->isManagedOutputTensorValue(val)) {
+      if (planner_ && isManagedOutputTensorValue(val)) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
@@ -1852,7 +1905,7 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (!planner_->isManagedOutputTensorValue(val)) {
+      if (!isManagedOutputTensorValue(val)) {
         continue;
       }
       const auto& t = ival->toTensor();
@@ -1869,8 +1922,18 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
   return true;
 }
 
-bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
+bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) const {
   return planner_ && planner_->isManagedOutputTensor(ivalue);
+}
+
+bool StaticRuntime::isManagedOutputTensorValue(const Value* value) const {
+  // It's possible that manage_output_tensors_ was disabled after initializing
+  // managed_output_tensor_values, so we have to check that flag here.
+  if (!planner_ || !manage_output_tensors_enabled_) {
+    return false;
+  }
+  const auto& managed_outputs = static_module_.managed_output_tensor_values();
+  return managed_outputs.find(value) != managed_outputs.end();
 }
 
 void StaticRuntime::disableManageOutputTensors() {
