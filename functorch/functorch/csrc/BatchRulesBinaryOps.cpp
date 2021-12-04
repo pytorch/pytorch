@@ -183,6 +183,13 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   POINTWISE_BOXED(op.scalar_tensor);
 
   // Batching rule registrations start
+  POINTWISE_BOXED(__ilshift__.Tensor);
+  POINTWISE_BOXED(__ilshift__.Scalar);
+  POINTWISE_BOXED(__irshift__.Tensor)
+  POINTWISE_BOXED(__irshift__.Scalar)
+  BINARY_SCALAR_2(__lshift__, Tensor, Scalar);
+  BINARY_SCALAR_2(__rshift__, Tensor, Scalar);
+
   BINARY_SCALAR_2(add, Tensor, Scalar);
   POINTWISE_BOXED(addcdiv);
   POINTWISE_BOXED(addcmul);
