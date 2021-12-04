@@ -666,7 +666,7 @@ class ParameterDict(Module):
             keys (iterable, string): keys to make the new ParameterDict from
             default (Parameter, optional): value to set for all keys
         """
-        return ParameterDict(self._parameters.fromkeys(keys, default))
+        return ParameterDict(self._parameters.fromkeys(keys, default))  # type: ignore[arg-type]
 
     def keys(self) -> Iterable[str]:
         r"""Return an iterable of the ParameterDict keys.
