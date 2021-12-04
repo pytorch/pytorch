@@ -23,7 +23,7 @@ _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
 _layout = torch.layout
 
 # Meta-type for "numeric" things; matches our docs
-Number = Union[builtins.int, builtins.float, builtins.bool]
+Number = Union[builtins.int, builtins.float, builtins.bool, builtins.complex]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
