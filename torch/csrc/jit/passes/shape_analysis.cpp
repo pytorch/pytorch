@@ -14,7 +14,7 @@
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #include <exception>
 #include <iostream>

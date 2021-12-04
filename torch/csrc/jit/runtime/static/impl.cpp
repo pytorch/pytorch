@@ -1,7 +1,7 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <ATen/MemoryOverlap.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
