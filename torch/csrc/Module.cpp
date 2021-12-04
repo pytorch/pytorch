@@ -9,6 +9,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/DLConvertor.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/LinalgBackend.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <ATen/VmapMode.h>
@@ -995,6 +996,18 @@ Call this whenever a new thread is created in order to propagate values from
         bool transposed_, at::IntArrayRef output_padding_, int64_t groups_) {
       return at::native::select_conv_backend(
           input, weight, bias_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
+  });
+
+  py::enum_<at::LinalgBackend>(py_module, "_LinalgBackend")
+    .value("Default", at::LinalgBackend::Default)
+    .value("Cusolver", at::LinalgBackend::Cusolver)
+    .value("Magma", at::LinalgBackend::Magma);
+
+  py_module.def("_set_linalg_preferred_backend", [](at::LinalgBackend b) {
+    at::globalContext().setLinalgPreferredBackend(b);
+  });
+  py_module.def("_get_linalg_preferred_backend", []() {
+    return at::globalContext().linalgPreferredBackend();
   });
 
 #ifdef USE_CUDA
