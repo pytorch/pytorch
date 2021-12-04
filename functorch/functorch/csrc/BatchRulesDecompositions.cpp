@@ -17,6 +17,18 @@ namespace at { namespace functorch {
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  OP_DECOMPOSE2(__and__, Scalar);
+  OP_DECOMPOSE2(__and__, Tensor);
+  OP_DECOMPOSE2(__iand__, Tensor);
+  OP_DECOMPOSE2(__iand__, Scalar);
+  OP_DECOMPOSE2(__ior__, Tensor);
+  OP_DECOMPOSE2(__ior__, Scalar);
+  OP_DECOMPOSE2(__ixor__, Tensor);
+  OP_DECOMPOSE2(__ixor__, Scalar);
+  OP_DECOMPOSE2(__or__, Tensor);
+  OP_DECOMPOSE2(__or__, Scalar);
+  OP_DECOMPOSE2(__xor__, Tensor);
+  OP_DECOMPOSE2(__xor__, Scalar);
   OP_DECOMPOSE(absolute);
   OP_DECOMPOSE(avg_pool1d);
   OP_DECOMPOSE(adaptive_max_pool1d);
@@ -35,6 +47,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(atleast_2d, Sequence);
   OP_DECOMPOSE(atleast_3d);
   OP_DECOMPOSE2(atleast_3d, Sequence);
+  OP_DECOMPOSE2(bitwise_or, Scalar);
+  OP_DECOMPOSE2(bitwise_xor, Scalar);
   OP_DECOMPOSE(broadcast_tensors);
   OP_DECOMPOSE(broadcast_to);
   OP_DECOMPOSE(clip);
