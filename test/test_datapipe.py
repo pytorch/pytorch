@@ -1606,6 +1606,32 @@ class TestFunctionalMapDataPipe(TestCase):
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
         self.assertEqual(5, len(zip_dp))
 
+    def test_shuffler_datapipe(self):
+        input_dp1 = dp.map.SequenceWrapper(range(10))
+        input_dp2 = dp.map.SequenceWrapper({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+
+        # Functional Test: Assumes 0-index when indices is not given
+        shuffler_dp = input_dp1.shuffle()
+        self.assertEqual(set(range(10)), set(shuffler_dp))
+
+        # Functional Test: Custom indices are working
+        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        self.assertEqual(set(range(1, 6)), set(shuffler_dp))
+
+        # # Reset Test:
+        shuffler_dp = input_dp1.shuffle()
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
+        self.assertEqual(5, len(res_before_reset))
+        for x in res_before_reset:
+            self.assertTrue(x in set(range(10)))
+        self.assertEqual(set(range(10)), set(res_after_reset))
+
+        # __len__ Test: returns the length of the input DataPipe
+        shuffler_dp = input_dp1.shuffle()
+        self.assertEqual(10, len(shuffler_dp))
+
+
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)

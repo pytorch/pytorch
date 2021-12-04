@@ -181,6 +181,34 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
     quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
     return quantized
 
+# TODO: generalize this to work for all modules
+def duplicate_relu(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
+    """
+    If a call_module relu node has multiple uses, duplicate it and create one call_module node for each use.
+    This is to enable the pattern matching to map from individual dequant - ref_module - relu - quant to
+    final quantized module.
+    """
+    quantized_root = quantized
+    modules = dict(quantized.named_modules())
+    for node in quantized.graph.nodes:
+        if node.op == "call_module" and isinstance(modules[node.target], torch.nn.ReLU):
+            module = modules[node.target]
+            users = list(node.users)
+            if len(users) > 1:
+                for user in users:
+                    # create a new module (with deepcopy)
+                    get_new_module_name = get_new_attr_name_with_prefix("_relu_copy_")
+                    relu_copy_name = get_new_module_name(quantized_root)
+                    relu_copy = copy.deepcopy(module)
+                    setattr(quantized, relu_copy_name, relu_copy)
+                    with quantized.graph.inserting_before(node):
+                        new_node = quantized.graph.create_node("call_module", relu_copy_name, node.args, {})
+                    user.replace_input_with(node, new_node)
+                quantized.graph.erase_node(node)
+
+    quantized = QuantizedGraphModule(quantized_root, quantized.graph, quantized_root.preserved_attr_names)
+    return quantized
+
 def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphModule:
     """
     Removes duplicate dequant nodes in the graph, for an operator that has multiple dequant nodes as a user,

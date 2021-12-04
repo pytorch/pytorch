@@ -30,7 +30,11 @@ class _SubgraphMatcher:
         # Maps nodes in the pattern subgraph to nodes in the larger graph
         self.nodes_map: Dict[Node, Node] = {}
 
-    def matches_subgraph_from_anchor(self, anchor: Node) -> bool:
+    def matches_subgraph_from_anchor(
+            self,
+            anchor: Node,
+            original_module: GraphModule,
+            pattern_module: GraphModule) -> bool:
         """
         Checks if the whole pattern can be matched starting from
         ``anchor`` in the larger graph.
@@ -39,10 +43,16 @@ class _SubgraphMatcher:
         node's use-def relationships against the graph node's.
         """
         self.nodes_map = {}
-        return self._match_nodes(self.pattern_anchor, anchor)
+        return self._match_nodes(
+            self.pattern_anchor, anchor, original_module, pattern_module)
 
     # Compare the pattern node `pn` against the graph node `gn`
-    def _match_nodes(self, pn: Node, gn: Node) -> bool:
+    def _match_nodes(
+            self,
+            pn: Node,
+            gn: Node,
+            original_module: GraphModule,
+            pattern_module: GraphModule) -> bool:
 
         if isinstance(pn, (tuple, list)):
             if not isinstance(gn, type(pn)):
@@ -71,6 +81,10 @@ class _SubgraphMatcher:
             else:
                 return False
 
+
+        original_modules = dict(original_module.named_modules())
+        pattern_modules = dict(pattern_module.named_modules())
+
         def attributes_are_equal(pn: Node, gn: Node) -> bool:
             # Use placeholder and output nodes as wildcards. The
             # only exception is that an output node can't match
@@ -78,9 +92,13 @@ class _SubgraphMatcher:
             if (pn.op == "placeholder"
                     or (pn.op == "output" and gn.op != "placeholder")):
                 return True
-            if pn.op == "get_attr" and gn.op == "get_attr":
+            elif pn.op == "get_attr" and gn.op == "get_attr":
                 # assuming get_attr nodes are the same
                 return True
+            elif pn.op == "call_module" and gn.op == "call_module":
+                original_m = original_modules[gn.target]
+                pattern_m = pattern_modules[pn.target]
+                return type(original_m) == type(pattern_m)
             return pn.op == gn.op and pn.target == gn.target
 
         # Terminate early if the node attributes are not equal
@@ -98,14 +116,15 @@ class _SubgraphMatcher:
                 and len(pn.args) != len(gn.args)):
             return False
         if pn.op == "output":
-            match_found = any(self._match_nodes(pn.all_input_nodes[0], gn_)
+            match_found = any(self._match_nodes(pn.all_input_nodes[0], gn_, original_module, pattern_module)
                               for gn_ in gn.all_input_nodes)
         else:
             # using args here to make sure we can match Node and non-Node
             # arguments
             # also allows us to match a Node with a primitive type value
             match_found = (len(pn.args) == len(gn.args)
-                           and all(self._match_nodes(pn_, gn_) for pn_, gn_  # type: ignore[arg-type]
+                           and all(self._match_nodes(pn_, gn_, original_module, pattern_module)
+                                   for pn_, gn_  # type: ignore[arg-type]
                                    in zip(pn.args, gn.args)))
         if not match_found:
             self.nodes_map.pop(pn)
@@ -290,10 +309,13 @@ def replace_pattern(
             add_2 = add_1 + max_2
             return add_2
     """
-    # Get the graphs for `gm`, `pattern`, `replacement`
-    original_graph = gm.graph
-    pattern_graph = symbolic_trace(pattern).graph
-    replacement_graph = symbolic_trace(replacement).graph
+    # Get the module and graph for `gm`, `pattern`, `replacement`
+    original_module = gm
+    original_graph = original_module.graph
+    pattern_module = symbolic_trace(pattern)
+    pattern_graph = pattern_module.graph
+    replacement_module = symbolic_trace(replacement)
+    replacement_graph = replacement_module.graph
 
     # Find all possible pattern matches in original_graph. Note that
     # pattern matches may overlap with each other.
@@ -303,7 +325,7 @@ def replace_pattern(
     # Consider each node as an "anchor" (deepest matching graph node)
     for anchor in original_graph.nodes:
 
-        if matcher.matches_subgraph_from_anchor(anchor):
+        if matcher.matches_subgraph_from_anchor(anchor, original_module, pattern_module):
 
             def pattern_is_contained(nodes_map: Dict[Node, Node]) -> bool:
                 # `lookup` represents all the nodes in `original_graph`
