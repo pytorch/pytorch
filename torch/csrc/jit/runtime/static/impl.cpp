@@ -30,6 +30,12 @@
 #include <folly/json.h>
 #endif
 
+// used in test only
+C10_DEFINE_bool(
+    static_runtime_disable_debug_memory_overlap_check,
+    false,
+    "If true, disable the memory overlap check in debug mode in ProcessedNode::run()");
+
 namespace torch {
 namespace jit {
 
@@ -624,11 +630,171 @@ void ValueGroup::init(
   }
 }
 
+namespace {
+
 bool containTensorsOnly(at::ArrayRef<Value*> values) {
   // return true only if all outputs are tensors
   return std::all_of(values.begin(), values.end(), [](const Value* value) {
     return value->type()->castRaw<TensorType>() != nullptr;
   });
+}
+
+bool mayContainAlias(const Value* v1, const Value* v2, const AliasDb& db) {
+  // AliasDb is not const-correct here, so we have to const_cast
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return db.mayContainAlias(const_cast<Value*>(v1), const_cast<Value*>(v2));
+}
+
+bool isPureFunction(const Node* node) {
+  auto* schema = node->maybeSchema();
+  return schema &&
+      schema->aliasAnalysis() == c10::AliasAnalysisKind::PURE_FUNCTION;
+}
+
+} // namespace
+
+ManagedTensorRanges::ManagedTensorRanges(
+    const std::shared_ptr<Graph>& graph,
+    const FastSet<const Value*>& managed_tensor_values) {
+  AliasDb alias_db(graph);
+  const std::vector<Node*> nodes(graph->nodes().begin(), graph->nodes().end());
+  const FastSet<const Value*> graph_inputs(
+      graph->inputs().begin(), graph->inputs().end());
+
+  auto isUntrackedValue = [&alias_db, &graph_inputs](const Value* value) {
+    return !alias_db.isMutableType(value) ||
+        graph_inputs.find(value) != graph_inputs.end();
+  };
+
+  const auto num_nodes = nodes.size();
+  for (const auto i : c10::irange(num_nodes)) {
+    auto* node = nodes[i];
+    for (auto* input : node->inputs()) {
+      auto* lifetime = getLifetime(input);
+      if (!lifetime) {
+        DCHECK(isUntrackedValue(input));
+        continue;
+      }
+      DCHECK(lifetime->end <= i);
+      lifetime->end = i;
+    }
+    for (auto* output : node->outputs()) {
+      if (!alias_db.isMutableType(output)) {
+        continue;
+      }
+      value_lifetimes_.emplace(output, Lifetime(i, i));
+    }
+  }
+  for (auto* graph_output : graph->outputs()) {
+    auto* lifetime = getLifetime(graph_output);
+    if (!lifetime) {
+      DCHECK(isUntrackedValue(graph_output));
+      continue;
+    }
+    lifetime->end = num_nodes;
+  }
+
+  // Handle aliases. Aliases may extend a Value*'s lifetime. If a node
+  // has an input and output that may alias each other, set the input's
+  // lifetime end to max(input.lifetime_end, output.lifetime_end). Iterate
+  // backwards to handle chains of aliases.
+  for (const auto* node : graph->nodes().reverse()) {
+    if (isPureFunction(node)) {
+      // If the node is a pure function, it doesn't create any aliases,
+      // so we can safely skip it.
+      continue;
+    }
+
+    auto inputs = collectValuesWithTrackedLifetimes(node->inputs());
+    auto outputs = collectValuesWithTrackedLifetimes(node->outputs());
+    for (auto* input : inputs) {
+      auto* input_lifetime = getLifetime(input);
+      DCHECK(input_lifetime != nullptr);
+      for (auto* output : outputs) {
+        if (mayContainAlias(input, output, alias_db)) {
+          auto* output_lifetime = getLifetime(output);
+          DCHECK(output_lifetime != nullptr);
+          input_lifetime->end =
+              std::max(output_lifetime->end, input_lifetime->end);
+        }
+      }
+    }
+  }
+  for (auto* managed_tensor : managed_tensor_values) {
+    auto* lifetime = getLifetime(managed_tensor);
+    DCHECK(lifetime && lifetime->end <= num_nodes);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    Node* freeing_node;
+    if (lifetime->end == num_nodes) {
+      freeing_node = graph->return_node();
+    } else {
+      freeing_node = nodes[lifetime->end];
+    }
+    node_to_newly_free_tensors_[freeing_node].emplace_back(managed_tensor);
+  }
+}
+
+bool ManagedTensorRanges::isUnusedValue(const Value* value) const {
+  auto* lifetime = getLifetime(value);
+  return lifetime && lifetime->start == lifetime->end;
+}
+
+bool ManagedTensorRanges::nodeFreesManagedTensors(Node* node) const {
+  auto it = node_to_newly_free_tensors_.find(node);
+  return it != node_to_newly_free_tensors_.end() && !it->second.empty();
+}
+
+const std::vector<const Value*>& ManagedTensorRanges::availableTensorsAfterNode(
+    Node* node) const {
+  return node_to_newly_free_tensors_.at(node);
+}
+
+bool ManagedTensorRanges::lifetimesOverlap(const Value* v1, const Value* v2)
+    const {
+  const auto* v1_lifetime = getLifetime(v1);
+  const auto* v2_lifetime = getLifetime(v2);
+  if (!v1_lifetime || !v2_lifetime) {
+    return false;
+  }
+
+  if (v1_lifetime->start < v2_lifetime->start) {
+    return v1_lifetime->end >= v2_lifetime->start;
+  }
+  return v2_lifetime->end >= v1_lifetime->start;
+}
+
+const ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) const {
+  auto it = value_lifetimes_.find(value);
+  if (it != value_lifetimes_.end()) {
+    return &it->second;
+  }
+  return nullptr;
+}
+
+ManagedTensorRanges::Lifetime* ManagedTensorRanges::getLifetime(
+    const Value* value) {
+  // const_cast is safe here, this is just a way to avoid code duplication
+  // between the const/non-const versions of getLifetime.
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  const auto* const_this = const_cast<const ManagedTensorRanges*>(this);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  return const_cast<ManagedTensorRanges::Lifetime*>(
+      const_this->getLifetime(value));
+}
+
+std::vector<const Value*> ManagedTensorRanges::
+    collectValuesWithTrackedLifetimes(at::ArrayRef<const Value*> values) {
+  std::vector<const Value*> mutable_values;
+  mutable_values.reserve(values.size());
+  std::copy_if(
+      values.begin(),
+      values.end(),
+      std::back_inserter(mutable_values),
+      [this](const Value* value) { return getLifetime(value) != nullptr; });
+  return mutable_values;
 }
 
 StaticModule::StaticModule(
@@ -685,51 +851,38 @@ StaticModule::StaticModule(
   // memory optimization pass (LivenessMap) is
   // aware of the new order!
 
-  // Fill constants first, so we have a std::vector<IValue> we can reference
-  // later
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() != prim::Constant) {
-      continue;
-    }
-    auto* v = node->output();
-    TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
-    constants_.emplace_back(toIValue(v).value());
-  }
   {
-    // construct SSA definition for constant nodes
-    int i = 0;
+    size_t nodes_size = 0, constants_size = 0;
     for (Node* node : graph_->nodes()) {
-      if (node->kind() != prim::Constant) {
-        continue;
-      }
-      auto* v = node->output();
-      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, i++);
+      ++(node->kind() == prim::Constant ? constants_size : nodes_size);
     }
-  }
 
-  int nodes_size = 0;
-  for (Node* node : graph_->nodes()) {
-    if (node->kind() == prim::Constant) {
-      continue;
-    }
-    ++nodes_size;
+    constants_.reserve(constants_size);
+    functions_.reserve(nodes_size);
+    nodes_.reserve(nodes_size);
   }
-  functions_.reserve(nodes_size);
-  nodes_.reserve(nodes_size);
 
   // Create ProcessedFunction instances first to freeze their addresses to pass
   // to ProcessedNode.
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
 
+  // Construct constant and function nodes
   for (Node* node : graph_->nodes()) {
     if (node->kind() == prim::Constant) {
+      auto* v = node->output();
+      TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
+      // construct SSA definition for constant nodes
+      value_to_ssa_def[v] = std::make_pair(CONSTANT_VALUE, constants_.size());
+      constants_.emplace_back(toIValue(v).value());
       continue;
     }
+
     // see [Check and correct bad schema alias info at runtime]
     bool check_outputs_for_overlap =
         !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
         containTensorsOnly(node->outputs());
+    // new ProcessedFunction
     functions_.emplace_back(
         node, opts.enable_out_variant, check_outputs_for_overlap);
   }
@@ -1129,7 +1282,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
       for (size_t i = 0; i < n.outputs().size(); i++) {
         at::Tensor& t = n.Output(i).toTensor();
         if (planner_->overlapWithInternalBuffer(t.data_ptr())) {
-          VLOG(1) << "Detected alias for node: " << PrintNode(n.node());
+          DLOG(INFO) << "Detected alias for node: " << PrintNode(n.node());
           n.Output(i) = at::native::clone(t, c10::nullopt);
           // set flag if overlap detected
           overlap_detected_with_fast_check = true;
@@ -1721,11 +1874,14 @@ void StaticRuntime::disableManageOutputTensors() {
 ProcessedFunction::ProcessedFunction(
     Node* node,
     bool enable_out_variant,
-    bool check_memory_overlap) {
+    bool check_memory_overlap)
+    : check_memory_overlap_(check_memory_overlap) {
   if (enable_out_variant) {
     f_ = getOutOfPlaceOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kOutVariant;
+      // do not check memory overlap for out variants
+      check_memory_overlap_ = false;
       VLOG(1) << "Switch to out variant for node: " << PrintNode(node);
       return;
     }
@@ -1734,6 +1890,10 @@ ProcessedFunction::ProcessedFunction(
     f_ = getNativeOperation(node);
     if (f_) {
       kind_ = ProcessedFunction::Kind::kNativeFunction;
+#ifdef NDEBUG
+      // skip this check in opt mode because these ops are better vetted
+      check_memory_overlap_ = false;
+#endif
       VLOG(1) << "Switch to native impl for node: " << PrintNode(node);
       return;
     }
@@ -1761,7 +1921,6 @@ ProcessedFunction::ProcessedFunction(
       }
     };
     kind_ = ProcessedFunction::Kind::kInterpreterFallback;
-    check_memory_overlap_ = check_memory_overlap;
     VLOG(1) << "Fallback interpreter for node: " << PrintNode(node);
   }
 }
@@ -1818,7 +1977,12 @@ void ProcessedNode::run() {
   fn_->f()(this);
 #endif
 #ifndef NDEBUG
-  verify_no_memory_overlap();
+  if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
+    // run check but do not enforce
+    verify_no_memory_overlap();
+  } else {
+    DCHECK(verify_no_memory_overlap());
+  }
 #endif
 }
 
@@ -1834,9 +1998,20 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   return true;
 }
 
-bool ProcessedNode::verify_no_memory_overlap() const {
+bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
+  const static std::array<c10::Symbol, 3> special_case_ops = {
+      fromQualString("prim::TypeCheck"),
+      fromQualString("static_runtime::VarTupleUnpack"),
+      fromQualString("static_runtime::dict_unpack")};
+  if (!force_check &&
+      std::find(
+          begin(special_case_ops), end(special_case_ops), node()->kind()) !=
+          end(special_case_ops)) {
+    return true;
+  }
+
   return verify_outputs_dont_overlap_each_other() &&
-      verify_inputs_dont_overlap_outputs();
+      verify_inputs_dont_overlap_outputs(force_check);
 }
 
 bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
@@ -1860,12 +2035,23 @@ bool ProcessedNode::verify_outputs_dont_overlap_each_other() const {
   return true;
 }
 
-bool ProcessedNode::verify_inputs_dont_overlap_outputs() const {
+bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   auto schema = node()->maybeSchema();
-  // skip memory overlap check for mutable ops with only one output
-  if (!schema || (schema->is_mutable() && num_outputs_ == 1)) {
+  // skip memory overlap check for mutable or view ops with only one output
+  bool skip_check = !schema ||
+      ((schema->is_mutable() || !fn_->checkMemoryOverlap()) &&
+       num_outputs_ == 1);
+  if (!force_check && skip_check) {
+    if (!schema) {
+      VLOG(2) << "Detected that op schema is null";
+      return true;
+    }
+    VLOG(2) << "schema->is_mutable: " << schema->is_mutable()
+            << ", fn_->checkMemoryOverlap: " << fn_->checkMemoryOverlap()
+            << ", num_outputs_: " << num_outputs_;
     return true;
   }
+
   for (const auto i : c10::irange(inputs_.size())) {
     const IValue* in = &Input(i);
     if (!in->isTensor()) {
@@ -1899,7 +2085,7 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
     for (const auto j : c10::irange(num_outputs_)) {
       const auto& out_t = Output(j).toTensor();
       if (!checkNoMemoryOverlap(in_t, out_t)) {
-        VLOG(1) << "Detected alias for node: " << PrintNode(node());
+        DLOG(INFO) << "Detected alias for node: " << PrintNode(node());
         Output(i) = at::native::clone(out_t, c10::nullopt);
         set_outputs_memory_overlap_detected();
       }
