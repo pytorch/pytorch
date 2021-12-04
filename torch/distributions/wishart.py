@@ -102,7 +102,7 @@ class Wishart(ExponentialFamily):
                     dtype=self._unbroadcasted_scale_tril.dtype,
                     device=self._unbroadcasted_scale_tril.device,
                 ).div(2).expand(batch_shape + (-1,))
-            ),                
+            ),
             rate=0.5,
         )
 
