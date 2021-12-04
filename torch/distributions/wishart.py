@@ -181,7 +181,7 @@ class Wishart(Distribution):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[0]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
-        H = (
+        return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
             + torch.mvlgamma(nu / 2, p=p)
