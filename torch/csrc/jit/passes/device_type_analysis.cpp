@@ -58,11 +58,6 @@ bool setReturnsToDevice(Node* n, Device device) {
   return changed;
 }
 
-PropRule setReturnstoDeviceRule(DeviceType deviceType) {
-  Device device = Device(deviceType);
-  return [device](Node* n) { return setReturnsToDevice(n, device); };
-}
-
 bool propWithNoDevice(Node* n) {
   // Figure out what the common device to propagate is
   c10::optional<Device> device;
@@ -145,7 +140,7 @@ struct DeviceTypePropagationPass {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
-        return processIf(n);
+        // return processIf(n);
       case prim::Loop:
       case prim::CallMethod:
       case prim::CallFunction:
@@ -182,57 +177,6 @@ struct DeviceTypePropagationPass {
     return false;
   }
 
-  bool mergeAndApplyTensorProps(
-      const at::ArrayRef<Value*>& src1,
-      const at::ArrayRef<Value*>& src2,
-      const at::ArrayRef<Value*>& dst) {
-    TORCH_INTERNAL_ASSERT(src1.size() == src2.size());
-    TORCH_INTERNAL_ASSERT(src1.size() == dst.size());
-
-    bool changed = false;
-    for (int i = 0; i < dst.size(); i++) {
-      auto src1_type = src1[i]->type()->cast<TensorType>();
-      auto src2_type = src2[i]->type()->cast<TensorType>();
-      if (!src1_type || !src2_type) {
-        continue;
-      }
-
-      auto true_device = src1_type->device();
-      auto false_device = src2_type->device();
-      if (!true_device.has_value() || !false_device.has_value()) {
-        // For now, being conservative and not handling the null device case.
-        continue;
-      }
-      if (true_device.value() != false_device.value()) {
-        continue;
-      }
-
-      changed |= setDeviceType(dst[i], true_device.value());
-    }
-    return changed;
-  }
-
-  /*
-  bool processLoop(Node* n) {
-    GRAPH_DEBUG("processLoop");
-  }
-  */
-
-  bool processIf(Node* node) {
-    GRAPH_DEBUG("processIf");
-    auto blocks = node->blocks();
-    auto true_block = blocks.at(0);
-    auto false_block = blocks.at(1);
-
-    bool changed = false;
-    changed |= processBlock(true_block);
-    changed |= processBlock(false_block);
-
-    changed |= mergeAndApplyTensorProps(
-        true_block->inputs(), false_block->outputs(), node->outputs());
-
-    return changed;
-  }
   // for efficiency
   bool processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
@@ -247,16 +191,15 @@ struct DeviceTypePropagationPass {
 
   void buildRuleRegistry() {
     // building a registry for all of the custom Device Type rules
-    static const OperatorMap<PropRule> temp_registry{
-        {"aten::cpu(Tensor(a) self) -> (Tensor(b|a))",
-         setReturnstoDeviceRule(DeviceType::CPU)},
-        {"aten::cuda(Tensor(a) self) -> (Tensor(b|a))",
-         setReturnstoDeviceRule(DeviceType::CUDA)},
-    };
-    device_prop_registry_ =
-        std::make_unique<OperatorMap<PropRule>>(temp_registry);
-  }
+    device_prop_registry_ = std::make_unique<OperatorMap<PropRule>>();
 
+    /*
+    device_prop_registry_->insert(
+        *nn_ops_first_input_preserving(), setIfAllDeviceTypeMatch);
+    device_prop_registry_->insert(
+        *ops_one_tensor_in_shape_transform(), setIfAllDeviceTypeMatch);
+    */
+  }
   std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
   std::shared_ptr<Graph> graph_;
 };
