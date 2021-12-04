@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/passes/canonicalize.h>
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
