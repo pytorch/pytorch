@@ -173,11 +173,6 @@ def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
     mapping[nnqat.Embedding] = nnq.Embedding
     return mapping
 
-def get_default_static_sparse_quant_module_mappings() -> Dict[Callable, Any]:
-    ''' Get module mapping for post training static sparse quantization
-    '''
-    return copy.deepcopy(DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS)
-
 def get_static_quant_module_class(
         float_module_class: Callable,
         additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None,
@@ -195,6 +190,22 @@ def get_static_quant_module_class(
         "Floating point module class {}".format(str(float_module_class)) + \
         " does not have a corresponding quantized module class"
     return copy.deepcopy(static_quant_module_class)
+
+def get_default_static_sparse_quant_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping for post training static sparse quantization
+    '''
+    return copy.deepcopy(DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS)
+
+def get_static_sparse_quant_module_class(
+        float_module_class: Callable,
+        additional_static_quant_mapping: Optional[Dict[Callable, Any]] = None,
+        is_reference: bool = False) -> Any:
+    static_sparse_mapping = get_default_static_sparse_quant_module_mappings()
+    if additional_static_quant_mapping is not None:
+        static_sparse_mapping.update(additional_static_quant_mapping)
+    return get_static_quant_module_class(float_module_class,
+                                         static_sparse_mapping,
+                                         is_reference)
 
 def get_dynamic_quant_module_class(
         float_module_class: Callable,
@@ -235,6 +246,15 @@ def get_default_dynamic_sparse_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training dynamic sparse quantization
     '''
     return DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS
+
+def get_dynamic_sparse_quant_module_class(
+        float_module_class: Callable,
+        additional_dynamic_quant_mapping: Optional[Dict[Callable, Any]] = None) -> Any:
+    dynamic_sparse_mapping = get_default_dynamic_sparse_quant_module_mappings()
+    if additional_dynamic_quant_mapping is not None:
+        dynamic_sparse_mapping.update(additional_dynamic_quant_mapping)
+    return get_dynamic_quant_module_class(float_module_class,
+                                          dynamic_sparse_mapping)
 
 def get_default_qconfig_propagation_list() -> Set[Callable]:
     ''' Get the default list of module types that we'll attach qconfig

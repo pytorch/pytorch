@@ -10,7 +10,9 @@ from ..observer import (
 )
 
 from ..quantization_mappings import (
+    get_static_sparse_quant_module_class,
     get_static_quant_module_class,
+    get_dynamic_sparse_quant_module_class,
     get_dynamic_quant_module_class,
     get_quantized_operator,
 )
@@ -957,11 +959,11 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                 if activation_int8_quantized:
                     additional_static_quant_mapping = convert_custom_config_dict.get("static", {})
                     if module_has_sparse_params(self.linear):
-                        mapping_fn = get_static_sparse_quant_module_class
+                        static_mapping_fn = get_static_sparse_quant_module_class
                     else:
-                        mapping_fn = get_static_quant_module_class
-                    qlinear = mapping_fn(type(self.linear),
-                                         additional_static_quant_mapping)
+                        static_mapping_fn = get_static_quant_module_class
+                    qlinear = static_mapping_fn(type(self.linear),
+                                                additional_static_quant_mapping)
                 else:
                     assert dtypes in [
                         (torch.float32, torch.qint8, torch.quint8),
@@ -969,10 +971,10 @@ class LinearReLUQuantizeHandler(QuantizeHandler):
                     ], f"dtype {dtypes} not supported yet"
                     additional_dynamic_quant_mapping = convert_custom_config_dict.get("dynamic", {})
                     if module_has_sparse_params(self.linear):
-                        mapping_fn = get_dynamic_sparse_quant_module_class
+                        dynamic_mapping_fn = get_dynamic_sparse_quant_module_class
                     else:
-                        mapping_fn = get_dynamic_quant_module_class
-                    qlinear = mapping_fn(type(self.linear), additional_dynamic_quant_mapping)
+                        dynamic_mapping_fn = get_dynamic_quant_module_class
+                    qlinear = dynamic_mapping_fn(type(self.linear), additional_dynamic_quant_mapping)
 
                 quantized = qlinear.from_float(self.linear)
                 parent_name, name = _parent_name(self.linear_node.target)
