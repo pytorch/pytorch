@@ -80,8 +80,8 @@ class Wishart(Distribution):
             batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
+            
         self.df = df.expand(batch_shape)
-
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -94,7 +94,7 @@ class Wishart(Distribution):
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
         # Gamma distribution is needed for Batlett decomposition sampling
-        self._dist_gamma = torch.distributions.Gamma(
+        self._dist_gamma = torch.distributions.gamma.Gamma(
             self.df.unsqueeze(-1)
             - torch.arange(
                 self._event_shape[0],
@@ -144,13 +144,13 @@ class Wishart(Distribution):
 
     @property
     def mean(self):
-        return self.df.expand(self._batch_shape, self._event_shape) * self.covariance_matrix
+        return self.df.expand(self._batch_shape + self._event_shape) * self.covariance_matrix
 
     @property
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
+        return self.df * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
