@@ -64,11 +64,12 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
       "`quant_min` should be less than or \
         equal to `quant_max`.");
 
-  TORCH_CHECK(
-      at::min(zero_point).item().toInt() >= quant_min &&
-          at::max(zero_point).item().toInt() <= quant_max,
-      "`zero_point` must be between `quant_min` and `quant_max`.");
-
+  if(!at::isFloatingType(zero_point.scalar_type())){
+      TORCH_CHECK(
+          at::min(zero_point).item().toInt() >= quant_min &&
+              at::max(zero_point).item().toInt() <= quant_max,
+          "`zero_point` must be between `quant_min` and `quant_max`.");
+  }
   TORCH_CHECK(
       axis >= 0 && axis <= self.dim(),
       "`axis` must be between 0 and number of dimensions of input");
