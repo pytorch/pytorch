@@ -1919,7 +1919,8 @@ class TestNN(NNTestCase):
             ('p25', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters.update(parameters2)
+        parameters2.update(parameters)
+        parameters = parameter2
         parameter_dict = parameter_dict2 | parameter_dict
         check()
 
