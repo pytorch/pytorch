@@ -110,7 +110,9 @@ class Wishart(ExponentialFamily):
         new = self._get_checked_instance(Wishart, _instance)
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
-        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril
+        df_shape = batch_shape
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(batch_shape + self.event_shape)
+        new.df = self.df.expand(batch_shape)
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
         if 'scale_tril' in self.__dict__:
