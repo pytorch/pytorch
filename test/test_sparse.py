@@ -3342,7 +3342,7 @@ class TestSparse(TestCase):
         s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
         t23 = s.to_dense()
         t0 = torch.tensor(2.0, device=device)
-        d = torch.tensor([[1.0,2.0,3.0],[4.0,5.0,6.0]], device=device)
+        d = torch.tensor([[1.0,2.0,3.0], [4.0,5.0,6.0]], device=device)
 
         r = s * 2.0
         r2 = s * d
