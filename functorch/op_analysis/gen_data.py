@@ -162,14 +162,21 @@ def gen_data(special_op_lists, analysis_name):
 
     with open(f"{analysis_name}", 'w') as f:
         for op in ops:
-            info = [op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)] + [op['name'] in op_list for op_list in special_op_lists]
+            info = [op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)] + [check(op) for check in special_op_lists]
             f.write(','.join([str(i) for i in info]) + '\n')
 
+def name_check(lst):
+    return lambda x: x['name'] in lst
+def full_name_check(lst):
+    return lambda x: x['full_name'] in lst
+
 # Generates batching rule data
-# gen_data([get_ops_for_key('FuncTorchBatched')], 'vmap')
-if True:
+gen_data([full_name_check(get_ops_for_key('FuncTorchBatched'))], 'vmap')
+
+
+if False:
     with open('run_ops.txt', 'r') as f:
         opinfo_ops = [i.strip() for i in f.readlines()]
     with open('run_decompositions.txt', 'r') as f:
         decomposed_ops = [i.strip() for i in f.readlines()]
-    gen_data([opinfo_ops, decomposed_ops], 'decompositions')
+    gen_data([name_check(opinfo_ops), name_check(decomposed_ops)], 'decompositions')
