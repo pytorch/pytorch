@@ -447,8 +447,8 @@ jobs:
           # Remove any previous test jsons if they exist
           rm -f test-jsons-*.zip
           zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
-      - uses: seemethere/upload-artifact-s3@v3
-        name: Store Test Downloaded JSONs on S3
+      - uses: actions/upload-artifact@v2
+        name: Store Test Downloaded JSONs on Github
         if: always()
         with:
           retention-days: 14

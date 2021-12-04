@@ -326,10 +326,11 @@ jobs:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
 {%- endif %}
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='linux') }}
 {%- if 'rocm' in test_runner_type %}
+      !{{ common.upload_downloaded_files(name='linux', use_s3=False) }}
       !{{ common.upload_test_reports(name='linux', artifact_name="test-reports", use_s3=False) }}
 {%- else %}
+      !{{ common.upload_downloaded_files(name='linux') }}
       !{{ common.upload_test_reports(name='linux') }}
 {%- endif %}
       !{{ common.upload_test_statistics(build_environment) }}
