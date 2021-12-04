@@ -84,8 +84,10 @@ if(INTERN_BUILD_ATEN_OPS)
 
   # Add source, includes, and libs to lists
   list(APPEND Caffe2_CPU_SRCS ${ATen_CPU_SRCS})
-  list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_SRCS})
+  list(APPEND Caffe2_GPU_SRCS ${ATen_CUDA_CPP_SRCS})
   list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_SRCS_W_SORT_BY_KEY})
+  list(APPEND Caffe2_GPU_CU_SRCS ${ATen_CUDA_CU_SRCS})
+  list(APPEND Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY ${ATen_CUDA_CU_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS})
   list(APPEND Caffe2_HIP_SRCS ${ATen_HIP_SRCS_W_SORT_BY_KEY})
   list(APPEND Caffe2_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS})
@@ -171,62 +173,10 @@ endif()
 if(CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_CPU_SRCS CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_GPU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_CU_SRCS CAFFE2_ALLOWLISTED_FILES)
+  caffe2_do_allowlist(Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY CAFFE2_ALLOWLISTED_FILES)
   caffe2_do_allowlist(Caffe2_HIP_SRCS CAFFE2_ALLOWLISTED_FILES)
-endif()
-
-if(BUILD_SPLIT_CUDA)
-  # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
-  set(Caffe2_GPU_SRCS_CU
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDABlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASolver.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CUDASparseBlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CublasHandlePool.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/cuda/CusolverDnHandlePool.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Activation.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebra.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/BatchLinearAlgebraLib.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Blas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Equal.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/IndexKernel.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ReduceOps.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/ScanKernels.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sort.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/Sorting.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorModeKernel.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorShapeCUDA.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/cuda/TensorTopK.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseBlasLegacy.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCStorage.cpp"
-      "${PROJECT_SOURCE_DIR}/aten/src/THC/THCTensor.cpp"
-
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterQuantizedCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCUDA.cpp"
-      "${PROJECT_BINARY_DIR}/aten/src/ATen/RegisterSparseCsrCUDA.cpp"
-   )
-
-  foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES ".*aten.*\\.cu")
-      # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
-      list(APPEND Caffe2_GPU_SRCS_CU "${tmp}")
-    else()
-      # Exclude special cases listed above that need to link to torch_cuda_cu
-      if(NOT "${tmp}" IN_LIST Caffe2_GPU_SRCS_CU)
-        list(APPEND Caffe2_GPU_SRCS_CPP "${tmp}")
-      endif()
-    endif()
-  endforeach()
-
-  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
-    if("${tmp}" MATCHES ".*aten.*\\.cu" AND NOT "${tmp}" MATCHES ".*TensorFactories.*")
-      list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU ${tmp})
-    else()
-      list(APPEND Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP ${tmp})
-    endif()
-  endforeach()
 endif()
 
 if(PRINT_CMAKE_DEBUG_INFO)
@@ -235,39 +185,25 @@ if(PRINT_CMAKE_DEBUG_INFO)
     message(STATUS "  " ${tmp})
   endforeach()
 
-  message(STATUS "GPU sources: ")
+  message(STATUS "GPU sources: (for torch_cuda_cpp)")
   foreach(tmp ${Caffe2_GPU_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
-  if(BUILD_SPLIT_CUDA)
-    message(STATUS "GPU sources: (for torch_cuda_cpp)")
-    foreach(tmp ${Caffe2_GPU_SRCS_CPP})
-      message(STATUS "  " ${tmp})
-    endforeach()
-
-    message(STATUS "GPU sources: (for torch_cuda_cu)")
-    foreach(tmp ${Caffe2_GPU_SRCS_CU})
-      message(STATUS "  " ${tmp})
-    endforeach()
-  endif()
-
-  message(STATUS "GPU sources (w/ sort by key): ")
-  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+  message(STATUS "GPU sources: (for torch_cuda_cu)")
+  foreach(tmp ${Caffe2_GPU_CU_SRCS})
     message(STATUS "  " ${tmp})
   endforeach()
 
-  if(BUILD_SPLIT_CUDA)
-    message(STATUS "torch_cuda_cu GPU sources (w/ sort by key): ")
-    foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
-      message(STATUS "  " ${tmp})
-    endforeach()
+  message(STATUS "torch_cuda_cu GPU sources (w/ sort by key): ")
+  foreach(tmp ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
+    message(STATUS "  " ${tmp})
+  endforeach()
 
-    message(STATUS "torch_cuda_cpp GPU sources (w/ sort by key): ")
-    foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
-      message(STATUS "  " ${tmp})
-    endforeach()
-  endif()
+  message(STATUS "torch_cuda_cpp GPU sources (w/ sort by key): ")
+  foreach(tmp ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    message(STATUS "  " ${tmp})
+  endforeach()
 
   message(STATUS "CPU include: ")
   foreach(tmp ${Caffe2_CPU_INCLUDE})
@@ -655,11 +591,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
   endif()
 
   if(USE_CUDA)
-    if(BUILD_SPLIT_CUDA)
-      list(APPEND Caffe2_GPU_SRCS_CU ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
-    else()
-      list(APPEND Caffe2_GPU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
-    endif()
+    list(APPEND Caffe2_GPU_CU_SRCS ${Caffe2_GPU_HIP_JIT_FUSERS_SRCS})
     add_library(caffe2_nvrtc SHARED ${ATen_NVRTC_STUB_SRCS})
     if(MSVC)
       # Delay load nvcuda.dll so we can import torch compiled with cuda on a CPU-only machine
@@ -670,22 +602,14 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     target_link_libraries(caffe2_nvrtc ${CUDA_NVRTC} ${CUDA_CUDA_LIB} ${CUDA_NVRTC_LIB} ${DELAY_LOAD_FLAGS})
     target_include_directories(caffe2_nvrtc PRIVATE ${CUDA_INCLUDE_DIRS})
     install(TARGETS caffe2_nvrtc DESTINATION "${TORCH_INSTALL_LIB_DIR}")
-    if(USE_NCCL AND BUILD_SPLIT_CUDA)
-      list(APPEND Caffe2_GPU_SRCS_CPP
-        ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
-    elseif(USE_NCCL)
+    if(USE_NCCL)
       list(APPEND Caffe2_GPU_SRCS
         ${TORCH_SRC_DIR}/csrc/cuda/nccl.cpp)
     endif()
     if(USE_DISTRIBUTED)
-      if(BUILD_SPLIT_CUDA)
-        set(_target "Caffe2_GPU_SRCS_CPP")
-      else()
-        set(_target "Caffe2_GPU_SRCS")
-      endif()
-      append_filelist("libtorch_cuda_distributed_base_sources" ${_target})
+      append_filelist("libtorch_cuda_distributed_base_sources" Caffe2_GPU_SRCS)
       if(NOT WIN32)
-        append_filelist("libtorch_cuda_distributed_extra_sources" ${_target})
+        append_filelist("libtorch_cuda_distributed_extra_sources" Caffe2_GPU_SRCS)
       endif()
     endif()
     set_source_files_properties(
@@ -933,17 +857,21 @@ elseif(USE_CUDA)
   if(CUDA_SEPARABLE_COMPILATION)
     # Separate compilation fails when kernels using `thrust::sort_by_key`
     # are linked with the rest of CUDA code. Workaround by linking them separately.
-    add_library(torch_cuda ${Caffe2_GPU_SRCS})
+    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_CU_SRCS})
     set_property(TARGET torch_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
-    add_library(torch_cuda_w_sort_by_key OBJECT ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda_w_sort_by_key OBJECT
+        ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+        ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
     set_property(TARGET torch_cuda_w_sort_by_key PROPERTY CUDA_SEPARABLE_COMPILATION OFF)
     target_link_libraries(torch_cuda PRIVATE torch_cuda_w_sort_by_key)
   elseif(BUILD_SPLIT_CUDA)
-    add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS_CPP} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CPP})
-    add_library(torch_cuda_cu ${Caffe2_GPU_SRCS_CU} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY_CU})
+    add_library(torch_cuda_cpp ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda_cu ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   else()
-    add_library(torch_cuda ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY})
+    add_library(torch_cuda
+        ${Caffe2_GPU_SRCS} ${Caffe2_GPU_SRCS_W_SORT_BY_KEY}
+        ${Caffe2_GPU_CU_SRCS} ${Caffe2_GPU_CU_SRCS_W_SORT_BY_KEY})
   endif()
   set(CUDA_LINK_LIBRARIES_KEYWORD)
   if(BUILD_SPLIT_CUDA)
