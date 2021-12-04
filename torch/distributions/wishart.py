@@ -148,7 +148,7 @@ class Wishart(Distribution):
 
     @property
     def variance(self):
-        V = self.covariance_matrix
+        V = self.covariance_matrix # has shape (batch_shape x event_shape)
         diag_V = V.diag()
         return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
 
@@ -164,9 +164,9 @@ class Wishart(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        nu = self.df
-        p = self._event_shape[0]
-        V = self.covariance_matrix
+        nu = self.df # has shape (batch_shape)
+        p = self._event_shape[0] # has singleton shape
+        V = self.covariance_matrix # has shape (batch_shape x event_shape)
         return (
             - torch.mvlgamma(nu / 2, p=p)
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
@@ -178,17 +178,19 @@ class Wishart(Distribution):
         )
 
     def entropy(self):
-        nu = self.df
-        p = self._event_shape[0]
-        V = self.covariance_matrix
+        nu = self.df # has shape (batch_shape)
+        p = self._event_shape[0] # has singleton shape
+        V = self.covariance_matrix # has shape (batch_shape x event_shape)
         H = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
             + torch.mvlgamma(nu / 2, p=p)
-            - (nu - p - 1) * _mvdigamma(nu / 2, p=p) / 2
+            # multivariate digamma function is used following the idea of:
+            # https://github.com/biomedia-mira/deepscm/blob/master/deepscm/distributions/torch_wishart.py#L18
+            - torch.polygamma(
+                1,
+                (nu / 2).unsqueeze(-1) - torch.arange(p).expand(self._batch_shape + (-1,)) / 2
+            ).sum(-1) * (nu - p - 1)
             + nu * p / 2
         )
-        if len(self._batch_shape) == 0:
-            return H
-        else:
-            return H.expand(self._batch_shape)
+
