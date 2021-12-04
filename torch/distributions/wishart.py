@@ -196,7 +196,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) / 2
+            (p + 1) / 2 * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
             + torch.mvlgamma(nu / 2, p=p)
             # multivariate digamma function is used following the idea of:
