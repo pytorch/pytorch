@@ -126,23 +126,31 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
 
   // Checks output
   const ScalarType return_scalar_type = c10::CppTypeToScalarType<return_type>::value;
-  if (iter.dtype(0) != return_scalar_type) {
+  const auto dtype0 = iter.dtype(0);
+  if (dtype0 != return_scalar_type) {
     std::cout << "iter.dtype(0) != return_scalar_type" << std::endl;
-    std::cout << "iter.dtype(0) is " << iter.dtype(0) << std::endl;
+    std::cout << "iter.dtype(0) is " << dtype0 << std::endl;
     std::cout << "return_scalar_type is " << return_scalar_type << std::endl;
     needs_dynamic_casting = true;
   }
+  TORCH_CHECK(dtype0 != kComplexDouble && dtype0 != kComplexFloat &&
+              dtype0 != kBFloat16 && dtype0 != at::kHalf,
+                "Encountered an unsupported dtype ", dtype0, "!");
 
   // Checks input(s)
   const ScalarType compute_scalar_type = c10::CppTypeToScalarType<compute_type>::value;
   for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
-    if (iter.dtype(i) != compute_scalar_type) {
+    const auto dtypei = iter.dtype(i);
+    if (dtypei != compute_scalar_type) {
       std::cout << "iter.dtype(i) != compute_scalar_type (i=" << i << ")" << std::endl;
-      std::cout << "iter.dtype(i) is " << iter.dtype(i) << std::endl;
+      std::cout << "iter.dtype(i) is " << dtypei << std::endl;
       std::cout << "compute_scalar_type is " << compute_scalar_type << std::endl;
       needs_dynamic_casting = true;
-      break;
+      // TODO: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
+    TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat &&
+                dtypei != kBFloat16 && dtypei != at::kHalf,
+                "Encountered an unsupported dtype ", dtypei, "!");
   }
 
   jitted_gpu_kernel_impl</*name*/ name,

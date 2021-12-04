@@ -296,7 +296,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
-  constexpr int num_threads = 64;
+  constexpr int num_threads = 128;
   constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
   #define ERROR_UNSUPPORTED_CAST assert(false);
