@@ -237,6 +237,33 @@ class _ConvNd(nn.Module):
             weight_post_process = mod.qconfig.weight()
         return cls.get_qconv(mod, activation_post_process, weight_post_process)
 
+    @classmethod
+    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
+        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
+        Args:
+            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+                          utilities or provided by the user
+            output_scale (float): scale for output Tensor
+            zero_point (int): zero point for output Tensor
+        """
+        qconv = cls(
+            ref_qconv.in_channels,
+            ref_qconv.out_channels,
+            ref_qconv.kernel_size,  # type: ignore[arg-type]
+            ref_qconv.stride,  # type: ignore[arg-type]
+            ref_qconv.padding,  # type: ignore[arg-type]
+            ref_qconv.dilation,  # type: ignore[arg-type]
+            ref_qconv.groups,
+            ref_qconv.bias is not None,  # type: ignore[arg-type]
+            ref_qconv.padding_mode,
+            device=ref_qconv.weight.device,
+            dtype=ref_qconv.weight.dtype)
+        qweight = ref_qconv.get_quantized_weight()
+        qconv.set_weight_bias(qweight, ref_qconv.bias)
+        qconv.scale = float(output_scale)
+        qconv.zero_point = int(output_zero_point)
+        return qconv
+
 class Conv1d(_ConvNd):
     r"""Applies a 1D convolution over a quantized input signal composed of
     several quantized input planes.

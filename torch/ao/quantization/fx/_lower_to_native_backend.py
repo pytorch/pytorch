@@ -48,8 +48,8 @@ def _lower_ref(model: QuantizedGraphModule, ref_class: type) -> QuantizedGraphMo
             continue
 
         # this can be removed if we add support for constants in is_match
-        if q_class == torch.nn.quantized.Linear and dtype != torch.quint8:
-            print(f"Only qint8 output for quantized linear is supported, got: {dtype}")
+        if dtype != torch.quint8:
+            print(f"Only quint8 output for quantized op is supported, got: {dtype}")
             continue
 
         # change this pattern to use the corresponding quantized module

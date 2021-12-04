@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional, Dict, Any
 from torch.nn.common_types import _size_1_t
-from .utils import _quantize_and_dequantize_weight
+from .utils import _quantize_weight, _quantize_and_dequantize_weight
 from .utils import _save_weight_qparams
 from .utils import _get_weight_qparam_keys
 
@@ -102,25 +102,6 @@ class _ConvNd(torch.nn.modules.conv._ConvNd):
         if float_conv.bias is not None:
             qref_conv.bias = torch.nn.Parameter(float_conv.bias.detach())
         return qref_conv
-
-    @classmethod
-    def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
-        Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
-                          utilities or provided by the user
-            output_scale (float): scale for output Tensor
-            zero_point (int): zero point for output Tensor
-        """
-        qconv = cls(
-            ref_qconv.in_features,
-            ref_qconv.out_features)
-        qweight = ref_qconv.get_quantized_weight()
-        qconv.set_weight_bias(qweight, ref_qconv.bias)
-
-        qconv.scale = float(output_scale)
-        qconv.zero_point = int(output_zero_point)
-        return qconv
 
 class Conv1d(_ConvNd, nn.Conv1d):
     def __init__(self,
