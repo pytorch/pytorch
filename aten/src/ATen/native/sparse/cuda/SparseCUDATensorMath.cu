@@ -438,7 +438,7 @@ struct TensorMulOp {
   }
 };
 
-SparseTensor& mul_out_dense_sparse_cuda(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_);
+SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense);
 
 SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
   if (src_.dim() == 0) {
@@ -452,13 +452,10 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   TORCH_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   TORCH_CHECK(cuda::check_device({r_, t_, src_}));
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
-  TORCH_CHECK(src_.is_sparse() || t_.is_sparse(), "mul: expected 'self' or 'other' to be sparse tensor, but both are dense tensor");
+  TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported. Use mul(sparse, dense) instead.");
 
   if (!src_.is_sparse()) {
-    return mul_out_dense_sparse_cuda(r_, src_, t_);
-  }
-  if (!t_.is_sparse()) {
-    return mul_out_dense_sparse_cuda(r_, t_, src_);
+    return mul_out_sparse_dense_cuda(r_, t_, src_);
   }
 
   SparseTensor t = t_.coalesce();
@@ -525,7 +522,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 // mul(Tensor, SparseTensor)
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_dense_sparse_cuda(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_) {
+SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
   TORCH_CHECK(dense.is_cuda(), "mul: expected 'self' to be a CUDA tensor, but got a CPU tensor");
   TORCH_CHECK(sparse_.is_cuda(), "mul: expected 'other' to be a CUDA tensor, but got a CPU tensor");
   TORCH_CHECK(r.is_cuda(), "mul: expected 'out' to be a CUDA tensor, but got a CPU tensor");

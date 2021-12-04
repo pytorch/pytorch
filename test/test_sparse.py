@@ -3352,7 +3352,6 @@ class TestSparse(TestCase):
         self.assertEqual(r, t0 * s)
         self.assertEqual(r, s * t0)
         self.assertEqual(r2.to_dense(), r3)
-        self.assertEqual(r2, d * s)
         self.assertEqual(r2, s * d)
 
 
