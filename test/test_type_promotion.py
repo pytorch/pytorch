@@ -734,11 +734,12 @@ class TestTypePromotion(TestCase):
             # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'
             self.assertRaises(RuntimeError, lambda: op(d1, s2))
 
-        # Test op(sparse, dense) not supported for any ops:
-        # add(sparse, dense) is not supported. Use add(dense, sparse) instead.
+        # Test op(sparse, dense) not supported for any ops except for mul.
+        # op(sparse, dense) is not supported. Use op(dense, sparse) instead.
         # sparse division only supports division by a scalar
         # mul: Didn't find kernel to dispatch to for operator 'aten::_nnz'.
-        self.assertRaises(RuntimeError, lambda: op(s1, d2))
+        if op_name != 'mul':
+            self.assertRaises(RuntimeError, lambda: op(s1, d2))
 
         # Test op(sparse, scalar)
         if not add_sub and not (self.device_type == 'cpu' and dtype1 == torch.half):
