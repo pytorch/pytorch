@@ -1042,6 +1042,22 @@ def gen_headers(
         'view_inverse_declarations': list(mapMaybe(gen_functionalization_view_inverse_declaration, native_functions))
     })
 
+    attrs = set()
+    names = set()
+    for func in native_functions:
+        names.add(str(func.func.name.name))
+        for arg in func.func.schema_order_arguments():
+            attrs.add(arg.name)
+
+    core_fm.write('aten_interned_strings.h', lambda: {
+        'aten_symbols': ' \\\n'.join([
+            f"_(aten, {name})" for name in sorted(list(names))
+        ]),
+        'attr_symbols': ' \\\n'.join([
+            f"_(attr, {name})" for name in sorted(list(attrs))
+        ]),
+    })
+
 def gen_source_files(
         *,
         native_functions: Sequence[NativeFunction],
