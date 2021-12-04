@@ -1,7 +1,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 from torch import nn
@@ -184,8 +184,8 @@ class BaseSparsifier(abc.ABC):
             parametrize.register_parametrization(module, 'weight', param(mask))
 
     def squash_mask(self,
-                    params_to_keep: Tuple[str, ...] = None,
-                    params_to_keep_per_layer: Dict[str, Tuple[str, ...]] = None,
+                    params_to_keep: Optional[Tuple[str, ...]] = None,
+                    params_to_keep_per_layer: Optional[Dict[str, Tuple[str, ...]]] = None,
                     *args, **kwargs):
         r"""Squashes the sparse masks into the appropriate tensors.
 
