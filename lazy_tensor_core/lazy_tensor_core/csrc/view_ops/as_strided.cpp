@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -42,7 +42,7 @@ bool AsStrided::StrideIsSupported(const torch::lazy::Shape& input_shape,
 std::vector<int64_t> AsStrided::GetArrayStridePermutation(
     c10::ArrayRef<int64_t> stride, c10::ArrayRef<int64_t> size) {
   std::vector<int64_t> permutation =
-      lazy_tensors::util::Iota<int64_t>(stride.size());
+      torch::lazy::Iota<int64_t>(stride.size());
   std::sort(permutation.begin(), permutation.end(),
             [&](int64_t a, int64_t b) { return stride[a] > stride[b]; });
   return permutation;

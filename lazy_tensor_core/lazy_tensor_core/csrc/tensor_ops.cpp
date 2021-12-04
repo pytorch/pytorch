@@ -7,7 +7,7 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 #include "torch/csrc/lazy/core/ir_metadata.h"
 
 namespace torch_lazy_tensors {
@@ -30,7 +30,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
                  c10::optional<int64_t> dim) {
   int64_t canonical_dim;
   if (dim) {
-    canonical_dim = GetCanonicalDimensionIndex(*dim, input.shape().get().dim());
+    canonical_dim = GetCanonicalDimensionIndex(*dim, input.shape().Get().dim());
   } else {
     auto input_shape_ref = input.shape();
     auto dim_3_it = std::find((*input_shape_ref).sizes().begin(),
@@ -42,7 +42,7 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
   CHECK_EQ(input.size(canonical_dim), 3)
       << "Invalid cross argument: dimension " << canonical_dim
       << " does not have size 3";
-  CHECK_LT(canonical_dim, input.shape().get().dim())
+  CHECK_LT(canonical_dim, input.shape().Get().dim())
       << "Invalid cross argument: dimension " << canonical_dim
       << " out of range";
   // Extract the slices for each axis.
@@ -69,9 +69,9 @@ LazyTensor Cross(const LazyTensor& input, const LazyTensor& other,
 
 LazyTensor Select(const LazyTensor& input, int64_t dim, int64_t index) {
   auto shape = input.shape();
-  dim = GetCanonicalDimensionIndex(dim, shape.get().dim());
+  dim = GetCanonicalDimensionIndex(dim, shape.Get().dim());
   LazyTensor result = lazy_tensor_aten_ops::narrow(input, dim, index, 1);
-  auto new_dims = DropDimensions(shape.get().sizes(), {dim});
+  auto new_dims = DropDimensions(shape.Get().sizes(), {dim});
   return lazy_tensor_aten_ops::view(result, new_dims);
 }
 

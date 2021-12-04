@@ -17,7 +17,7 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace {
@@ -119,7 +119,7 @@ CanonicalIndexInfo TransposeToFront(at::Tensor base, at::TensorList indices) {
   IndexAdjacencyInfo adjacency_info = GetIndexAdjacencyInfo(indices);
   if (adjacency_info.contiguous_non_null) {
     return {base, std::move(transposed_indices),
-            lazy_tensors::util::Iota<int64_t>(base_rank),
+            torch::lazy::Iota<int64_t>(base_rank),
             adjacency_info.start_dim};
   }
   return {base.permute(dims), std::move(transposed_indices),
@@ -198,12 +198,12 @@ torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim, const LazyTe
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().dim(), 1)
+  CHECK_LE(index.shape().Get().dim(), 1)
       << "Fill index is supposed to be a vector";
   return IndexFillOp(
       base.GetIrValue(), dim, index.GetIrValue(),
       LazyGraphExecutor::Get()->GetIrValueForScalar(
-          value, base.shape().get().scalar_type(), base.GetDevice()));
+          value, base.shape().Get().scalar_type(), base.GetDevice()));
 }
 
 torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
@@ -212,9 +212,9 @@ torch::lazy::NodePtr IndexFill(const LazyTensor& base, int64_t dim,
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Fill index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().dim(), 1)
+  CHECK_LE(index.shape().Get().dim(), 1)
       << "Fill index is supposed to be a vector";
-  CHECK_EQ(value.shape().get().dim(), 0)
+  CHECK_EQ(value.shape().Get().dim(), 0)
       << "Fill only supports a 0-dimensional value tensor";
   return IndexFillOp(base.GetIrValue(), dim, index.GetIrValue(),
                      value.GetIrValue());
@@ -227,7 +227,7 @@ torch::lazy::Value IndexAdd(const LazyTensor& base, int64_t dim,
       << "Add index is expected to be of scalar type Long or scalar type Int, "
          "but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().dim(), 1)
+  CHECK_LE(index.shape().Get().dim(), 1)
       << "Add index is supposed to be a vector";
   return IndexAddOp(base.GetIrValue(), dim, index.GetIrValue(),
                     source.GetIrValue());
@@ -239,7 +239,7 @@ torch::lazy::Value IndexCopy(const LazyTensor& base, int64_t dim,
   CHECK_EQ(index.dtype(), at::ScalarType::Long)
       << "Copy index is expected to be of scalar type Long, but it is "
       << index.dtype();
-  CHECK_LE(index.shape().get().dim(), 1)
+  CHECK_LE(index.shape().Get().dim(), 1)
       << "Copy index is supposed to be a vector";
   return IndexCopyOp(base.GetIrValue(), dim, index.GetIrValue(),
                      source.GetIrValue());

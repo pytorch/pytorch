@@ -8,7 +8,7 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensors/computation_client/async_task.h"
 #include "lazy_tensors/computation_client/multi_wait.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 
@@ -112,7 +112,7 @@ class LazyGraphExecutor {
     SyncTensorsConfig config;
     std::vector<size_t> indices;
     torch::lazy::hash_t hash;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     torch::lazy::BackendDevice device;
   };
 
@@ -151,7 +151,7 @@ class LazyGraphExecutor {
 
     lazy_tensors::util::MultiWait mwait;
     std::vector<size_t> indices;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     std::vector<torch::lazy::BackendDataPtr> parameters_data;
     torch::lazy::BackendDevice device;
     ComputationCache::TypePtr cached_computation;

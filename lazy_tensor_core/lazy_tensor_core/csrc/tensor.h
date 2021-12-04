@@ -4,7 +4,7 @@
 #include <torch/csrc/lazy/backend/backend_interface.h>
 
 #include "lazy_tensor_core/csrc/lazy_view.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -82,7 +82,7 @@ class LazyTensor {
 
   at::ScalarType dtype() const;
 
-  lazy_tensors::util::MaybeRef<torch::lazy::Shape> shape() const;
+  torch::lazy::MaybeRef<torch::lazy::Shape> shape() const;
 
   const torch::lazy::BackendDevice& GetDevice() const;
   int64_t GetUniqueId() const;

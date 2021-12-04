@@ -12,14 +12,14 @@
 #include <tuple>
 #include <vector>
 
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 
 // Converts an iterable container to a vector of int64's.
 template <typename S>
 static std::vector<int64_t> ToI64Vector(const S& input) {
-  return lazy_tensors::util::ToVector<int64_t>(input);
+  return torch::lazy::ToVector<int64_t>(input);
 }
 
 // Creates a set of dimension by dropping the drop_dims ones.
