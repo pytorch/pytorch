@@ -29,7 +29,28 @@ from .utils import (
     get_op_packing_only_uses_module_attributes,
     get_packable_tensor_kwarg_names,
     get_producer_of_seen_op_info,
+    clone_detach_tensor_without_dispatch,
+    get_input_args_quant_dequant_info,
 )
+
+OpConvertInfo = Tuple[
+    # quantized equivalent of original op (None means keep original)
+    Optional[Callable],
+    # arg_quant_infos, each element is (scale, zp) for quantized and None otherwise
+    List[Optional[Tuple[float, int]]],
+    # arg_dequant_infos, each element is True if this arg needs a dequant
+    List[bool],
+    # packed param name, if the op has a packed param
+    Optional[str],
+    # additional kwargs, such as output scale and zero_point
+    Dict[str, Any],
+    # any_arg_quant_or_dequant_needed, if False then we can skip looking at
+    # arg_quant_infos and arg_dequant_infos, for performance
+    bool,
+    # any_arg_kwarg_modification_needed, if False then we can return original
+    # args and kwargs, for performance
+    bool,
+]
 
 # TODO(future PR): maybe better name
 # TODO(future PR): add serialization support
@@ -57,7 +78,7 @@ class AutoQuantizationState(torch.nn.Module):
         # to be within the module hierarchy.
         self.tensor_id_to_observer = torch.nn.ModuleDict()
         # TODO(future PR): include kwargs
-        self.idx_to_seen_op_infos: Dict[str, SeenOpInfo] = {}
+        self.idx_to_seen_op_infos: Dict[int, SeenOpInfo] = {}
         # qtensor_info objects of tensor outputs of the module, specified
         # in order of iteration through the output type. Non-tensor outputs
         # are represented with `None`.
@@ -67,27 +88,46 @@ class AutoQuantizationState(torch.nn.Module):
         # key: idx of seen op
         # value: name of packed weight
         # note: this is filled out right before convert
-        self.idx_to_packed_weight_name: Dict[str, str] = {}
+        self.idx_to_packed_weight_name: Dict[int, str] = {}
+        self.tensor_id_to_scale_zp: Dict[int, Tuple[torch.Tensor, torch.Tensor]] = {}
+
+        # Numeric Suite add_loggers functionality
+        # if this flag is True, op outputs will be saved for debugging
+        self.log_op_outputs = False
+        # data structure to save op outputs for debugging
+        # * outer list represents the different model forward call instances
+        # * inner list represents the different op forward call instances in a
+        #   model forward
+        # TODO(future PR): handle types which are not torch.Tensor
+        # TODO(future PR): use the Logger class and allow user overrides of it
+        self.op_outputs: List[List[Tuple[
+            int,  # global op idx
+            Optional[str],  # fqn
+            Callable,  # fp32 op type (TODO future PR: add quantized op type)
+            torch.Tensor,  # value
+        ]]] = []
+        # model name to use in logging results
+        self.logging_model_name: Optional[str]
+
+        self.idx_to_op_convert_info: Dict[int, OpConvertInfo] = {}
+
+        # If this is True, module outputs will be checked and converted
+        # to the dtype specified by the user. If this is False, module outputs
+        # will be returned as is. This value can be precalculated and it is set
+        # to its final value after tracing.
+        self.needs_dtype_transform_on_outputs = True
 
     def has_at_least_one_seen_op_info(self) -> bool:
         return len(self.idx_to_seen_op_infos) > 0
-
-    def validate_is_at_first_idx(self) -> None:
-        is_at_first_idx = (
-            len(self.idx_to_seen_op_infos) == 0 or
-            self.idx == 0
-        )
-        assert is_at_first_idx, \
-            f"Cur idx: {self.idx}, expected idx: 0"
-
 
     def validate_is_at_last_seen_idx(self) -> None:
         is_at_last_seen_idx = (
             len(self.idx_to_seen_op_infos) == 0 or
             self.idx == len(self.idx_to_seen_op_infos)
         )
-        assert is_at_last_seen_idx, \
-            f"Cur idx: {self.idx}, expected idx: {len(self.idx_to_seen_op_infos)}"
+        if not is_at_last_seen_idx:
+            raise AssertionError(
+                f"Cur idx: {self.idx}, expected idx: {len(self.idx_to_seen_op_infos)}")
 
     def extra_repr(self) -> str:
         s = ""
@@ -109,13 +149,18 @@ class AutoQuantizationState(torch.nn.Module):
             s += "(idx_to_packed_weight_name): {\n"
             for k, v in self.idx_to_packed_weight_name.items():  # type: ignore[assignment]
                 s += f"  {k}: {v}\n"
-            s += "}"
+            s += "}\n"
         else:
-            s += "(idx_to_packed_weight_name): {}"
+            s += "(idx_to_packed_weight_name): {}\n"
+        if len(self.tensor_id_to_scale_zp):
+            s += "(tensor_id_to_scale_zp): {\n"
+            for k, v in self.tensor_id_to_scale_zp.items():  # type: ignore[assignment]
+                s += f"  {k}: {v}\n"
+            s += "}"
         return s
 
     def _get_cur_seen_op_info(self):
-        return self.idx_to_seen_op_infos[str(self.idx)]
+        return self.idx_to_seen_op_infos[self.idx]
 
     def get_cur_output_inf_dtype(self):
         return self._get_cur_seen_op_info().output_tensor_infos[0].inf_dtype
@@ -124,7 +169,12 @@ class AutoQuantizationState(torch.nn.Module):
         """
         Resets the internal op counter to start a new top level module call
         """
-        self.idx = 0
+        # torch.nn.Module __setattr__ has overhead,
+        # this code is the explicit fast path for `self.idx = 0`
+        object.__setattr__(self, 'idx', 0)
+
+        if self.log_op_outputs:
+            self.op_outputs.append([])
 
     def cur_op_needs_hooks(self, cur_op: Callable) -> bool:
         return op_needs_quantization(cur_op)
@@ -135,13 +185,12 @@ class AutoQuantizationState(torch.nn.Module):
         module call which needs hooks. It validates that the new function or
         module is of the expected type based on the order of execution.
         """
-        assert self.cur_op_needs_hooks(cur_op)
         try:
             seen_op_info = self._get_cur_seen_op_info()
             expected_op = seen_op_info.type
         except IndexError:
             _raise_obs_not_found_error(cur_op)
-        if not ops_are_related(cur_op, expected_op):
+        if not ops_are_related(cur_op, expected_op, seen_op_info.type_is_module):
             _raise_obs_op_mismatch(cur_op, expected_op)
 
     def mark_cur_op_complete(self, cur_op: Callable) -> None:
@@ -149,8 +198,9 @@ class AutoQuantizationState(torch.nn.Module):
         This function is expected to be called after a function or module
         processing is complete.
         """
-        if op_needs_quantization(cur_op):
-            self.idx += 1
+        # torch.nn.Module __setattr__ has overhead,
+        # this code is the explicit fast path for `self.idx += 1`
+        object.__setattr__(self, 'idx', self.idx + 1)
 
     def outputs_prepare_hook(
         self,
@@ -214,7 +264,6 @@ class AutoQuantizationState(torch.nn.Module):
 
         The function returns modified `args` and `kwargs`.
         """
-        assert self.cur_op_needs_hooks(op)
         if first_call:
             return self._first_call_op_prepare_before_hook_create_subgraphs(
                 op, args, kwargs, first_call, qtensor_id, fqn, root_module)
@@ -243,6 +292,7 @@ class AutoQuantizationState(torch.nn.Module):
         first_call: bool,
         qtensor_id: List[int],
         root_module: torch.nn.Module,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called after an op call on a prepared model.
@@ -255,10 +305,8 @@ class AutoQuantizationState(torch.nn.Module):
         If `first_call` is False, we
         * observe the output, if needed
         """
-        assert self.cur_op_needs_hooks(op)
         seen_op_info = self._get_cur_seen_op_info()
-        func_output_obs_type = get_func_output_obs_type(
-            op, args, seen_op_info.op_packing_only_uses_module_attributes)
+        func_output_obs_type = get_func_output_obs_type(seen_op_info)
         if first_call:
             self._first_call_op_prepare_after_hook_adjust_subgraphs(
                 op, output, args, first_call, qtensor_id, root_module,
@@ -270,6 +318,12 @@ class AutoQuantizationState(torch.nn.Module):
                 tensor_id = seen_op_info.output_tensor_infos[0].id
                 obs = self.tensor_id_to_observer[str(tensor_id)]
                 output = obs(output)
+
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
@@ -288,8 +342,6 @@ class AutoQuantizationState(torch.nn.Module):
         Returns potentially modified `op`, potentially modified `args`,
         potentially modified `kwargs`.
         """
-        assert self.cur_op_needs_hooks(op)
-
         # TODO generalize this for more things
         # currently:
         # * can quantize args (via arg_quant_infos)
@@ -300,47 +352,52 @@ class AutoQuantizationState(torch.nn.Module):
         #   to
         # q.conv2d(input, packed_params, scale, zero_point)
         orig_op = op
-        op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs = \
-            self.get_op_convert_info(op)
+        maybe_new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, \
+            additional_kwargs, any_arg_quant_or_dequant_needed, \
+            any_arg_kwarg_modification_needed = self.get_op_convert_info(op)
+        if maybe_new_op is not None:
+            op = maybe_new_op
+        if not any_arg_kwarg_modification_needed:
+            return op, args, kwargs
         # print(op, arg_quant_infos, packed_param_name, additional_kwargs)
 
         # potentially quantize args, based on arg_quant_infos
         new_args = []
-        tensor_arg_idx = 0
-        # TODO: refactor this to use iterate_and_apply
-        if isinstance(args[0], (tuple, list)):  # torch.cat variants
-            # input tensors
-            new_first_arg = []
-            for arg in args[0]:
-                # TODO: handle non-tensor inputs
-                quant_info = arg_quant_infos[tensor_arg_idx]
-                dequant_info = arg_dequant_infos[tensor_arg_idx]
-                if quant_info is not None:
-                    scale, zp = quant_info
-                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                elif dequant_info is True:
-                    arg = arg.dequantize()
-                new_first_arg.append(arg)
-                tensor_arg_idx += 1
-            new_args = [new_first_arg, *args[1:]]
-        else:
-            for arg in args:
-                if not isinstance(arg, torch.Tensor):
+        if any_arg_quant_or_dequant_needed:
+            tensor_arg_idx = 0
+            # TODO: refactor this to use iterate_and_apply
+            if orig_op is torch.cat:  # torch.cat variants
+                # input tensors
+                new_first_arg = []
+                for arg in args[0]:
+                    # TODO: handle non-tensor inputs
+                    quant_info = arg_quant_infos[tensor_arg_idx]
+                    dequant_info = arg_dequant_infos[tensor_arg_idx]
+                    if quant_info is not None:
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
+                        arg = arg.dequantize()
+                    new_first_arg.append(arg)
+                    tensor_arg_idx += 1
+                new_args = [new_first_arg, *args[1:]]
+            else:
+                for arg in args:
+                    # TODO: handle non-tensor inputs
+                    # TODO: this is not handling non-tensor tuple args (for example,
+                    # dilation in conv2d) correctly, it just happens to work but
+                    # needs a fix.
+                    quant_info = arg_quant_infos[tensor_arg_idx]
+                    dequant_info = arg_dequant_infos[tensor_arg_idx]
+                    if quant_info is not None:
+                        scale, zp = quant_info
+                        arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
+                    elif dequant_info is True:
+                        arg = arg.dequantize()
                     new_args.append(arg)
-                    continue
-                # TODO: handle non-tensor inputs
-                # TODO: this is not handling non-tensor tuple args (for example,
-                # dilation in conv2d) correctly, it just happens to work but
-                # needs a fix.
-                quant_info = arg_quant_infos[tensor_arg_idx]
-                dequant_info = arg_dequant_infos[tensor_arg_idx]
-                if quant_info is not None:
-                    scale, zp = quant_info
-                    arg = torch.quantize_per_tensor(arg, scale, zp, torch.quint8)
-                elif dequant_info is True:
-                    arg = arg.dequantize()
-                new_args.append(arg)
-                tensor_arg_idx += 1
+                    tensor_arg_idx += 1
+        else:
+            new_args = [*args]
 
         # if there is a packed param, replace the relevant args
         if packed_param_name is not None:
@@ -359,13 +416,14 @@ class AutoQuantizationState(torch.nn.Module):
 
         # potentially extend kwargs with scale and zero_point
         # TODO move op-specific logic out of here
-        if orig_op not in (F.conv2d, F.linear):
-            kwargs.update(**additional_kwargs)
-        else:
-            seen_op_info = self._get_cur_seen_op_info()
-            if seen_op_info.output_tensor_infos[0].inf_dtype == torch.quint8:
-                new_args.append(additional_kwargs['scale'])
-                new_args.append(additional_kwargs['zero_point'])
+        if len(additional_kwargs):
+            if orig_op not in (F.conv2d, F.linear):
+                kwargs.update(**additional_kwargs)
+            else:
+                seen_op_info = self._get_cur_seen_op_info()
+                if seen_op_info.output_tensor_infos[0].inf_dtype == torch.quint8:
+                    new_args.append(additional_kwargs['scale'])
+                    new_args.append(additional_kwargs['zero_point'])
 
         # TODO move op-specific logic out of here
         if op is torch.ops.quantized.linear:
@@ -377,140 +435,77 @@ class AutoQuantizationState(torch.nn.Module):
         self,
         op: Callable,
         output,
+        global_op_idx: List[int],
     ) -> Any:
         """
         This function is called aftern an op call in a converted model.
 
         TODO: add dequant, if needed
         """
+        if self.log_op_outputs:
+            output_clone = clone_detach_tensor_without_dispatch(output)
+            seen_op_info = self._get_cur_seen_op_info()
+            self.op_outputs[-1].append(
+                (global_op_idx[0], seen_op_info.fqn, seen_op_info.type, output_clone))
+            global_op_idx[0] += 1
 
         return output
 
     def get_op_convert_info(
         self,
         op: Callable,
-        unwrap_scale_zp: bool = False,
-    ) -> Tuple[
-        Callable,
-        List[Optional[Tuple[float, int]]],
-        List[bool],
-        Optional[str],
-        Dict[str, Any]
-    ]:
+    ) -> OpConvertInfo:
         """
         Returns the information needed for convert time modifications to `op`.
-        Has no side effects.  Return types:
-
-        `new_op`. Returns either the original callable unchanged,
-        or the corresponding quantized target. Note: always returns the original
-        callable for modules, because they are quantized with module swaps.
-
-        `arg_quant_infos`. Returns information needed to quantize each arg, if
-        applicable.
-
-        `additional_kwargs`. Returns additional kwargs for scale and zero_point, if
-        applicable.
         """
-        assert self.cur_op_needs_hooks(op)
-        seen_op_info = self._get_cur_seen_op_info()
+        return self.idx_to_op_convert_info[self.idx]
 
+    def calculate_op_convert_info(
+        self,
+        seen_op_info: SeenOpInfo,
+    ) -> OpConvertInfo:
+        """
+        This precalculates the information which will be returned by
+        `get_op_convert_info`.
+        """
         # calculate new op
-        new_op = get_quantized_op(op, seen_op_info)
+        maybe_new_op = get_quantized_op(seen_op_info)
 
         # calculate quant infos
-        arg_quant_infos, arg_dequant_infos = \
-            self._get_input_args_quant_dequant_info(op)
+        arg_quant_infos, arg_dequant_infos, any_arg_quant_or_dequant_needed = \
+            get_input_args_quant_dequant_info(
+                seen_op_info, self.tensor_id_to_scale_zp)
 
         # get packed param name, if applicable
-        packed_param_name = self._get_packed_param_name(op)
+        packed_param_name = self._get_packed_param_name(seen_op_info)
 
         # calculate scale and zp for output
         # TODO: instead of always doing this if there is an observer,
         # calculate whether this is needed based on the op and dtypes
         additional_kwargs = {}
-        needs_scale_zp = converted_func_needs_scale_zp(op, seen_op_info)
+        needs_scale_zp = converted_func_needs_scale_zp(seen_op_info)
         if needs_scale_zp:
-            seen_op_info = self._get_cur_seen_op_info()
             output_tensor_infos = seen_op_info.output_tensor_infos
             tensor_id = output_tensor_infos[0].id
-            observer = self.tensor_id_to_observer[str(tensor_id)]
+            scale, zp = self.tensor_id_to_scale_zp[tensor_id]
+            additional_kwargs.update({'scale': scale, 'zero_point': zp})
 
-            scale, zp = observer.calculate_qparams()
-            # TODO(future PR): remove this boolean flag
-            if not unwrap_scale_zp:
-                additional_kwargs.update({'scale': scale, 'zero_point': zp})
-            else:
-                additional_kwargs.update(
-                    {'scale': scale.item(), 'zero_point': zp.item()})
+        any_arg_kwarg_modification_needed = bool(
+            any_arg_quant_or_dequant_needed or
+            packed_param_name is not None or
+            len(additional_kwargs)
+        )  # the cast to bool is to make mypy recognize this as a bool
 
-        return new_op, arg_quant_infos, arg_dequant_infos, packed_param_name, additional_kwargs
+        return maybe_new_op, arg_quant_infos, arg_dequant_infos, \
+            packed_param_name, additional_kwargs, any_arg_quant_or_dequant_needed, \
+            any_arg_kwarg_modification_needed
 
-    def _get_packed_param_name(self, cur_op: Callable) -> Optional[str]:
+    def _get_packed_param_name(self, seen_op_info: SeenOpInfo) -> Optional[str]:
         """
-        If the op has a quantized packed param, returns it. Otherwise, returns
-        None.
+        If the op in seen_op_info has a quantized packed param, returns it.
+        Otherwise, returns None.
         """
-        return self.idx_to_packed_weight_name.get(str(self.idx), None)
-
-    # TODO(next): make this also return information about dequants, not just quants
-    def _get_input_args_quant_dequant_info(
-        self,
-        cur_op: Callable,
-    ) -> Tuple[List[Optional[Tuple[float, int]]], List[bool]]:
-        """
-        Returns a list of information about the tensor inputs to the current op.
-
-        Quant list:
-        For each tensor input:
-        * if the tensor input needs a quant, the list will contain
-          (scale, zero_point)
-        * if the tensor input does not need a quant, the list will contain None
-
-        Dequant list:
-        For each tensor input:
-        * if the tensor input needs a dequant, True, otherwise, False
-
-        For example, if there are two tensor inputs to the current op, and the
-        first input needs a quant, this function will return
-
-          # quants
-          [(scale0, zero_point0), None],
-          # dequants
-          [False, False]
-        """
-        assert self.cur_op_needs_hooks(cur_op)
-        seen_op_info = self._get_cur_seen_op_info()
-        quant_infos: List[Optional[Tuple[float, int]]] = []
-        dequant_infos: List[bool] = []
-
-        # determine the expected output dtype
-        output_dtype = seen_op_info.output_tensor_infos[0].inf_dtype
-        packable_arg_idxs = get_packable_arg_idxs(cur_op)
-
-        for input_arg_idx, input_arg in enumerate(seen_op_info.input_tensor_infos):
-            arg_will_be_packed = packable_arg_idxs is not None and \
-                input_arg_idx in packable_arg_idxs and \
-                seen_op_info.op_packing_only_uses_module_attributes
-            if input_arg is not None and not arg_will_be_packed:
-                tensor_id = input_arg.id
-                if input_arg.inf_dtype != output_dtype:
-                    if output_dtype == torch.quint8:
-                        assert str(tensor_id) in self.tensor_id_to_observer
-                        observer = self.tensor_id_to_observer[str(tensor_id)]
-                        # TODO: return this to the caller
-                        scale, zp = observer.calculate_qparams()
-                        quant_infos.append((scale, zp,))
-                        dequant_infos.append(False)
-                    else:
-                        quant_infos.append(None)
-                        dequant_infos.append(True)
-                else:
-                    quant_infos.append(None)
-                    dequant_infos.append(False)
-            else:
-                quant_infos.append(None)
-                dequant_infos.append(False)
-        return quant_infos, dequant_infos
+        return self.idx_to_packed_weight_name.get(seen_op_info.idx, None)
 
     def _first_call_assign_qtensor_infos_to_mod_outputs_tensor(
         self,
@@ -563,6 +558,23 @@ class AutoQuantizationState(torch.nn.Module):
             pass
         return outputs
 
+    def set_needs_dtype_transform_on_outputs(self):
+        """
+        Calculates whether a dtype transform on module outputs is needed
+        and stores it. This is used to skip the outputs hook if it is not
+        needed.
+        """
+        self.needs_dtype_transform_on_outputs = False
+        qtensor_info = self.output_qtensor_infos[0]
+        if self.output_dtypes is not None:
+            assert qtensor_info is not None
+            # check the output dtype, and do the conversion if needed
+            output_dtype = self.output_dtypes[0]
+            if qtensor_info.inf_dtype != output_dtype:
+                assert output_dtype is torch.float, \
+                    'non-float output dtypes not handled yet'
+                self.needs_dtype_transform_on_outputs = True
+
     def _maybe_mod_outputs_dtype_transform(
         self,
         outputs: Any,
@@ -573,6 +585,9 @@ class AutoQuantizationState(torch.nn.Module):
         tensors it has to return, does the dtype conversion. Otherwise,
         does nothing.
         """
+        if not self.needs_dtype_transform_on_outputs:
+            return outputs
+
         if isinstance(outputs, torch.Tensor):
             qtensor_info = self.output_qtensor_infos[0]
             if self.output_dtypes is not None:
@@ -698,11 +713,11 @@ class AutoQuantizationState(torch.nn.Module):
                     packable_tensor_kwarg_name_to_name[kwarg_name] = \
                         kwarg_name_on_module
 
-        key = str(self.idx)
-        if key not in self.idx_to_seen_op_infos:
-            op_type = op if not isinstance(op, torch.nn.Module) else type(op)
-            self.idx_to_seen_op_infos[key] = SeenOpInfo(
-                self.idx, op_type, fqn, arg_tensor_infos, [],
+        if self.idx not in self.idx_to_seen_op_infos:
+            op_type_is_module = isinstance(op, torch.nn.Module)
+            op_type = type(op) if op_type_is_module else op
+            self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
+                self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
                 op_packing_only_uses_module_attributes)
@@ -787,7 +802,7 @@ class AutoQuantizationState(torch.nn.Module):
             else:
                 dtype_to_use = args[0]._qtensor_info.inf_dtype
         output._qtensor_info = QTensorInfo(qtensor_id[0], dtype_to_use)
-        self.idx_to_seen_op_infos[str(self.idx)].output_tensor_infos.append(
+        self.idx_to_seen_op_infos[self.idx].output_tensor_infos.append(
             output._qtensor_info)
         qtensor_id[0] += 1
 
