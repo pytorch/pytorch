@@ -2191,8 +2191,6 @@ class TestFrozenOptimizations(JitTestCase):
         mod_eager = Net(3, 6, kernel_size=3, stride=2).eval().cuda()
 
         inps = [5, 3, 4, 4]
-        if conv == nn.Conv3d:
-            inps.append(inps[-1])
         inp = torch.rand(inps).cuda()
 
         scripted_mod = torch.jit.script(mod_eager)
