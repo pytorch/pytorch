@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/native/mkldnn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
 
@@ -89,7 +89,7 @@ class Operator {
 
  private:
   dnnl::graph::logical_tensor createLogicalTensor(Value* value) const {
-    return at::LlgaTensorDesc(value).logical_tensor();
+    return LlgaTensorDesc(value).logical_tensor();
   }
 
   const Node* n;

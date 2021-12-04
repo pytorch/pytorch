@@ -1,17 +1,21 @@
 #include <ATen/Config.h>
 
 #if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <c10/core/CPUAllocator.h>
-namespace at {
+
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 LlgaTensorImpl::LlgaTensorImpl(
-    Storage&& storage,
+    at::Storage&& storage,
     const caffe2::TypeMeta& data_type,
     const LlgaTensorDesc& desc)
-    : TensorImpl(
+    : at::TensorImpl(
           std::move(storage),
-          c10::DispatchKeySet(DispatchKey::MkldnnCPU),
+          c10::DispatchKeySet(c10::DispatchKey::MkldnnCPU),
           data_type),
       desc_(desc) {
   sizes_and_strides_.set_sizes(desc.sizes());
@@ -19,7 +23,7 @@ LlgaTensorImpl::LlgaTensorImpl(
 }
 
 // The following are publically exposed as methods of Tensor
-IntArrayRef LlgaTensorImpl::strides() const {
+c10::IntArrayRef LlgaTensorImpl::strides() const {
   TORCH_CHECK(false, "Cannot get strides of LlgaTensorImpl");
 }
 int64_t LlgaTensorImpl::stride(int64_t d) const {
@@ -28,7 +32,7 @@ int64_t LlgaTensorImpl::stride(int64_t d) const {
 bool LlgaTensorImpl::is_contiguous(at::MemoryFormat memory_format) const {
   TORCH_CHECK(false, "Cannot get query is_contiguous on LlgaTensorImpl");
 }
-const Storage& LlgaTensorImpl::storage() const {
+const at::Storage& LlgaTensorImpl::storage() const {
   TORCH_CHECK(false, "Cannot access the storage() of LlgaTensorImpl");
 }
 int64_t LlgaTensorImpl::storage_offset() const {
@@ -50,7 +54,7 @@ bool LlgaTensorImpl::has_storage() const {
   return true;
 }
 
-Tensor empty_llga(const LlgaTensorDesc& desc, const TensorOptions& options) {
+at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options) {
   auto sizes = desc.sizes();
   auto nbytes = desc.storage_size();
 
@@ -66,13 +70,13 @@ Tensor empty_llga(const LlgaTensorDesc& desc, const TensorOptions& options) {
       std::move(storage_impl), options.dtype(), desc);
 }
 
-const LlgaTensorDesc& get_llga_desc(const Tensor& tensor) {
+const LlgaTensorDesc& get_llga_desc(const at::Tensor& tensor) {
   TORCH_INTERNAL_ASSERT(
       tensor.is_mkldnn(), "get_llga_desc expects Mkldnn tensor input");
   return static_cast<LlgaTensorImpl*>(tensor.unsafeGetTensorImpl())->desc();
 }
 
-dnnl::graph::tensor llga_from_aten_tensor(const Tensor& tensor) {
+dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor) {
   return {get_llga_desc(tensor).logical_tensor(), tensor.data_ptr()};
 }
 
@@ -126,6 +130,9 @@ at::ScalarType LlgaTensorDesc::aten_scalar_type() const {
   }
 }
 
-} // namespace at
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch
 
 #endif // AT_MKLDNN_ENABLED()

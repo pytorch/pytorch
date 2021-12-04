@@ -154,9 +154,9 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
       outputs.push_back(inputTensor);
       runOutputs.push_back({spec.logical_tensor(), inputTensor.data_ptr()});
     } else if (spec.is_opaque()) {
-      auto tensor = at::empty_llga(spec, opt);
+      auto tensor = empty_llga(spec, opt);
       outputs.push_back(tensor);
-      runOutputs.push_back(at::llga_from_aten_tensor(tensor));
+      runOutputs.push_back(llga_from_aten_tensor(tensor));
     } else {
       auto tensor = at::empty(spec.sizes(), opt);
       outputs.push_back(tensor);

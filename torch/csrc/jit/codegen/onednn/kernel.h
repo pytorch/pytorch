@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/native/mkldnn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/rw_mutex.hpp>
 #include <unordered_map>
@@ -14,7 +14,7 @@ namespace jit {
 namespace fuser {
 namespace onednn {
 
-using ArgSpec = at::LlgaTensorDesc;
+using ArgSpec = LlgaTensorDesc;
 using ArgSpecs = std::vector<ArgSpec>;
 using RunArg = dnnl::graph::tensor;
 using RunArgs = std::vector<RunArg>;

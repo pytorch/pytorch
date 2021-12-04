@@ -1,4 +1,4 @@
-#include <ATen/native/mkldnn/LlgaTensorImpl.h>
+#include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 
 #include <ATen/core/functional.h>

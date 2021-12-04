@@ -6,7 +6,10 @@
 #include <oneapi/dnnl/dnnl_graph.hpp>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace at {
+namespace torch {
+namespace jit {
+namespace fuser {
+namespace onednn {
 
 struct LlgaTensorDesc {
   using desc = dnnl::graph::logical_tensor;
@@ -164,7 +167,7 @@ struct LlgaTensorDesc {
 
 struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {
   LlgaTensorImpl(
-      Storage&& storage,
+      at::Storage&& storage,
       const caffe2::TypeMeta& data_type,
       const LlgaTensorDesc& desc);
 
@@ -177,21 +180,24 @@ struct TORCH_API LlgaTensorImpl : public c10::TensorImpl {
   bool is_contiguous(
       at::MemoryFormat memory_format =
           at::MemoryFormat::Contiguous) const override;
-  IntArrayRef strides() const override;
+  c10::IntArrayRef strides() const override;
   int64_t stride(int64_t d) const override;
   void set_size(int64_t dim, int64_t new_size) override;
   void set_stride(int64_t dim, int64_t new_stride) override;
   void set_storage_offset(int64_t storage_offset) override;
   bool has_storage() const override;
-  const Storage& storage() const override;
+  const at::Storage& storage() const override;
   int64_t storage_offset() const override;
 
  private:
   LlgaTensorDesc desc_;
 };
 
-Tensor empty_llga(const LlgaTensorDesc& desc, const TensorOptions& options);
+at::Tensor empty_llga(const LlgaTensorDesc& desc, const c10::TensorOptions& options);
 
-dnnl::graph::tensor llga_from_aten_tensor(const Tensor& tensor);
+dnnl::graph::tensor llga_from_aten_tensor(const at::Tensor& tensor);
 
-} // namespace at
+} // namespace onednn
+} // namespace fuser
+} // namespace jit
+} // namespace torch
