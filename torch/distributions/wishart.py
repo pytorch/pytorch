@@ -113,6 +113,17 @@ class Wishart(ExponentialFamily):
         df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(batch_shape + self.event_shape)
         new.df = self.df.expand(batch_shape)
+        new._dist_gamma = torch.distributions.gamma.Gamma(
+            concentration=(
+                new.df.unsqueeze(-1)
+                - torch.arange(
+                    self.event_shape[-1],
+                    dtype=new._unbroadcasted_scale_tril.dtype,
+                    device=new._unbroadcasted_scale_tril.device,
+                ).div(2).expand(batch_shape + (-1,))
+            ),
+            rate=0.5,
+        )
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
         if 'scale_tril' in self.__dict__:
