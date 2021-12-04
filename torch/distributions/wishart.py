@@ -148,7 +148,7 @@ class Wishart(Distribution):
 
     @property
     def variance(self):
-        V = self.covariance_matrix # has shape (batch_shape x event_shape)
+        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diag()
         return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
 
@@ -164,9 +164,9 @@ class Wishart(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        nu = self.df # has shape (batch_shape)
-        p = self._event_shape[0] # has singleton shape
-        V = self.covariance_matrix # has shape (batch_shape x event_shape)
+        nu = self.df  # has shape (batch_shape)
+        p = self._event_shape[0]  # has singleton shape
+        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             - torch.mvlgamma(nu / 2, p=p)
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
@@ -178,9 +178,9 @@ class Wishart(Distribution):
         )
 
     def entropy(self):
-        nu = self.df # has shape (batch_shape)
-        p = self._event_shape[0] # has singleton shape
-        V = self.covariance_matrix # has shape (batch_shape x event_shape)
+        nu = self.df  # has shape (batch_shape)
+        p = self._event_shape[0]  # has singleton shape
+        V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         H = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * math.log(2) / 2
@@ -193,4 +193,3 @@ class Wishart(Distribution):
             ).sum(-1) * (nu - p - 1)
             + nu * p / 2
         )
-
