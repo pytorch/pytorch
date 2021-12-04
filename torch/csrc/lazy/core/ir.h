@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 
 #include <functional>
 #include <memory>
