@@ -58,77 +58,26 @@
 
 @end
 
-static NSString* gModelCacheDirectory = @"";
-
 @implementation PTMCoreMLExecutor {
   MLModel* _mlModel;
-  NSURL* _modelPath;
-  NSURL* _compiledModelPath;
-}
-
-+ (void)setModelCacheDirectory:(NSString*)dir {
-  gModelCacheDirectory = dir;
-}
-
-+ (NSString*)modelCacheDirectory {
-  if (gModelCacheDirectory.length == 0 ||
-      ![[NSFileManager defaultManager]
-          isWritableFileAtPath:gModelCacheDirectory]) {
-    // set the default directory to tmp
-    gModelCacheDirectory = NSTemporaryDirectory();
-  }
-  return gModelCacheDirectory;
-}
-
-+ (BOOL)isAvailable {
-#if !defined(__APPLE__)
-  return false;
-#elif TARGET_OS_IPHONE
-  if ([UIDevice currentDevice].systemVersion.floatValue > 14.0) {
-    return true;
-  }
-#elif TARGET_OS_MAC
-  NSOperatingSystemVersion supportedVer = {10, 13, 0};
-  if ([[NSProcessInfo processInfo]
-          isOperatingSystemAtLeastVersion:supportedVer]) {
-    return true;
-  }
-#endif
-  return false;
 }
 
 - (BOOL)compileMLModel:(const std::string&)modelSpecs
             identifier:(const std::string&)identifier
     API_AVAILABLE(ios(11.0), macos(10.13)) {
-  NSString* mlModelName = [NSString stringWithCString:identifier.c_str()
-                                             encoding:NSUTF8StringEncoding];
-  _modelPath = [self _cacheFilePath:mlModelName];
-  [self _saveModel:modelSpecs];
+  _modelPath = [self _save:modelSpecs
+                identifier:[NSString stringWithCString:identifier.c_str()
+                                              encoding:NSUTF8StringEncoding]];
   NSError* error = nil;
-  _compiledModelPath = [self _compiledModelFilePath:_modelPath.path];
-  // Compile the model when OS version changes
-  if ([self _shouldRecompileModel]) {
-    if (@available(iOS 11.0, macOS 10.13, *)) {
-      NSURL* temporaryFileURL = [MLModel compileModelAtURL:_modelPath
-                                                     error:&error];
-      if (!error) {
-        // move the model to the cache directory
-        NSFileManager* fileManager = [NSFileManager defaultManager];
-        if (![temporaryFileURL isEqual:_compiledModelPath]) {
-          if ([fileManager fileExistsAtPath:_compiledModelPath.path]) {
-            [fileManager removeItemAtURL:_compiledModelPath error:&error];
-          }
-          [fileManager moveItemAtURL:temporaryFileURL
-                               toURL:_compiledModelPath
-                               error:&error];
-        }
-      }
-    } else {
-      TORCH_CHECK(false, "CoreML is not available on your deivce");
-    }
+  NSURL* compiledModelPath = nil;
+  if (@available(iOS 11.0, macOS 10.13, *)) {
+    compiledModelPath =
+        [MLModel compileModelAtURL:[NSURL URLWithString:_modelPath]
+                             error:&error];
+  } else {
+    TORCH_CHECK(false, "CoreML is not available on your deivce");
   }
-
-  if (error) {
+  if (error || !compiledModelPath) {
     // remove cached models if compalition failed.
     [self cleanup];
     TORCH_CHECK(
@@ -147,11 +96,11 @@ static NSString* gModelCacheDirectory = @"";
     }
     config.computeUnits = backend;
     config.allowLowPrecisionAccumulationOnGPU = self.allowLowPrecision;
-    _mlModel = [MLModel modelWithContentsOfURL:_compiledModelPath
+    _mlModel = [MLModel modelWithContentsOfURL:compiledModelPath
                                  configuration:config
                                          error:&error];
   } else {
-    _mlModel = [MLModel modelWithContentsOfURL:_compiledModelPath error:&error];
+    _mlModel = [MLModel modelWithContentsOfURL:compiledModelPath error:&error];
   }
   if (error || !_mlModel) {
     TORCH_CHECK(
@@ -159,6 +108,8 @@ static NSString* gModelCacheDirectory = @"";
         "Error loading the MLModel",
         error.localizedDescription.UTF8String);
   }
+
+  _compiledModelPath = compiledModelPath.path;
   return YES;
 }
 
@@ -194,19 +145,20 @@ static NSString* gModelCacheDirectory = @"";
 - (BOOL)cleanup {
   NSFileManager* fileManager = [NSFileManager defaultManager];
   NSError* error = nil;
-  NSString* modelPath = _modelPath.path;
-  NSString* compiledModelPath = _compiledModelPath.path;
-  if ([fileManager fileExistsAtPath:modelPath]) {
-    [fileManager removeItemAtPath:modelPath error:&error];
+  if (![fileManager fileExistsAtPath:_modelPath]) {
+    [fileManager removeItemAtPath:_modelPath error:&error];
   }
-  if ([fileManager fileExistsAtPath:compiledModelPath]) {
-    [fileManager removeItemAtPath:compiledModelPath error:&error];
+  if (![fileManager fileExistsAtPath:_compiledModelPath]) {
+    [fileManager removeItemAtPath:_compiledModelPath error:&error];
   }
   return !error;
 }
 
-- (void)_saveModel:(const std::string&)spec {
-  NSString* modelPath = _modelPath.path;
+- (NSString*)_save:(const std::string&)spec identifier:(NSString*)identifier {
+  NSURL* temporaryDirectoryURL = [NSURL fileURLWithPath:NSTemporaryDirectory()
+                                            isDirectory:YES];
+  NSString* modelPath = [NSString
+      stringWithFormat:@"%@/%@", temporaryDirectoryURL.path, identifier];
   if (![[NSFileManager defaultManager] fileExistsAtPath:modelPath]) {
     // Note that the serialized protobuf binary contains bytes, not text;
     // see
@@ -215,42 +167,7 @@ static NSString* gModelCacheDirectory = @"";
     BOOL ret = [data writeToFile:modelPath atomically:YES];
     TORCH_CHECK(ret, "Error saving the MLModel", modelPath.UTF8String);
   }
-}
-
-- (BOOL)_shouldRecompileModel {
-#if TARGET_OS_IPHONE
-  NSError* error = nil;
-  NSString* currentOSVer = [UIDevice currentDevice].systemVersion;
-  NSString* versionPath = [self _cacheFilePath:@"version"].path;
-  BOOL shouldRecompileModel = YES;
-  NSFileManager* fileManager = [NSFileManager defaultManager];
-  if ([fileManager fileExistsAtPath:versionPath]) {
-    NSString* cachedOSVer =
-        [NSString stringWithContentsOfFile:versionPath
-                                  encoding:NSUTF8StringEncoding
-                                     error:&error];
-    if ([cachedOSVer isEqualToString:currentOSVer]) {
-      if ([fileManager fileExistsAtPath:_compiledModelPath.path]) {
-        shouldRecompileModel = NO;
-      }
-    }
-  }
-  [currentOSVer writeToFile:versionPath atomically:YES];
-  return shouldRecompileModel;
-#else
-  return YES;
-#endif
-}
-
-- (NSURL*)_cacheFilePath:(NSString*)fileName {
-  NSString* filePath = [[[self class] modelCacheDirectory]
-      stringByAppendingPathComponent:fileName];
-  return [NSURL fileURLWithPath:filePath];
-}
-
-- (NSURL*)_compiledModelFilePath:(NSString*)modelPath {
-  NSString* filePath = [modelPath stringByAppendingString:@".mlmodelc"];
-  return [NSURL fileURLWithPath:filePath];
+  return modelPath;
 }
 
 @end
