@@ -94,7 +94,7 @@ class Wishart(Distribution):
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
         # Gamma distribution is needed for Batlett decomposition sampling
-        self.dist_gamma = torch.distributions.Gamma(
+        self._dist_gamma = torch.distributions.Gamma(
             self.df.unsqueeze(-1)
             - torch.arange(
                 self._event_shape[0],
@@ -144,19 +144,19 @@ class Wishart(Distribution):
 
     @property
     def mean(self):
-        return self.df * self.covariance_matrix
+        return self.df.expand(self._batch_shape, self._event_shape) * self.covariance_matrix
 
     @property
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
-        diag_V = V.diag()
+        diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df * (V.pow(2) + torch.einsum("i,j->ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
 
         # Implemented Sampling using Bartlett decomposition
-        noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
+        noise = self._dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
         noise = noise + torch.randn(shape, dtype=noise.dtype, device=noise.device).tril(diagonal=-1)
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.mT
