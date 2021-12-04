@@ -2,6 +2,7 @@
 #include <c10/macros/Export.h>
 #include <cstdint>
 #include <functional>  // For std::hash
+#include <string>
 
 
 namespace c10 {
