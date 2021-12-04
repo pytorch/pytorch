@@ -17,7 +17,7 @@
 #include <omp.h>
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
 #include <mkl.h>
 #endif
 
@@ -200,7 +200,7 @@ void init_num_threads() {
   omp_set_num_threads(1);
 #endif
 
-#ifdef TH_BLAS_MKL
+#if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
 #endif
 
