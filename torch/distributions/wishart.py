@@ -80,7 +80,7 @@ class Wishart(Distribution):
             batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
             event_shape = precision_matrix.shape[-2:]
             self.precision_matrix = precision_matrix
-            
+
         self.df = df.expand(batch_shape)
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
 
