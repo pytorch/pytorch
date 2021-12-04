@@ -10,5 +10,4 @@ PARENT_SCOPE)
 
 install(FILES
   THGenerateByteType.h
-  THConcat.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
