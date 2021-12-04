@@ -63,7 +63,7 @@ using ConstTypePtr = std::shared_ptr<const Type>;
 // c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
 using TypePrinter =
-    std::function<c10::optional<std::string>(const ConstTypePtr&)>;
+    std::function<c10::optional<std::string>(const Type&)>;
 
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
  private:
@@ -118,7 +118,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   std::string annotation_str(TypePrinter printer) const {
     if (printer) {
       // the printer can return nullopt to fall through to the default impl
-      if (auto renamed = printer(shared_from_this())) {
+      if (auto renamed = printer(*this)) {
         return *renamed;
       }
     }
