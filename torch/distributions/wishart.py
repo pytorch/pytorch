@@ -150,7 +150,7 @@ class Wishart(Distribution):
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return self.df.view(self._batch_shape + (1, 1)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
+        return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
