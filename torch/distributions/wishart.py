@@ -2,7 +2,7 @@ import math
 
 import torch
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
@@ -11,7 +11,7 @@ def _mvdigamma(x, p) -> torch.Tensor:
     assert x > (p - 1) / 2, "Wrong domain for digamma function."
     return torch.digamma(x - torch.arange(p) / 2).sum()
 
-class Wishart(Distribution):
+class Wishart(ExponentialFamily):
     r"""
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
     or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
@@ -95,12 +95,15 @@ class Wishart(Distribution):
 
         # Gamma distribution is needed for Batlett decomposition sampling
         self._dist_gamma = torch.distributions.gamma.Gamma(
-            self.df.unsqueeze(-1)
-            - torch.arange(
-                self._event_shape[0],
-                device=self._unbroadcasted_scale_tril.device
-            ).div(2).expand(batch_shape + (-1,)),
-            1 / 2,
+            concentration=(
+                self.df.unsqueeze(-1)
+                - torch.arange(
+                    self._event_shape[-1],
+                    dtype=self._unbroadcasted_scale_tril.dtype,
+                    device=self._unbroadcasted_scale_tril.device,
+                ).div(2).expand(batch_shape + (-1,))
+            ),                
+            rate=0.5,
         )
 
     def expand(self, batch_shape, _instance=None):
@@ -114,9 +117,7 @@ class Wishart(Distribution):
             new.scale_tril = self.scale_tril.expand(cov_shape)
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
-        super(Wishart, new).__init__(batch_shape,
-                                     self.event_shape,
-                                     validate_args=False)
+        super(Wishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
 
@@ -134,7 +135,7 @@ class Wishart(Distribution):
     @lazy_property
     def precision_matrix(self):
         identity = torch.eye(
-            self._event_shape[0],
+            self._event_shape[-1],
             device=self._unbroadcasted_scale_tril.device,
             dtype=self._unbroadcasted_scale_tril.dtype,
         )
@@ -165,7 +166,7 @@ class Wishart(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         nu = self.df  # has shape (batch_shape)
-        p = self._event_shape[0]  # has singleton shape
+        p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             - torch.mvlgamma(nu / 2, p=p)
@@ -179,7 +180,7 @@ class Wishart(Distribution):
 
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
-        p = self._event_shape[0]  # has singleton shape
+        p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) / 2
