@@ -2347,7 +2347,7 @@ Example::
     >>> l = torch.linalg.cholesky(a)
     >>> z = l @ l.mT
     >>> torch.dist(z, a)
-    tensor(3.5887e-07)
+    tensor(3.5894e-07)
 """)
 
 add_docstr(torch.clone, r"""
