@@ -1471,10 +1471,18 @@ Tensor _inverse_helper_cuda_legacy(const Tensor& self) {
 
 Tensor _inverse_helper_cuda(const Tensor& self) {
 #ifdef USE_CUSOLVER
-  if ((self.dim() == 2) || (/* self.dim() > 2 && */ batchCount(self) <= 2) || !use_magma_) {
-    return _inverse_helper_cuda_lib(self);    // cusolver or cublas
-  } else {
-    return _inverse_helper_cuda_legacy(self); // magma-cuda
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      return _inverse_helper_cuda_lib(self); // cusolver or cublas
+    case at::LinalgBackend::Magma:
+      return _inverse_helper_cuda_legacy(self); // magma-cuda
+    default:
+      if (batchCount(self) <= 2 || !use_magma_) {
+        return _inverse_helper_cuda_lib(self); // cusolver or cublas
+      } else {
+        return _inverse_helper_cuda_legacy(self); // magma-cuda
+      }
   }
 #else
   return _inverse_helper_cuda_legacy(self); // magma-cuda
@@ -1503,10 +1511,18 @@ Tensor& _linalg_inv_out_helper_cuda(Tensor &result, Tensor& infos_lu, Tensor& in
   // This function calculates the inverse matrix in-place
   // result should be in column major order and contain matrices to invert
 #ifdef USE_CUSOLVER
-  if ((result.dim() == 2) || (/* result.dim() > 2 && */ batchCount(result) <= 2) || !use_magma_) {
-    return _linalg_inv_out_helper_cuda_lib(result, infos_lu, infos_getri);  // cusolver or cublas
-  } else {
-    return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      return _linalg_inv_out_helper_cuda_lib(result, infos_lu, infos_getri);  // cusolver or cublas
+    case at::LinalgBackend::Magma:
+      return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
+    default:
+      if (batchCount(result) <= 2 || !use_magma_) {
+        return _linalg_inv_out_helper_cuda_lib(result, infos_lu, infos_getri);  // cusolver or cublas
+      } else {
+        return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
+      }
   }
 #else
   return _linalg_inv_out_helper_cuda_legacy(result, infos_lu, infos_getri);  // magma-cuda
@@ -1600,10 +1616,18 @@ Tensor _cholesky_solve_helper_cuda_magma(const Tensor& self, const Tensor& A, bo
 //     Batched cholesky_solve is dispatched to magma.
 Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(self) == 1 || !use_magma_) {
-    return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
-  } else {
-    return _cholesky_solve_helper_cuda_magma(self, A, upper);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+    case at::LinalgBackend::Magma:
+      return _cholesky_solve_helper_cuda_magma(self, A, upper);
+    default:
+      if (batchCount(self) == 1 || !use_magma_) {
+        return _cholesky_solve_helper_cuda_cusolver(self, A, upper);
+      } else {
+        return _cholesky_solve_helper_cuda_magma(self, A, upper);
+      }
   }
 #else
   return _cholesky_solve_helper_cuda_magma(self, A, upper);
@@ -1706,10 +1730,20 @@ void cholesky_helper_magma(const Tensor& input, bool upper, const Tensor& info) 
 
 static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper) {
 #ifdef USE_CUSOLVER
-  if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
-    cholesky_helper_cusolver(input, upper, info);
-  } else {
-    cholesky_helper_magma(input, upper, info);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      cholesky_helper_cusolver(input, upper, info);
+      break;
+    case at::LinalgBackend::Magma:
+      cholesky_helper_magma(input, upper, info);
+      break;
+    default:
+      if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
+        cholesky_helper_cusolver(input, upper, info);
+      } else {
+        cholesky_helper_magma(input, upper, info);
+      }
   }
 #else
   cholesky_helper_magma(input, upper, info);
@@ -1777,10 +1811,19 @@ Tensor& cholesky_inverse_kernel_impl(Tensor &result, Tensor& infos, bool upper) 
   // result should be in column major order and contain matrices to invert
   // the content of result is overwritten by 'apply_cholesky_inverse'
 #ifdef USE_CUSOLVER
-  if (batchCount(result) == 1 || !use_magma_) {
-    return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
-  } else {
-    return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+    case at::LinalgBackend::Magma:
+      return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+    default:
+      if (batchCount(result) == 1 ||
+          !use_magma_) {
+        return cholesky_inverse_kernel_impl_cusolver(result, infos, upper);
+      } else {
+        return cholesky_inverse_kernel_impl_magma(result, infos, upper);
+      }
   }
 #else
   return cholesky_inverse_kernel_impl_magma(result, infos, upper);
@@ -1913,13 +1956,13 @@ static void apply_lu_factor_batched_magma(const Tensor& input, const Tensor& piv
 }
 
 static void lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_looped", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_looped", [&]{
     apply_lu_factor_looped_magma<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
 
 static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_magma_batched", [&]{
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(input.scalar_type(), "lu_factor_magma_batched", [&]{
     apply_lu_factor_batched_magma<scalar_t>(input, pivots, infos, compute_pivots);
   });
 }
@@ -1933,33 +1976,52 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
     infos.zero_();
     return;
   }
+  const auto lu_factor_magma = [](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+      // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
+      // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
+      std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
+      magma_version(&std::get<0>(version), &std::get<1>(version), &std::get<2>(version));
+      if (version >= std::make_tuple<magma_int_t, magma_int_t, magma_int_t>(2, 5, 2)) {
+        lu_factor_batched_magma(input, pivots, infos, compute_pivots);
+      } else {
+        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+      }
+  };
 #ifdef USE_CUSOLVER
-  // If there's no magma, we always default to CUSOLVER
-  // Otherwise, we do not use it for complex inputs if !get_pivots since nan_to_num_ does not work with it.
-  // See https://github.com/pytorch/pytorch/issues/59247 for more info
-  // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
-  auto m = input.size(-2);
-  if (((batch_size == 1 || (batch_size <= 8 && m <= 16))
-       && (!input.is_complex() || compute_pivots))
-      || !use_magma_ ){
-    lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Cusolver:
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+      break;
+    case at::LinalgBackend::Magma:
+      if (batch_size == 1) {
+        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+      } else {
+        lu_factor_magma(input, pivots, infos, compute_pivots);
+      }
+      break;
+    default:
+      // If there's no magma, we always default to CUSOLVER
+      // Otherwise, we do not use it for complex inputs if !get_pivots since nan_to_num_ does not work with it.
+      // See https://github.com/pytorch/pytorch/issues/59247 for more info
+      // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
+      auto m = input.size(-2);
+      if (((batch_size == 1 || (batch_size <= 8 && m <= 16))
+           && (!input.is_complex() || compute_pivots))
+          || !use_magma_ ){
+        lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+      } else {
+        lu_factor_magma(input, pivots, infos, compute_pivots);
+      }
   }
 #else
-  if (batch_size == 1) {
-    lu_factor_looped_magma(input, pivots, infos, compute_pivots);
-  }
-#endif // USE_CUSOLVER
-  else {
-    // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
-    // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
-    magma_int_t major, minor, micro;
-    magma_version(&major, &minor, &micro);
-    if (major >= 2 && minor >= 5 && micro >= 2) {
-      lu_factor_batched_magma(input, pivots, infos, compute_pivots);
-    } else {
+    if (batch_size == 1) {
       lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+    } else {
+      lu_factor_magma(input, pivots, infos, compute_pivots);
     }
-  }
+#endif // USE_CUSOLVER
+
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)
   if (!compute_pivots) {
     auto k = std::min(input.size(-2), input.size(-1));
@@ -2072,12 +2134,12 @@ Tensor& orgqr_kernel_impl(Tensor& result, const Tensor& tau) {
   // See discussions in https://github.com/pytorch/pytorch/pull/51348 for comparison of cuSOLVER-MAGMA
   // and Windows failure.
   // For reference here is the MAGMA-based implementation: https://gist.github.com/IvanYashchuk/2db50002c9d3c1462ff769e6410ad983
-  #if defined(USE_CUSOLVER)
-    return orgqr_helper_cusolver(result, tau); // cusolver
-  #else
-    TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
-      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
-  #endif
+#if defined(USE_CUSOLVER)
+  return orgqr_helper_cusolver(result, tau); // cusolver
+#else
+  TORCH_CHECK(false, "Calling torch.orgqr on a CUDA tensor requires compiling ",
+    "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#endif
 }
 
 REGISTER_CUDA_DISPATCH(orgqr_stub, &orgqr_kernel_impl);
@@ -2144,7 +2206,14 @@ void geqrf_magma(const Tensor& input, const Tensor& tau) {
 // This is a backend library dispatching helper function for calling looped batch implementation
 void geqrf_looped(const Tensor& input, const Tensor& tau) {
 #if defined(USE_CUSOLVER)
-  return geqrf_cusolver(input, tau);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Magma:
+      return geqrf_magma(input, tau);
+    case at::LinalgBackend::Cusolver:
+    default:
+      return geqrf_cusolver(input, tau);
+  }
 #else
   return geqrf_magma(input, tau);
 #endif
@@ -2281,9 +2350,16 @@ std::tuple<Tensor, Tensor> linalg_qr_helper_magma(const Tensor& self, c10::strin
 
 std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
 #if defined(USE_CUSOLVER)
-  // _linalg_qr_helper_default is a generic function that is implemented using
-  // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
-  return _linalg_qr_helper_default(input, mode);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Magma:
+      return linalg_qr_helper_magma(input, mode);
+    case at::LinalgBackend::Cusolver:
+    default:
+      // _linalg_qr_helper_default is a generic function that is implemented using
+      // geqrf_stub and orgqr_stub. It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+      return _linalg_qr_helper_default(input, mode);
+  }
 #else
   return linalg_qr_helper_magma(input, mode);
 #endif
@@ -2440,7 +2516,15 @@ void linalg_eigh_magma(const Tensor& eigenvalues, const Tensor& eigenvectors, co
 
 void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& infos, bool upper, bool compute_eigenvectors) {
 #if defined(USE_CUSOLVER)
-  linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Magma:
+      linalg_eigh_magma(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+      break;
+    case at::LinalgBackend::Cusolver:
+    default:
+      linalg_eigh_cusolver(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
+  }
 #else
   linalg_eigh_magma(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #endif
@@ -2737,7 +2821,14 @@ std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda_legacy(const Tensor& self, b
 
 std::tuple<Tensor, Tensor, Tensor> _svd_helper_cuda(const Tensor& self, bool some, bool compute_uv) {
 #ifdef USE_CUSOLVER
-  return _svd_helper_cuda_lib(self, some, compute_uv);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Magma:
+      return _svd_helper_cuda_legacy(self, some, compute_uv);
+    case at::LinalgBackend::Cusolver:
+    default:
+      return _svd_helper_cuda_lib(self, some, compute_uv);
+  }
 #else
   return _svd_helper_cuda_legacy(self, some, compute_uv);
 #endif
@@ -3052,10 +3143,17 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 
 void gels_looped(const Tensor& a, Tensor& b, Tensor& infos) {
 #if defined(USE_CUSOLVER)
-  // linalg_lstsq_gels is a generic function that is implemented using
-  // geqrf_stub, ormqr_stub, and triangular_solve_stub
-  // It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
-  return linalg_lstsq_gels(a, b, infos);
+  auto preferred_backend = at::globalContext().linalgPreferredBackend();
+  switch (preferred_backend) {
+    case at::LinalgBackend::Magma:
+      return gels_magma(a, b, infos);
+    case at::LinalgBackend::Cusolver:
+    default:
+      // linalg_lstsq_gels is a generic function that is implemented using
+      // geqrf_stub, ormqr_stub, and triangular_solve_stub
+      // It dispatches to cuSOLVER for CUDA inputs if USE_CUSOLVER is defined
+      return linalg_lstsq_gels(a, b, infos);
+  }
 #else
   return gels_magma(a, b, infos);
 #endif
