@@ -157,7 +157,7 @@ class Wishart(Distribution):
 
         # Implemented Sampling using Bartlett decomposition
         noise = self.dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
-        noise = noise + torch.randn(shape, device=noise.device).tril(diagonal=-1)
+        noise = noise + torch.randn(shape, dtype=noise.dtype, device=noise.device).tril(diagonal=-1)
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.mT
 
