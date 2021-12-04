@@ -9,6 +9,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -627,9 +628,6 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
-  // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
-  // Make sure we use the sparse exemplar for result.
   auto result_options = self.is_sparse() ?
     self.options().dtype(commonDtype) : other.options().dtype(commonDtype);
   Tensor result = at::empty({0}, result_options);
@@ -639,6 +637,8 @@ Tensor mul_sparse(const Tensor& self, const Tensor& other) {
 Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
+
+SparseTensor& mul_out_dense_sparse_cpu(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_);
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
@@ -651,10 +651,15 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   AT_ASSERT(!t_.is_cuda()); // dispatch argument
   TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
   TORCH_CHECK(!src_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(src_.is_sparse(), "mul(sparse, dense) is not supported");
-  TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported");
+  TORCH_CHECK(src_.is_sparse() || t_.is_sparse(), "mul: expected 'self' or 'other' to be sparse tensor, but both are dense tensor");
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
+  if (!src_.is_sparse()) {
+    return mul_out_dense_sparse_cpu(r, src_, t_);
+  }
+  if (!t_.is_sparse()) {
+    return mul_out_dense_sparse_cpu(r, t_, src_);
+  }
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     r.resize_as_(src_);
     return r.zero_();
@@ -736,6 +741,54 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   Tensor r_values = r_buffer.to(r.scalar_type());
   get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
   get_sparse_impl(r)->set_nnz_and_narrow(r_i);
+  return r._coalesced_(true);
+}
+
+// --------------------------------------------------------------------
+// mul(Tensor, SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& mul_out_dense_sparse_cpu(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(!dense.is_sparse());
+  AT_ASSERT(sparse_.is_sparse());
+
+  AT_ASSERT(!dense.is_cuda()); // dispatch argument
+  TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
+  TORCH_CHECK(!sparse_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
+
+  TORCH_CHECK(dense.sizes().equals(sparse_.sizes()), "mul: expected 'self' and 'other' to have same size, but self has size ",
+    dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse multiplication does not currently support broadcasting)");
+
+  auto commonDtype = promoteTypes(dense.scalar_type(), sparse_.scalar_type());
+  TORCH_CHECK(canCast(commonDtype, r.scalar_type()), "Can't convert result type ", commonDtype, " to output ", r.scalar_type(), " in mul operation");
+
+  SparseTensor sparse = sparse_.coalesce().to(commonDtype);
+
+  int64_t nnz = sparse._nnz();
+  int64_t sparse_dim = sparse.sparse_dim();
+  int64_t dense_dim = sparse.dense_dim();
+  Tensor sparse_indices = sparse._indices();
+  Tensor sparse_values = sparse._values();
+
+  std::vector<at::indexing::TensorIndex> indices;
+
+  for (int64_t d=0; d<sparse_dim; d++) {
+    std::vector<at::indexing::TensorIndex> i;
+    i.push_back(d);
+    i.push_back(at::indexing::Slice());
+    indices.push_back(sparse_indices.index(i));
+  }
+  for (int64_t d=0; d<dense_dim; d++) {
+    indices.push_back(at::indexing::Slice());
+  }
+
+  Tensor r_indices = at::empty({sparse_dim, nnz}, sparse_indices.options());
+  r_indices.copy_(sparse_indices);
+  Tensor r_values = dense.index(indices).to(commonDtype).mul_(sparse_values).to(r.scalar_type());
+
+  r.resize_as_(sparse);
+  get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
   return r._coalesced_(true);
 }
 
