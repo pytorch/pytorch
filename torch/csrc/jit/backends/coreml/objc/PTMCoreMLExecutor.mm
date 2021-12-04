@@ -218,6 +218,7 @@ static NSString* gModelCacheDirectory = @"";
 }
 
 - (BOOL)_shouldRecompileModel {
+#if TARGET_OS_IPHONE
   NSError* error = nil;
   NSString* currentOSVer = [UIDevice currentDevice].systemVersion;
   NSString* versionPath = [self _cacheFilePath:@"version"].path;
@@ -235,8 +236,10 @@ static NSString* gModelCacheDirectory = @"";
     }
   }
   [currentOSVer writeToFile:versionPath atomically:YES];
-
   return shouldRecompileModel;
+#else
+  return YES;
+#endif
 }
 
 - (NSURL*)_cacheFilePath:(NSString*)fileName {
