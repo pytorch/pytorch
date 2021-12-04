@@ -1882,13 +1882,13 @@ class TestNN(NNTestCase):
             ('p3', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters |= parameters2
+        parameters.update(parameters2)
         parameter_dict |= parameter_dict2
         check()
 
         parameters2 = OrderedDict()
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters |= parameters2
+        parameters.update(parameters2)
         parameter_dict |= parameter_dict2
         check()
 
@@ -1898,7 +1898,7 @@ class TestNN(NNTestCase):
             ('p13', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters |= parameters2
+        parameters.update(parameters2)
         parameter_dict |= parameter_dict2
         check()
 
@@ -1909,7 +1909,7 @@ class TestNN(NNTestCase):
             ('p22', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters = parameters | parameters2
+        parameters.update(parameters2)
         parameter_dict = parameter_dict | parameter_dict2
         check()
 
@@ -1919,7 +1919,7 @@ class TestNN(NNTestCase):
             ('p25', Parameter(torch.randn(10, 10))),
         ])
         parameter_dict2 = nn.ParameterDict(parameters2)
-        parameters = parameters2 | parameters
+        parameters.update(parameters2)
         parameter_dict = parameter_dict2 | parameter_dict
         check()
 
