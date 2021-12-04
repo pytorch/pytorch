@@ -182,7 +182,7 @@ class Wishart(Distribution):
         p = self._event_shape[0]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1) / 2
             + p * (p + 1) * math.log(2) / 2
             + torch.mvlgamma(nu / 2, p=p)
             # multivariate digamma function is used following the idea of:
@@ -190,6 +190,6 @@ class Wishart(Distribution):
             - torch.polygamma(
                 1,
                 (nu / 2).unsqueeze(-1) - torch.arange(p).expand(self._batch_shape + (-1,)) / 2
-            ).sum(-1) * (nu - p - 1)
+            ).sum(-1) * (nu - p - 1) / 2
             + nu * p / 2
         )
