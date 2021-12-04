@@ -244,13 +244,13 @@ class BaseSparsifier(abc.ABC):
                                                 leave_parametrized=True)
             sparse_params = dict()
             if params_to_keep is not None:
-                params = {k: config[k] for k in params_to_keep}
-                sparse_params.update(params)
+                global_params = {k: config[k] for k in params_to_keep}
+                sparse_params.update(global_params)
             if params_to_keep_per_layer is not None:
                 params = params_to_keep_per_layer.get(config['fqn'], None)
                 if params is not None:
-                    params = {k: config[k] for k in params}
-                    sparse_params.update(params)
+                    per_layer_params = {k: config[k] for k in params}
+                    sparse_params.update(per_layer_params)
             if sparse_params:
                 module.sparse_params = sparse_params
 
