@@ -57,11 +57,11 @@ class _SubgraphMatcher:
         if isinstance(pn, (tuple, list)):
             if not isinstance(gn, type(pn)):
                 return False
-            return all(self._match_nodes(a1, a2) for a1, a2 in zip(pn, gn))  # type: ignore[call-overload]
+            return all(self._match_nodes(a1, a2, original_module, pattern_module) for a1, a2 in zip(pn, gn))  # type: ignore[call-overload]
         elif isinstance(pn, dict):
             if not isinstance(gn, dict):
                 return False
-            return pn.keys() == gn.keys() and all(self._match_nodes(v1, v2) for v1, v2 in zip(pn.values(), gn.values()))
+            return pn.keys() == gn.keys() and all(self._match_nodes(v1, v2, original_module, pattern_module) for v1, v2 in zip(pn.values(), gn.values()))
 
         # Check if we've already matched these nodes in the current
         # traversal
