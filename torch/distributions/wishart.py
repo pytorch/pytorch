@@ -118,12 +118,12 @@ class Wishart(ExponentialFamily):
             concentration=(
                 new.df.unsqueeze(-1)
                 - torch.arange(
-                    self.event_shape[-1],
+                    self._event_shape[-1],
                     dtype=new._unbroadcasted_scale_tril.dtype,
                     device=new._unbroadcasted_scale_tril.device,
-                ).div(2).expand(batch_shape + (-1,))
-            ),
-            rate=0.5,
+                ).expand(batch_shape + (-1,))
+            ) / 2,
+            rate=2,
         )
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
