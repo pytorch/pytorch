@@ -171,7 +171,7 @@ class Wishart(ExponentialFamily):
         shape = self._extended_shape(sample_shape)
 
         # Implemented Sampling using Bartlett decomposition
-        noise = self._dist_gamma.rsample(sample_shape).diag_embed(dim1=-2, dim2=-1).sqrt()
+        noise = self._dist_gamma.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         noise = noise + torch.randn(shape, dtype=noise.dtype, device=noise.device).tril(diagonal=-1)
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.mT
