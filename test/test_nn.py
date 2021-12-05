@@ -9035,25 +9035,16 @@ class TestNN(NNTestCase):
             def _gelu_ref(X):
                 return X * stats.norm.cdf(X)
 
-            def _tanh_gelu_ref(X):
-                M_SQRT_2_PI = math.sqrt(2 / math.pi)
-                Z = M_SQRT_2_PI * (X + 0.044715 * np.power(X, 3.0))
-                return 0.5 * X * (1.0 + np.tanh(Z))
-
-            for approximate in [False, True]:
-                for d in devices:
-                    if contiguous:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
-                    else:
-                        X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
-                    res = F.gelu(X, approximate)
-                    if approximate:
-                        ref = _tanh_gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    else:
-                        ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
-                    self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
-                    if dtype == torch.float64:
-                        gradcheck(F.gelu, [X, approximate], eps=1e-4)
+            for d in devices:
+                if contiguous:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)
+                else:
+                    X = torch.rand(n, m, dtype=dtype, requires_grad=True, device=d)[:, ::2]
+                res = F.gelu(X)
+                ref = _gelu_ref(X.to(numpy_dtype).cpu().detach().numpy())
+                self.assertEqual(res, ref, rtol=rtol, atol=atol, exact_dtype=False)
+                if dtype == torch.float64:
+                    gradcheck(F.gelu, [X], eps=1e-4)
 
         for n in range(1, 10):
             for m in range(1, 10):
@@ -11228,6 +11219,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
             fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
             fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
+
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
+        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
+            fold(torch.randn(1, 12, 12))
 
     def test_unfold_invalid_arg(self):
         # input wrong dimension
@@ -16946,6 +16941,24 @@ class TestNNDeviceType(NNTestCase):
         output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
         output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
         self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_layernorm_weight_bias(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.float32) * 0.1
+        normalized_shape = (width,)
+        data = torch.randn(width, device="cuda", dtype=torch.float32)
+        weight = torch.ones(width, device="cuda", dtype=torch.float32)
+        bias = torch.zeros(width, device="cuda", dtype=torch.float32)
+        eps = 1e-5
+
+        out_none_weight = torch.layer_norm(input, normalized_shape, None, data, eps)
+        out_one_weight = torch.layer_norm(input, normalized_shape, weight, data, eps)
+        self.assertEqual(out_none_weight, out_one_weight)
+
+        out_none_bias = torch.layer_norm(input, normalized_shape, data, None, eps)
+        out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
+        self.assertEqual(out_none_bias, out_zero_bias)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10

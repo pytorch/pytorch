@@ -42,7 +42,6 @@ _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
 _(aten, convolution_backward_overrideable) \
-_(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
 _(aten, _cosh) \
@@ -75,7 +74,6 @@ _(aten, _expm1) \
 _(aten, _fft_with_size) \
 _(aten, _fill) \
 _(aten, _floor) \
-_(aten, _indexCopy) \
 _(aten, _fused_dropout) \
 _(aten, _indices) \
 _(aten, _ldexp) \

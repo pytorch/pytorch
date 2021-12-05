@@ -1254,6 +1254,7 @@ class TestCudaFuser(JitTestCase):
         self.assertTrue(self._compare("comparing rstd failed", rstd, jit_rstd, error))
         self.assertGraphContains(t_jit.graph_for(x), FUSION_GUARD)
 
+    @unittest.skipIf(True, "codegen failure awaiting fix")
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -1268,6 +1269,7 @@ class TestCudaFuser(JitTestCase):
                     norm_shape = [input_shape[idx] for idx in range(dims - offset, dims)]
                     self._native_layer_norm_helper(input_shape, norm_shape, torch.float32, "cuda", 1e-4, affine)
 
+    @unittest.skipIf(True, "codegen failure awaiting fix")
     @unittest.skipIf(is_pre_volta(), "reduction not supported in pre volta device")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -2166,15 +2168,13 @@ class TestCudaFuser(JitTestCase):
         x = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=True)
         grads = torch.randn([1024, 1024], dtype=dtype, device=device, requires_grad=False)
 
-        def t(x: torch.Tensor, fast : bool):
-            o = torch.nn.functional.gelu(x, fast)
+        def t(x: torch.Tensor):
+            o = torch.nn.functional.gelu(x)
             o = o * 2.0
             return o
 
         t_jit = torch.jit.script(t)
-
-        for approximate in [False, True]:
-            self._run_training_helper(t_jit, t, grads, x, approximate)
+        self._run_training_helper(t_jit, t, grads, x)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
@@ -3043,6 +3043,7 @@ class TestCudaFuser(JitTestCase):
             return o1, o2
         self._run_fwd_helper(t2, ['aten::sum', 'aten::mul'], x, y)
 
+    @unittest.skipIf(True, "Fixed in PR #68804")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")

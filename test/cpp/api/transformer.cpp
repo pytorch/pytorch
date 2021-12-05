@@ -335,7 +335,7 @@ void transformer_decoder_layer_test_helper_gelu(bool is_cuda, bool use_callable_
     TransformerDecoderLayer,
     TransformerDecoderLayerOptions>(tensor_options, use_callable_activation);
   if (use_callable_activation) {
-    model.get()->options.activation([&](const torch::Tensor& t) {return torch::nn::functional::gelu(t, false);});
+    model.get()->options.activation([&](const torch::Tensor& t) {return torch::nn::functional::gelu(t);});
   } else {
     model.get()->options.activation(torch::kGELU);
   }

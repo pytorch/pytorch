@@ -7,8 +7,6 @@ SELUOptions::SELUOptions(bool inplace) : inplace_(inplace) {}
 
 GLUOptions::GLUOptions(int64_t dim) : dim_(dim) {}
 
-GELUOptions::GELUOptions(bool approximate) : approximate_(approximate) {}
-
 HardshrinkOptions::HardshrinkOptions(double lambda) : lambda_(lambda) {}
 
 SoftmaxOptions::SoftmaxOptions(int64_t dim) : dim_(dim) {}

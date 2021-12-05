@@ -2,7 +2,7 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Iterable
 
 import jinja2
 import json
@@ -53,6 +53,7 @@ LABEL_CIFLOW_ALL = "ciflow/all"
 LABEL_CIFLOW_BAZEL = "ciflow/bazel"
 LABEL_CIFLOW_CPU = "ciflow/cpu"
 LABEL_CIFLOW_CUDA = "ciflow/cuda"
+LABEL_CIFLOW_DOCS = "ciflow/docs"
 LABEL_CIFLOW_DEFAULT = "ciflow/default"
 LABEL_CIFLOW_LIBTORCH = "ciflow/libtorch"
 LABEL_CIFLOW_LINUX = "ciflow/linux"
@@ -279,19 +280,19 @@ WINDOWS_WORKFLOWS = [
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CPU, LABEL_CIFLOW_WIN}
         ),
     ),
-    # CIWorkflow(
-    #     arch="windows",
-    #     build_environment="win-vs2019-cuda11.3-py3",
-    #     cuda_version="11.3",
-    #     test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
-    #     num_test_shards=2,
-    #     only_run_smoke_tests_on_pull_request=True,
-    #     enable_force_on_cpu_test=1,
-    #     ciflow_config=CIFlowConfig(
-    #         run_on_canary=True,
-    #         labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
-    #     ),
-    # ),
+    CIWorkflow(
+        arch="windows",
+        build_environment="win-vs2019-cuda11.3-py3",
+        cuda_version="11.3",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        only_run_smoke_tests_on_pull_request=True,
+        enable_force_on_cpu_test=1,
+        ciflow_config=CIFlowConfig(
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
     CIWorkflow(
         arch="windows",
         build_environment="periodic-win-vs2019-cuda11.1-py3",
@@ -312,13 +313,37 @@ LINUX_WORKFLOWS = [
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
         enable_jit_legacy_test=1,
-        enable_doc_jobs=True,
-        enable_docs_test=1,
         enable_backwards_compat_test=1,
+        enable_docs_test=1,
         num_test_shards=2,
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-docs",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        enable_doc_jobs=True,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_DOCS, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-docs-push",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.6-gcc5.4",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        enable_doc_jobs=True,
+        exclude_test=True,
+        is_scheduled="0 0 * * *",  # run pushes only on a nightly schedule
+        # NOTE: This is purposefully left without LABEL_CIFLOW_DOCS so that you can run
+        #       docs builds on your PR without the fear of anything pushing
+        ciflow_config=CIFlowConfig(
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU}
         ),
     ),
     CIWorkflow(
@@ -712,15 +737,15 @@ def main() -> None:
         loader=jinja2.FileSystemLoader(str(GITHUB_DIR.joinpath("templates"))),
         undefined=jinja2.StrictUndefined,
     )
-    # template_and_workflows = [
-    #     (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
-    #     (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
-    #     (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
-    #     (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
-    #     (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
-    #     (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
-    #     (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
-    # ]
+    template_and_workflows = [
+        (jinja_env.get_template("linux_ci_workflow.yml.j2"), LINUX_WORKFLOWS),
+        (jinja_env.get_template("windows_ci_workflow.yml.j2"), WINDOWS_WORKFLOWS),
+        (jinja_env.get_template("bazel_ci_workflow.yml.j2"), BAZEL_WORKFLOWS),
+        (jinja_env.get_template("ios_ci_workflow.yml.j2"), IOS_WORKFLOWS),
+        (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
+        (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
+        (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
+    ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
     for w in existing_workflows:
@@ -730,13 +755,13 @@ def main() -> None:
             print(f"Error occurred when deleting file {w}: {e}")
 
     ciflow_ruleset = CIFlowRuleset()
-    # for template, workflows in template_and_workflows:
-    #     # added Iterable check to appease the mypy gods
-    #     if not isinstance(workflows, Iterable):
-    #         raise Exception(f"How is workflows not iterable? {workflows}")
-    #     for workflow in workflows:
-    #         workflow.generate_workflow_file(workflow_template=template)
-    #         ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
+    for template, workflows in template_and_workflows:
+        # added Iterable check to appease the mypy gods
+        if not isinstance(workflows, Iterable):
+            raise Exception(f"How is workflows not iterable? {workflows}")
+        for workflow in workflows:
+            workflow.generate_workflow_file(workflow_template=template)
+            ciflow_ruleset.add_label_rule(workflow.ciflow_config.labels, workflow.build_environment)
     ciflow_ruleset.generate_json()
 
 

@@ -2029,6 +2029,7 @@ works_list = [
     'mul',
     'ne',
     'neg',
+    'nn.functional.gelu',
     'nn.functional.hardshrink',
     'nn.functional.hardsigmoid',
     'nn.functional.hardswish',
@@ -2096,9 +2097,6 @@ known_failures = [
 
 # If your OpInfo test causes this test to fail, add it here
 skip_ops = [
-    # Tanh Gelu approximation is not supported
-    # Reference: https://github.com/pytorch/pytorch/pull/61439
-    'nn.functional.gelu'
     'conj'
 ]
 
