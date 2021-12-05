@@ -59,7 +59,7 @@ def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
             self.zero_point = torch.tensor([0])
 
         def forward(self, x, y):
-            x = qbinary_oprelu(x, y, self.scale.item(), self.zero_point.item())
+            x = qbinary_oprelu(x, y, self.scale, self.zero_point)
             return x
 
     class BinaryOpScalarReLU1Pattern(torch.nn.Module):
