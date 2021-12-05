@@ -1,10 +1,12 @@
 """
 This is the centralized file for all PyTorch operator upgraders.
-Each function definition here needs to following requirements:
+Each function definition here should satisfy following
+requirements:
 1. The body of the function must be Torchscriptable
 2. The naming convention of the upgraders should be:
     <op_name>_<op_overload>_upgrader_<old_version>_<new_version>
-3. The name of the upgrader must be present in operator_versions.yaml
+3. The name of the upgrader must be present in
+   torch/csrc/jit/operator_upgraders/version_map.h
 """
 import torch
 import yaml
