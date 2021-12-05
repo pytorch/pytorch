@@ -1,9 +1,11 @@
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
+
+#include <caffe2/serialize/versions.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
-#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <limits>
 #include <regex>
@@ -31,7 +33,10 @@ struct OldOpsReplacer {
           auto upgrader_entry =
               findUpgrader(version_entry->second, current_version);
           if (!upgrader_entry.has_value()) {
-            TORCH_INTERNAL_ASSERT(false, "Upgrader must be present for ", schema_name);
+            if (!isOpSymbolCurrent(schema_name, current_version)) {
+              TORCH_INTERNAL_ASSERT(false, "Upgrader must be present for ", schema_name);
+            }
+            return;
           }
           auto upgrader_entry_val = upgrader_entry.value();
           auto upgrader_name = upgrader_entry_val.upgrader_name;
@@ -56,6 +61,10 @@ struct OldOpsReplacer {
       }
       node = graph_it.next();
     }
+
+    // now that we updated the graph, we want to bump the
+    // graph version too.
+    graph_->set_op_version(caffe2::serialize::kProducedFileFormatVersion);
   }
 
   std::shared_ptr<Graph> graph_;
