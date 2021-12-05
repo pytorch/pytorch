@@ -12,4 +12,5 @@ from .._src.aot_autograd import (
     partition_with_recompute_fwd_in_bwd,
     num_of_recompilations,
     clear_compile_cache,
+    draw_graph,
 )
