@@ -70,6 +70,10 @@ def time_with_torch_timer(fn, args, string_id):
         env = {"fn": fn, "a": args[0], "b": args[1]}
         fn_call = "fn(a, b)"
         grad_none = "a.grad = b.grad = None"
+    elif len(args) == 1:
+        env = {"fn": fn, "a": args[0]}
+        fn_call = "fn(a)"
+        grad_none = "a.grad = None"
 
     print("################################################")
     print(f"#### Torch Timer for {string_id} starts #########")
