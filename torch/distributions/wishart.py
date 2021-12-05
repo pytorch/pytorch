@@ -97,7 +97,7 @@ class Wishart(ExponentialFamily):
         # Gamma distribution is needed for Batlett decomposition sampling
         self._dist_chi2 = torch.distributions.chi2.Chi2(
             df=(
-                self.df.expand(batch_shape + (self._event_shape[-1],))
+                self.df.unsqueeze(-1)
                 - torch.arange(
                     self._event_shape[-1],
                     dtype=self._unbroadcasted_scale_tril.dtype,
@@ -123,7 +123,7 @@ class Wishart(ExponentialFamily):
 
         new._dist_chi2 = torch.distributions.chi2.Chi2(
             df=(
-                new.df.expand(batch_shape + (self.event_shape[-1],))
+                new.df.unsqueeze(-1)
                 - torch.arange(
                     self.event_shape[-1],
                     dtype=new._unbroadcasted_scale_tril.dtype,
