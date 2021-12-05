@@ -95,16 +95,15 @@ class Wishart(ExponentialFamily):
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
         # Gamma distribution is needed for Batlett decomposition sampling
-        self._dist_gamma = torch.distributions.gamma.Gamma(
-            concentration=(
-                self.df.unsqueeze(-1)
+        self._dist_chi2 = torch.distributions.chi2.Chi2(
+            df=(
+                self.df.expand(batch_shape + (self._event_shape[-1],))
                 - torch.arange(
                     self._event_shape[-1],
                     dtype=self._unbroadcasted_scale_tril.dtype,
                     device=self._unbroadcasted_scale_tril.device,
                 ).expand(batch_shape + (-1,))
-            ) / 2,
-            rate=2,
+            )
         )
 
     def expand(self, batch_shape, _instance=None):
@@ -114,23 +113,25 @@ class Wishart(ExponentialFamily):
         df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(batch_shape + self.event_shape)
         new.df = self.df.expand(batch_shape)
-        new._dist_gamma = torch.distributions.gamma.Gamma(
-            concentration=(
-                new.df.unsqueeze(-1)
-                - torch.arange(
-                    self._event_shape[-1],
-                    dtype=new._unbroadcasted_scale_tril.dtype,
-                    device=new._unbroadcasted_scale_tril.device,
-                ).expand(batch_shape + (-1,))
-            ) / 2,
-            rate=2,
-        )
+
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
         if 'scale_tril' in self.__dict__:
             new.scale_tril = self.scale_tril.expand(cov_shape)
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
+
+        new._dist_chi2 = torch.distributions.chi2.Chi2(
+            df=(
+                new.df.expand(batch_shape + (self.event_shape[-1],))
+                - torch.arange(
+                    self.event_shape[-1],
+                    dtype=new._unbroadcasted_scale_tril.dtype,
+                    device=new._unbroadcasted_scale_tril.device,
+                ).expand(batch_shape + (-1,))
+            )
+        )
+
         super(Wishart, new).__init__(batch_shape, self.event_shape, validate_args=False)
         new._validate_args = self._validate_args
         return new
@@ -171,7 +172,7 @@ class Wishart(ExponentialFamily):
         shape = self._extended_shape(sample_shape)
 
         # Implemented Sampling using Bartlett decomposition
-        noise = self._dist_gamma.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
+        noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         noise = noise + torch.randn(shape, dtype=noise.dtype, device=noise.device).tril(diagonal=-1)
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.mT
