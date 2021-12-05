@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include <ATen/core/qualified_name.h>
-#include <caffe2/serialize/versions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
