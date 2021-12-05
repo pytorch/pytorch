@@ -183,13 +183,11 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            - torch.mvlgamma(nu / 2, p=p)
+            - nu * p * _log_2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            - (
-                - (nu - p - 1) * value.logdet()
-                + nu * p * math.log(2)
-                + (V.inverse() @ value).diagonal(dim1=-2, dim2=-1).sum(dim=-1)
-            ) / 2
+            - torch.mvlgamma(nu / 2, p=p)
+            + (nu - p - 1) / 2 * value.logdet()
+            - (V.inverse() @ value).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
         )
 
     def entropy(self):
@@ -197,7 +195,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
-            (p + 1) / 2 * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * _log_2 / 2
             + torch.mvlgamma(nu / 2, p=p)
             - _mvdigamma(nu / 2, p=p) * (nu - p - 1) / 2
