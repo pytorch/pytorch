@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/internal.h>
 
 // This number is a heuristic determined with pytorch/benchmark
 #define DEFAULT_FUSION_SIZE 4
