@@ -3998,6 +3998,9 @@ class TestQuantizeFxOps(QuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+        # check the result is scriptable
+        m = torch.jit.script(m)
+
     @skipIfNoFBGEMM
     def test_mul_relu(self):
         self._test_binary_op_relu_int8_impl(
