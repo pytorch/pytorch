@@ -179,7 +179,7 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool = True, **kwargs) -> nn.Module:
-    module_overrides = {}
+    module_overrides = {}  # type: ignore[var-annotated]
     # We need check_module_overrides flag to support backward compat with
     # ConfigAutoWrap.wrap, which uses the kwargs priority order of:
     # kwargs passed into config auto wrap, then module.wrapper_config kwargs,
@@ -187,7 +187,7 @@ def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool
     # ConfigAutoWrap.wrap constructs according to this priority and skips
     # below logic by passing check_module_overrides=False.
     if check_module_overrides and hasattr(module, "wrapper_config"):
-        module_overrides = module.wrapper_config
+        module_overrides = module.wrapper_config  # type: ignore[assignment]
         assert isinstance(module_overrides, dict)
     wrap_overrides = {**kwargs, **module_overrides}
     assert wrapper_cls is not None
@@ -351,7 +351,7 @@ class ConfigAutoWrap:
 
         return _recursive_wrap(
             module=module,
-            auto_wrap_policy=auto_wrap_policy,
-            wrapper_cls=ConfigAutoWrap.wrapper_cls,
+            auto_wrap_policy=auto_wrap_policy,  # type: ignore[arg-type]
+            wrapper_cls=ConfigAutoWrap.wrapper_cls,  # type: ignore[arg-type]
             **{**ConfigAutoWrap.kwargs, **kwargs}
         )
