@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/runtime/static/impl.h>
-#include <torch/csrc/jit/runtime/static/internal.h>
 
 namespace torch {
 namespace jit {
