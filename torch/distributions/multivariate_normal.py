@@ -2,7 +2,7 @@ import math
 
 import torch
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, lazy_property
 
 
@@ -75,7 +75,7 @@ def _precision_to_scale_tril(P):
     return L
 
 
-class MultivariateNormal(Distribution):
+class MultivariateNormal(ExponentialFamily):
     r"""
     Creates a multivariate normal (also called Gaussian) distribution
     parameterized by a mean vector and a covariance matrix.
@@ -218,3 +218,7 @@ class MultivariateNormal(Distribution):
             return H
         else:
             return H.expand(self._batch_shape)
+
+    @property
+    def _natural_params(self):
+        return (self.loc, -0.5 * self.precision_matrix)
