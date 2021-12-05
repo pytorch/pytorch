@@ -28,7 +28,7 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     print(f"Writing FX graph to file: {base}{ext}")
     g = graph_drawer.FxGraphDrawer(traced, figname)
     x = g.get_main_dot_graph()
-    getattr(x, "write_" + ext.lstrip("."))(fname)
+    getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
 
 # todo(chilli): clean this up/make it more understandable
 def default_partition(fx_module: fx.GraphModule, _joint_inputs):
