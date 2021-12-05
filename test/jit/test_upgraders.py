@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import io
 import os
 import sys
 
@@ -16,11 +17,17 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-# Tests that Python slice class is supported in TorchScript
 class TestUpgraders(JitTestCase):
     def test_aten_div_at_3(self):
         model_path = pytorch_test_dir + "/cpp/jit/div_at_version_3.pt"
         loaded_model = torch.jit.load(model_path)
-        torch._C._jit_pass_replace_old_ops_with_upgraders(loaded_model.graph)
         FileCheck().check("prim::If").run(loaded_model.graph)
         FileCheck().check_count("aten::div", 2).run(loaded_model.graph)
+
+        buffer = io.BytesIO()
+        torch.jit.save(loaded_model, buffer)
+        buffer.seek(0)
+        loaded_model_twice = torch.jit.load(buffer)
+        # we check by its' code because graph variable names
+        # can be different every time
+        self.assertEqual(loaded_model.code, loaded_model_twice.code)

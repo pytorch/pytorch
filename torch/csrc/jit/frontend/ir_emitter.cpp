@@ -646,7 +646,7 @@ struct to_ir {
         typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
-    ApplyOldOpsUpgraders(graph);
+
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
@@ -657,6 +657,11 @@ struct to_ir {
           << "methods must have a self argument";
     }
     method.setSchema(emitDef(def, self, graph->block()));
+
+    // At this point, we might have received a graph that is compiled with
+    // old operator schemas that might not exist in the system anymore.
+    // Therefore, we replace such ops with its' valid upgrader.
+    ApplyOldOpsUpgraders(graph);
 
     // NB ORDERING: SSA conversion has to occur before
     // lifting of closures and forks, this way closures are converted

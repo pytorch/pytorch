@@ -6,7 +6,7 @@ namespace caffe2 {
 namespace serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;
-constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
+constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
 
 // Versions (i.e. why was the version number bumped?)
 
@@ -49,8 +49,8 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x6L;
 // 6. Write version string to `./data/version` instead of `version`.
 
 // TODO: this needs to be more descriptive, but for now we know that the global
-// operator version number is at 5.
-constexpr uint64_t kProducedFileFormatVersion = 0x5L;
+// operator version number is at 7.
+constexpr uint64_t kProducedFileFormatVersion = 0x7L;
 
 // The version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
