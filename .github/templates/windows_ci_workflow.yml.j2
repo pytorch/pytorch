@@ -208,6 +208,7 @@ jobs:
         timeout-minutes: 210
         run: |
             .jenkins/pytorch/win-test.sh
+      !{{ common.upload_downloaded_files(name='windows') }}
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
