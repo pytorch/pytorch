@@ -40,64 +40,54 @@ def get_binary_op_mrelu_pttn_and_rplcmnt(binary_op, qbinary_oprelu):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
-            self.scale = torch.tensor([])
-            self.zero_point = torch.tensor([])
 
-        def forward(self, x, y):
+        def forward(self, x, y, scale, zero_point):
             y = y.dequantize()
             x = x.dequantize()
             x = binary_op(x, y)
             x = self.relu(x)
-            x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
             return x
 
     class BinaryOpReLUReplacement(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
-            self.scale = torch.tensor([1])
-            self.zero_point = torch.tensor([0])
 
-        def forward(self, x, y):
-            x = qbinary_oprelu(x, y, self.scale, self.zero_point)
+        def forward(self, x, y, scale, zero_point):
+            x = qbinary_oprelu(x, y, scale, zero_point)
             return x
 
     class BinaryOpScalarReLU1Pattern(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
-            self.scale = torch.tensor([])
-            self.zero_point = torch.tensor([])
 
-        def forward(self, x, num):
+        def forward(self, x, num, scale, zero_point):
             x = x.dequantize()
             x = binary_op(x, num)
             x = self.relu(x)
-            x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
             return x
 
     class BinaryOpScalarReLU2Pattern(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
-            self.scale = torch.tensor([])
-            self.zero_point = torch.tensor([])
 
-        def forward(self, x, num):
+        def forward(self, x, num, scale, zero_point):
             x = x.dequantize()
             x = binary_op(num, x)
             x = self.relu(x)
-            x = torch.quantize_per_tensor(x, self.scale, self.zero_point, torch.quint8)
+            x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
             return x
 
     class BinaryOpScalarReLUReplacement(torch.nn.Module):
         def __init__(self):
             super().__init__()
             self.relu = torch.nn.ReLU()
-            self.scale = torch.tensor([])
-            self.zero_point = torch.tensor([])
 
-        def forward(self, x, num):
+        def forward(self, x, num, scale, zero_point):
             x = qbinary_oprelu(x, num)
             return x
 

@@ -3,6 +3,7 @@
 #include <ATen/Utils.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/internal.h>
 
 namespace at {
 namespace native {
