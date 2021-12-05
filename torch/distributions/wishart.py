@@ -102,9 +102,9 @@ class Wishart(ExponentialFamily):
                     self._event_shape[-1],
                     dtype=self._unbroadcasted_scale_tril.dtype,
                     device=self._unbroadcasted_scale_tril.device,
-                ).div(2).expand(batch_shape + (-1,))
-            ),
-            rate=0.5,
+                ).expand(batch_shape + (-1,))
+            ) / 2,
+            rate=2,
         )
 
     def expand(self, batch_shape, _instance=None):
