@@ -1606,6 +1606,32 @@ class TestFunctionalMapDataPipe(TestCase):
         zip_dp = input_dp1.zip(input_dp2, input_dp3)
         self.assertEqual(5, len(zip_dp))
 
+    def test_shuffler_datapipe(self):
+        input_dp1 = dp.map.SequenceWrapper(range(10))
+        input_dp2 = dp.map.SequenceWrapper({'a': 1, 'b': 2, 'c': 3, 'd': 4, 'e': 5})
+
+        # Functional Test: Assumes 0-index when indices is not given
+        shuffler_dp = input_dp1.shuffle()
+        self.assertEqual(set(range(10)), set(shuffler_dp))
+
+        # Functional Test: Custom indices are working
+        shuffler_dp = dp.map.Shuffler(input_dp2, indices=['a', 'b', 'c', 'd', 'e'])
+        self.assertEqual(set(range(1, 6)), set(shuffler_dp))
+
+        # # Reset Test:
+        shuffler_dp = input_dp1.shuffle()
+        n_elements_before_reset = 5
+        res_before_reset, res_after_reset = reset_after_n_next_calls(shuffler_dp, n_elements_before_reset)
+        self.assertEqual(5, len(res_before_reset))
+        for x in res_before_reset:
+            self.assertTrue(x in set(range(10)))
+        self.assertEqual(set(range(10)), set(res_after_reset))
+
+        # __len__ Test: returns the length of the input DataPipe
+        shuffler_dp = input_dp1.shuffle()
+        self.assertEqual(10, len(shuffler_dp))
+
+
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)
@@ -1636,6 +1662,32 @@ class TestFunctionalMapDataPipe(TestCase):
             self.assertEqual(
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
             )
+
+    def test_batch_datapipe(self):
+        arr = list(range(13))
+        input_dp = dp.map.SequenceWrapper(arr)
+
+        # Functional Test: batches top level by default
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11], [12]], list(batch_dp))
+
+        # Functional Test: drop_last on command
+        batch_dp = dp.map.Batcher(input_dp, batch_size=2, drop_last=True)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], list(batch_dp))
+
+        # Functional Test: nested batching
+        batch_dp_2 = batch_dp.batch(batch_size=3)
+        self.assertEqual([[[0, 1], [2, 3], [4, 5]], [[6, 7], [8, 9], [10, 11]]], list(batch_dp_2))
+
+        # Reset Test:
+        n_elements_before_reset = 3
+        res_before_reset, res_after_reset = reset_after_n_next_calls(batch_dp, n_elements_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5]], res_before_reset)
+        self.assertEqual([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9], [10, 11]], res_after_reset)
+
+        # __len__ Test:
+        self.assertEqual(6, len(batch_dp))
+        self.assertEqual(2, len(batch_dp_2))
 
 # Metaclass conflict for Python 3.6
 # Multiple inheritance with NamedTuple is not supported for Python 3.9
