@@ -6,10 +6,11 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
+_log_2 = math.log(2)
 
 def _mvdigamma(x, p) -> torch.Tensor:
     assert x > (p - 1) / 2, "Wrong domain for digamma function."
-    return torch.digamma(x - torch.arange(p) / 2).sum()
+    return torch.digamma(x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
 
 class Wishart(ExponentialFamily):
     r"""
@@ -197,13 +198,15 @@ class Wishart(ExponentialFamily):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         return (
             (p + 1) / 2 * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-            + p * (p + 1) * math.log(2) / 2
+            + p * (p + 1) * _log_2 / 2
             + torch.mvlgamma(nu / 2, p=p)
-            # multivariate digamma function is used following the idea of:
-            # https://github.com/biomedia-mira/deepscm/blob/master/deepscm/distributions/torch_wishart.py#L18
-            - torch.polygamma(
-                1,
-                (nu / 2).unsqueeze(-1) - torch.arange(p).expand(self._batch_shape + (-1,)) / 2
-            ).sum(-1) * (nu - p - 1) / 2
+            - _mvdigamma(nu / 2, p=p) * (nu - p - 1) / 2
             + nu * p / 2
+        )
+
+    @property
+    def _natural_params(self):
+        return (
+            (self.df - self.event_shape[-1] - 1) / 2,
+            - torch.cholesky_inverse(self._unbroadcasted_scale_tril).div(2)
         )
