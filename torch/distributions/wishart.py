@@ -64,7 +64,7 @@ class Wishart(ExponentialFamily):
                 df = torch.tensor([self.scale_tril.shape[-1]], dtype=scale_tril.dtype)
             batch_shape = torch.broadcast_shapes(scale_tril.shape[:-2], df.shape)
             event_shape = scale_tril.shape[-2:]
-            self.scale_tril = scale_tril
+            self.scale_tril = scale_tril.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
             assert covariance_matrix.dim() > 1, \
                 "covariance_matrix must be at least two-dimensional, with optional leading batch dimensions"
@@ -72,7 +72,7 @@ class Wishart(ExponentialFamily):
                 df = torch.tensor([self.covariance_matrix.shape[-1]], dtype=covariance_matrix.dtype)
             batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], df.shape)
             event_shape = covariance_matrix.shape[-2:]
-            self.covariance_matrix = covariance_matrix
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
@@ -80,7 +80,7 @@ class Wishart(ExponentialFamily):
                 df = torch.tensor([self.precision_matrix.shape[-1]], dtype=precision_matrix.dtype)
             batch_shape = torch.broadcast_shapes(precision_matrix.shape[:-2], df.shape)
             event_shape = precision_matrix.shape[-2:]
-            self.precision_matrix = precision_matrix
+            self.precision_matrix = precision_matrix.expand(batch_shape + (-1, -1))
 
         self.df = df.expand(batch_shape)
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
@@ -111,8 +111,8 @@ class Wishart(ExponentialFamily):
         batch_shape = torch.Size(batch_shape)
         cov_shape = batch_shape + self.event_shape
         df_shape = batch_shape
-        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(batch_shape + self.event_shape)
-        new.df = self.df.expand(batch_shape)
+        new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
+        new.df = self.df.expand(df_shape)
 
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
