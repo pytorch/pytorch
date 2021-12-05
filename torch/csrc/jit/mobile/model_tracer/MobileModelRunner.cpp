@@ -202,10 +202,8 @@ void MobileModelRunner::run_argless_functions(
 bool MobileModelRunner::set_has_metal_gpu_operators(
     std::set<std::string> const& op_list) {
   for (std::string const& op : op_list) {
-    if (op.find("metal::") == 0) {
-      return true;
-    }
-    if (op.find("metal_prepack_unet::") == 0) {
+    if (op.find("metal::") == 0 || op.find("metal_prepack::") == 0 ||
+        op.find("metal_prepack_unet::") == 0) {
       return true;
     }
   }
