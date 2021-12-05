@@ -67,7 +67,7 @@ def build_sparse_fp16_trt(rn18, sparse_params=None):
     rn18 = acc_tracer.trace(rn18, [torch.randn(1, 3, 224, 224)])
     interp = TRTInterpreter(
         rn18, [InputTensorSpec(torch.Size([3, 224, 224]), torch.float, has_batch_dim=False)])
-    interpreter_result = interp.run(fp16_mode=True)
+    interpreter_result = interp.run(fp16_mode=True, sparse_mode=True)
     return TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
 
 
@@ -136,7 +136,7 @@ def build_sparse_int8_trt(rn18):
         [InputTensorSpec(torch.Size([-1, *data.shape[1:]]), torch.float,
                          shape_ranges=[((1, 3, 224, 224), (5, 3, 224, 224), (10, 3, 224, 224))], has_batch_dim=True)],
         explicit_batch_dimension=True, explicit_precision=True, logger_level=trt.Logger.VERBOSE)
-    interpreter_result = interp.run(fp16_mode=False, int8_mode=True)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_mode=True)
     trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("explicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
@@ -198,7 +198,7 @@ def build_sparse_int8_trt_implicit_quant(rn18):
     shape_prop.ShapeProp(traced_rn18).propagate(data)
     traced_rn18 = NormalizeArgs(traced_rn18).transform()
     interp = TRTInterpreter(traced_rn18, InputTensorSpec.from_tensors([data]), logger_level=trt.Logger.VERBOSE)
-    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, strict_type_constraints=True)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_mode=True, strict_type_constraints=True)
     trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("implicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
