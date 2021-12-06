@@ -1,40 +1,25 @@
-{% import 'common.yml.j2' as common %}
-
-{%- block name -%}
+# @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: !{{ build_environment }}
-{%- endblock %}
+name: linux-binary-conda-py3.7-cpu
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
+    types: [opened, synchronize, reopened, unassigned]
   push:
     branches:
       - master
       - release/*
-{%- endif %}
   workflow_dispatch:
 
 env:
-  DESIRED_PYTHON: !{{ python_version }}
-{%- if gpu_arch_version != "" %}
-  # TODO: This is a legacy variable that we eventually want to get rid of in
-  #       favor of GPU_ARCH_VERSION
-  DESIRED_CUDA: !{{ gpu_arch_version }}
-  GPU_ARCH_VERSION: !{{ gpu_arch_version }}
-{%- endif %}
-  GPU_ARCH_TYPE: !{{ gpu_arch_type }}
+  DESIRED_PYTHON: 3.7
+  GPU_ARCH_TYPE: cpu
   PYTORCH_BUILD_NUMBER: 1
   SKIP_ALL_TESTS: 1
   PYTORCH_ROOT: /pytorch
-  BUILD_ENVIRONMENT: !{{ build_environment }}
-  DOCKER_IMAGE_BASE: !{{ docker_image_base }}
+  BUILD_ENVIRONMENT: linux-binary-conda-py3.7-cpu
+  DOCKER_IMAGE_BASE: pytorch/conda-builder:cpu
   IN_CI: 1
   IS_GHA: 1
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
@@ -44,17 +29,37 @@ env:
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
-!{{ common.concurrency(build_environment) }}
+concurrency:
+  group: linux-binary-conda-py3.7-cpu-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
 
 jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
-{% block build +%}
+
+  ciflow_should_run:
+    runs-on: linux.large
+    timeout-minutes: 240
+    env:
+      IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda') }}
+      LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+    if: ${{ (github.repository == 'pytorch/pytorch') && (
+            (github.event_name == 'push') ||
+            (github.event_name == 'schedule') ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/binaries') || contains(github.event.pull_request.labels.*.name, 'ciflow/binaries/conda')) ||
+            (false))
+         }}
+    steps:
+      - name: noop
+        run: echo running ciflow_should_run
+      - name: print labels
+        run: echo "${LABELS}"
+
   build:
     runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
-    timeout-minutes: !{{ common.timeout_minutes }}
+    needs: [ciflow_should_run]
+    timeout-minutes: 240
     container:
-      image: !{{ docker_image_base }}
+      image: pytorch/conda-builder:cpu
     steps:
       - name: Clone pytorch/pytorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -74,11 +79,6 @@ jobs:
           version=$(.github/scripts/generate_pytorch_version.py)
           echo "Generated version: ${version}"
           echo "PYTORCH_BUILD_VERSION=${version}" >> "$GITHUB_ENV"
-{%- if gpu_arch_type == 'cuda' and gpu_arch_version.startswith("11") %}
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA=1" >> "$GITHUB_ENV"
-{%- endif %}
       # TODO: Remove this once we remove the need for the directories to be
       #       in specific locations
       - name: Symlink repositories to root directory (for legacy scripts purposes)
@@ -87,10 +87,10 @@ jobs:
           ln -s "$PWD"/builder /builder
       - name: Build PyTorch binary
         run: |
-          /builder/!{{ package_type }}/build.sh
+          /builder/conda/build.sh
       - uses: actions/upload-artifact@v2
         with:
-          name: pytorch-!{{ package_type }}-py!{{ python_version }}-!{{ gpu_arch_type }}!{{ gpu_arch_version }}
+          name: pytorch-conda-py3.7-cpu
           path:
             /remote/**/*.whl
       - name: Parse ref
@@ -112,4 +112,3 @@ jobs:
           export COMMIT_TIME
           pip3 install requests==2.26
           python3 -m tools.stats.upload_binary_size_to_scuba || exit 0
-{%- endblock %}

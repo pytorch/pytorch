@@ -4,6 +4,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Set, List, Iterable
 
+import itertools
 import jinja2
 import json
 import os
@@ -72,6 +73,9 @@ LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
+LABEL_CIFLOW_BINARIES = "ciflow/binaries"
+LABEL_CIFLOW_BINARIES_WHEEL= "ciflow/binaries/wheel"
+LABEL_CIFLOW_BINARIES_CONDA = "ciflow/binaries/conda"
 
 
 @dataclass
@@ -84,6 +88,8 @@ class CIFlowConfig:
     root_job_name: str = 'ciflow_should_run'
     root_job_condition: str = ''
     label_conditions: str = ''
+    # Certain jobs might not want to be part of the ciflow/all workflow
+    add_to_ciflow_all: bool = True
 
     def gen_root_job_condition(self) -> None:
         # CIFlow conditions:
@@ -113,7 +119,8 @@ class CIFlowConfig:
         self.root_job_condition = ''
 
     def __post_init__(self) -> None:
-        self.labels.add(LABEL_CIFLOW_ALL)
+        if self.add_to_ciflow_all:
+            self.labels.add(LABEL_CIFLOW_ALL)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -255,6 +262,46 @@ class DockerWorkflow:
 
     def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
         output_file_path = GITHUB_DIR / "workflows/generated-docker-builds.yml"
+        with open(output_file_path, "w") as output_file:
+            GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
+            output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
+            try:
+                content = workflow_template.render(asdict(self))
+            except Exception as e:
+                print(f"Failed on template: {workflow_template}", file=sys.stderr)
+                raise e
+            output_file.write(content)
+            if content[-1] != "\n":
+                output_file.write("\n")
+        print(output_file_path)
+
+@dataclass
+class BinaryBuildWorkflow:
+    package_type: str
+    os: str
+    gpu_arch_type: str
+
+    # Optional fields
+    build_environment: str = ''
+    ciflow_config: CIFlowConfig = field(default_factory=CIFlowConfig)
+    docker_image_base: str = ''
+    gpu_arch_version: str = ''
+    is_scheduled: str = ''
+    python_version: str = ''
+
+    def __post_init__(self) -> None:
+        self.build_environment = f"{self.os}-binary-{self.package_type}-py{self.python_version}-{self.gpu_arch_type}{self.gpu_arch_version}"
+        self.assert_valid()
+
+    def assert_valid(self) -> None:
+        # Python version should be specified if building anything except libtorch
+        if self.package_type != "libtorch":
+            assert self.python_version != ""
+        if self.gpu_arch_type == "cpu":
+            assert self.gpu_arch_version == ""
+
+    def generate_workflow_file(self, workflow_template: jinja2.Template) -> None:
+        output_file_path = GITHUB_DIR / f"workflows/generated-{self.build_environment}.yml"
         with open(output_file_path, "w") as output_file:
             GENERATED = "generated"  # Note that please keep the variable GENERATED otherwise phabricator will hide the whole file
             output_file.writelines([f"# @{GENERATED} DO NOT EDIT MANUALLY\n"])
@@ -731,6 +778,100 @@ DOCKER_WORKFLOWS = [
     ),
 ]
 
+SUPPORTED_PYTHON_VERSIONS = [
+    "3.6",
+    "3.7",
+    "3.8",
+    "3.9"
+]
+
+SUPPORTED_CUDA_VERSIONS = [
+    "10.2",
+    "11.1",
+    "11.3",
+    "11.5"
+]
+
+ROCM_VERSIONS = [
+    "4.1",
+    "4.2",
+    "4.3.1"
+]
+
+LINUX_BINARY_BUILD_WORFKLOWS = [
+    # WHEELS
+    *[
+        BinaryBuildWorkflow(
+            os="linux",
+            package_type="manywheel",
+            gpu_arch_type="cpu",
+            python_version=python_version,
+            docker_image_base="pytorch/manylinux-builder:cpu",
+            ciflow_config=CIFlowConfig(
+                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+                add_to_ciflow_all=False,
+            ),
+        ) for python_version in SUPPORTED_PYTHON_VERSIONS
+    ],
+    *[
+        BinaryBuildWorkflow(
+            os="linux",
+            package_type="manywheel",
+            gpu_arch_type="cuda",
+            gpu_arch_version=gpu_arch_version,
+            python_version=python_version,
+            docker_image_base=f"pytorch/manylinux-builder:cuda{gpu_arch_version}",
+            ciflow_config=CIFlowConfig(
+                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+                add_to_ciflow_all=False,
+            ),
+        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, SUPPORTED_CUDA_VERSIONS)
+    ],
+    # NOTE: ROCM is only supported for linux wheels
+    *[
+        BinaryBuildWorkflow(
+            os="linux",
+            package_type="manywheel",
+            gpu_arch_type="rocm",
+            gpu_arch_version=gpu_arch_version,
+            python_version=python_version,
+            docker_image_base=f"pytorch/manylinux-builder:rocm{gpu_arch_version}",
+            ciflow_config=CIFlowConfig(
+                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_WHEEL},
+                add_to_ciflow_all=False,
+            ),
+        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, ROCM_VERSIONS)
+    ],
+    # CONDA
+    *[
+        BinaryBuildWorkflow(
+            os="linux",
+            package_type="conda",
+            gpu_arch_type="cpu",
+            python_version=python_version,
+            docker_image_base="pytorch/conda-builder:cpu",
+            ciflow_config=CIFlowConfig(
+                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+                add_to_ciflow_all=False,
+            ),
+        ) for python_version in SUPPORTED_PYTHON_VERSIONS
+    ],
+    *[
+        BinaryBuildWorkflow(
+            os="linux",
+            package_type="conda",
+            gpu_arch_type="cuda",
+            gpu_arch_version=gpu_arch_version,
+            python_version=python_version,
+            docker_image_base=f"pytorch/conda-builder:cuda{gpu_arch_version}",
+            ciflow_config=CIFlowConfig(
+                labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_CONDA},
+                add_to_ciflow_all=False,
+            ),
+        ) for python_version, gpu_arch_version in itertools.product(SUPPORTED_PYTHON_VERSIONS, SUPPORTED_CUDA_VERSIONS)
+    ],
+]
+
 def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
@@ -745,6 +886,7 @@ def main() -> None:
         (jinja_env.get_template("macos_ci_workflow.yml.j2"), MACOS_WORKFLOWS),
         (jinja_env.get_template("docker_builds_ci_workflow.yml.j2"), DOCKER_WORKFLOWS),
         (jinja_env.get_template("android_ci_workflow.yml.j2"), ANDROID_WORKFLOWS),
+        (jinja_env.get_template("linux_binary_build_workflow.yml.j2"), LINUX_BINARY_BUILD_WORFKLOWS),
     ]
     # Delete the existing generated files first, this should align with .gitattributes file description.
     existing_workflows = GITHUB_DIR.glob("workflows/generated-*")
