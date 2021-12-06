@@ -227,7 +227,7 @@ CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
 
-// signbit, isneginf and isposinf currently don't have an inplace variant
+// angle, isneginf, isposinf and signbit currently don't have an inplace variant
 CREATE_UNARY_UFUNC_NO_INPLACE(angle);
 CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
 CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
