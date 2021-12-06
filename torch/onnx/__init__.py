@@ -198,7 +198,7 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                 Models exported this way are probably runnable only by Caffe2.
 
         opset_version (int, default 9): The version of the
-            `default opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
+            `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
             to target. Must be >= 7 and <= 15.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
