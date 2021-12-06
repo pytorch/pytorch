@@ -188,18 +188,18 @@ def export(model, args, f, export_params=True, verbose=False, training=TrainingM
                   %3 : Float = onnx::Mul(%2, %0)
                   return (%3)
 
-              If an op is in the TorchScript namespace "quantized", it will be exported
-              in the ONNX opset domain "caffe2". These ops are produced by
-              the modules described in
+              If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
+              Caffe2-specific behavior will be enabled, including special support
+              for ops are produced by the modules described in
               `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
 
               .. warning::
 
                 Models exported this way are probably runnable only by Caffe2.
 
-        opset_version (int, default 9):
-            Must be ``== _onnx_main_opset or in _onnx_stable_opsets``,
-            defined in torch/onnx/symbolic_helper.py.
+        opset_version (int, default 9): The version of the
+            `default (ai.onnx) opset <https://github.com/onnx/onnx/blob/master/docs/Operators.md>`_
+            to target. Must be >= 7 and <= 15.
         do_constant_folding (bool, default False): Apply the constant-folding optimization.
             Constant-folding will replace some of the ops that have all constant inputs
             with pre-computed constant nodes.
