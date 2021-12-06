@@ -34,7 +34,6 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
 
   TORCH_VIEW_FNS(m)
-  TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
 }
 

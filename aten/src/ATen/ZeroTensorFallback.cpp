@@ -60,7 +60,6 @@ namespace at {
         if (tensor._is_zerotensor()) {
           TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
-          auto key_set = tensor.key_set().remove(DispatchKey::ZeroTensor);
           tensor = at::zeros({}, tensor.options()).expand(tensor.sizes());
         }
         (*stack)[stack_start + i] = std::move(tensor);
@@ -73,7 +72,6 @@ namespace at {
             //_like should not propagate zerotensor dispatch key
             TORCH_CHECK(!mut_arg, "ZeroTensors are immutable. Please use the materialized zero tensor ",
                     "obtained using .clone() if you want a mutable tensor.");
-            auto key_set = tensor.key_set().remove(DispatchKey::ZeroTensor);
             tensors[j] = at::zeros({}, tensor.options()).expand(tensor.sizes());
           }
         }
