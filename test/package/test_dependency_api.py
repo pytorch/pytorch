@@ -342,9 +342,10 @@ class TestDependencyAPI(PackageTestCase):
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_selective_intern(self):
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with PackageExporter(buffer, do_selective_intern=True) as he:
             he._selective_intern(
                 "package_d",
                 [
@@ -398,9 +399,10 @@ class TestDependencyAPI(PackageTestCase):
             foo.test_extern.test_selective_intern, package_d.test_selective_intern
         )
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_selective_intern_subpackage(self):
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with PackageExporter(buffer, do_selective_intern=True) as he:
             he._selective_intern("package_b", ["package_b.subpackage_0"])
             he.save_source_string(
                 "foo",
@@ -442,6 +444,7 @@ class TestDependencyAPI(PackageTestCase):
         # Check that attribute access works correctly on the shim.
         self.assertIs(foo.package_b.package_b_li, package_b.package_b_li)
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_selective_intern_torch_quantization(self):
         # test selective intern using torch toy examples from quantization
 
@@ -467,7 +470,7 @@ class TestDependencyAPI(PackageTestCase):
             mq_og = _do_quant_transforms(m_og, input_tensor_copy)
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with PackageExporter(buffer, do_selective_intern=True) as he:
             he.save_source_string(
                 "foo",
                 "import torch; \
@@ -486,12 +489,13 @@ class TestDependencyAPI(PackageTestCase):
         self.assertIsNot(torch, foo.torch)
         self.assertIs(torch.nn, foo.torch.nn)
 
+    @skipIf(version_info < (3, 7), "selective intern uses __getattr__ a 3.7 feature")
     def test_selective_intern_torch(self):
         # test that torch.nn is externed properly,
         # and that torch is shimmed
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with PackageExporter(buffer, do_selective_intern=True) as he:
             he.save_source_string(
                 "foo",
                 "import torch;"
@@ -508,7 +512,7 @@ class TestDependencyAPI(PackageTestCase):
         # test that selective intern works on torch.fx
 
         buffer = BytesIO()
-        with PackageExporter(buffer) as he:
+        with PackageExporter(buffer, do_selective_intern=True) as he:
             he.save_source_string(
                 "foo",
                 "import torch.fx as fx"

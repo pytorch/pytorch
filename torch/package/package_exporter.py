@@ -193,6 +193,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        do_selective_intern: bool = False,
     ):
         """
         Create an exporter.
@@ -209,6 +210,7 @@ class PackageExporter:
         else:  # is a byte buffer
             self.buffer = f
 
+        self.do_selective_intern = do_selective_intern
         self.zip_file = torch._C.PyTorchFileWriter(f)
         self.zip_file.set_min_version(6)
         self._written_files: Set[str] = set()
@@ -244,8 +246,9 @@ class PackageExporter:
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
         self._selective_interns: Dict[str, [str]] = {}
-        for (package_name, interned_packages) in DEFAULT_SELECTIVE_INTERN_LIST.items():
-            self._selective_intern(package_name, interned_packages, allow_empty=True)
+        if self.do_selective_intern:
+            for (package_name, interned_packages) in DEFAULT_SELECTIVE_INTERN_LIST.items():
+                self._selective_intern(package_name, interned_packages, allow_empty=True)
 
     def save_source_file(
         self, module_name: str, file_or_directory: str, dependencies=True
@@ -728,6 +731,9 @@ class PackageExporter:
                 before any modules match that pattern, an exception is thrown. If ``allow_empty=True``, no such exception is thrown.
 
         """
+
+        assert self.do_selective_intern
+
         if package_name not in self._selective_interns:
             self._selective_interns[package_name] = set()
         self._selective_interns[package_name].update(interned_modules)
@@ -1055,6 +1061,8 @@ class PackageExporter:
 
     def _can_implicitly_extern(self, module_name: str) -> bool:
         top_level_package_name = module_name.partition(".")[0]
+        if not self.do_selective_intern and top_level_package_name == "torch":
+            return True
         return top_level_package_name not in _DISALLOWED_MODULES and is_stdlib_module(
             top_level_package_name
         )
