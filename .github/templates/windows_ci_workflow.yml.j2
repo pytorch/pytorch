@@ -53,6 +53,9 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
 {%- endif %}
@@ -205,6 +208,7 @@ jobs:
         timeout-minutes: 210
         run: |
             .jenkins/pytorch/win-test.sh
+      !{{ common.upload_downloaded_files(name='windows') }}
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}

@@ -95,6 +95,7 @@ jobs:
           path: /remote/**/*.bz2
       - name: Parse ref
         id: parse-ref
+        working-directory: pytorch/
         run: .github/scripts/parse_ref.py
       - name: Display and upload binary build size statistics (Click Me)
         env:
@@ -104,6 +105,7 @@ jobs:
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: '${{ github.run_id }}_${{ github.run_number }}'
+        working-directory: pytorch/
         run: |
           COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
           export COMMIT_TIME
