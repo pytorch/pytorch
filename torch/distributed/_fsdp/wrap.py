@@ -161,14 +161,87 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             the values provided by the :func:`enable_wrap` context
     """
     if ConfigAutoWrap.in_autowrap_context:
+        assert ConfigAutoWrap.wrapper_cls is not None
+        # Construct according to priority for BC
         module_overrides = {}  # type: ignore[var-annotated]
         if hasattr(module, "wrapper_config"):
             module_overrides = module.wrapper_config  # type: ignore[assignment]
             assert isinstance(module_overrides, dict)
         wrap_overrides = {**ConfigAutoWrap.kwargs, **module_overrides, **wrap_overrides}
-        assert ConfigAutoWrap.wrapper_cls is not None
-        return ConfigAutoWrap.wrapper_cls(module, **wrap_overrides)
+        return _wrap(
+            module,
+            ConfigAutoWrap.wrapper_cls,
+            # Already passing in any module overrides
+            check_module_overrides=False,
+            **wrap_overrides,
+        )
     return module
+
+
+def _wrap(module: nn.Module, wrapper_cls: Callable, check_module_overrides: bool = True, **kwargs) -> nn.Module:
+    module_overrides = {}  # type: ignore[var-annotated]
+    # We need check_module_overrides flag to support backward compat with
+    # ConfigAutoWrap.wrap, which uses the kwargs priority order of:
+    # kwargs passed into config auto wrap, then module.wrapper_config kwargs,
+    # then kwargs passed into wrap(), from least to highest precedence. Thus,
+    # ConfigAutoWrap.wrap constructs according to this priority and skips
+    # below logic by passing check_module_overrides=False.
+    if check_module_overrides and hasattr(module, "wrapper_config"):
+        module_overrides = module.wrapper_config  # type: ignore[assignment]
+        assert isinstance(module_overrides, dict)
+    wrap_overrides = {**kwargs, **module_overrides}
+    assert wrapper_cls is not None
+    return wrapper_cls(module, **wrap_overrides)
+
+
+def _recursive_wrap(
+    module: nn.Module,
+    auto_wrap_policy: Callable,
+    wrapper_cls: Callable,
+    only_wrap_children: bool = False,
+    **kwargs: Any
+) -> Tuple[nn.Module, int]:
+    """
+    Automatically wrap child modules of *module* that meet the given
+    criteria with :func:`auto_wrap`. Does not rely on ConfigAutoWrap.
+    Args:
+        module (nn.Module):
+            module to recursively wrap
+        auto_wrap_policy (Callable):
+            A callable specifying a policy to recursively wrap layers with FSDP.
+    Returns:
+        (nn.Module, int):
+            Wrapped module and the number parameters wrapped recursively.
+    """
+    assert auto_wrap_policy is not None, "Must specify auto_wrap_policy."
+    assert wrapper_cls is not None, "Must specify wrapper_cls"
+    # Make sure no child is already wrapped.
+    for _, child in module.named_modules():
+        assert not isinstance(child, cast(type, wrapper_cls))
+
+    # We count all params, assuming none of them is already wrapped.
+    num_params = sum([p.numel() for p in module.parameters()])
+
+    assert auto_wrap_policy is not None
+    if auto_wrap_policy(module=module, recurse=True, unwrapped_params=num_params):
+        total_wrapped_params = 0
+        # Iterate through the children, recursively wrap if necessary
+        for name, child in module.named_children():
+            wrapped_child, num_wrapped_params = _recursive_wrap(
+                module=child, auto_wrap_policy=auto_wrap_policy, wrapper_cls=wrapper_cls, **kwargs
+            )
+            setattr(module, name, wrapped_child)
+            # Keep track of how many parameters have been wrapped
+            total_wrapped_params += num_wrapped_params
+        # decide if we need to wrap the current module,
+        # since the left over parameters exceed the number of params to wrap
+        remainder = num_params - total_wrapped_params
+        if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
+            # Leaf node or final wrapping of the remainder both happen here.
+            return _wrap(module, wrapper_cls, **kwargs), num_params
+        else:
+            return module, total_wrapped_params
+    return module, 0
 
 
 def auto_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable] = None, **kwargs: Any) -> nn.Module:
@@ -257,7 +330,6 @@ class ConfigAutoWrap:
     def recursive_wrap(
         module: nn.Module,
         auto_wrap_policy: Optional[Callable],
-        only_wrap_children: bool = False,
         **kwargs: Any
     ) -> Tuple[nn.Module, int]:
         """
@@ -269,11 +341,6 @@ class ConfigAutoWrap:
                 module to recursively wrap
             auto_wrap_policy (Callable, Optional):
                 optionally, override the :func:`auto_wrap_policy` from the context.
-            only_wrap_children (bool, Optional):
-                If ``True``, will not wrap the passed in (i.e. outer-most)
-                module passed into ``recursive_wrap``. This is useful if the
-                function is being called from FSDP constructor which takes care
-                of wrapping the outer-most user module.
 
         Returns:
             (nn.Module, int):
@@ -282,30 +349,9 @@ class ConfigAutoWrap:
         if auto_wrap_policy is None:
             auto_wrap_policy = ConfigAutoWrap.auto_wrap_policy
 
-        # Make sure no child is not already wrapped.
-        for _, child in module.named_modules():
-            assert not isinstance(child, cast(type, ConfigAutoWrap.wrapper_cls))
-
-        # We count all params, assuming none of them is already wrapped.
-        num_params = sum([p.numel() for p in module.parameters()])
-
-        assert auto_wrap_policy is not None
-        if auto_wrap_policy(module=module, recurse=True, unwrapped_params=num_params):
-            total_wrapped_params = 0
-            # Iterate through the children, recursively wrap if necessary
-            for name, child in module.named_children():
-                wrapped_child, num_wrapped_params = ConfigAutoWrap.recursive_wrap(
-                    module=child, auto_wrap_policy=auto_wrap_policy, **kwargs
-                )
-                setattr(module, name, wrapped_child)
-                # Keep track of how many parameters have been wrapped
-                total_wrapped_params += num_wrapped_params
-            # decide if we need to wrap the current module,
-            # since the left over parameters exceed the number of params to wrap
-            remainder = num_params - total_wrapped_params
-            if not only_wrap_children and auto_wrap_policy(module=module, recurse=False, unwrapped_params=remainder):
-                # Leaf node or final wrapping of the remainder both happen here.
-                return wrap(module, **kwargs), num_params
-            else:
-                return module, total_wrapped_params
-        return module, 0
+        return _recursive_wrap(
+            module=module,
+            auto_wrap_policy=auto_wrap_policy,  # type: ignore[arg-type]
+            wrapper_cls=ConfigAutoWrap.wrapper_cls,  # type: ignore[arg-type]
+            **{**ConfigAutoWrap.kwargs, **kwargs}
+        )
