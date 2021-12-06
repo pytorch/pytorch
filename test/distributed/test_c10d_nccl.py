@@ -2160,7 +2160,8 @@ class DistributedDataParallelTest(
                 self.assertTrue(j.grad is not None)
                 self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
-    # DDP works as expect when layer is checkpointed only once
+    # DDP works as expect when layer is checkpointed only once,
+    # when find_unused_parameters=False.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_once(self):
@@ -2239,6 +2240,7 @@ class DistributedDataParallelTest(
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
+            # Test passes when static_graph=True.
             model = self._test_ddp_checkpointing(
                 self.CheckpointTwiceModule(),
                 process_group=process_group,
