@@ -209,15 +209,6 @@ LivenessMap GetLivenessMap(
   // block nodes)
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
-  for (const auto* node : graph->nodes()) {
-    values_to_idx_in_creation_order.reserve(
-        values_to_idx_in_creation_order.size() + node->outputs().size());
-    for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order.emplace(
-          v, values_in_creation_order.size());
-      values_in_creation_order.emplace_back(v);
-    }
-  }
 
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
@@ -226,6 +217,42 @@ LivenessMap GetLivenessMap(
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
   FastMap<const Node*, FastSet<const Value*>> live_nodes_def_chain;
+
+  {
+    // Set container capacity
+    size_t live_values_size = 0, live_nodes_size = 0,
+           values_in_creation_size = 0;
+    for (const auto* node : graph->nodes()) {
+      bool has_live_value = false;
+      for (const auto* v : node->outputs()) {
+        ++values_in_creation_size;
+        if (!value_group.isAlwaysAlive(v)) {
+          ++live_values_size;
+          has_live_value = true;
+        }
+      }
+      // All inputs and ouputs should be alive at the same time.
+      live_values_size += node->inputs().size();
+      if (has_live_value) {
+        ++live_nodes_size;
+      }
+    }
+
+    live_nodes_def_chain.reserve(live_nodes_size);
+    live_values_use_chain.reserve(live_values_size);
+    liveness_map.reserve(live_values_size);
+    values_in_creation_order.reserve(values_in_creation_size);
+    values_to_idx_in_creation_order.reserve(values_in_creation_size);
+  }
+
+  // Construct values_in_creation
+  for (const auto* node : graph->nodes()) {
+    for (const auto* v : node->outputs()) {
+      values_to_idx_in_creation_order.emplace(
+          v, values_in_creation_order.size());
+      values_in_creation_order.emplace_back(v);
+    }
+  }
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
