@@ -95,7 +95,7 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
   if (device->type() != at::kLazy) {
     return c10::nullopt;
   }
-  return bridge::AtenDeviceToBackendDevice(*device);
+  return torch::lazy::atenDeviceToBackendDevice(*device);
 }
 
 }  // namespace

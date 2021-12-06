@@ -28,9 +28,5 @@ c10::optional<torch::lazy::BackendDevice> GetBackendDevice(const T& tensor, cons
     return GetBackendDevice(forward_tensors...);
 }
 
-torch::lazy::BackendDevice AtenDeviceToBackendDevice(const c10::Device& device);
-
-c10::Device BackendDeviceToAtenDevice(const torch::lazy::BackendDevice& device);
-
 }  // namespace bridge
 }  // namespace torch_lazy_tensors
