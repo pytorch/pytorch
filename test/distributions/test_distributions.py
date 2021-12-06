@@ -4306,6 +4306,8 @@ class TestAgainstScipy(TestCase):
         positive_var2 = torch.randn(20).exp()
         random_var = torch.randn(20)
         simplex_tensor = softmax(torch.randn(20), dim=-1)
+        cov_tensor = torch.randn(20, 20)
+        cov_tensor = cov_tensor @ cov_tensor.mT
         self.distribution_pairs = [
             (
                 Bernoulli(simplex_tensor),
@@ -4377,6 +4379,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
             ),
             (
+                MultivariateNormal(random_var, cov_tensor),
+                scipy.stats.multivariate_normal(random_var, cov_tensor)
+            ),
+            (
                 Normal(random_var, positive_var2),
                 scipy.stats.norm(random_var, positive_var2)
             ),
@@ -4407,7 +4413,11 @@ class TestAgainstScipy(TestCase):
             (
                 Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
-            )
+            ),
+            (
+                Wishart(19 + positive_var, cov_tensor),
+                scipy.stats.wishart(19 + positive_var, cov_tensor)
+            ),            
         ]
 
     def test_mean(self):
