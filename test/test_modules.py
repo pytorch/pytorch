@@ -490,13 +490,13 @@ class TestModule(TestCase):
                 gpu_p.data.copy_(cpu_p)
 
             # === Compare forward output between cpu and gpu ===
-            cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
-            gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+            cpu_outputs = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+            gpu_outputs = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
 
-            self.assertEqual(cpu_output, gpu_output)
+            self.assertEqual(cpu_outputs, gpu_outputs)
 
             # === Run backwards on CPU and GPU and compare results ===
-            for _ in range(5):
+            def check_backward(cpu_output, gpu_output):
                 cpu_grad_output = cpu_output.clone().normal_()
                 gpu_grad_output = cpu_grad_output.type_as(gpu_output)
 
@@ -513,6 +513,13 @@ class TestModule(TestCase):
                 cpu_grad_kwarg_input = self._get_grads(cpu_forward_kwargs)
                 gpu_grad_kwarg_input = self._get_grads(gpu_forward_kwargs)
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
+
+            for _ in range(5):
+                if isinstance(cpu_outputs, torch.Tensor):
+                    check_backward(cpu_outputs, gpu_outputs)
+                else:
+                    for cpu_output, gpu_output in zip(cpu_outputs, gpu_outputs):
+                        check_backward(cpu_output, gpu_output)
 
 
 instantiate_device_type_tests(TestModule, globals())
