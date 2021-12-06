@@ -475,6 +475,10 @@ int nnc_lowerings_lazy_registration() {
          const std::vector<ExprHandle>& outputShape,
          const c10::optional<ScalarType>& outputType,
          at::Device device) {
+        auto A = c10::get<BufHandle>(inputs[0]);
+        if (A.node()->qscale()) {
+          return computeQuantizedRelu(inputs, outputShape, outputType, device);
+        }
         return computeOneOperand(
             "aten_relu",
             inputs,
@@ -1589,6 +1593,10 @@ int nnc_lowerings_lazy_registration() {
   RegisterNNCLoweringsFunction quantized_conv2d_prepack(
       {"quantized::conv2d_prepack(Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> (__torch__.torch.classes.quantized.Conv2dPackedParamsBase)"},
       computeQuantizedConv2dPrepack);
+
+  RegisterNNCLoweringsFunction quantized_cat(
+      {"quantized::cat(Tensor[] qx, int dim, float? scale, int? zero_point) -> (Tensor)"},
+      computeQuantizedCat);
 
   RegisterNNCLoweringsFunction aten_upsample_nearest2d(
       {"aten::upsample_nearest2d.vec(Tensor input, int[]? output_size, float[]? scale_factors) -> (Tensor)"},
