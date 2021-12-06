@@ -1171,7 +1171,7 @@ class TensorExprFuser {
     }
     for (Node* fusion_group : fusion_groups) {
       VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
-      if (!GenerateGuard(fusion_group)) {
+      if (!GenerateGuard(fusion_group, /*add_composed_op=*/true)) {
         VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
                 << std::endl;
         SubgraphUtils::unmergeSubgraph(fusion_group);
@@ -1235,15 +1235,53 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  std::vector<int64_t> sym_shapes;
-  if (node->hasAttribute(attr::symbolic_shape_inputs)) {
-    sym_shapes = node->is(attr::symbolic_shape_inputs);
+  if (!tensorExprDynamicShapeFusionEnabled()) {
+    auto kernel =
+        std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
+    return [kernel](Stack& stack) {
+      RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
+      kernel->run(stack);
+      return 0;
+    };
   }
-  std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
-      custom_lowerings;
-  auto kernel = std::make_shared<tensorexpr::TensorExprKernel>(
-      node->g(attr::Subgraph), custom_lowerings, sym_shapes);
-  return [kernel](Stack& stack) {
+
+  // Handle the case when dynamic shape fusion is enabled.
+  //
+  // This case is different because the TensorExprGroup node is not part of
+  // the main graph, but it is part of the composed op TensorExprDynamicGroup.
+  // So, every run of the TensorExprDynamicGroup op will end up calling this
+  // function, but that still does not require creating a new TensorExprKernel
+  // for every such call. So, we maintain a cache from the node to the kernels
+  // created.
+  //
+  // TODO: Can we get rid of the cache here and still ensure that we compile
+  // the kernel only once for every op?
+  return [=](Stack& stack) {
+    // A cache from the node to the corresponding kernel.
+    static std::unordered_map<
+        std::string,
+        std::shared_ptr<tensorexpr::TensorExprKernel>>
+        cached_kernels;
+    std::ostringstream node_ss;
+    node->print(node_ss, 0, nullptr);
+    auto node_str = node_ss.str();
+    auto it = cached_kernels.find(node_str);
+    std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
+    if (it != cached_kernels.end()) {
+      kernel = it->second;
+    } else {
+      VLOG(1) << "Compiling a new kernel for " << *node;
+      std::vector<int64_t> sym_shapes;
+      if (node->hasAttribute(attr::symbolic_shape_inputs)) {
+        sym_shapes = node->is(attr::symbolic_shape_inputs);
+      }
+      std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
+          custom_lowerings;
+      auto subgraph = node->g(attr::Subgraph);
+      kernel = std::make_shared<tensorexpr::TensorExprKernel>(
+          subgraph, custom_lowerings, sym_shapes);
+      cached_kernels[node_str] = kernel;
+    }
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
     kernel->run(stack);
     return 0;
