@@ -186,7 +186,7 @@ class Wishart(ExponentialFamily):
         support_check = self.support.check(sample)
         while not support_check.all():
             fix_list = support_check.logical_not().nonzero(as_tuple=True)
-            sample[fix_list] = self.rsample(len(fix_list))
+            sample[fix_list] = self.rsample([len(fix_list)])
             support_check = self.support.check(sample)
 
         return sample
