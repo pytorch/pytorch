@@ -407,8 +407,8 @@ class Node:
 
     @compatibility(is_backward_compatible=True)
     def format_node(self,
-                    placeholder_names: List[str] = None,
-                    maybe_return_typename: List[str] = None) -> Optional[str]:
+                    placeholder_names: Optional[List[str]] = None,
+                    maybe_return_typename: Optional[List[str]] = None) -> Optional[str]:
         """
         Return a descriptive string representation of ``self``.
 
