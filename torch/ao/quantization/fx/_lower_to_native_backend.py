@@ -58,7 +58,7 @@ def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torc
         ref_module = modules[ref_node.target]
         output_scale = getattr(model, scale_node.target)
         output_zero_point = getattr(model, zero_point_node.target)
-        assert issubclass(q_class, ReferenceableQuantizedModule) # suppress mypy warnings
+        assert issubclass(q_class, ReferenceableQuantizedModule)  # suppress mypy warnings
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
 
         # replace reference module with quantized module
