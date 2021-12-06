@@ -17,7 +17,7 @@ const static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperat
       {{3,
         "_test_serialization_subcmul_0_2",
         "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"}}},
-    {{"aten::div.Tensor",
+     {"aten::div.Tensor",
       {{4,
         "div_Tensor_0_3",
         "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},

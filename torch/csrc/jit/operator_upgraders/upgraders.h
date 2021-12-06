@@ -12,7 +12,7 @@ class UpgradersMap {
  public:
   void set_content(const std::unordered_map<std::string, std::string>& content);
   int count();
-  std::unordered_map<std::string, std::string> get_content();
+  const std::unordered_map<std::string, std::string>& get_content();
 
  private:
   std::unordered_map<std::string, std::string> content_;
@@ -24,7 +24,8 @@ TORCH_API void populate_upgraders_map(const std::unordered_map<std::string, std:
 
 TORCH_API int get_upgraders_map_size();
 
-TORCH_API std::unordered_map<std::string, std::string> dump_upgraders_map();
+TORCH_API const std::unordered_map<std::string, std::string>&
+dump_upgraders_map();
 
 static UpgradersMap upgradersMap;
 
