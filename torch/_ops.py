@@ -7,7 +7,6 @@ import types
 
 import torch.jit
 import torch._utils_internal
-from torch.jit.annotations import is_function_or_method
 # Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, 'getdlopenflags') and hasattr(sys, 'setdlopenflags')
 
@@ -61,23 +60,25 @@ class OpOverload:
 # <torch._ops.OpOverload object at 0x7f54a7dccb50>
 
 # this might be a bit slower than the version before.
-class OpOverloadBundle():
+class OpOverloadBundle(types.ModuleType):
     def __init__(self, qualified_op_name, op_name, op):
         self.qualified_op_name = qualified_op_name
         self.op_name = op_name
         self.op = op
 
     def __getattr__(self, key):
+        # It is not a valid op_name when __file__ is passed in
+        if key == '__file__':
+            return 'torch.ops.OpOverloadBundle'
         # return the overload packet
         # make sure to disallow this keyword in native functions
         # can access all overloads except -> overload_name=empty string, schema-> aten::add(Scalar a, Scalar b) -> (Scalar)
 
         try:
             use_key = "" if key == 'default' else key
-            op = torch._C.get_operation_overload(self.qualified_op_name, use_key)
+            op_ = torch._C.get_operation_overload(self.qualified_op_name, use_key)
             schema = torch.get_schema(self.qualified_op_name, use_key)
-
-            return OpOverload(op, schema)
+            return OpOverload(op_, schema)
         except RuntimeError:
             out = getattr(self.op, key)
             return out

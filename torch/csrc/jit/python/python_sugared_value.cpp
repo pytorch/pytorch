@@ -1182,6 +1182,13 @@ std::shared_ptr<SugaredValue> toSugaredValue(
         script_class.class_type_.type_->expect<ClassType>(), obj);
   }
 
+  auto opoverloadbundle_type = py::module::import("torch").attr("ops").attr("OpOverloadBundle");
+  py::bool_ is_overloadbundle = py::isinstance(obj, opoverloadbundle_type);
+  if (py::cast<bool>(is_overloadbundle)) {
+    std::cout<<"Entering py::cast<bool>(is_overloadbundle)\n";
+    obj = opoverloadbundle_type.attr("op")(obj);
+  }
+
   if (isNamedTupleClass(obj)) {
     auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
     return std::make_shared<NamedTupleConstructor>(tuple_type);

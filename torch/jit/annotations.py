@@ -21,10 +21,7 @@ from typing import Type
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
-
-
-class OpOverloadBundle:
-    pass
+from torch._ops import OpOverloadBundle
 
 class Module(object):
     def __init__(self, name, members):
