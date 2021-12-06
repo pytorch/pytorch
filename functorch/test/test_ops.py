@@ -789,6 +789,7 @@ class TestDecompositionOpInfo(TestCase):
         skip('tensor_split'),
         skip('mvlgamma'),
         skip('eig'),
+        skip('nn.functional.dropout'),
         # Some weird matmul stuff with int64 matmuls
         # inplace op
         skip('resize_'),
@@ -869,7 +870,11 @@ class TestDecompositionOpInfo(TestCase):
                     global run_decompositions
                     run_decompositions.add(func)
                     decomp_out =  decomposition(*args, **kwargs)
-                    op_assert_equal(func, real_out, decomp_out)
+                    real_out_flat = tree_flatten(real_out)[0]
+                    decomp_out_flat = tree_flatten(decomp_out)[0]
+                    assert(len(real_out_flat) == len(decomp_out_flat))
+                    for a, b in zip(real_out_flat, decomp_out_flat):
+                        op_assert_equal(func, a, b)
 
                 def wrap_tensor(e):
                     if e is None:
