@@ -1,6 +1,10 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 
 #include <ATen/InferSize.h>
+#include <torch/csrc/lazy/core/util.h>
+#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/core/view_ops/permute.h>
+#include <torch/csrc/lazy/core/view_ops/view.h>
 
 #include <algorithm>
 #include <functional>
@@ -29,11 +33,7 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
-#include "lazy_tensor_core/csrc/view_ops/permute.h"
-#include "lazy_tensor_core/csrc/view_ops/view.h"
 #include "lazy_tensors/computation_client/metrics.h"
-#include <torch/csrc/lazy/core/util.h>
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/lazy/core/ir_metadata.h"
 #include "torch/csrc/lazy/core/ir_util.h"
@@ -85,19 +85,19 @@ torch::lazy::Value GetIrValueOrDefault(const LazyTensor& input,
                          : input.GetIrValue();
 }
 
-ViewInfo CreateAsStridedViewInfo(const torch::lazy::Shape& input_shape,
-                                 std::vector<int64_t> size,
-                                 std::vector<int64_t> stride,
-                                 c10::optional<int64_t> storage_offset) {
+torch::lazy::ViewInfo CreateAsStridedViewInfo(
+    const torch::lazy::Shape& input_shape, std::vector<int64_t> size,
+    std::vector<int64_t> stride, c10::optional<int64_t> storage_offset) {
   torch::lazy::Shape result_shape =
       torch::lazy::Shape(input_shape.scalar_type(), size);
-  AsStridedInfo as_strided_info;
+  torch::lazy::AsStridedInfo as_strided_info;
   as_strided_info.stride = std::move(stride);
   if (storage_offset) {
     as_strided_info.offset = *storage_offset;
   }
-  return ViewInfo(ViewInfo::Type::kAsStrided, std::move(result_shape),
-                  input_shape, std::move(as_strided_info));
+  return torch::lazy::ViewInfo(torch::lazy::ViewInfo::Type::kAsStrided,
+                               std::move(result_shape), input_shape,
+                               std::move(as_strided_info));
 }
 
 }  // namespace
@@ -117,7 +117,7 @@ void as_strided_(LazyTensor& input, std::vector<int64_t> size,
                  std::vector<int64_t> stride,
                  c10::optional<int64_t> storage_offset) {
   if (input.data()->view == nullptr) {
-    input.SetIrValue(torch::lazy::MakeNode<ir::ops::AsStrided>(
+    input.SetIrValue(torch::lazy::MakeNode<torch::lazy::AsStrided>(
         input.GetIrValue(), std::move(size), std::move(stride),
         storage_offset.value_or(0)));
   } else {
@@ -244,11 +244,12 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
   torch::lazy::Shape narrow_shape = input_shape;
   narrow_shape.set_size(dim, length);
 
-  ViewInfo::Type view_type =
+  torch::lazy::ViewInfo::Type view_type =
       (input_shape.Get().numel() == narrow_shape.numel())
-          ? ViewInfo::Type::kReshape
-          : ViewInfo::Type::kNarrow;
-  ViewInfo view_info(view_type, std::move(narrow_shape), input_shape);
+          ? torch::lazy::ViewInfo::Type::kReshape
+          : torch::lazy::ViewInfo::Type::kNarrow;
+  torch::lazy::ViewInfo view_info(view_type, std::move(narrow_shape),
+                                  input_shape);
   view_info.indices[dim] =
       GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
   return input.CreateViewTensor(std::move(view_info));
@@ -324,8 +325,8 @@ std::pair<LazyTensor, LazyTensor> nms(const LazyTensor& boxes,
 
 LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   auto input_shape = input.shape();
-  ViewInfo view_info(
-      ViewInfo::Type::kPermute, input_shape,
+  torch::lazy::ViewInfo view_info(
+      torch::lazy::ViewInfo::Type::kPermute, input_shape,
       GetCanonicalDimensionIndices(dims, input_shape.Get().dim()));
   return input.CreateViewTensor(std::move(view_info));
 }
@@ -387,8 +388,9 @@ LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
   }
   step = std::min(step, end - start);
 
-  SelectInfo select = {dim, start, end, step};
-  ViewInfo view_info(ViewInfo::Type::kSelect, input_shape, std::move(select));
+  torch::lazy::SelectInfo select = {dim, start, end, step};
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kSelect,
+                                  input_shape, std::move(select));
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -467,7 +469,8 @@ LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
-  ViewInfo view_info(ViewInfo::Type::kPermute, input_shape, permute_dims);
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
+                                  input_shape, permute_dims);
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -475,7 +478,8 @@ void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
-  ViewInfo view_info(ViewInfo::Type::kPermute, input_shape, permute_dims);
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
+                                  input_shape, permute_dims);
   return input.ModifyCurrentView(std::move(view_info));
 }
 
@@ -499,7 +503,8 @@ LazyTensor view(const LazyTensor& input, c10::ArrayRef<int64_t> output_size) {
   auto input_shape = input.shape().Get();
   torch::lazy::Shape shape = torch::lazy::Shape(
       input_shape.scalar_type(), at::infer_size(output_size, input_shape.numel()));
-  ViewInfo view_info(ViewInfo::Type::kReshape, std::move(shape), input_shape);
+  torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kReshape,
+                                  std::move(shape), input_shape);
   return input.CreateViewTensor(std::move(view_info));
 }
 
