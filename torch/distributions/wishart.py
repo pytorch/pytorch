@@ -185,9 +185,11 @@ class Wishart(ExponentialFamily):
         # Below part is to improve numerical stability temporally and should be removed in the future.
         support_check = self.support.check(sample)
         while not support_check.all():
-            for index in support_check.logical_not().nonzero(as_tuple=True):
-                sample[index] = self.rsample()
+            fix_list = support_check.logical_not().nonzero(as_tuple=True)
+            sample[fix_list] = self.rsample(len(fix_list))
             support_check = self.support.check(sample)
+
+        return sample
 
         return sample
 
