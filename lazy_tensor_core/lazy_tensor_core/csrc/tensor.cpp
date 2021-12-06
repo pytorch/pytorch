@@ -1,7 +1,8 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 
+#include <torch/csrc/lazy/core/helpers.h>
+
 #include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -83,7 +84,7 @@ LazyTensor::Data* LazyTensor::data() const {
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
   int rank = tensor_shape.Get().dim();
-  int dim_index = GetCanonicalDimensionIndex(dim, rank);
+  int dim_index = torch::lazy::GetCanonicalDimensionIndex(dim, rank);
   return tensor_shape.Get().size(dim_index);
 }
 
@@ -101,8 +102,9 @@ torch::lazy::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
     return torch::lazy::GetShapeFromTsValue(data()->ir_value);
   }
   CHECK(data()->tensor_data);
-  return torch::lazy::Shape(data()->tensor_data->scalar_type(),
-                            ToI64Vector(data()->tensor_data->sizes()));
+  return torch::lazy::Shape(
+      data()->tensor_data->scalar_type(),
+      torch::lazy::ToI64Vector(data()->tensor_data->sizes()));
 }
 
 const torch::lazy::BackendDevice& LazyTensor::GetDevice() const { return data()->device; }

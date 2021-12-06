@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/torch.h>
 
@@ -7,7 +8,6 @@
 #include "c10/core/Device.h"
 #include "cpp_test_util.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "torch_ltc_ts_test.h"

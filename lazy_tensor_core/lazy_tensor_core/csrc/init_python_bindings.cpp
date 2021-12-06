@@ -2,7 +2,9 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/util.h>
 
 #include <cstring>
 #include <sstream>
@@ -11,7 +13,6 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/python_util.h"
@@ -27,7 +28,6 @@
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
-#include <torch/csrc/lazy/core/util.h>
 #include "lazy_tensors/core/platform/macros.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"

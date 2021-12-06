@@ -1,6 +1,8 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 
 #include <ATen/InferSize.h>
+#include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>
@@ -11,7 +13,6 @@
 
 #include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
@@ -35,8 +36,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/lazy/core/ir_metadata.h"
-#include "torch/csrc/lazy/core/ir_util.h"
 
 namespace torch_lazy_tensors {
 namespace lazy_tensor_aten_ops {
@@ -240,7 +239,7 @@ LazyTensor mul(const LazyTensor& input, const at::Scalar& other) {
 LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
                   int64_t length) {
   auto input_shape = input.shape();
-  dim = GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
+  dim = torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
   torch::lazy::Shape narrow_shape = input_shape;
   narrow_shape.set_size(dim, length);
 
@@ -251,7 +250,7 @@ LazyTensor narrow(const LazyTensor& input, int64_t dim, int64_t start,
   torch::lazy::ViewInfo view_info(view_type, std::move(narrow_shape),
                                   input_shape);
   view_info.indices[dim] =
-      GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
+      torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -327,7 +326,7 @@ LazyTensor permute(const LazyTensor& input, c10::ArrayRef<int64_t> dims) {
   auto input_shape = input.shape();
   torch::lazy::ViewInfo view_info(
       torch::lazy::ViewInfo::Type::kPermute, input_shape,
-      GetCanonicalDimensionIndices(dims, input_shape.Get().dim()));
+      torch::lazy::GetCanonicalDimensionIndices(dims, input_shape.Get().dim()));
   return input.CreateViewTensor(std::move(view_info));
 }
 
@@ -379,9 +378,10 @@ LazyTensor select(const LazyTensor& input, int64_t dim, int64_t index) {
 LazyTensor slice(const LazyTensor& input, int64_t dim, int64_t start,
                  int64_t end, int64_t step) {
   auto input_shape = input.shape();
-  dim = GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
-  start = GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
-  end = GetCanonicalPosition(input_shape.Get().sizes(), dim, end);
+  dim = torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim());
+  start =
+      torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
+  end = torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, end);
   // PyTorch allows tensor[-1:0] to return a 0-dim tensor.
   if (start > end) {
     end = start;
@@ -404,7 +404,7 @@ LazyTensor squeeze(const LazyTensor& input) {
 LazyTensor squeeze(const LazyTensor& input, int64_t dim) {
   auto input_shape = input.shape();
   int64_t squeeze_dim =
-      GetCanonicalDimensionIndex(dim, input.shape().Get().dim());
+      torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim());
   auto output_dimensions =
       ir::ops::BuildSqueezedDimensions(input_shape.Get().sizes(), squeeze_dim);
   return view(input, output_dimensions);
@@ -418,7 +418,7 @@ void squeeze_(LazyTensor& input) {
 void squeeze_(LazyTensor& input, int64_t dim) {
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::Squeeze>(
       input.GetIrValue(),
-      GetCanonicalDimensionIndex(dim, input.shape().Get().dim())));
+      torch::lazy::GetCanonicalDimensionIndex(dim, input.shape().Get().dim())));
 }
 
 LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
@@ -427,8 +427,8 @@ LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
   for (auto& tensor : tensors) {
     values.push_back(tensor.GetIrValue());
   }
-  int64_t canonical_dim =
-      GetCanonicalDimensionIndex(dim, tensors.front().shape().Get().dim() + 1);
+  int64_t canonical_dim = torch::lazy::GetCanonicalDimensionIndex(
+      dim, tensors.front().shape().Get().dim() + 1);
   return LazyTensor::Create(
       torch::lazy::MakeNode<ir::ops::Stack>(values, canonical_dim), tensors[0].GetDevice());
 }
@@ -467,7 +467,7 @@ LazyTensor tanh_backward(const LazyTensor& grad_output,
 
 LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
-  auto permute_dims = MakeTransposePermutation(
+  auto permute_dims = torch::lazy::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
                                   input_shape, permute_dims);
@@ -476,7 +476,7 @@ LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
 
 void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
-  auto permute_dims = MakeTransposePermutation(
+  auto permute_dims = torch::lazy::MakeTransposePermutation(
       /*dim0=*/dim0, /*dim1=*/dim1, /*rank=*/input_shape.Get().dim());
   torch::lazy::ViewInfo view_info(torch::lazy::ViewInfo::Type::kPermute,
                                   input_shape, permute_dims);
@@ -486,15 +486,15 @@ void transpose_(LazyTensor& input, int64_t dim0, int64_t dim1) {
 LazyTensor unsqueeze(const LazyTensor& input, int64_t dim) {
   auto input_shape = input.shape();
   int64_t squeeze_dim =
-      GetCanonicalDimensionIndex(dim, input_shape.Get().dim() + 1);
+      torch::lazy::GetCanonicalDimensionIndex(dim, input_shape.Get().dim() + 1);
   auto dimensions =
       ir::ops::BuildUnsqueezeDimensions(input_shape.Get().sizes(), squeeze_dim);
   return view(input, dimensions);
 }
 
 void unsqueeze_(LazyTensor& input, int64_t dim) {
-  int squeeze_dim =
-      GetCanonicalDimensionIndex(dim, input.shape().Get().dim() + 1);
+  int squeeze_dim = torch::lazy::GetCanonicalDimensionIndex(
+      dim, input.shape().Get().dim() + 1);
   input.SetIrValue(torch::lazy::MakeNode<ir::ops::Unsqueeze>(input.GetIrValue(),
                                                              squeeze_dim));
 }
