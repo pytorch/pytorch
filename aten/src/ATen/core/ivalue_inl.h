@@ -1471,10 +1471,10 @@ using _guarded_unsigned_long = std::conditional_t<
 
 } // namespace detail
 
-inline const ivalue::Object& IValue::toObjectRef() const {
+inline ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
-  return *static_cast<const c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
+  return *static_cast<c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
