@@ -1,4 +1,3 @@
-#include <c10/util/Optional.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 
@@ -1377,11 +1376,7 @@ void TensorExprKernel::run(Stack& stack) {
 
 void TensorExprKernel::updateOutputSizesAndStrides(
     const at::ArrayRef<IValue>& inputs) {
-  // The output sizes and strides are set during compilation if there are no
-  // symbolic shapes.
-  if (!has_symbolic_shapes_) {
-    return;
-  }
+  TORCH_INTERNAL_ASSERT(has_symbolic_shapes_);
   // If there are symbolic shapes, then the output tensor size wouldn't have
   // been computed at compile time. That has to be done here by using the
   // symbolic shape input params passed in to this call.
@@ -1424,7 +1419,9 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     }
   }
 
-  updateOutputSizesAndStrides(inputs);
+  if (has_symbolic_shapes_) {
+    updateOutputSizesAndStrides(inputs);
+  }
 
   for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
     auto const& opts = tensorOutputTensorOptions_[i];
@@ -1483,6 +1480,9 @@ void TensorExprKernel::runFast(
 }
 
 void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
+  TORCH_INTERNAL_ASSERT(
+      device_ == at::kCPU,
+      "Pre-allocated output tensors are supported only on CPUs.");
   std::vector<void*> args;
   args.reserve(nInputs_ + nOutputs_ + constants_.size());
 
@@ -1506,10 +1506,12 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
   }
 
   if (has_symbolic_shapes_) {
-    TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
     updateOutputSizesAndStrides(stack_inputs);
+    TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto& out = stack_outputs[i].toTensor();
+      // This has only been tested on CPUs.
+      // TODO: Test on GPUs.
       at::native::resize_(out, tensorOutputSizes_[i], c10::nullopt);
       args.emplace_back(out.data_ptr());
     }
@@ -1519,7 +1521,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
     }
   }
 
-  for (auto c : constants_) {
+  for (const auto& c : constants_) {
     args.emplace_back(c.ptr);
   }
 
