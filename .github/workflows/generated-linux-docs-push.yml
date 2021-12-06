@@ -340,6 +340,7 @@ jobs:
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
             -e PR_LABELS \
+            -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
