@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -587,6 +588,7 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
@@ -595,6 +597,7 @@ void PrepareGraphForStaticModule(
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
@@ -611,15 +614,16 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  PrepareGraphForStaticModule(graph, opts);
+  PrepareGraphForStaticModule(graph, sample_inputs, opts);
 
   return std::make_pair(graph, module);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
-  PrepareGraphForStaticModule(graph, opts);
+  PrepareGraphForStaticModule(graph, sample_inputs, opts);
   return std::make_pair(graph, c10::nullopt);
 }
 
@@ -845,14 +849,20 @@ std::vector<const Value*> ManagedTensorRanges::
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
+    : StaticModule(
+          PrepareForStaticModule(g->copy(), sample_inputs, opts),
+          opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
+    : StaticModule(
+          PrepareForStaticModule(m, is_frozen, sample_inputs, opts),
+          opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
