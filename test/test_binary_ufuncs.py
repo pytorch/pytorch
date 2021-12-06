@@ -116,19 +116,16 @@ class TestBinaryUfuncs(TestCase):
         lhs_tensors = []
         rhs_tensors = []
 
-        shapes = (
-            # tensors with no elements
-            (0,),
-            (1, 0, 3),
-            # zero dim (scalar) tensor
-            (),
-            # small 1D tensor
-            (20,),
-            # medium 1D tensor
-            (812,),
-            # large 2D tensor
-            (1029, 917)
-        )
+        shapes = ((0,),  # tensors with no elements
+                  (1, 0, 3),
+                  # zero dim (scalar) tensor
+                  (),
+                  # small 1D tensor
+                  (20,),
+                  # medium 1D tensor
+                  (812,),
+                  # large 2D tensor
+                  (1029, 917))
 
         for kwargs, tensors in ((lhs_kwargs, lhs_tensors), (rhs_kwargs, rhs_tensors)):
             for shape in shapes:
@@ -145,13 +142,13 @@ class TestBinaryUfuncs(TestCase):
         _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254, 255, 256)
         _int_vals = (0, -1, 1, -55, 55, -127, 127, -128, 128)
         _float_vals = (0.,
-                    -.001, .001,
-                    -.25, .25,
-                    -1., 1.,
-                    -math.pi / 2, math.pi / 2,
-                    -math.pi + .00001, math.pi - .00001,
-                    -math.pi, math.pi,
-                    -math.pi - .00001, math.pi + .00001)
+                       -.001, .001,
+                       -.25, .25,
+                       -1., 1.,
+                       -math.pi / 2, math.pi / 2,
+                       -math.pi + .00001, math.pi - .00001,
+                       -math.pi, math.pi,
+                       -math.pi - .00001, math.pi + .00001)
 
         l_vals = []
         r_vals = []
@@ -597,7 +594,7 @@ class TestBinaryUfuncs(TestCase):
             if op.supports_out:
                 if not op.promotes_int_to_float:
                     # Integers can be safely cast to other integer types
-                    out=torch.empty_like(lhs_i64)
+                    out = torch.empty_like(lhs_i64)
                     self.assertEqual(op(lhs_i16, rhs_i32, out=out).dtype, torch.int64)
                     self.assertEqual(op(lhs_i16, rhs_i32), out, exact_dtype=False)
 

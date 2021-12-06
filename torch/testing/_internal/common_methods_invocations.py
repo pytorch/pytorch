@@ -8370,7 +8370,9 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                # TODO: update sample inputs with for_inplace_variant kwarg to support this test
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),),
+               DecorateInfo(unittest.skip("Skipped!"),
+                            'TestCommon',
+                            'test_variant_consistency_eager'),),
            sample_inputs_func=sample_inputs_addcmul_addcdiv),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
@@ -10194,7 +10196,7 @@ op_db: List[OpInfo] = [
                     dtypes=integral_types_and(),
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
-                    skips = (
+                    skips=(
                         # TODO: FIXME: lcm doesn't support scalars
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',

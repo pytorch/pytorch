@@ -3,7 +3,6 @@
 import torch
 import numpy as np
 
-import warnings
 import math
 from itertools import product, chain
 from numbers import Number
