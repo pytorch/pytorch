@@ -650,7 +650,8 @@ def maybe_insert_output_observer_for_node(
         if activation_is_int8_quantized(qconfig):
             act_post_process_ctr = qhandler.get_activation_ctr(
                 qconfig,
-                matched_pattern)
+                matched_pattern,
+                model.training)
         observer = act_post_process_ctr()
         new_obs = insert_observer(node, node, observer, model, modules, graph)
         return new_obs
