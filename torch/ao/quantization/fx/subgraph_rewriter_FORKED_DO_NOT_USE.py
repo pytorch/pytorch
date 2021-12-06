@@ -57,11 +57,14 @@ class _SubgraphMatcher:
         if isinstance(pn, (tuple, list)):
             if not isinstance(gn, type(pn)):
                 return False
-            return all(self._match_nodes(a1, a2, original_module, pattern_module) for a1, a2 in zip(pn, gn))  # type: ignore[call-overload]
+            return all(self._match_nodes(a1, a2, original_module, pattern_module) for \
+                       a1, a2 in zip(pn, gn))  # type: ignore[call-overload]
         elif isinstance(pn, dict):
             if not isinstance(gn, dict):
                 return False
-            return pn.keys() == gn.keys() and all(self._match_nodes(v1, v2, original_module, pattern_module) for v1, v2 in zip(pn.values(), gn.values()))
+            return pn.keys() == gn.keys() and \
+                all(self._match_nodes(v1, v2, original_module, pattern_module) \
+                    for v1, v2 in zip(pn.values(), gn.values()))
 
         # Check if we've already matched these nodes in the current
         # traversal
@@ -123,8 +126,8 @@ class _SubgraphMatcher:
             # arguments
             # also allows us to match a Node with a primitive type value
             match_found = (len(pn.args) == len(gn.args)
-                           and all(self._match_nodes(pn_, gn_, original_module, pattern_module)
-                                   for pn_, gn_  # type: ignore[arg-type]
+                           and all(self._match_nodes(pn_, gn_, original_module, pattern_module) # type: ignore[arg-type]
+                                   for pn_, gn_ \
                                    in zip(pn.args, gn.args)))
         if not match_found:
             self.nodes_map.pop(pn)

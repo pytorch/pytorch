@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 
 namespace torch {
 namespace jit {
