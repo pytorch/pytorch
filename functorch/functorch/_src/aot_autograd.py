@@ -111,10 +111,16 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     new_graph = fx.Graph()
     tracer = GraphAppendingTracer(new_graph)
     env = {}
+
+    # Add new placeholder nodes in the order specified by the inputs
+    new_inputs = {}
+    for node in inputs:
+        new_node = new_graph.placeholder(node.name)
+        new_inputs[node.name] = new_node
+
     for node in joint_graph.nodes:
         if node in inputs:
-            new_node = new_graph.placeholder(node.name)
-            env[node] = fx.Proxy(new_node, tracer)
+            env[node] = fx.Proxy(new_inputs[node.name], tracer)
         elif node.op == 'placeholder':
             env[node] = InvalidNode
         elif node.op == 'call_function':
@@ -168,19 +174,32 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
 
     saved_values = list(filter(is_primal, nodes))
 
-    # Also save the mask from _fused_dropout
-    dropout_nodes = list(filter(lambda x: x.target == torch.ops.aten._fused_dropout, nodes))
-    for node in joint_module.graph.nodes:
-        if node.target == operator.getitem and node.args[0] in dropout_nodes and node.args[1] == 1:
-            saved_values.append(node)
+    random_ops = set([torch.ops.aten.rand_like])
+    random_nodes = list(filter(lambda x: x.target in random_ops, nodes))
+
+    for node in random_nodes:
+        saved_values.append(node)
+
     primal_inputs = list(filter(is_primal, joint_module.graph.nodes))
     tangent_inputs = list(filter(is_tangent, joint_module.graph.nodes))
     # Construct the forward module
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
-    fwd_module = fx.GraphModule(joint_module, fwd_graph)
-
-    # Construct the backward module
     bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
+
+    # This is to filter out saved values that don't actually end up being used by the backwards pass
+    for node in bwd_graph.nodes:
+        if node.op == 'placeholder' and not node.users:
+            for saved_value in saved_values:
+                if saved_value.name == node.name:
+                    saved_values.remove(saved_value)
+                    break
+
+    # Now, we re-generate the fwd/bwd graphs.
+    # NB: This might be inefficient, but I doubt it matters  
+    fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
+    bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
+
+    fwd_module = fx.GraphModule(joint_module, fwd_graph)
     bwd_module = fx.GraphModule(joint_module, bwd_graph)
 
     return fwd_module, bwd_module
