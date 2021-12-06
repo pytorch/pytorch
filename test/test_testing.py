@@ -7,7 +7,7 @@ import itertools
 import math
 import os
 import re
-import unittest
+import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
 import torch
@@ -23,6 +23,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import op_db
 import torch.testing._internal.opinfo_helper as opinfo_helper
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.common_modules import modules, module_db
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -728,7 +729,7 @@ class TestAssertClose(TestCase):
         expected = torch.nn.Parameter(actual)
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
                 fn(allow_subclasses=False)
 
     def test_mismatching_types(self):
@@ -736,7 +737,7 @@ class TestAssertClose(TestCase):
         expected = actual.numpy()
 
         for fn, allow_subclasses in itertools.product(assert_close_with_inputs(actual, expected), (True, False)):
-            with self.assertRaisesRegex(AssertionError, str(type(expected))):
+            with self.assertRaisesRegex(TypeError, str(type(expected))):
                 fn(allow_subclasses=allow_subclasses)
 
     def test_unknown_type(self):
@@ -937,6 +938,21 @@ class TestAssertClose(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             fn()
 
+    def test_none(self):
+        actual = expected = None
+
+        for fn in assert_close_with_inputs(actual, expected):
+            fn()
+
+    def test_none_mismatch(self):
+        expected = None
+
+        for actual in (False, 0, torch.nan, torch.tensor(torch.nan)):
+            for fn in assert_close_with_inputs(actual, expected):
+                with self.assertRaises(AssertionError):
+                    fn()
+
+
     def test_docstring_examples(self):
         finder = doctest.DocTestFinder(verbose=False)
         runner = doctest.DocTestRunner(verbose=False, optionflags=doctest.NORMALIZE_WHITESPACE)
@@ -955,6 +971,27 @@ class TestAssertClose(TestCase):
 
         for fn in assert_close_with_inputs(actual, expected):
             fn(check_dtype=False)
+
+    class UnexpectedException(Exception):
+        pass
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.__init__", side_effect=UnexpectedException)
+    def test_unexpected_error_originate(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+    @unittest.mock.patch("torch.testing._comparison.TensorLikePair.compare", side_effect=UnexpectedException)
+    def test_unexpected_error_compare(self, _):
+        actual = torch.tensor(1.0)
+        expected = actual.clone()
+
+        with self.assertRaisesRegex(RuntimeError, "unexpected exception"):
+            torch.testing.assert_close(actual, expected)
+
+
 
 
 class TestAssertCloseMultiDevice(TestCase):
@@ -1083,7 +1120,7 @@ class TestAssertCloseErrorMessage(TestCase):
             with self.assertRaisesRegex(AssertionError, re.escape(f"(up to {atol} allowed)")):
                 fn(rtol=0.0, atol=atol)
 
-    def test_msg_str(self):
+    def test_msg(self):
         msg = "Custom error message!"
 
         actual = torch.tensor(1)
@@ -1092,93 +1129,6 @@ class TestAssertCloseErrorMessage(TestCase):
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(AssertionError, msg):
                 fn(msg=msg)
-
-    def test_msg_callable(self):
-        msg = "Custom error message!"
-
-        def make_msg(actual, expected, diagnostics):
-            return msg
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, msg):
-                fn(msg=make_msg)
-
-    def test_msg_callable_inputs(self):
-        sentinel = (
-            "This is just a sentinel. If you see this in a traceback, "
-            "you probably need to look at the exception that caused this to see the actual error!"
-        )
-
-        expected_actual = torch.tensor(1)
-        expected_expected = torch.tensor(2)
-
-        def make_msg(actual_actual, actual_expected, diagnostics):
-            torch.testing.assert_close(
-                actual_actual, expected_actual, msg="`actual` is not passed correctly to the `msg` callable!"
-            )
-            torch.testing.assert_close(
-                actual_expected, expected_expected, msg="`expected` is not passed correctly to the `msg` callable!"
-            )
-            return sentinel
-
-        for fn in assert_close_with_inputs(expected_actual, expected_expected):
-            with self.assertRaisesRegex(AssertionError, sentinel):
-                fn(msg=make_msg)
-
-    def test_msg_callable_diagnostics(self):
-        sentinel = (
-            "This is just a sentinel. If you see this in a traceback, "
-            "you probably need to look at the exception that caused this to see the actual error!"
-        )
-
-        expected_attributes = dict(
-            number_of_elements=int,
-            total_mismatches=int,
-            max_abs_diff=(int, float),
-            max_abs_diff_idx=(int, tuple),
-            atol=float,
-            max_rel_diff=(int, float),
-            max_rel_diff_idx=(int, tuple),
-            rtol=float,
-        )
-
-        def check_diagnostics_smoke(diagnostics):
-            actual_attributes = vars(diagnostics)
-
-            extra_attributes = set(actual_attributes.keys()) - set(expected_attributes.keys())
-            if extra_attributes:
-                raise AssertionError(
-                    f"`diagnostics_info` has the following attributes that are not documented:\n\n "
-                    f"'{', '.join(sorted(extra_attributes))}'"
-                )
-
-            missing_attributes = set(expected_attributes.keys()) - set(actual_attributes.keys())
-            if missing_attributes:
-                raise AssertionError(
-                    f"`diagnostics_info` is missing the following attributes:\n\n "
-                    f"'{', '.join(sorted(missing_attributes))}'"
-                )
-
-            for name, expected_type in expected_attributes.items():
-                if not isinstance(actual_attributes[name], expected_type):
-                    raise AssertionError(
-                        f"`diagnostics_info.{name}` should be {expected_type}, "
-                        f"but got {type(actual_attributes[name])} instead."
-                    )
-
-        def make_msg(actual, expected, diagnostics):
-            check_diagnostics_smoke(diagnostics)
-            return sentinel
-
-        actual = torch.tensor(1)
-        expected = torch.tensor(2)
-
-        for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(AssertionError, sentinel):
-                fn(msg=make_msg)
 
 
 class TestAssertCloseContainer(TestCase):
@@ -1196,7 +1146,7 @@ class TestAssertCloseContainer(TestCase):
         actual = (t1, t1)
         expected = (t1, t2)
 
-        with self.assertRaisesRegex(AssertionError, r"index\s+1"):
+        with self.assertRaisesRegex(AssertionError, re.escape("item [1]")):
             torch.testing.assert_close(actual, expected)
 
     def test_mapping_mismatching_keys(self):
@@ -1213,7 +1163,7 @@ class TestAssertCloseContainer(TestCase):
         actual = {"a": t1, "b": t1}
         expected = {"a": t1, "b": t2}
 
-        with self.assertRaisesRegex(AssertionError, r"key\s+'b'"):
+        with self.assertRaisesRegex(AssertionError, re.escape("item ['b']")):
             torch.testing.assert_close(actual, expected)
 
 
@@ -1534,6 +1484,40 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_modules_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @modules(module_db)
+            def test_modules(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_ops_decorator_misuse_error(self):
+        # Test that @modules errors out when used with instantiate_parametrized_tests().
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            def test_ops(self, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'intended to be used in a device-specific context'):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_multiple_handling_of_same_param_error(self):
+        # Test that multiple decorators handling the same param errors out.
+
+        class TestParametrized(TestCase):
+            @parametrize("x", range(3))
+            @parametrize("x", range(5))
+            def test_param(self, x):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, 'multiple parametrization decorators'):
+            instantiate_parametrized_tests(TestParametrized)
+
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, x):
         if x == 2:
@@ -1601,12 +1585,6 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
-    # Note: Currently, the device string is inserted into the name multiple times.
-    # To fix this, the responsibility for adding the device string can be pushed outside
-    # into instantiate_device_type_tests(). This will result in the device string always being
-    # at the end of the test name, which is different from now for @ops tests. This possibly
-    # breaking change will be made in a future PR.
-    @unittest.expectedFailure
     def test_name_fn(self, device):
         device = self.device_type
 
@@ -1674,12 +1652,6 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(expected_test_names, test_names)
 
-    # Note: Currently, the device string is inserted into the name multiple times.
-    # To fix this, the responsibility for adding the device string can be pushed outside
-    # into instantiate_device_type_tests(). This will result in the device string always being
-    # at the end of the test name, which is different from now for @ops tests. This possibly
-    # breaking change will be made in a future PR.
-    @unittest.expectedFailure
     def test_ops_composition_names(self, device):
         device = self.device_type
 
@@ -1695,16 +1667,17 @@ class TestTestParametrizationDeviceType(TestCase):
         expected_test_names = []
         for op in op_db:
             for dtype in op.default_test_dtypes(device):
-                for flag_part in ('_flag_disabled_', '_flag_enabled_'):
-                    op_name = '{}{}'.format(op.name, '_' + op.variant_test_name if op.variant_test_name else '')
-                    part1 = '{}.test_op_parametrized_{}'.format(device_cls.__name__, op_name)
-                    expected_test_names.append(part1 + '_' + dtype_name(dtype) + flag_part + device)
+                for flag_part in ('flag_disabled', 'flag_enabled'):
+                    expected_name = '{}.test_op_parametrized_{}_{}_{}_{}'.format(
+                        device_cls.__name__, op.formatted_name, flag_part, device, dtype_name(dtype))
+                    expected_test_names.append(expected_name)
 
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
-    def test_dtypes_composition_names(self, device):
-        # Test checks that @parametrize and @dtypes compose as expected.
+    def test_dtypes_composition_valid(self, device):
+        # Test checks that @parametrize and @dtypes compose as expected when @parametrize
+        # doesn't set dtype.
 
         device = self.device_type
 
@@ -1727,6 +1700,45 @@ class TestTestParametrizationDeviceType(TestCase):
         ]
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_dtypes_composition_invalid(self, device):
+        # Test checks that @dtypes cannot be composed with parametrization decorators when they
+        # also try to set dtype.
+
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("dtype", [torch.int32, torch.int64])
+            def test_parametrized(self, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        # Verify proper error behavior with @ops + @dtypes, as both try to set dtype.
+
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @ops(op_db)
+            def test_parametrized(self, op, dtype):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+    def test_multiple_handling_of_same_param_error(self, device):
+        # Test that multiple decorators handling the same param errors out.
+        # Both @modules and @ops handle the dtype param.
+
+        class TestParametrized(TestCase):
+            @ops(op_db)
+            @modules(module_db)
+            def test_param(self, device, dtype, op, module_info):
+                pass
+
+        with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
+            instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
 
     @parametrize("x", [1, subtest(2, decorators=[unittest.expectedFailure]), 3])
     def test_subtest_expected_failure(self, device, x):

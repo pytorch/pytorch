@@ -253,7 +253,9 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
@@ -380,11 +382,6 @@ filegroup(
             "aten/src/THC/*.cpp",
         ],
     ),
-)
-
-filegroup(
-    name = "thc_cu_srcs",
-    srcs = glob(["aten/src/THC/*.cu"]),
 )
 
 filegroup(
@@ -599,10 +596,7 @@ torch_cuda_half_options = [
 
 cu_library(
     name = "aten_cuda",
-    srcs = [
-        ":aten_cu_srcs",
-        ":thc_cu_srcs",
-    ],
+    srcs = [":aten_cu_srcs"],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
     deps = [
