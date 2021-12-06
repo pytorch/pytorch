@@ -1073,7 +1073,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
 
 # Generate an ONNX ATen op node.
 def _graph_at(g, opname, *args, **kwargs):
-    overload_name = kwargs.get("overload_name", "")
+    overload_name = kwargs.pop('overload_name_s', '')
     return g.op("ATen", *args, operator_s=opname, overload_name_s=overload_name, **kwargs)
 
 
