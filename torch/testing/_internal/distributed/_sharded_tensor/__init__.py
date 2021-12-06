@@ -72,14 +72,18 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         self.assertEqual(len(st1.remote_shards()), len(st2.remote_shards()))
 
 # wrapper to initialize comms (processgroup + rpc)
-def with_comms(init_rpc=True, backend="nccl"):
+def with_comms(_func=None, *, init_rpc=True, backend="nccl"):
     def with_comms_decorator(func):
         @wraps(func)
-        def wrapper(self):
+        def wrapper(self, *args, **kwargs):
             if backend == "nccl" and torch.cuda.device_count() < self.world_size:
                 sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
             self.init_comms(init_rpc=init_rpc, backend=backend)
             func(self)
             self.destroy_comms(destroy_rpc=init_rpc)
         return wrapper
-    return with_comms_decorator
+
+    if _func is None:
+        return with_comms_decorator
+    else:
+        return with_comms_decorator(_func)
