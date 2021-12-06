@@ -177,16 +177,18 @@ class BinaryOpRelu(torch.nn.Module):
         self.op = ibinary_op if ibinary_op and is_inplace else binary_op
         self.is_functional_relu = is_functional_relu
         self.is_scalar = is_scalar
-        self.relu = F.relu if self.is_functional_relu \
+        self.relu1 = F.relu if self.is_functional_relu \
+            else torch.nn.ReLU()
+        self.relu2 = F.relu if self.is_functional_relu \
             else torch.nn.ReLU()
 
     def forward(self, x, y):
         x = self.conv1(x)
         y = 3 if self.is_scalar else self.conv2(y)
         x = self.op(x, y)
-        x = self.relu(x)
+        x = self.relu1(x)
         x = self.op(y, x)
-        x = self.relu(x)
+        x = self.relu2(x)
         return x
 
 @torch.fx.wrap
@@ -210,7 +212,9 @@ class TestFuseFx(QuantizationTestCase):
                 self.bn1d2 = nn.BatchNorm1d(1)
                 self.bn2d2 = nn.BatchNorm2d(1)
                 self.bn3d2 = nn.BatchNorm3d(1)
-                self.relu = nn.ReLU()
+                self.relu1 = nn.ReLU()
+                self.relu2 = nn.ReLU()
+                self.relu3 = nn.ReLU()
 
             def forward(self, x):
                 x = self.conv1d(x)
@@ -221,13 +225,13 @@ class TestFuseFx(QuantizationTestCase):
                 x = self.bn3d(x)
                 x = self.conv1d2(x)
                 x = self.bn1d2(x)
-                x = self.relu(x)
+                x = self.relu1(x)
                 x = self.conv2d2(x)
                 x = self.bn2d2(x)
-                x = self.relu(x)
+                x = self.relu2(x)
                 x = self.conv3d2(x)
                 x = self.bn3d2(x)
-                x = self.relu(x)
+                x = self.relu3(x)
                 return x
 
         # test train mode
@@ -311,21 +315,26 @@ class TestFuseFx(QuantizationTestCase):
                 self.bn1d = nn.BatchNorm1d(1)
                 self.bn2d = nn.BatchNorm2d(1)
                 self.bn3d = nn.BatchNorm3d(1)
-                self.relu = nn.ReLU()
+                self.relu1 = nn.ReLU()
+                self.relu2 = nn.ReLU()
+                self.relu3 = nn.ReLU()
+                self.relu4 = nn.ReLU()
+                self.relu5 = nn.ReLU()
+                self.relu6 = nn.ReLU()
 
             def forward(self, x):
                 x = self.conv1d(x)
-                x = self.relu(x)
+                x = self.relu1(x)
                 x = self.conv2d(x)
-                x = self.relu(x)
+                x = self.relu2(x)
                 x = self.conv3d(x)
-                x = self.relu(x)
+                x = self.relu3(x)
                 x = self.bn1d(x)
-                x = self.relu(x)
+                x = self.relu4(x)
                 x = self.bn2d(x)
-                x = self.relu(x)
+                x = self.relu5(x)
                 x = self.bn3d(x)
-                x = self.relu(x)
+                x = self.relu6(x)
                 return x
 
         m = M().eval()
@@ -4846,7 +4855,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.conv = torch.nn.Conv2d(3, 3, 3)
+                self.conv1 = torch.nn.Conv2d(3, 3, 3)
+                self.conv2 = torch.nn.Conv2d(3, 3, 3)
                 self.avg_pool1d = torch.nn.AvgPool1d(3)
                 self.avg_pool2d = torch.nn.AvgPool2d(3)
                 self.avg_pool3d = torch.nn.AvgPool3d(3)
@@ -4855,7 +4865,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 self.adaptive_avg_pool3d = torch.nn.AdaptiveAvgPool3d((1, 1, 1))
 
             def forward(self, x):
-                x = self.conv(x)
+                x = self.conv1(x)
                 x = self.avg_pool1d(x)
                 x = self.avg_pool2d(x)
                 x = self.avg_pool3d(x)
@@ -4874,7 +4884,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 x = x.mean([2, 3], True)
                 x = F.interpolate(x, 4, mode='nearest')
                 x = F.interpolate(x, 4, mode='linear')
-                x = self.conv(x)
+                x = self.conv2(x)
                 return x
 
         # This model is not executable since we just put all ops
