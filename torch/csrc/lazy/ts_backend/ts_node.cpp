@@ -1,6 +1,5 @@
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
-#include <torch/csrc/lazy/core/cache.h>
 
 namespace torch {
 namespace lazy {
@@ -40,15 +39,57 @@ hash_t OperandHashes(const OpList& operands, const hash_t& seed) {
   return hash;
 }
 
+/**
+ * Constructors used by legacy IR
+ *  - to avoid having to modify each legacy IR class to compute hashes,
+ *    just provide special constructors for them which compute the hashes the old way
+ */
 TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
                size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs,
-           // TODO(WHC) this is inefficient (having to compute node_hash twice
-           // since I can't call hash() yet) so probably move dag_hash
-           // initialization to a separate function?
+    : TsNode(op, operands, std::move(shapes), num_outputs,
            /* node_hash */ HashCombine(op.hash(), hash_seed),
            /* dag_hash */
-           OperandHashes(operands, HashCombine(op.hash(), hash_seed))),
+           OperandHashes(operands, HashCombine(op.hash(), hash_seed))) {}
+
+TsNode::TsNode(OpKind op, OpList operands,
+               const std::function<Shape()>& shape_fn,
+               size_t num_outputs, hash_t hash_seed)
+    : TsNode(op, operands, std::vector<Shape>{}, num_outputs, 
+           /* node_hash */ HashCombine(op.hash(), hash_seed),
+           /* dag_hash */
+           OperandHashes(operands, HashCombine(op.hash(), hash_seed))) {
+  // shapes_.push_back(GetOpShape(shape_fn));
+  shapes_ = GetOpShape(shape_fn);
+}
+
+TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
+               hash_t hash_seed)
+    : TsNode(op, operands, std::vector<Shape>{}, num_outputs,
+           /* node_hash */ HashCombine(op.hash(), hash_seed),
+           /* dag_hash */
+           OperandHashes(operands, HashCombine(op.hash(), hash_seed))) {}
+
+void TsNode::SetShapeDeferred(
+    const std::function<Shape()>& shape_fn) {
+  shapes_ = GetOpShape(shape_fn);
+  // shapes_.push_back(GetOpShape(shape_fn));
+}
+
+TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs)
+    : Node(op, num_outputs, HashCombine(op.hash(), shape.hash())) {
+  shapes_.push_back(std::move(shape));
+}
+
+/**
+ * Constructors used by codegen IR
+ *  - node_ and dag_hash are explicitly computed in the codegen code, so shape-caching
+ *    can be done outside Node class based on hash
+ */
+TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
+               size_t num_outputs, hash_t node_hash, hash_t dag_hash)
+    : Node(op, num_outputs,
+           node_hash,
+           dag_hash),
       shapes_(shapes) {
   for (auto& operand : operands) {
     // Ideally, optional operands should be filtered by the leaf node classes,
@@ -63,24 +104,9 @@ TsNode::TsNode(OpKind op, OpList operands, std::vector<Shape>&& shapes,
   }
 }
 
-TsNode::TsNode(OpKind op, OpList operands,
-               const std::function<Shape()>& shape_fn,
-               size_t num_outputs, hash_t hash_seed)
-    : TsNode(op, operands, std::vector<Shape>{}, num_outputs, hash_seed) {
-  shapes_.push_back(GetOpShape(shape_fn));
-}
-
-TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
-               hash_t hash_seed)
-    : TsNode(op, operands, std::vector<Shape>{}, num_outputs, hash_seed) {}
-
-void TsNode::SetShapeDeferred(
-    const std::function<Shape()>& shape_fn) {
-  shapes_.push_back(GetOpShape(shape_fn));
-}
-
-TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t hash_seed)
-    : Node(op, num_outputs, GetOpHash(op, shape, hash_seed))
+// TODO(whc) is this ctor even used anywhere? are there any codegenned leaf nodes?
+TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs, hash_t node_hash)
+    : Node(op, num_outputs, HashCombine(op.hash(), HashCombine(shape.hash(), node_hash)))
 {
   shapes_.push_back(std::move(shape));
 }
@@ -89,20 +115,21 @@ const Shape& TsNode::shape(size_t output_index) const {
   return shapes_.at(output_index);
 }
 
-using ShapeCache = Cache<hash_t, Shape, HashReducer>;
 
 ShapeCache* GetShapeCache() {
   static ShapeCache* cache = new ShapeCache(FLAGS_torch_lazy_ts_shape_cache_size);
   return cache;
 }
 
-Shape TsNode::GetOpShape(
+// Used by legacy IR which still returns a single 'Shape' rather than vector<Shape>
+// so this helper wraps the shape in a vector for consistency with newer codegenned IR shapes 
+std::vector<Shape> TsNode::GetOpShape(
     const std::function<Shape()>& shape_fn) const {
   ShapeCache* shape_cache = GetShapeCache();
   auto shape = shape_cache->Get(hash());
   if (shape == nullptr) {
     shape = shape_cache->Add(hash(),
-                             std::make_shared<Shape>(shape_fn()));
+                             std::make_shared<std::vector<Shape>>(std::initializer_list<Shape>{shape_fn()}));
   }
   return *shape;
 }
@@ -118,11 +145,6 @@ std::string TsNode::ToString() const {
   }
   EmitShortFrameInfo(ss, metadata().frame_info);
   return ss.str();
-}
-
-hash_t TsNode::GetOpHash(OpKind op, const Shape& shape, hash_t hash_seed) {
-  hash_t h = HashCombine(op.hash(), shape.hash());
-  return HashCombine(h, hash_seed);
 }
 
 void TsNode::AddOperand(NodePtr node, size_t index) {

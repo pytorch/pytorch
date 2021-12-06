@@ -9,6 +9,21 @@ import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
+def lazy_value_string_from_optionals(arg: NamedCType) -> str:
+    """
+    Given a NamedCType from a lazy IR schema,
+    generate a c++ string for materializing an rvalue of that arg for passing into
+    somewhere that accepts ir::Values (both null and non-null)
+    """
+    if isValueType(arg.type):
+        if isinstance(arg.type, BaseCType):
+            return f"lazy_{arg.name}.GetIrValue()"
+        elif isinstance(arg.type, OptionalCType):
+            return f"lazy_{arg.name} ? " \
+                   f"lazy_{arg.name}.GetIrValue() : " \
+                   "torch::lazy::Value()"
+        else:
+            raise AssertionError("TODO not sure if there are other valid types to handle here")
 
 def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     """
@@ -46,7 +61,7 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
     """
     Produce a formatted string with the arguments as passed into the constructor of a node class.
     """
-    node_ctor_values = [node_ctor_arg_rvalue_string(arg, schema) for arg in schema.filtered_types()]
+    node_ctor_values = [node_ctor_arg_rvalue_string(arg, schema) for arg in schema.filtered_types()] + ["node_hash", "dag_hash"]
     return ",\n                              ".join(node_ctor_values)
 
 def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
@@ -74,6 +89,37 @@ def aten_symbol(schema: LazyIrSchema) -> str:
         return f'c10::Symbol::fromQualString("aten::{schema.aten_name}")'
     return f'at::aten::{schema.aten_name}'
 
+def cached_shape_inference(func: NativeFunction, schema: LazyIrSchema,
+                           returns_length: int, all_types: List[NamedCType]) -> str:
+    # call the meta kernel if it exists, to compute output shape/dtype for our IR
+    if func.structured or func.structured_delegate is not None:
+        meta_out = """cached_shapes = shape_cache->Add(dag_hash, std::make_shared<std::vector<Shape>>(std::initializer_list<Shape>{Shape(out_meta.scalar_type(), out_meta.sizes().vec())}));"""
+        if returns_length > 1:
+            def this_shape(i: int) -> str:
+                return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
+            inner_shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
+            meta_out = "cached_shapes = shape_cache->Add(dag_hash, std::make_shared<std::vector<Shape>>(std::initializer_list<Shape>{" + inner_shapes_str + "}));"
+
+        shapes_body = f"""
+            auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
+            {meta_out}
+"""
+    else:
+        shape_sig = ComputeShapeSignature(metadata.kernel, func)
+        shapes_body = f"""
+            cached_shapes = shape_cache->Add(dag_hash, std::make_shared<std::vector<Shape>>({shape_sig.shape_call}));
+"""    
+    
+    shapes_str = f"""
+        auto shape_cache = torch::lazy::GetShapeCache();
+        auto cached_shapes = shape_cache->Get(dag_hash);
+        if (cached_shapes == nullptr) {{{shapes_body}
+        }}
+        auto& shapes = *cached_shapes;
+        TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});
+"""
+    return shapes_str
+
 @dataclass(frozen=True)
 class LazyIR:
     backend_index: BackendIndex
@@ -93,11 +139,10 @@ class LazyIR:
         value_types = schema.filtered_types(values=True, scalars=False)
         scalar_types = schema.filtered_types(values=False, scalars=True)
 
-        node_ctor_args = ", ".join([f"const {i.cpp_type()}& {i.name}" for i in all_types])
+        node_ctor_args = ", ".join([f"const {i.cpp_type()}& {i.name}" for i in all_types] + ["torch::lazy::hash_t node_hash, torch::lazy::hash_t dag_hash"])
         scalar_initializers = ",\n        ".join([f"{t.name}({t.name})" for t in scalar_types])
         comma_if_scalar_initializers = ",\n" if len(scalar_initializers) else ""
         scalar_decls = "\n  ".join([f"{t.cpp_type()} {t.name};" for t in scalar_types])
-        scalar_hashes = ", ".join([f"{f.name}" for f in scalar_types])
         base_ctor_value_args_list = []
         optional_values = []
         for t in value_types:
@@ -130,7 +175,8 @@ class {schema.node_name} : public {self.node_base} {{
       : {self.node_base}(torch::lazy::OpKind({aten_symbol(schema)}),
               {{{base_ctor_value_args}}}, std::move(shapes),
               /* num_outputs */ {len(func.returns)},
-              torch::lazy::MHash({scalar_hashes})){comma_if_scalar_initializers}
+              node_hash,
+              dag_hash){comma_if_scalar_initializers}
         {scalar_initializers}
 
   {{
@@ -203,23 +249,14 @@ class GenLazyNativeFuncDefinition:
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
         node_ctor_input_str = node_ctor_inputs(schema)
 
-        # call the meta kernel if it exists, to compute output shape/dtype for our IR
-        if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<Shape> shapes{Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
-            if returns_length > 1:
-                def this_shape(i: int) -> str:
-                    return f"Shape(std::get<{i}>(out_meta).scalar_type(), std::get<{i}>(out_meta).sizes().vec())"
-                shapes_str = ','.join([this_shape(i) for i in range(returns_length)])
-                meta_out = "std::vector<Shape> shapes{" + shapes_str + "};"
+        hashes = [f"static_cast<uint32_t>(at::aten::{schema.aten_name})"]
+        hashes += [f"{f.name}" for f in scalar_types]
+        node_hash = f"torch::lazy::hash_t node_hash = torch::lazy::MHash({', '.join(hashes)});"
+        ir_values = [lazy_value_string_from_optionals(v) for v in value_types] 
+        dag_hash = f"torch::lazy::hash_t dag_hash = torch::lazy::OperandHashes({{{', '.join(ir_values)}}}, node_hash);"
+        hash_str = node_hash + "\n        " + dag_hash
 
-            meta_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(t.name) for t in all_types)});
-        {meta_out}"""
-        else:
-            shape_sig = ComputeShapeSignature(metadata.kernel, func)
-            meta_str = f"""
-        auto shapes = {shape_sig.shape_call};"""
-        meta_str += f"""
-        TORCH_INTERNAL_ASSERT(shapes.size() == {returns_length});"""
+        shape_str = cached_shape_inference(func, schema, returns_length, all_types)
 
         node_str = f"""auto node = torch::lazy::MakeNode<ir::ops::{schema.node_name}>({node_ctor_input_str},
                                                                                       std::move(shapes));"""
@@ -245,7 +282,8 @@ class GenLazyNativeFuncDefinition:
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
-        {meta_str}
+        {hash_str}
+        {shape_str}
         {node_str}
         {bridge_str}
         return result;

@@ -172,6 +172,15 @@ hash_t Hash(const c10::optional<std::vector<T>>& value) {
 }
 
 template <typename T>
+hash_t Hash(const c10::optional<c10::ArrayRef<T>>& value) {
+  if (value.has_value()) {
+    return ContainerHash(value.value());
+  } else {
+    return Hash(kNullOpt);
+  }
+}
+
+template <typename T>
 hash_t Hash(const std::set<T>& values) {
   return ContainerHash(values);
 }
@@ -188,6 +197,11 @@ static inline hash_t Hash(const hash_t& value) {
 template <typename T>
 hash_t Hash(c10::ArrayRef<T> values) {
   return ContainerHash(values);
+}
+
+template <typename T, size_t size>
+torch::lazy::hash_t Hash(std::array<T, size> values) {
+  return torch::lazy::ContainerHash(values);
 }
 
 template <typename T>
