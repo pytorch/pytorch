@@ -1338,29 +1338,7 @@ void ComputeConstant(Node* n, int opset_version) {
       break;
     }
     case ::c10::onnx::Shape: {
-      auto input_shape =
-          ConstantValueMap::GetShapeInto1DInt64Vector(n->input()->debugName());
-      if (input_shape.has_value()) {
-        auto shape_value = input_shape.value();
-        // TODO: getDevice() ?
-        auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
-        auto shape_value_size = static_cast<int64_t>(shape_value.size());
-        auto f =
-            at::from_blob(shape_value.data(), {shape_value_size}, at::kLong)
-                .to(at::kCPU);
-        // Need copy here
-        at::Tensor f_copy = at::empty({shape_value_size}, options);
-        f_copy.copy_(f);
-        ConstantValueMap::SetValue(n->output()->debugName(), f_copy);
-        std::vector<::c10::ShapeSymbol> final_shape_vector(
-            1, c10::ShapeSymbol::fromStaticSize(shape_value_size));
-        ::c10::SymbolicShape final_shape(final_shape_vector);
-        UpdateShape(n->output(), final_shape);
-      } else if (ConstantValueMap::HasShape(n->input()->debugName())) {
-        ConstantValueMap::SetShapeValue(
-            n->output()->debugName(),
-            ConstantValueMap::GetShape(n->input()->debugName()).value());
-      }
+      // get data from ONNX symboolic shape inference insteda
       break;
     }
     case ::c10::onnx::Reshape: {
