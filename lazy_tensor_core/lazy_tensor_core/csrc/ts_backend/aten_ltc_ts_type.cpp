@@ -1,6 +1,7 @@
 #include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/library.h>
 
 #include "ATen/MetaFunctions.h"
@@ -15,7 +16,6 @@
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
 #include "lazy_tensors/computation_client/metrics.h"
 namespace torch_lazy_tensors {
 namespace ir {
@@ -112,8 +112,7 @@ at::Tensor LazyNativeFunctions::as_strided(
   LazyTensor self_tensor = TryGetLtcTensor(self);
   auto xsize = ToI64Vector(size);
   auto xstride = ToI64Vector(stride);
-  if (!ir::ops::AsStrided::StrideIsSupported(
-          self_tensor.shape(), xsize, xstride, storage_offset.value_or(0))) {
+  if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
                                                         storage_offset);
@@ -129,8 +128,7 @@ const at::Tensor& LazyNativeFunctions::as_strided_(
   LazyTensor self_tensor = TryGetLtcTensor(self);
   auto xsize = ToI64Vector(size);
   auto xstride = ToI64Vector(stride);
-  if (!ir::ops::AsStrided::StrideIsSupported(
-          self_tensor.shape(), xsize, xstride, storage_offset.value_or(0))) {
+  if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided_)>::call(self, size, stride,
                                                          storage_offset);

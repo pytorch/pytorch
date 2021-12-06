@@ -2,9 +2,9 @@
 
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
-
-#include "lazy_tensor_core/csrc/lazy_view.h"
+#include <torch/csrc/lazy/core/lazy_view.h>
 #include <torch/csrc/lazy/core/util.h>
+
 #include "torch/csrc/lazy/core/ir.h"
 
 namespace torch_lazy_tensors {
@@ -24,7 +24,8 @@ class LazyTensor {
         : ir_value(std::move(ir_value)),
           device(device),
           unique_id(GetNextTensorId()) {}
-    Data(std::shared_ptr<LazyView> view, const torch::lazy::BackendDevice& device)
+    Data(std::shared_ptr<torch::lazy::LazyView> view,
+         const torch::lazy::BackendDevice& device)
         : view(std::move(view)), device(device), unique_id(GetNextTensorId()) {}
     Data(at::Tensor tensor_data, const torch::lazy::BackendDevice& device)
         : tensor_data(std::move(tensor_data)),
@@ -35,7 +36,7 @@ class LazyTensor {
 
     torch::lazy::BackendDataPtr handle;
     torch::lazy::Value ir_value;
-    std::shared_ptr<LazyView> view;
+    std::shared_ptr<torch::lazy::LazyView> view;
     c10::optional<at::Tensor> tensor_data;
     const torch::lazy::BackendDevice device;
     const int64_t unique_id = 0;
@@ -107,16 +108,16 @@ class LazyTensor {
   void SetIrValue(torch::lazy::Value ir_value);
   void SetInPlaceIrValue(torch::lazy::Value ir_value);
 
-  void SetSubView(ViewInfo view_info) const;
+  void SetSubView(torch::lazy::ViewInfo view_info) const;
 
   c10::optional<at::Tensor> CurrentTensorData() const;
 
   std::vector<LazyTensor> MakeOutputTensors(torch::lazy::NodePtr node) const;
 
-  LazyTensor CreateViewTensor(ViewInfo view_info) const;
+  LazyTensor CreateViewTensor(torch::lazy::ViewInfo view_info) const;
   LazyTensor CopyTensorToDevice(const torch::lazy::BackendDevice& device);
 
-  void ModifyCurrentView(ViewInfo view_info) const;
+  void ModifyCurrentView(torch::lazy::ViewInfo view_info) const;
 
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
@@ -125,12 +126,12 @@ class LazyTensor {
   LazyTensor(const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
   LazyTensor(torch::lazy::Value ir_value,
              const torch::lazy::BackendDevice& device);
-  LazyTensor(std::shared_ptr<LazyView> view,
+  LazyTensor(std::shared_ptr<torch::lazy::LazyView> view,
              const torch::lazy::BackendDevice& device);
   LazyTensor(torch::lazy::BackendDataPtr handle);
   LazyTensor(std::shared_ptr<Data> data);
 
-  static LazyTensor Create(std::shared_ptr<LazyView> view,
+  static LazyTensor Create(std::shared_ptr<torch::lazy::LazyView> view,
                            const torch::lazy::BackendDevice& device);
 
   std::shared_ptr<Data> data_ptr() const { return data_; }
@@ -143,12 +144,14 @@ class LazyTensor {
                                       bool read_only) const;
 
   std::tuple<torch::lazy::Value, bool> GetViewUpdate(
-      const std::shared_ptr<LazyView>& view) const;
+      const std::shared_ptr<torch::lazy::LazyView>& view) const;
 
-  std::shared_ptr<LazyView> UpdateView(std::shared_ptr<LazyView> view,
-                                   torch::lazy::Value ir_value) const;
+  std::shared_ptr<torch::lazy::LazyView> UpdateView(
+      std::shared_ptr<torch::lazy::LazyView> view,
+      torch::lazy::Value ir_value) const;
 
-  std::shared_ptr<LazyView> CreateView(ViewInfo view_info) const;
+  std::shared_ptr<torch::lazy::LazyView> CreateView(
+      torch::lazy::ViewInfo view_info) const;
 
   // We build a graph accumulating operations, but at a given point we
   // need to force a rendering, otherwise the graph can grow without control.
