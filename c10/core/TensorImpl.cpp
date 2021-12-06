@@ -597,13 +597,10 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
-  dest_impl->is_channels_last_1d_contiguous_ =
-      src_impl->is_channels_last_1d_contiguous_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ =
       src_impl->is_channels_last_3d_contiguous_;
-  dest_impl->is_channels_last_1d_ = src_impl->is_channels_last_1d_;
   dest_impl->is_channels_last_ = src_impl->is_channels_last_;
   dest_impl->is_channels_last_3d_ = src_impl->is_channels_last_3d_;
   dest_impl->is_non_overlapping_and_dense_ =

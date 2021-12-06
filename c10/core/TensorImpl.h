@@ -791,7 +791,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
     if (memory_format == at::MemoryFormat::ChannelsLast1d) {
-      return is_channels_last_1d_contiguous_;
+      return compute_channels_last_contiguous_1d();
     } else if (memory_format == at::MemoryFormat::ChannelsLast) {
       return is_channels_last_contiguous_;
     } else if (memory_format == at::MemoryFormat::ChannelsLast3d) {
@@ -2121,7 +2121,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool is_strides_like_channels_last_1d() const {
-    return is_channels_last_1d_;
+    return compute_strides_like_channels_last_1d();
   }
 
   bool is_strides_like_channels_last() const {
@@ -2277,66 +2277,41 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void refresh_contiguous() {
     is_contiguous_ = compute_contiguous();
     // Note:
-    // Dim 0, 1  will never be a channels last 1d/2d/3d format
-    // Dim 2+ is possibly be a channels last 1d format (Dim 3 only at this
-    // point) Dim 3+ is possibly be a channels last 2d format (Dim 4 only at
+    // Dim 0, 1, 2  will never be a channels last 2d/3d format
+    // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at
     // this point) Dim 4+ is possibly be a channels last 3d format (Dim 5 only
     // at this point)
     switch (dim()) {
-      case 3:
-        is_channels_last_1d_contiguous_ = compute_channels_last_contiguous_1d();
-        is_channels_last_contiguous_ = false;
-        is_channels_last_3d_contiguous_ = false;
-        is_channels_last_1d_ = compute_strides_like_channels_last_1d();
-        is_channels_last_ = false;
-        is_channels_last_3d_ = false;
-        is_non_overlapping_and_dense_ = is_contiguous_ ||
-            is_channels_last_1d_contiguous_ ||
-            compute_non_overlapping_and_dense();
-        break;
       case 4:
-        is_channels_last_1d_contiguous_ = compute_channels_last_contiguous_1d();
-        is_channels_last_contiguous_ = !is_channels_last_1d_contiguous_ &&
-            compute_channels_last_contiguous_2d();
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
         is_channels_last_3d_contiguous_ = false;
-        is_channels_last_1d_ = !is_channels_last_contiguous_ &&
-            compute_strides_like_channels_last_1d();
-        is_channels_last_ =
-            !is_channels_last_1d_ && compute_strides_like_channels_last_2d();
+        is_channels_last_ = compute_strides_like_channels_last_2d();
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ = is_contiguous_ ||
-            is_channels_last_1d_contiguous_ || is_channels_last_contiguous_ ||
+            is_channels_last_contiguous_ ||
             compute_non_overlapping_and_dense();
         break;
       case 5:
-        is_channels_last_1d_contiguous_ = compute_channels_last_contiguous_1d();
-        is_channels_last_contiguous_ = !is_channels_last_1d_contiguous_ &&
-            compute_channels_last_contiguous_2d();
-        is_channels_last_3d_contiguous_ = !is_channels_last_1d_contiguous_ &&
-            !is_channels_last_contiguous_ &&
+        is_channels_last_contiguous_ = compute_channels_last_contiguous_2d();
+        is_channels_last_3d_contiguous_ = !is_channels_last_contiguous_ &&
             compute_channels_last_contiguous_3d();
-        is_channels_last_1d_ = !is_channels_last_contiguous_ &&
-            !is_channels_last_3d_contiguous_ &&
-            compute_strides_like_channels_last_1d();
         is_channels_last_ = !is_channels_last_3d_contiguous_ &&
             compute_strides_like_channels_last_2d();
-        is_channels_last_3d_ = !is_channels_last_1d_ && !is_channels_last_ &&
+        is_channels_last_3d_ = !is_channels_last_ &&
             compute_strides_like_channels_last_3d();
         is_non_overlapping_and_dense_ = is_contiguous_ ||
-            is_channels_last_1d_contiguous_ || is_channels_last_contiguous_ ||
+            is_channels_last_contiguous_ ||
             is_channels_last_3d_contiguous_ ||
             compute_non_overlapping_and_dense();
         break;
       default:
-        is_channels_last_1d_contiguous_ = false;
         is_channels_last_contiguous_ = false;
         is_channels_last_3d_contiguous_ = false;
-        // is_channels_last_1d_, is_channels_last_ and is_channels_last_3d_ are
+        // is_channels_last_ and is_channels_last_3d_ are
         // suggested memory_format. memory_format. Being
         // channels_last_contiguous doesn't necessarily mean the tensor is
         // strided like channels_last: for strides on channel dimension could
         // suggest desired memory_layout, but it doesn't affect memory storage
-        is_channels_last_1d_ = false;
         is_channels_last_ = false;
         is_channels_last_3d_ = false;
         is_non_overlapping_and_dense_ =
@@ -2527,8 +2502,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     is_contiguous_ = true;
     has_contiguity_ = static_cast<uint8_t>(HasContiguityPolicy::Default);
 
-    is_channels_last_1d_ = false;
-    is_channels_last_1d_contiguous_ = false;
     is_channels_last_ = false;
     is_channels_last_contiguous_ = false;
     is_channels_last_3d_ = false;
@@ -2540,16 +2513,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     owns_pyobj_ = false;
     storage_access_should_throw_ = false;
   }
-
-  // Tensor is stored in the channels last 1d memory format, when dimensions
-  // order is (N)CW and C-strides < W-strides (< N-strides)
-  // (If size of any dimension is equal to 1, this dimension strides value
-  // is not taken into account).
-  bool is_channels_last_1d_ : 1;
-
-  // Channels last 1d contiguous tensor is channel last tensor which occupies
-  // contiguous memory block.
-  bool is_channels_last_1d_contiguous_ : 1;
 
   // Tensor is stored in the channels last 2d memory format, when dimensions
   // order is (N)CHW and C-strides < W-strides < H-strides (< N-strides)
