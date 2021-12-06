@@ -245,7 +245,11 @@ TensorView* TensorView::computeWith(
   return this;
 }
 
-TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
+TensorView* TensorView::split(
+    int axis_,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
   // Only check things associated with axis, factor will be validated in
   // IterDomain
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim TensorView");
@@ -277,12 +281,16 @@ TensorView* TensorView::split(int axis_, Val* factor, bool inner_split) {
       "Splitting an axis of non-Serial parallel type is not supported at this time."
       " Parallelization strategy must be set after calling split.");
 
-  domain()->split(axis_, factor, inner_split);
+  domain()->split(axis_, factor, inner_split, trim_out_of_bounds);
   return this;
 }
 
-TensorView* TensorView::split(int axis, unsigned int factor, bool inner_split) {
-  split(axis, new Int(factor), inner_split);
+TensorView* TensorView::split(
+    int axis,
+    unsigned int factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
+  split(axis, new Int(factor), inner_split, trim_out_of_bounds);
   return this;
 }
 
@@ -494,7 +502,7 @@ TensorView* TensorView::welfordRfactorHelper(
 
     // construct a trivial root domain map
     std::unordered_map<IterDomain*, IterDomain*> id_map;
-    for (size_t i = 0; i < root.size(); i++) {
+    for (const auto i : c10::irange(root.size())) {
       id_map[this_root[i]] = root[i];
     }
 
@@ -815,7 +823,7 @@ void TensorView::clearReductionIterDomains() {
 
   std::vector<IterDomain*> new_root;
   std::vector<bool> new_contig;
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
+  for (const auto i : c10::irange(getRootDomain().size())) {
     if (!getRootDomain()[i]->isReduction()) {
       new_root.push_back(getRootDomain()[i]);
       new_contig.push_back(domain()->contiguity()[i]);
@@ -860,7 +868,7 @@ TensorViewBuilder& TensorViewBuilder::shape(std::vector<int64_t> shape) {
 TensorView* TensorViewBuilder::build() const {
   // Build the domain
   std::vector<IterDomain*> domain(ndims_, nullptr);
-  for (size_t i = 0; i < ndims_; i++) {
+  for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
       domain[i] = new IterDomain(new Int(0), new Int());
     } else {

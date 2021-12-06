@@ -39,9 +39,9 @@ model = Model().eval()
 traced = acc_tracer.trace(model, inputs)
 
 # Splitter will split the model into serveral submodules. The name of submodules will
-# be either `run_on_acc_{}` or `run_on_cpu_{}`. Submodules named `run_on_acc_{}` can
-# be fully lowered to TensorRT via fx2trt while submodules named `run_on_cpu_{}` has
-# unsupported ops and can't be lowered by fx2trt. We can still run `run_on_cpu_{}`
+# be either `run_on_acc_{}` or `run_on_gpu_{}`. Submodules named `run_on_acc_{}` can
+# be fully lowered to TensorRT via fx2trt while submodules named `run_on_gpu_{}` has
+# unsupported ops and can't be lowered by fx2trt. We can still run `run_on_gpu_{}`
 # submodules on Gpu if ops there have cuda implementation, the naming is a bit
 # confusing and we'll improve it.
 splitter = TRTSplitter(traced, inputs)
@@ -62,20 +62,20 @@ acc_ops.linalg_norm: ((), {'input': torch.float32})
 # Split.
 split_mod = splitter()
 
-# After split we have two submodules, _run_on_acc_0 and _run_on_cpu_1.
+# After split we have two submodules, _run_on_acc_0 and _run_on_gpu_1.
 print(split_mod.graph)
 """
 graph():
     %x : [#users=1] = placeholder[target=x]
     %_run_on_acc_0 : [#users=1] = call_module[target=_run_on_acc_0](args = (%x,), kwargs = {})
-    %_run_on_cpu_1 : [#users=1] = call_module[target=_run_on_cpu_1](args = (%_run_on_acc_0,), kwargs = {})
-    return _run_on_cpu_1
+    %_run_on_gpu_1 : [#users=1] = call_module[target=_run_on_gpu_1](args = (%_run_on_acc_0,), kwargs = {})
+    return _run_on_gpu_1
 """
 
 # Take a look at what inside each submodule. _run_on_acc_0 contains linear and relu while
-# _run_on_cpu_1 contains linalg_norm which currently is not supported by fx2trt.
+# _run_on_gpu_1 contains linalg_norm which currently is not supported by fx2trt.
 print(split_mod._run_on_acc_0.graph)
-print(split_mod._run_on_cpu_1.graph)
+print(split_mod._run_on_gpu_1.graph)
 """
 graph():
     %x : [#users=1] = placeholder[target=x]

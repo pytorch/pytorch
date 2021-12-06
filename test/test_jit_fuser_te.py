@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from torch.testing import FileCheck
 from typing import List
+import warnings
 
 # these needs to be set before `common_utils`
 # infers `GRAPH_EXECUTOR`.
@@ -2037,6 +2038,9 @@ works_list = [
     'nn.functional.leaky_relu',
     'nn.functional.relu',
     'nn.functional.relu6',
+    'nn.functional.softsign',
+    'nn.functional.tanhshrink',
+    'nn.functional.threshold',
     'permute',
     'pow',
     'reciprocal',
@@ -2168,7 +2172,9 @@ def f({', '.join(param_names)}):
         if get_name(op) in skip_ops:
             return
         try:
-            self.te_compile(device, dtype, op)
+            with warnings.catch_warnings():
+                warnings.simplefilter('ignore', TracerWarning)
+                self.te_compile(device, dtype, op)
         except Exception as e:
             pass
         else:

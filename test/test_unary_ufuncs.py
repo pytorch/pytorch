@@ -70,10 +70,21 @@ _medium_length = 812
 _large_size = (1029, 917)
 
 
+# Replace values satisfying condition with a safe value. This is used to block
+# out values the could cause singularity like tan(pi/2)
+def replace_values_in_tensor(tensor, condition, safe_value):
+    mask = condition(tensor)
+    tensor.masked_fill_(mask, safe_value)
+
+
 # Returns generator of tensors of different sizes filled with values in domain
 # and with intested region filled with `vals`. This will help test different code
 # paths for the given vals
-def generate_tensors_from_vals(vals, device, dtype, domain):
+# `filter_` can be either None or a tuple of (condition, safe_value). When not None
+# values satisfying `condition`` will be replaced with `safe_value` in the generated
+# tensor. This is useful to avoid singularities when generating inputs for tests, such
+# as tan(pi/2)
+def generate_tensors_from_vals(vals, device, dtype, domain, filter_):
     offset = 63
 
     assert _large_size[1] > (_medium_length + offset)  # large tensor should be large enough
@@ -89,14 +100,23 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
         if domain[1] is not None:
             vals = list(filter(lambda x: x < domain[1], vals))
 
+    if filter_ is not None:
+        condition, safe_value = filter_
+
     # Constructs the large tensor containing vals
     large_tensor = make_tensor(_large_size, device=device, dtype=dtype, low=domain[0], high=domain[1])
 
     # Inserts the vals at an odd place
     large_tensor[57][offset:offset + len(vals)] = torch.tensor(vals, device=device, dtype=dtype)
 
+    if filter_ is not None:
+        replace_values_in_tensor(large_tensor, condition, safe_value)
+
     # Takes a medium sized copy of the large tensor containing vals
     medium_tensor = large_tensor[57][offset:offset + _medium_length]
+
+    if filter_ is not None:
+        replace_values_in_tensor(medium_tensor, condition, safe_value)
 
     # Constructs scalar tensors
     scalar_tensors = (t.squeeze() for t in torch.split(medium_tensor, 1))
@@ -129,7 +149,8 @@ def generate_tensors_from_vals(vals, device, dtype, domain):
 # The randomly generated values can be restricted by the domain
 #   argument.
 def generate_numeric_tensors(device, dtype, *,
-                             domain=(None, None)):
+                             domain=(None, None),
+                             filter_=None):
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (torch.empty(0, device=device, dtype=torch.bool),
@@ -153,11 +174,12 @@ def generate_numeric_tensors(device, dtype, *,
         assert dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
         vals = _int_vals
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 def generate_numeric_tensors_hard(device, dtype, *,
-                                  domain=(None, None)):
+                                  domain=(None, None),
+                                  filter_=None):
     is_signed_integral = dtype in (torch.int8, torch.int16, torch.int32, torch.int64)
     if not (dtype.is_floating_point or dtype.is_complex or is_signed_integral):
         return ()
@@ -175,11 +197,12 @@ def generate_numeric_tensors_hard(device, dtype, *,
     else:
         vals = _large_int_vals
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 def generate_numeric_tensors_extremal(device, dtype, *,
-                                      domain=(None, None)):
+                                      domain=(None, None),
+                                      filter_=None):
     if not (dtype.is_floating_point or dtype.is_complex):
         return ()
 
@@ -191,7 +214,7 @@ def generate_numeric_tensors_extremal(device, dtype, *,
                                                      product(_float_vals, _float_extremals),
                                                      product(_float_extremals, _float_vals)))
 
-    return generate_tensors_from_vals(vals, device, dtype, domain)
+    return generate_tensors_from_vals(vals, device, dtype, domain, filter_)
 
 
 # TODO: port test_unary_out_op_mem_overlap
@@ -201,23 +224,9 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    # Tests bool tensor negation raises the correct error
-    def test_neg_error_message(self, device):
-        msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
-               " If you are trying to invert a mask, use the `\\~` or"
-               " `logical_not\\(\\)` operator instead.")
-
-        t = torch.tensor((False, True), device=device)
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.neg(t)
-
-    @dtypes(*floating_types_and(torch.bfloat16, torch.half))
-    @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
+    @ops([_fn for _fn in unary_ufuncs if _fn.domain != (None, None)],
+         allowed_dtypes=floating_types_and(torch.bfloat16, torch.half))
     def test_float_domains(self, device, dtype, op):
-        if not op.supports_dtype(dtype, torch.device(device).type):
-            raise unittest.SkipTest('unsupported dtype')
-
         eps = (1e-5, 1e-3, 1e-1, 1, 2, 10, 20, 50, 100)
 
         low, high = op.domain
@@ -337,7 +346,8 @@ class TestUnaryUfuncs(TestCase):
     @ops(reference_filtered_ops)
     def test_reference_numerics_normal(self, device, dtype, op):
         tensors = generate_numeric_tensors(device, dtype,
-                                           domain=op.domain)
+                                           domain=op.domain,
+                                           filter_=op.reference_numerics_filter)
         self._test_reference_numerics(dtype, op, tensors)
 
     @suppress_warnings
