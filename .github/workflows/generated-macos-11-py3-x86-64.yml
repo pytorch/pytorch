@@ -29,7 +29,7 @@ env:
 jobs:
 
   ciflow_should_run:
-    runs-on: ubuntu-18.04
+    runs-on: linux.large
     timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
@@ -132,6 +132,9 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      # For sccache / S3 access (only on non-forked PRs)
+      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -177,6 +180,22 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: |
           python3 tools/render_junit.py test/
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Downloaded JSONs on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:
