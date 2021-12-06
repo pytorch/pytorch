@@ -5759,7 +5759,8 @@ class TestQuantizeFxModels(QuantizationTestCase):
                     x = self.linear(x)
                     return x
 
-            qconfig_dict = {"": get_default_qat_qconfig("fbgemm"),
+            qengine = torch.backends.quantized.engine
+            qconfig_dict = {"": get_default_qat_qconfig(qengine),
                             "object_type": [(torch.nn.Embedding, default_embedding_qat_qconfig)]}
 
 
