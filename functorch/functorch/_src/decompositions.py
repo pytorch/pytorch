@@ -150,6 +150,11 @@ def logit_backward(grad_output: Tensor, self: Tensor, eps: Optional[float] = Non
             aten.new_full(self, (), float('nan')))
 
 
+@register_decomposition(aten.native_dropout)
+def native_dropout_decomposition(input, p, generator=None):
+    bool_mask = aten.rand_like(input) < p
+    res = bool_mask * input * float(1.0 / p)
+    return [res, bool_mask]
 
 # @register_decomposition(aten._fused_dropout)
 # def _fused_dropout_decomposition(input, p, generator=None):
