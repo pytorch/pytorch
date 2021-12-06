@@ -6683,6 +6683,20 @@ class TestNN(NNTestCase):
         bad_input = torch.randn(3, 1)
         test_all(hidden_size, good_hx, good_hx, input_size, bad_input)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_native_dropout_corner_case(self):
+        for train in [True, False]:
+            for p in [0.0, 1.0]:
+                for device in ["cuda", "cpu"]:
+                    x = torch.randn(5).to(device=device).requires_grad_()
+                    x_ref = x.detach().requires_grad_()
+                    o = torch.native_dropout(x, p, train)[0]
+                    o_ref = torch.dropout(x_ref, p, train)
+                    o.sum().backward()
+                    o_ref.sum().backward()
+                    assert(o.equal(o_ref))
+                    assert(x.grad.equal(x_ref.grad))
+
     def test_invalid_dropout_p(self):
         v = torch.ones(1)
         self.assertRaises(ValueError, lambda: nn.Dropout(-0.1))
@@ -9145,6 +9159,13 @@ class TestNN(NNTestCase):
 
             self.assertEqual(output_sig.grad, output_logits.grad)
 
+    def test_bce_with_logits_has_correct_forward_grad(self):
+        output = torch.randn(3, 5, requires_grad=True)
+        target = torch.randn(3, 5)
+        for reduction in ('sum', 'mean', 'none'):
+            gradcheck(lambda self, target: nn.BCEWithLogitsLoss(reduction=reduction)(self, target),
+                      (output, target), check_forward_ad=True)
+
     def test_bce_with_logits_has_correct_grad_at_zero(self):
         output = torch.zeros(3, 1, requires_grad=True)
         target = torch.zeros(3, 1)
@@ -11198,6 +11219,10 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
             fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
             fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
+
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
+        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
+            fold(torch.randn(1, 12, 12))
 
     def test_unfold_invalid_arg(self):
         # input wrong dimension
@@ -15073,45 +15098,66 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.channels_last_3d, 10, 15)
 
     def test_upsamplingBilinear2d(self, device):
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bilinear', align_corners=align_corners)
-            for memory_format in [torch.contiguous_format, torch.channels_last]:
-                # test float scale factor up & downsampling
-                for scale_factor in [0.5, 1.5, 2]:
-                    in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                    out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-                    with warnings.catch_warnings(record=True) as w:
-                        out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-                    self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
-                    # Assert that memory format is carried through to the output
-                    self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-                    out_t.backward(torch.randn_like(out_t))
-                    self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        for antialias in [True, False]:
+            # temporarily disabled on CUDA:
+            if antialias and torch.device(device).type == 'cuda':
+                continue
+            for align_corners in [True, False]:
+                kwargs = dict(mode='bilinear', align_corners=align_corners, antialias=antialias)
+                for memory_format in [torch.contiguous_format, torch.channels_last]:
+                    # test float scale factor up & downsampling
+                    for scale_factor in [0.5, 1.5, 2]:
+                        in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                        out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                        with warnings.catch_warnings(record=True) as w:
+                            out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                        self.assertEqual(torch.ones(1, 2, out_size, out_size, device=device), out_t.data)
+                        # Assert that memory format is carried through to the output
+                        self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                        out_t.backward(torch.randn_like(out_t))
+                        self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-                    input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                    gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                        input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-                    # Assert that cpu and cuda give same results
-                    if torch.device(device).type == 'cuda':
-                        for shapes in [
-                            (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
-                        ]:
-                            a_cuda = torch.randn(*shapes, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                            a_cpu = a_cuda.detach().cpu().requires_grad_()
+                        # Assert that cpu and cuda give same results
+                        if torch.device(device).type == 'cuda':
+                            for shapes in [
+                                (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                            ]:
+                                a_cuda = torch.randn(
+                                    *shapes, device=device
+                                ).contiguous(memory_format=memory_format).requires_grad_()
+                                a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                            with warnings.catch_warnings(record=True):
-                                out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
-                                out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+                                with warnings.catch_warnings(record=True):
+                                    out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                                    out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
 
-                            self.assertEqual(out_cpu.cuda(), out_cuda)
+                                self.assertEqual(out_cpu.cuda(), out_cuda)
 
-                            g_cuda = torch.randn_like(out_cuda)
-                            g_cpu = g_cuda.cpu()
+                                g_cuda = torch.randn_like(out_cuda)
+                                g_cpu = g_cuda.cpu()
 
-                            out_cuda.backward(g_cuda)
-                            out_cpu.backward(g_cpu)
+                                out_cuda.backward(g_cuda)
+                                out_cpu.backward(g_cpu)
 
-                            self.assertEqual(a_cuda.grad, a_cpu.grad)
+                                self.assertEqual(a_cuda.grad, a_cpu.grad)
+
+    @onlyCPU  # temporarily disabled on CUDA
+    def test_upsamplingBilinear2d_aa_correctness(self, device):
+        t_in = torch.arange(30, dtype=torch.float, device=device).reshape(1, 1, 1, -1)
+        # This expected result is obtain using PIL.Image.resize
+        # a_in = t_in.numpy()[0, 0, ...]
+        # pil_in = Image.fromarray(a_in)
+        # pil_out = pil_in.resize((8, 1), resample=Image.LINEAR)
+        expected_out = torch.tensor(
+            [1.7244898, 5.1061945, 8.8938055, 12.642858,
+             16.357143, 20.106195, 23.893805, 27.27551],
+            device=device, dtype=torch.float
+        ).reshape(1, 1, 1, 8)
+        t_out = F.interpolate(t_in, size=(1, 8), mode="bilinear", align_corners=False, antialias=True)
+        self.assertEqual(expected_out, t_out)
 
     @dtypes(torch.float, torch.double)
     def test_adaptive_pooling_max_nhwc(self, device, dtype):
@@ -15552,7 +15598,7 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(input.grad, ref_input.grad)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.float, torch.half)
+    @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("90GB", "cpu")
     @precisionOverride({torch.half: 0.001})
@@ -16895,6 +16941,24 @@ class TestNNDeviceType(NNTestCase):
         output_fp16 = torch.layer_norm(input, normalized_shape, weight, bias, eps)
         output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
         self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_layernorm_weight_bias(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.float32) * 0.1
+        normalized_shape = (width,)
+        data = torch.randn(width, device="cuda", dtype=torch.float32)
+        weight = torch.ones(width, device="cuda", dtype=torch.float32)
+        bias = torch.zeros(width, device="cuda", dtype=torch.float32)
+        eps = 1e-5
+
+        out_none_weight = torch.layer_norm(input, normalized_shape, None, data, eps)
+        out_one_weight = torch.layer_norm(input, normalized_shape, weight, data, eps)
+        self.assertEqual(out_none_weight, out_one_weight)
+
+        out_none_bias = torch.layer_norm(input, normalized_shape, data, None, eps)
+        out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
+        self.assertEqual(out_none_bias, out_zero_bias)
 
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
