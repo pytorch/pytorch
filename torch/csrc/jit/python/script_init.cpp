@@ -1,4 +1,5 @@
 #include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -8,12 +9,14 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -29,6 +32,8 @@
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -39,6 +44,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -1592,6 +1598,15 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
 
   m.def(
       "_jit_script_class_compile",
