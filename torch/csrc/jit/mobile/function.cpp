@@ -13,6 +13,14 @@ namespace mobile {
 Function::Function(c10::QualifiedName name)
     : name_(std::move(name)), code_(std::make_shared<Code>()) {}
 
+Function::Function(
+    c10::QualifiedName name,
+    std::shared_ptr<Code> code,
+    at::optional<c10::FunctionSchema> schema)
+    : name_(std::move(name)),
+      code_(std::move(code)),
+      schema_(std::move(schema)) {}
+
 const c10::QualifiedName& Function::qualname() const {
   return name_;
 }
@@ -43,89 +51,12 @@ bool Function::append_operator(
   // Keep the original opname in code_
   code_->op_names_.emplace_back(name, overload_name);
   const auto& opname = code_->op_names_.back();
-  const auto full_name = c10::toString(opname);
-
-  std::function<void(Stack&)> fn;
-
-  const std::vector<c10::Argument>* pArgs = nullptr;
-  bool promoted_op = mobile::hasPrimOpsFn(full_name);
-  if (promoted_op) {
-    fn = mobile::getPrimOpsFn(full_name);
-  } else {
-    std::shared_ptr<Operator> jit_op = findOperatorFor(opname);
-    if (jit_op) {
-      fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
-      pArgs = &jit_op->schema().arguments();
-    } else {
-      auto op = c10::Dispatcher::singleton().findSchema(opname);
-      if (op.has_value()) {
-        fn = [op](Stack& stack) { op->callBoxed(&stack); };
-        if (op->hasSchema()) {
-          pArgs = &op->schema().arguments();
-        } else {
-          TORCH_CHECK(false, "arguments are missing for operator ", opname);
-        }
-      } else {
-        return false;
-      }
-    }
+  code_->operator_input_sizes_.emplace_back(num_specified_args.value_or(-1));
+  auto func = makeOperatorFunction(opname, num_specified_args, model_version);
+  if (!func.has_value()) {
+    return false;
   }
-
-  if (!promoted_op) {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
-    const auto& args = *pArgs;
-    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
-        opname.overload_name.empty()) {
-      // Since byte-code versions 0x4L, convolution has an additional
-      // default-value argument (allow_tf32=True, see
-      // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
-      // backward compatibility with models of byte-code version <= 0x3L, where
-      // this bool argument does not yet exist.
-      fn = [fn](Stack& stack) {
-        stack.push_back(true);
-        fn(stack);
-      };
-    } else {
-      // num_specified_args >= 0 indicates number of arguments are available
-      // from model. We can use it to handle backward compatibility.
-      if (num_specified_args &&
-          num_specified_args.value() < static_cast<int64_t>(args.size())) {
-        fn = [fn, num_specified_args, &args](Stack& stack) {
-          std::vector<IValue> out_args;
-          // The following logic pops and temporarily stores all out arguments
-          // from the stack (which can be 0 or more, and always appended to the
-          // schema), in order to push the necessary default values. Finally,
-          // the out arguments are pushed back into the stack.
-          for (size_t i = args.size() - 1; i > 0 && args.at(i).is_out(); i--) {
-            out_args.push_back(stack.back());
-            stack.pop_back();
-          }
-          size_t start_index = num_specified_args.value() - out_args.size();
-          TORCH_CHECK(
-              start_index >= 0,
-              "The number of output arguments is: ",
-              out_args.size(),
-              ", which is more then the number of specified arguments: ",
-              num_specified_args.value());
-          for (size_t i = start_index; i < (args.size() - out_args.size());
-               ++i) {
-            TORCH_CHECK(
-                args[i].default_value().has_value(),
-                "Error happened at preparing for default values for the argument. The ",
-                i,
-                "th argument ",
-                args[i].name(),
-                " does not have a specified value or default value. ");
-
-            stack.push_back(args[i].default_value());
-          }
-          stack.insert(stack.end(), out_args.rbegin(), out_args.rend());
-          fn(stack);
-        };
-      }
-    }
-  }
-  code_->operators_.emplace_back(fn);
+  code_->operators_.emplace_back(*func);
   return true;
 }
 
@@ -195,6 +126,93 @@ const std::shared_ptr<Code> Function::get_code() const {
 
 const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
   return getInterpretersExceptionDebugHandles();
+}
+
+c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
+    c10::OperatorName opname,
+    c10::optional<int> num_specified_args,
+    int64_t model_version) {
+  std::function<void(Stack&)> fn;
+  const auto full_name = c10::toString(opname);
+  const std::vector<c10::Argument>* pArgs = nullptr;
+  bool promoted_op = mobile::hasPrimOpsFn(full_name);
+  if (promoted_op) {
+    fn = mobile::getPrimOpsFn(full_name);
+  } else {
+    std::shared_ptr<Operator> jit_op = findOperatorFor(opname);
+    if (jit_op) {
+      fn = [jit_op](Stack& stack) { jit_op->getOperation()(stack); };
+      pArgs = &jit_op->schema().arguments();
+    } else {
+      auto op = c10::Dispatcher::singleton().findSchema(opname);
+      if (op.has_value()) {
+        fn = [op](Stack& stack) { op->callBoxed(&stack); };
+        if (op->hasSchema()) {
+          pArgs = &op->schema().arguments();
+        } else {
+          TORCH_CHECK(false, "arguments are missing for operator ", opname);
+        }
+      } else {
+        return c10::nullopt;
+      }
+    }
+  }
+
+  if (!promoted_op) {
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(pArgs);
+    const auto& args = *pArgs;
+    if (model_version == 0x3LL && opname.name == "aten::_convolution" &&
+        opname.overload_name.empty()) {
+      // Since byte-code versions 0x4L, convolution has an additional
+      // default-value argument (allow_tf32=True, see
+      // https://github.com/pytorch/pytorch/pull/40737). This wrapper handles
+      // backward compatibility with models of byte-code version <= 0x3L, where
+      // this bool argument does not yet exist.
+      fn = [fn](Stack& stack) {
+        stack.push_back(true);
+        fn(stack);
+      };
+    } else {
+      // num_specified_args >= 0 indicates number of arguments are available
+      // from model. We can use it to handle backward compatibility.
+      if (num_specified_args &&
+          num_specified_args.value() < static_cast<int64_t>(args.size())) {
+        fn = [fn, num_specified_args, &args](Stack& stack) {
+          std::vector<IValue> out_args;
+          // The following logic pops and temporarily stores all out arguments
+          // from the stack (which can be 0 or more, and always appended to the
+          // schema), in order to push the necessary default values. Finally,
+          // the out arguments are pushed back into the stack.
+          for (size_t i = args.size() - 1; i > 0 && args.at(i).is_out(); i--) {
+            out_args.push_back(stack.back());
+            stack.pop_back();
+          }
+          size_t start_index = num_specified_args.value() - out_args.size();
+          TORCH_CHECK(
+              start_index >= 0,
+              "The number of output arguments is: ",
+              out_args.size(),
+              ", which is more then the number of specified arguments: ",
+              num_specified_args.value());
+          for (size_t i = start_index; i < (args.size() - out_args.size());
+               ++i) {
+            TORCH_CHECK(
+                args[i].default_value().has_value(),
+                "Error happened at preparing for default values for the argument. The ",
+                i,
+                "th argument ",
+                args[i].name(),
+                " does not have a specified value or default value. ");
+
+            stack.push_back(args[i].default_value());
+          }
+          stack.insert(stack.end(), out_args.rbegin(), out_args.rend());
+          fn(stack);
+        };
+      }
+    }
+  }
+  return fn;
 }
 
 } // namespace mobile
