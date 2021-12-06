@@ -17,22 +17,7 @@ from torch.fx.experimental.fx2trt.utils import (
 from torch.fx.immutable_collections import immutable_list
 from torch.fx.node import Target, Argument
 
-from .converter_utils import (
-    get_trt_plugin,
-    set_layer_name,
-    to_numpy,
-    has_dynamic_shape,
-    get_axes_for_reduce_op,
-    get_trt_tensor,
-    prepend_ones,
-    broadcast,
-    add_binary_elementwise_layer,
-    add_unary_layer,
-    add_activation_layer,
-    extend_attr_to_tuple,
-    get_positive_dim,
-    trunc_div,
-)
+from .converter_utils import *  # noqa: F403
 
 
 @tensorrt_converter(acc_ops.conv2d)
@@ -407,6 +392,7 @@ def acc_ops_batch_norm(
 
     return layer.get_output(0)
 
+
 @tensorrt_converter(acc_ops.layer_norm)
 def acc_ops_layer_norm(
     network: TRTNetwork,
@@ -595,6 +581,25 @@ def acc_ops_tile(
         layer.set_input(2, slice_shapes_tensor)
 
     return layer.get_output(0)
+
+
+@tensorrt_converter(acc_ops.sign)
+def acc_ops_sign(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> Union[TRTTensor, Sequence[TRTTensor]]:
+    input_val = kwargs["input"]
+
+    if trt.__version__ >= "8.2" and not network.has_implicit_batch_dimension:
+        input_val = kwargs["input"]
+        operation_type = trt.ActivationType.SIGN
+        return add_activation_layer(network, input_val, operation_type, target, name)
+
+    return sign(network, input_val, target, name)
+
 
 @tensorrt_converter(acc_ops.relu)
 def acc_ops_relu(
