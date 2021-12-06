@@ -1185,7 +1185,8 @@ c10::optional<TypePtr> UnionType::toOptional() const {
   }
 }
 
-c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+namespace {
+c10::optional<TypePtr> subtractTypeSetFrom(std::vector<TypePtr>& to_subtract, ArrayRef<TypePtr> from) {
   std::vector<TypePtr> types;
 
   // Given a TypePtr `lhs`, this function says whether or not `lhs` (or
@@ -1199,7 +1200,7 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
 
   // Copy all the elements that should NOT be subtracted to the `types`
   // vector
-  std::copy_if(this->containedTypes().begin(), this->containedTypes().end(),
+  std::copy_if(from.begin(), from.end(),
               std::back_inserter(types),
               [&](const TypePtr& t) {
                 return !should_subtract(t);
@@ -1212,6 +1213,11 @@ c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtr
   } else {
     return UnionType::create(std::move(types));
   }
+}
+}
+
+c10::optional<TypePtr> UnionType::subtractTypeSet(std::vector<TypePtr>& to_subtract) const {
+  return subtractTypeSetFrom(to_subtract, containedTypes());
 }
 
 OptionalType::OptionalType(TypePtr contained)
@@ -1232,7 +1238,7 @@ OptionalType::OptionalType(TypePtr contained)
     types_.push_back(NoneType::get());
   } else {
     std::vector<TypePtr> to_subtract{NoneType::get()};
-    auto without_none = this->subtractTypeSet(to_subtract);
+    auto without_none = subtractTypeSetFrom(to_subtract, types_);
     contained_ = UnionType::create({*without_none});
   }
   has_free_variables_ = contained_->hasFreeVariables();
@@ -1711,7 +1717,7 @@ InterfaceType::InterfaceType(QualifiedName name, bool is_module)
 
 InterfaceType::~InterfaceType() = default;
 
-static bool containsAny(const TypePtr& type) {
+bool containsAnyType(const TypePtr& type) {
   std::vector<TypePtr> to_scan = { type };
   while (!to_scan.empty()) {
     const auto typ = to_scan.back();
@@ -1728,7 +1734,7 @@ static bool containsAny(const TypePtr& type) {
 
 void checkNoAny(const Type& base, const char* what, const std::string& attrname, const TypePtr& attrtype) {
   TORCH_CHECK(
-      !containsAny(attrtype),
+      !containsAnyType(attrtype),
       "attempting to add ",
       what,
       " '",

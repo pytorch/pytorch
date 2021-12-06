@@ -8,11 +8,12 @@
 namespace c10 {
 
 namespace {
-bool contains(DynamicType::Tag lhs, uint32_t rhs) {
-  return (static_cast<uint32_t>(lhs) | rhs) == static_cast<uint32_t>(lhs);
+bool contains(DynamicType::Tag lhs, DynamicTypeBits rhs) {
+  return (static_cast<DynamicTypeBits>(lhs) | rhs) ==
+      static_cast<DynamicTypeBits>(lhs);
 }
 bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
-  return contains(lhs, static_cast<uint32_t>(rhs));
+  return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
 } // namespace
 
@@ -76,7 +77,7 @@ DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   case T##Type::Kind:   \
     tag_ = Tag::T;      \
     break;
-    FORALL_DYNAMIC_JIT_TYPES(CASE_TYPE)
+    FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
     default:
       if (kind == DeviceObjType::Kind || kind == StreamObjType::Kind ||
@@ -125,27 +126,30 @@ bool DynamicType::equals(const DynamicType& other) const {
 }
 
 bool DynamicType::operator==(const Type& rhs) const {
-  return equals(*create(rhs));
+  if (auto dyn = rhs.castRaw<DynamicType>()) {
+    return equals(*dyn);
+  }
+
+  return false;
 }
 
 bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
   auto other = create(rhs);
-  if (equals(*other)) {
-    return true;
-  }
-
-  if (contains(other->tag_, tag_)) {
-    return true;
-  }
-
-  if (contains(tag_, 0x80000000)) {
-    if (compare(
-            *other,
-            [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
-              return a.isSubtypeOf(b);
-            })) {
+  if (tag_ == other->tag_) {
+    if (equals(*other)) {
       return true;
-    };
+    }
+    if (contains(tag_, kDynamicCovariantTypeBit)) {
+      if (compare(
+              *other,
+              [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
+                return a.isSubtypeOf(b);
+              })) {
+        return true;
+      };
+    }
+  } else if (contains(other->tag_, tag_)) {
+    return true;
   }
 
   if (other->tag_ == Tag::Optional) {

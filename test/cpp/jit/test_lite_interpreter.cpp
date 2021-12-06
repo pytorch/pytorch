@@ -658,7 +658,10 @@ TEST(LiteInterpreterTest, isCompatibleSuccess) {
 
   std::unordered_set<std::string> types = {"List", "int", "NamedTuple"};
   auto model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -721,7 +724,20 @@ TEST(LiteInterpreterTest, isCompatibleFail) {
   std::unordered_set<std::string> types = {"List", "int", "Sequence"};
 
   model_info = ModelCompatibilityInfo{
-      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, types};
+      caffe2::serialize::kMaxSupportedBytecodeVersion,
+      model_ops,
+      types,
+      _get_runtime_bytecode_min_max_versions().first};
+
+  AT_ASSERT(
+      is_compatible(runtime_info, model_info).status ==
+      ModelCompatibilityStatus::ERROR);
+
+  // test trivial failure due to operator version
+  runtime_info = RuntimeCompatibilityInfo::get();
+
+  model_info = ModelCompatibilityInfo{
+      caffe2::serialize::kMaxSupportedBytecodeVersion, model_ops, {}, 0};
 
   AT_ASSERT(
       is_compatible(runtime_info, model_info).status ==
@@ -1485,6 +1501,156 @@ TEST(RunTimeTest, RuntimeCall) {
   foo->run(inputs);
   auto output = inputs[0];
   ASSERT_EQ(output, at::tensor(7));
+}
+
+TEST(LiteInterpreterTest, OperatorSize1) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  const auto& func = bc.get_method("forward").function();
+  ASSERT_EQ(
+      func.get_code().operator_input_sizes_.size(),
+      func.get_code().operators_.size());
+}
+
+TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    std::stringstream ss;
+    m._save_for_mobile(ss);
+    mobile::Module bc = _load_for_mobile(ss);
+    const auto& func = bc.get_method("test_func").function();
+    ASSERT_EQ(
+        func.get_code().operator_input_sizes_.size(),
+        func.get_code().operators_.size());
+  }
+}
+
+#if !defined FB_XPLAT_BUILD
+// The following test run in fbcode only
+TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl");
+  mobile::Module m_module = _load_for_mobile(test_model_file);
+  std::vector<IValue> inputs = {
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
+}
+#endif // !defined(FB_XPLAT_BUILD)
+
+void enumerateTupleType(
+    size_t depth,
+    std::vector<TypePtr>& current,
+    const std::vector<TypePtr>& candidates,
+    std::vector<TypePtr>& out) {
+  static std::vector<std::string> fieldNames;
+  if (depth > fieldNames.size()) {
+    fieldNames.reserve(depth);
+    for (size_t i = fieldNames.size(); i < depth; i++) {
+      fieldNames.push_back("field" + std::to_string(i));
+    }
+  }
+  if (depth == 0) {
+    out.push_back(TupleType::create(current));
+    while (fieldNames.size() > current.size()) {
+      fieldNames.pop_back();
+    }
+    out.push_back(TupleType::createNamed("NamedTuple", fieldNames, current));
+    return;
+  }
+  for (const auto& type : candidates) {
+    if (containsAnyType(type)) {
+      continue;
+    }
+    current.push_back(type);
+    enumerateTupleType(depth - 1, current, candidates, out);
+    current.pop_back();
+  }
+}
+
+TEST(LiteInterpreterTest, DynamicType) {
+  auto cu = std::make_shared<CompilationUnit>();
+  std::vector<TypePtr> keyTypes = {
+      AnyType::get(),
+      IntType::get(),
+      BoolType::get(),
+      FloatType::get(),
+      ComplexType::get(),
+      StringType::get(),
+      TensorType::get(),
+      DeviceObjType::get(),
+  };
+  std::vector<TypePtr> types = {
+      NoneType::get(),
+      NumberType::get(),
+      ClassType::create("__torch__.TestClass1", cu),
+      ClassType::create("__torch__.TestClass2", cu),
+      AnyListType::get(),
+      AnyTupleType::get(),
+      StreamObjType::get(),
+      CapsuleType::get()};
+  std::copy(keyTypes.begin(), keyTypes.end(), back_inserter(types));
+  auto expandTypes = [&](size_t tupleSize) {
+    std::vector<TypePtr> nested;
+    for (const auto& type : types) {
+      if (!(type == AnyType::get())) {
+        nested.push_back(ListType::create(type));
+        if (!(type == NoneType::get() || type->kind() == OptionalType::Kind)) {
+          nested.push_back(OptionalType::create(type));
+        }
+      }
+      for (const auto& keyType : keyTypes) {
+        nested.push_back(DictType::create(keyType, type));
+      }
+    }
+    std::vector<TypePtr> tmp;
+    enumerateTupleType(tupleSize, tmp, types, nested);
+    std::move(std::begin(nested), std::end(nested), std::back_inserter(types));
+  };
+  expandTypes(2);
+  expandTypes(1);
+  for (const auto& a : types) {
+    auto da = DynamicType::create(*a);
+    for (const auto& b : types) {
+      bool result = a->isSubtypeOf(*b);
+      EXPECT_EQ(result, da->isSubtypeOf(*b));
+      result = b->isSubtypeOf(*a);
+      EXPECT_EQ(result, b->isSubtypeOf(*da));
+    }
+  }
 }
 
 } // namespace jit
