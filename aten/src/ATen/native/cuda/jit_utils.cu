@@ -1,13 +1,9 @@
-#include <ATen/cuda/CUDAContext.h>
-
-#include <torch/csrc/jit/resource_guard.h>
 #include <sstream>
-#include <torch/csrc/jit/frontend/code_template.h>
-#include <torch/csrc/jit/codegen/fuser/cuda/fused_kernel.h>
-#include <c10/core/ScalarType.h>
-//#include <c10/util/Optional.h>
-#include <ATen/native/cuda/jit_utils.h>
+
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/jit_utils.h>
+#include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace cuda { namespace jit {
@@ -438,6 +434,62 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   }
 )ESCAPE";
 
+// The following is copied from fused_kernel.cpp
+// TODO: refactor codegenOutputQuery into its own file
+//   that can be included by both files
+// See NOTE [ USE OF NVRTC AND DRIVER API ]
+const at::cuda::NVRTC& nvrtc() {
+  return at::globalContext().getNVRTC();
+}
+
+// query codegen output arch and target
+void codegenOutputQuery(
+    const cudaDeviceProp* const prop,
+    int& major,
+    int& minor,
+    bool& compile_to_sass) {
+  using CudaVersion = std::pair<int, int>;
+  CudaVersion nvrtc_version;
+  AT_CUDA_NVRTC_CHECK(
+      nvrtc().nvrtcVersion(&nvrtc_version.first, &nvrtc_version.second));
+
+  TORCH_CHECK(
+      nvrtc_version.first >= 6,
+      "NVRTC versions less than 6 are not supported. Is: ",
+      nvrtc_version.first);
+
+  // Version supported by device
+  // Usually any lower version works too but is less efficient
+  const CudaVersion dev_version = CudaVersion(prop->major, prop->minor);
+  // Maximum version supported by the driver, cap dev_version to this
+  CudaVersion max_dev_version;
+  if (nvrtc_version.first <= 7) { // 7 supports 2-5.x
+    max_dev_version = CudaVersion(5, 0);
+  } else if (nvrtc_version.first <= 8) { // 8 supports 2-6.x
+    max_dev_version = CudaVersion(6, 0);
+  } else if (nvrtc_version.first <= 9) { // 9 supports 3-7.2
+    max_dev_version = CudaVersion(7, 2);
+  } else if (nvrtc_version.first <= 10) { // 10 supports 3-7.5
+    max_dev_version = CudaVersion(7, 5);
+  } else if (nvrtc_version == CudaVersion(11, 0)) { // 11.0 supports 3-8.0
+    max_dev_version = CudaVersion(8, 0);
+  } else {
+    // If the driver version is unknown (i.e. newer than this code)
+    // assume the driver supports this device
+    max_dev_version = dev_version;
+  }
+  if (dev_version > max_dev_version) {
+    major = max_dev_version.first;
+    minor = max_dev_version.second;
+    // if we are clamping major/minor, sass is not compatible
+    compile_to_sass = false;
+  } else {
+    major = dev_version.first;
+    minor = dev_version.second;
+    compile_to_sass = true;
+  }
+}
+
 //FIXME - this are defined in Loops.cuh, but including Loops.cuh here would lead to circular includes Loops.cuh -> CUDALoops.cuh -> jit_utils.h -> Loops.cuh
 #define THREAD_WORK_SIZE 4
 constexpr int thread_work_size = THREAD_WORK_SIZE;
@@ -452,7 +504,7 @@ std::string generate_code(
     bool dynamic_casting,
     bool vectorized,
     int vec_size) {
-  torch::jit::TemplateEnv env;
+  TemplateEnv env;
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
@@ -507,7 +559,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-      static auto cuda_template = torch::jit::CodeTemplate(jit_code_template);
+      static auto cuda_template = CodeTemplate(jit_code_template);
     return cuda_template.format(env);
   }
 
@@ -540,7 +592,7 @@ std::string generate_code(
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());
 
-  static auto cuda_template = torch::jit::CodeTemplate(jit_vectorized_code_template);
+  static auto cuda_template = CodeTemplate(jit_vectorized_code_template);
   return cuda_template.format(env);
 }
 
@@ -552,7 +604,7 @@ NvrtcFunction jit_pwise_function(
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major = 0, minor = 0;
   bool compile_to_sass = false;
-  torch::jit::fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
+  codegenOutputQuery(prop, major, minor, compile_to_sass);
   // Creates the NVRTC program
   nvrtcProgram program;
   const auto& nvrtc = at::globalContext().getNVRTC();

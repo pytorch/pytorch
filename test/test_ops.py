@@ -83,7 +83,6 @@ class TestCommon(TestCase):
                 unsupported_backward_dtypes.append(dtype)
 
         for dtype in get_all_dtypes():
-            print("Testing dtype " + str(dtype))
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
@@ -211,9 +210,15 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_reference_testing(self, device, dtype, op):
-        sample_inputs = op.sample_inputs(device, dtype)
-        for sample_input in sample_inputs:
-            self.compare_with_reference(op, op.ref, sample_input)
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+            sample_inputs = op.sample_inputs(device, dtype)
+            for sample_input in sample_inputs:
+                self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
+        finally:
+            torch.set_default_dtype(cur_default)
 
     @skipMeta
     @onlyNativeDeviceTypes
