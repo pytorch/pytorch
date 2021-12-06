@@ -10,7 +10,7 @@ _log_2 = math.log(2)
 
 def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
-    return torch.polygamma(1, x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
+    return torch.digamma(x.unsqueeze(-1) - torch.arange(p).div(2).expand(x.shape + (-1,))).sum(-1)
 
 class Wishart(ExponentialFamily):
     r"""
@@ -144,7 +144,7 @@ class Wishart(ExponentialFamily):
     @lazy_property
     def covariance_matrix(self):
         return (
-            self._unbroadcasted_scale_tril @ self._unbroadcasted_scale_tril.mT
+            self._unbroadcasted_scale_tril @ self._unbroadcasted_scale_tril.transpose(-2, -1)
         ).expand(self._batch_shape + self._event_shape)
 
     @lazy_property
@@ -160,25 +160,36 @@ class Wishart(ExponentialFamily):
 
     @property
     def mean(self):
-        return self.df.expand(self._batch_shape + self._event_shape) * self.covariance_matrix
+        return self.df.view(self._batch_shape + (1, 1,)) * self.covariance_matrix
 
     @property
     def variance(self):
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
         diag_V = V.diagonal(dim1=-2, dim2=-1)
-        return (
-            self.df.expand(self._batch_shape + self._event_shape)
-            * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
-        )
+        return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
     def rsample(self, sample_shape=torch.Size()):
-        shape = self._extended_shape(sample_shape)
+        p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
         noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
-        noise = noise + torch.randn(shape, dtype=noise.dtype, device=noise.device).tril(diagonal=-1)
+        i, j = torch.tril_indices(p, p, offset=-1)
+        noise[..., i, j] = torch.randn(
+            sample_shape + self._batch_shape + (p * (p - 1) // 2,),
+            dtype=noise.dtype,
+            device=noise.device
+        )
         chol = self._unbroadcasted_scale_tril @ noise
-        return chol @ chol.mT
+        sample = chol @ chol.transpose(-2, -1)
+
+        # Below part is to improve numerical stability temporally and should be removed in the future.
+        support_check = self.support.check(sample)
+        while not support_check.all():
+            for index in support_check.logical_not().nonzero(as_tuple=True):
+                sample[index] = self.rsample()
+            support_check = self.support.check(sample)
+
+        return sample
 
     def log_prob(self, value):
         if self._validate_args:
