@@ -99,6 +99,8 @@ def _make_tensor(shape, dtype, device, fill_ones=False) -> torch.Tensor:
 # TODO: update to use opinfos consistently
 class TestBinaryUfuncs(TestCase):
     # Generic tests for elementwise binary (AKA binary universal (u) functions (funcs))
+    # TODO: below contiguous tensor results are compared with a variety of noncontiguous results.
+    #   It would be interesting to have the lhs and rhs have different discontiguities.
 
     # Returns a pair of iterables of contiguous tensors on the requested device
     #   and with the requested dtype.
@@ -140,7 +142,7 @@ class TestBinaryUfuncs(TestCase):
     # Unlike the previous function, the values in these tensors are specified manually.
     def _generate_interesting_small_valued_tensors(self, device, dtype):
         # defines interesting values
-        _unsigned_int_vals = (0, 1, 55, 127)
+        _unsigned_int_vals = (0, 1, 55, 127, 128, 190, 210, 220, 254, 255, 256)
         _int_vals = (0, -1, 1, -55, 55, -127, 127, -128, 128)
         _float_vals = (0.,
                     -.001, .001,
@@ -277,9 +279,6 @@ class TestBinaryUfuncs(TestCase):
                 self.assertEqualHelper(actual, expected, msg, dtype=dtype, equal_nan=equal_nan, exact_dtype=exact_dtype)
 
         for l, r in tensor_pairs:
-            # print("Tensor pair is: ")
-            # print(l)
-            # print(r)
             if dtype is torch.bfloat16:
                 l_numpy = l.cpu().to(torch.float32).numpy()
                 r_numpy = r.cpu().to(torch.float32).numpy()
@@ -289,12 +288,6 @@ class TestBinaryUfuncs(TestCase):
 
             actual = op(l, r)
             expected = op.ref(l_numpy, r_numpy)
-
-            # print("Actual:")
-            # print(actual)
-
-            # print("expected:")
-            # print(expected)
 
             # Crafts a custom error message for smaller, printable tensors
             if l.numel() < 10 and r.numel() < 10:

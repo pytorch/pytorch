@@ -10194,7 +10194,12 @@ op_db: List[OpInfo] = [
                     dtypes=integral_types_and(),
                     sample_inputs_func=sample_inputs_binary_pwise,
                     supports_autograd=False,
-                    ),
+                    skips = (
+                        # TODO: FIXME: lcm doesn't support scalars
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_broadcast_python_scalar'),
+                    )),
     BinaryUfuncInfo('gcd',
                     ref=np.gcd,
                     dtypes=integral_types_and(),
@@ -10205,6 +10210,10 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_small_values',
                                      dtypes=(torch.int8,)),
+                        # TODO: FIXME: jiterator doesn't support non-tensor inputs
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_broadcast_python_scalar'),
                         # TODO: FIXME: jiterator doesn't support casts to unsupported types
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',

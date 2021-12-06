@@ -50,7 +50,7 @@ void i0e_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-
+// See note [Jiterator]
 const char i1_name[] = "i1";
 void i1_kernel_cuda(TensorIteratorBase& iter) {
   #ifdef USE_JITERATOR

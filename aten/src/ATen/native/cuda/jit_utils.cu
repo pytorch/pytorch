@@ -10,23 +10,19 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <c10/util/irange.h>
 
-namespace at{
-
-namespace cuda{
-
-namespace jit {
+namespace at { namespace cuda { namespace jit {
 
 const std::string jit_code_template = R"ESCAPE(
   typedef long long int int64_t;
   typedef unsigned int uint32_t;
   typedef signed char int8_t;
-  typedef char uint8_t;
+  typedef unsigned char uint8_t;  // NOTE: this MUST be "unsigned char"! "char" is equivalent to "signed char"
   typedef short int16_t;
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
   static_assert(sizeof(int8_t) == 1, "expected size does not match");
   constexpr int num_threads = 128;
-  constexpr int thread_work_size = 4; //TODO make template substitution once we decide where those vars live
+  constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
   #define ERROR_UNSUPPORTED_CAST assert(false);
 
@@ -34,24 +30,19 @@ const std::string jit_code_template = R"ESCAPE(
   // NB: Order matters for this macro; it is relied upon in
   // _promoteTypesLookup and the serialization format.
   // Note, some types have ctype as void because we don't support them in codegen
-  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(_) \
+  #define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
   _(uint8_t, Byte) /* 0 */                               \
   _(int8_t, Char) /* 1 */                                \
   _(int16_t, Short) /* 2 */                              \
   _(int, Int) /* 3 */                                    \
   _(int64_t, Long) /* 4 */                               \
-  _(void, Half) /* 5 */                              \
+  _(void, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
-  _(void, ComplexHalf) /* 8 */        \
-  _(void, ComplexFloat) /* 9 */           \
-  _(void, ComplexDouble) /* 10 */        \
-  _(bool, Bool) /* 11 */                                 \
-  _(void, QInt8) /* 12 */                          \
-  _(void, QUInt8) /* 13 */                        \
-  _(void, QInt32) /* 14 */                        \
-  _(void, BFloat16) /* 15 */                     \
-  _(void, QUInt4x2) /* 16 */
+  _(void, ComplexFloat) /* 8 */                          \
+  _(void, ComplexDouble) /* 9 */                         \
+  _(bool, Bool) /* 10 */                                 \
+  _(void, BFloat16) /* 11 */                             \
 
   #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
@@ -64,7 +55,7 @@ const std::string jit_code_template = R"ESCAPE(
 
   enum class ScalarType : int8_t {
   #define DEFINE_ENUM(_1, n) n,
-  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_ENUM)
   #undef DEFINE_ENUM
       Undefined,
   NumOptions
@@ -291,7 +282,7 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   typedef long long int int64_t;
   typedef unsigned int uint32_t;
   typedef signed char int8_t;
-  typedef char uint8_t;
+  typedef unsigned char uint8_t;
   typedef short int16_t;
   static_assert(sizeof(int64_t) == 8, "expected size does not match");
   static_assert(sizeof(uint32_t) == 4, "expected size does not match");
@@ -372,11 +363,6 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
   struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
     scalar_t val[vec_size];
   };
-
-
-
-
-
 
   ${functor}
 
@@ -558,22 +544,15 @@ std::string generate_code(
   return cuda_template.format(env);
 }
 
-
+// Compiles the kernel
 NvrtcFunction jit_pwise_function(
     const std::string& code,
     const std::string& kernel_name) {
-
-  // TODO: this lock is could be acquired around the cache updates
-//  std::lock_guard<std::mutex> guard{jiterator_mutex};
-
-  // Compiles the kernel ---
-
   // Acquires device and NVRTC properties (for compile arch and occupancy calculations)
   const cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
   int major = 0, minor = 0;
   bool compile_to_sass = false;
   torch::jit::fuser::cuda::codegenOutputQuery(prop, major, minor, compile_to_sass);
-  //std::cout << "create program\n";
   // Creates the NVRTC program
   nvrtcProgram program;
   const auto& nvrtc = at::globalContext().getNVRTC();
@@ -605,12 +584,10 @@ NvrtcFunction jit_pwise_function(
   // Avoid excessive register usage from assertion
   args.push_back("-DNDEBUG");
 #endif
-//  std::cout << "compile program\n";
   // compiles and validates result
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
   if (compilation_result != NVRTC_SUCCESS) {
-    std::cout << "Compilation failed!" << std::endl;
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
@@ -644,7 +621,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
 
-    //TODO use guards to avoid leaking
+    // TODO: use guards to avoid leaking
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
     return compiled_kernel_;
@@ -674,9 +651,4 @@ void launch_jitted_pwise_function(
     nullptr));
 }
 
-// TODO: may need/want to initialize CUDA context here (refactor into nvrtc call)
-
-
-}
-}
-}
+}}} // at::cuda::jit

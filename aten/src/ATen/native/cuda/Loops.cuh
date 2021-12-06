@@ -86,7 +86,19 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 namespace at { namespace native {
 
 /* Note [Jiterator]
+The "jiterator" simply just-in-time compiles the same kernels that
+Loops.cuh (and CUDALoops.cuh) usually build. This reduces build time,
+build size, and CUDA context size.
 
+The jiterator currently has some limitations, however. It cannot:
+  - handle float16, bfloat16, or complex datatypes
+  - handle scalar inputs
+
+These improvements will likely come soon.
+
+For examples of how to use the jiterator see the i1 and gcd kernel
+implementations, which pass jittable strings implementing their
+operations instead of the typical CUDA functors.
 */
 
 // Entrypoint for jitted GPU kernels.
@@ -121,18 +133,15 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
   // Note: this is intentionally divergent from calling needs_dynamic_casting,
   //   which is more general and inspects a lambda to determine if dynamic
   //   casting is needed.
-  // TODO: this needs additional review
   bool needs_dynamic_casting = false;
 
   // Checks output
   const ScalarType return_scalar_type = c10::CppTypeToScalarType<return_type>::value;
   const auto dtype0 = iter.dtype(0);
   if (dtype0 != return_scalar_type) {
-    std::cout << "iter.dtype(0) != return_scalar_type" << std::endl;
-    std::cout << "iter.dtype(0) is " << dtype0 << std::endl;
-    std::cout << "return_scalar_type is " << return_scalar_type << std::endl;
     needs_dynamic_casting = true;
   }
+  // TODO: FIXME: support these datatypes!
   TORCH_CHECK(dtype0 != kComplexDouble && dtype0 != kComplexFloat &&
               dtype0 != kBFloat16 && dtype0 != at::kHalf,
                 "Encountered an unsupported dtype ", dtype0, "!");
@@ -142,11 +151,8 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
   for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
     const auto dtypei = iter.dtype(i);
     if (dtypei != compute_scalar_type) {
-      std::cout << "iter.dtype(i) != compute_scalar_type (i=" << i << ")" << std::endl;
-      std::cout << "iter.dtype(i) is " << dtypei << std::endl;
-      std::cout << "compute_scalar_type is " << compute_scalar_type << std::endl;
       needs_dynamic_casting = true;
-      // TODO: can't short-circuit here yet because the dtype check below needs to run on every arg
+      // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
     TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat &&
                 dtypei != kBFloat16 && dtypei != at::kHalf,

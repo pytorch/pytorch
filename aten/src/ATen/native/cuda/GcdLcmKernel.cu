@@ -12,6 +12,7 @@
 
 namespace at { namespace native {
 
+// See note [Jiterator]
 const char gcd_name[] = "gcd";
 void gcd_kernel_cuda(TensorIteratorBase& iter) {
   #ifdef USE_JITERATOR
@@ -22,7 +23,7 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
                         /*arity=*/ 2>(iter, gcd_string);
     });
   #else
-    AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cuda", [&]() {
+    AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cuda", [&]() {
       gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
         return calc_gcd(a, b);
       });
@@ -31,7 +32,7 @@ void gcd_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void lcm_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cuda", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cuda", [&]() {
     gpu_kernel(iter, [] GPU_LAMBDA (scalar_t a, scalar_t b) -> scalar_t {
       scalar_t g = calc_gcd(a, b);
       return (g == 0) ? 0 : ::abs(a / g * b);
