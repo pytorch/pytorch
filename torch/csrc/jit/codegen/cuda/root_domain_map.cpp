@@ -131,7 +131,7 @@ std::unordered_map<IterDomain*, IterDomain*> PairwiseRootDomainMap::
   TORCH_INTERNAL_ASSERT(top != nullptr);
 
   const auto& new2old = top->new2old();
-  for (size_t i = 0; i < consumer_root.size(); ++i) {
+  for (const auto i : c10::irange(consumer_root.size())) {
     IterDomain* map_key_id = producer_root[new2old[i]];
     IterDomain* map_value_id = consumer_root[i];
     if (!producer_to_consumer) {
@@ -742,7 +742,7 @@ void ComputeAtRootDomainMapBuilder::mapPointwiseOrReductionOp(Expr* e) {
         in_root,
         "\nOutput root domain: ",
         out_root);
-    for (size_t it = 0; it < in_root.size(); it++) {
+    for (const auto it : c10::irange(in_root.size())) {
       if (e->outputs().size() > 1) {
         TORCH_INTERNAL_ASSERT(
             e->isA<WelfordOp>(), "Only supported multioutput op is welford");
@@ -818,7 +818,7 @@ void ComputeAtRootDomainMapBuilder::handle(TransposeOp* op) {
 
   const auto& new2old = op->new2old();
 
-  for (size_t it = 0; it < out_root.size(); it++) {
+  for (const auto it : c10::irange(out_root.size())) {
     setMaybeMapped(in_td, in_root[new2old[it]], out_td, out_root[it]);
   }
 }
@@ -830,13 +830,13 @@ void ComputeAtRootDomainMapBuilder::handle(GatherOp* op) {
   const auto& out_root = out_td->getRootDomain();
 
   // Only maps the input root axes. Do not map the new window axes.
-  for (size_t it = 0; it < in_root.size(); it++) {
+  for (const auto it : c10::irange(in_root.size())) {
     setMaybeMapped(in_td, in_root[it], out_td, out_root[it]);
   }
 
   // Keep track of window axes so that they can be skipped when
   // mapping root domains
-  for (size_t it = in_root.size(); it < out_root.size(); it++) {
+  for (const auto it : c10::irange(in_root.size(), out_root.size())) {
     root_map_.window_axes_.insert(out_root[it]);
   }
 }
