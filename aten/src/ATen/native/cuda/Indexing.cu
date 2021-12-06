@@ -15,7 +15,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/cub.cuh>
+#include <ATen/cuda/cub.h>
 #include <c10/util/irange.h>
 #include <c10/core/QScheme.h>
 
@@ -209,6 +209,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   if (indices.size() > (size_t)self.dim()) {
     TORCH_CHECK_INDEX(false, "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   }
+  if (!self.is_contiguous()) {
+    self = self.contiguous();
+  }
   Tensor linearIndex, src, expandedValue = value;
   int64_t nElemBefore, strideBefore, sliceSize;
   std::vector<int64_t> inversePerm;
@@ -216,7 +219,15 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
   int64_t num_indices = linearIndex.numel();
 
   if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
-    auto expanded_size = infer_size_dimvector(expandedValue.sizes(), linearIndex.sizes());
+    auto expanded_size = at::DimVector(expandedValue.sizes());
+    auto size1 = expandedValue.sizes();
+    auto size2 = linearIndex.sizes();
+    if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    }
+    if (nElemBefore > 1) {
+      expanded_size.insert(expanded_size.begin(), nElemBefore);
+    }
     expandedValue = expandedValue.expand(expanded_size);
   }
   expandedValue = expandedValue.contiguous();
@@ -277,8 +288,9 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       });
 
-      if (permuted)
-          self.copy_(src_.permute(inversePerm));
+      if (permuted) {
+        self.copy_(src_.permute(inversePerm));
+      }
   }
 }
 

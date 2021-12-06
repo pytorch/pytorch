@@ -5,7 +5,9 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization.fake_quantize import (
     FakeQuantize,
+    FakeQuantizeBase,
     default_fake_quant,
+    default_dynamic_fake_quant,
     default_per_channel_weight_fake_quant,
     default_weight_fake_quant,
     default_fused_act_fake_quant,
@@ -141,6 +143,12 @@ default_qat_qconfig = QConfig(activation=default_fake_quant,
                               weight=default_weight_fake_quant)
 """
 Default qconfig for QAT.
+"""
+
+default_dynamic_qat_qconfig = QConfig(activation=default_dynamic_fake_quant,
+                                      weight=default_weight_fake_quant)
+"""
+Default qconfig for dynamic QAT.
 """
 
 default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
@@ -320,6 +328,30 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     else:
         assert q1 is not None and q2 is not None
         try:
-            return partial_equals(q1.activation.p, q2.activation.p) and partial_equals(q1.weight.p, q2.weight.p)
+            # Qconfig weight and activation can be either a partial wrapper,
+            # or an observer class. Special handling is required (above) for
+            # comparing partial wrappers.
+            if(isinstance(q1.activation, torch.ao.quantization.observer._PartialWrapper)):
+                activation_same = partial_equals(q1.activation.p, q2.activation.p)
+            else:
+                activation_same = q1.activation == q2.activation
+            if(isinstance(q1.weight, torch.ao.quantization.observer._PartialWrapper)):
+                weight_same = partial_equals(q1.weight.p, q2.weight.p)
+            else:
+                weight_same = q1.weight == q2.weight
+
+            return activation_same and weight_same
         except AttributeError:
             return q1 == q2
+
+def activation_is_memoryless(qconfig: QConfig):
+    """
+    Return whether the observer for activations defined in the given QConfig is memoryless.
+    """
+    def _is_memoryless(observer):
+        return hasattr(observer, "memoryless") and observer.memoryless
+    act = qconfig.activation()
+    if isinstance(act, FakeQuantizeBase) and hasattr(act, "activation_post_process"):
+        return _is_memoryless(act.activation_post_process)
+    else:
+        return _is_memoryless(act)
