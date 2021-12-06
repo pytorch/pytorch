@@ -57,7 +57,7 @@ static void NvFuserScheduler_Softmax(
 
   at::Tensor aten_input =
       (reduction_axis ? at::randn({iter_size, reduction_size}, options)
-                     : at::randn({reduction_size, iter_size}, options));
+                      : at::randn({reduction_size, iter_size}, options));
 
   std::vector<c10::IValue> aten_inputs({aten_input});
 
@@ -187,7 +187,6 @@ static void Baseline_Softmax(
     benchmark::State& benchmark_state,
     DataType dtype,
     const int reduction_axis) {
-
   at::manual_seed(0);
   auto options =
       at::TensorOptions().dtype(data_type_to_aten(dtype)).device(at::kCUDA, 0);
