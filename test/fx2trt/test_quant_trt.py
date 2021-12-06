@@ -49,6 +49,10 @@ def lower_to_trt(model, inputs, shape_ranges):
     return trt_mod
 
 class TestConvertFxDoNotUse(QuantizationTestCase):
+    def setUp(self):
+        super().setUp()
+        self.trt_backend_config_dict = get_tensorrt_backend_config_dict()
+
     def _test_quantized_inputs_outputs(
             self, prepare_custom_config_dict, prepare_count_check,
             convert_count_check):
@@ -75,7 +79,8 @@ class TestConvertFxDoNotUse(QuantizationTestCase):
             prepare_custom_config_dict=prepare_custom_config_dict)
         self.checkGraphModuleNodes(mp, expected_node_occurrence=prepare_count_check)
         mp(torch.randn(1, 1, 4, 4))
-        mq = _convert_fx_do_not_use(mp, is_reference=True)
+        mq = _convert_fx_do_not_use(
+            mp, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         self.checkGraphModuleNodes(mq, expected_node_occurrence=convert_count_check)
 
     def test_quantized_input_quantized_output(self):
@@ -175,7 +180,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=no_prepare)
         # calibration
         prepared(*inputs)
-        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(
+            prepared, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         self.checkGraphModuleNodes(quantized, expected_node_occurrence=no_convert)
         # lower to trt
         trt_mod = lower_to_trt(quantized, inputs, shape_ranges)
@@ -277,7 +283,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
 
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
-        m = _convert_fx_do_not_use(m, is_reference=True)
+        m = _convert_fx_do_not_use(
+            m, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 5,
             ns.call_method("dequantize"): 5,
@@ -306,7 +313,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         prepared = prepare_fx(m, {"": trt_unsupported_qconfig}, backend_config_dict=self.trt_backend_config_dict)
         # calibration
         prepared(linear_module_input)
-        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(
+            prepared, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 0,
             ns.call_method("dequantize"): 0,
@@ -328,7 +336,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         prepared = prepare_fx(
             m, {"": self.qconfig}, backend_config_dict=self.trt_backend_config_dict)
         self.assertTrue(len(dict(prepared.named_children())) == 1)
-        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(
+            prepared, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         node_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 2,
             ns.call_function(torch.cat): 1,
@@ -356,7 +365,8 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_module(torch.ao.quantization.HistogramObserver): 2,
         }
         self.checkGraphModuleNodes(prepared, expected_node_occurrence=node_occurrence)
-        quantized = _convert_fx_do_not_use(prepared, is_reference=True)
+        quantized = _convert_fx_do_not_use(
+            prepared, is_reference=True, backend_config_dict=self.trt_backend_config_dict)
         node_occurrence = {
             # input activation, output activation and weight
             ns.call_function(torch.quantize_per_tensor): 3,

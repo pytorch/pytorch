@@ -36,7 +36,7 @@ concurrency:
 jobs:
 
   ciflow_should_run:
-    runs-on: ubuntu-18.04
+    runs-on: linux.large
     timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
@@ -402,10 +402,18 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+          PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
+          if [[ $TEST_CONFIG != 'xla' ]]; then
+            # shellcheck disable=SC2089
+            PROXY_ENV="-e http_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e https_proxy=http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128 -e no_proxy=localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -427,12 +435,13 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e https_proxy="http://internal-tf-lb-20210727220640487900000002-835786077.us-east-1.elb.amazonaws.com:3128" -e no_proxy="localhost,127.0.0.1,github.com,amazonaws.com,s3.amazonaws.com,169.254.169.254,169.254.170.2,/var/run/docker.sock" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            ${PROXY_ENV} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -461,6 +470,22 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: |
           python3 tools/render_junit.py test/
+      - name: Zip JSONs for upload
+        if: always()
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+      - uses: seemethere/upload-artifact-s3@v3
+        name: Store Test Downloaded JSONs on S3
+        if: always()
+        with:
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:

@@ -46,8 +46,13 @@ struct TORCH_API AnyType : public Type {
   AnyType() : Type(TypeKind::AnyType) {}
 };
 
-inline std::string toString(TypePtr typePtr) {
-  return typePtr->str();
+inline std::string toString(const Type& type) {
+  return type.str();
+}
+
+// Shim for compatibility with code that uses TypePtr.
+inline std::string toString(const TypePtr& typePtr) {
+  return toString(*typePtr);
 }
 
 inline bool operator!=(const Type& lhs, const Type& rhs) {
@@ -2119,5 +2124,7 @@ private:
   TypePtr type_;
   std::string reason_;
 };
+
+TORCH_API bool containsAnyType(const TypePtr& type);
 
 } // namespace c10
