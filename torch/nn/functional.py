@@ -7,6 +7,13 @@ import torch
 from torch import _VF
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes
+# A workaround to support both TorchScript and MyPy:
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from torch.types import _dtype as DType
+else:
+    # The JIT doesn't understand Union, nor torch.dtype here
+    DType = int
 
 from .._jit_internal import boolean_dispatch, _overload, BroadcastingList1, BroadcastingList2, BroadcastingList3
 from ..overrides import (
@@ -1717,7 +1724,7 @@ def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     return ret
 
 
-def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None) -> Tensor:
+def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmin function.
 
     Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
@@ -1743,7 +1750,7 @@ def softmin(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtyp
     return ret
 
 
-def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None) -> Tensor:
+def softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmax function.
 
     Softmax is defined as:
@@ -1841,7 +1848,7 @@ def gumbel_softmax(logits: Tensor, tau: float = 1, hard: bool = False, eps: floa
     return ret
 
 
-def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[int] = None) -> Tensor:
+def log_softmax(input: Tensor, dim: Optional[int] = None, _stacklevel: int = 3, dtype: Optional[DType] = None) -> Tensor:
     r"""Applies a softmax followed by a logarithm.
 
     While mathematically equivalent to log(softmax(x)), doing these two
@@ -3618,17 +3625,17 @@ upsample.__doc__ = upsample.__doc__.format(**reproducibility_notes)
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[List[int]] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
     pass
 
 
 @_overload  # noqa: F811
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[float] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
     pass
 
 
@@ -3640,10 +3647,11 @@ def interpolate(  # noqa: F811
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
+    antialias: bool = False,
 ) -> Tensor:  # noqa: F811
     pass
 
-def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None) -> Tensor:  # noqa: F811
+def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optional[List[float]] = None, mode: str = 'nearest', align_corners: Optional[bool] = None, recompute_scale_factor: Optional[bool] = None, antialias: bool = False) -> Tensor:  # noqa: F811
     r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -3685,6 +3693,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             from the recomputed `scale_factor` due to rounding and precision issues.
             If `recompute_scale_factor` is ``False``, then `size` or `scale_factor` will
             be used directly for interpolation.
+        antialias (bool, optional): flag to apply anti-aliasing. Default: ``False``. Using anti-alias
+            option together with ``align_corners=False``, interpolation result would match Pillow
+            result for downsampling operation. Supported modes: ``'bilinear'``.
 
     .. note::
         With ``mode='bicubic'``, it's possible to cause overshoot, in other words it can produce
@@ -3728,6 +3739,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             mode=mode,
             align_corners=align_corners,
             recompute_scale_factor=recompute_scale_factor,
+            antialias=antialias
         )
 
     if mode in ("nearest", "area", "nearest-exact"):
@@ -3823,6 +3835,9 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
             output_size = [int(math.floor(float(input.size(i + 2)) * scale_factors[i])) for i in range(dim)]
         scale_factors = None
 
+    if antialias and not (mode in ("bilinear", ) and input.ndim == 4):
+        raise ValueError("Anti-alias option is only supported for bilinear mode")
+
     if input.dim() == 3 and mode == "nearest":
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest":
@@ -3857,6 +3872,13 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
         return torch._C._nn.upsample_linear1d(input, output_size, align_corners, scale_factors)
     if input.dim() == 4 and mode == "bilinear":
         assert align_corners is not None
+        # Enforce that the full call with the new kwarg is not invoked when scripting.
+        # TODO: Remove this scripting logic once the 2-week FC window has passed.
+        if antialias:
+            if not torch.jit.is_scripting():
+                return torch._C._nn._upsample_bilinear2d_aa(input, output_size, align_corners, scale_factors)
+            else:
+                raise RuntimeError("TorchScript currently does not support antialias in interpolate")
         return torch._C._nn.upsample_bilinear2d(input, output_size, align_corners, scale_factors)
     if input.dim() == 5 and mode == "trilinear":
         assert align_corners is not None
@@ -4723,7 +4745,7 @@ def _pad_circular(input: Tensor, padding: List[int]) -> Tensor:
     for idx, size in enumerate(paddable_shape):
         out_shape += (size + padding[-(idx * 2 + 1)] + padding[-(idx * 2 + 2)],)
 
-    out = torch.empty(out_shape, dtype=input.dtype, layout=input.layout, device=input.device)
+    out = input.new_empty(out_shape)
 
     # Put original array in padded array
     if ndim == 1:
