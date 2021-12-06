@@ -41,8 +41,12 @@ void ExpressionEvaluator::bind(
 
 c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
   if (precomputed_integers_ && precomputed_integers_->ready()) {
-    return precomputed_integers_->getMaybeValueFor(value);
-  } else if (value->isScalar() && value->isConst()) {
+    if (precomputed_integers_->getMaybeValueFor(value).has_value()) {
+      return precomputed_integers_->getMaybeValueFor(value);
+    }
+  }
+
+  if (value->isScalar() && value->isConst()) {
     return value->as<Int>()->value();
   } else {
     FUSER_PERF_SCOPE("kir::ExpressionEvaluator::evaluate");
