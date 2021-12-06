@@ -581,7 +581,6 @@ class TestOperators(TestCase):
         xfail('cummax'),
         xfail('cummin'),
         xfail('cumprod'),
-        xfail('diag'),
         xfail('diag_embed'),
         xfail('eig'),
         xfail('fft.ihfft'),
