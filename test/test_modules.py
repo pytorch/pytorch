@@ -521,8 +521,10 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
         cudnn_greater_7_6 = False
+        cudnn_greater_8 = False
         if torch.backends.cudnn.is_available():
             cudnn_greater_7_6 = torch.backends.cudnn.version() >= 7603
+            cudnn_greater_8 = torch.backends.cudnn.version() >= 8005
 
         def _get_mem_formats(channels_last=False, channels_last_3d=False):
             if channels_last:
@@ -535,6 +537,7 @@ class TestModule(TestCase):
                 return ([torch.contiguous_format],
                         [torch.preserve_format, torch.contiguous_format])
 
+        # Check that at least one Tensor input has dim=n
         def _check_dims(obj, n):
             if isinstance(obj, torch.Tensor):
                 return obj.dim() == n
@@ -543,8 +546,12 @@ class TestModule(TestCase):
             else:
                 return False
 
+        # Called after _check_dims
         def _to_mem_format(obj, mem_format):
             if isinstance(obj, torch.Tensor):
+                d = obj.dim()
+                if (mem_format == torch.channels_last and d != 4 or mem_format == torch.channels_last_3d and d != 5):
+                    return obj
                 return obj.to(memory_format=mem_format)
             elif isinstance(obj, (tuple, list)):
                 return type(obj)(_to_mem_format(o, mem_format) for o in obj)
@@ -559,7 +566,7 @@ class TestModule(TestCase):
                     or (module_mem_format == torch.channels_last and 'Conv' in name and cudnn_greater_7_6))):  # noqa: E129
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
                 elif (output.dim() == 5 and (input_mem_format == torch.channels_last_3d
-                      or (module_mem_format == torch.channels_last_3d and 'Conv' in name and cudnn_greater_7_6))):
+                      or (module_mem_format == torch.channels_last_3d and 'Conv' in name and cudnn_greater_8))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
