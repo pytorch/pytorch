@@ -1265,6 +1265,7 @@ Operation createTensorExprOp(const Node* node) {
     std::ostringstream node_ss;
     node->print(node_ss, 0, nullptr);
     auto node_str = node_ss.str();
+    auto subgraph = node->g(attr::Subgraph);
     auto it = cached_kernels.find(node_str);
     std::shared_ptr<tensorexpr::TensorExprKernel> kernel;
     if (it != cached_kernels.end()) {
@@ -1277,13 +1278,25 @@ Operation createTensorExprOp(const Node* node) {
       }
       std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
           custom_lowerings;
-      auto subgraph = node->g(attr::Subgraph);
       kernel = std::make_shared<tensorexpr::TensorExprKernel>(
           subgraph, custom_lowerings, sym_shapes);
       cached_kernels[node_str] = kernel;
     }
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
-    kernel->run(stack);
+
+    // Stack contents:
+    //   [<outputs>] <inputs>
+    //
+    // If the number of graph inputs is same as the stack size, then no
+    // outputs are being passed in. Otherwise, output tensors are passed in
+    // at the bottom of the stack. So, we call the appropriate run function
+    // in TensorExprKernel.
+    auto num_subgraph_inputs = subgraph->inputs().size();
+    if (num_subgraph_inputs == stack.size()) {
+      kernel->run(stack);
+    } else {
+      kernel->runWithAllocatedOutputs(stack);
+    }
     return 0;
   };
 }
