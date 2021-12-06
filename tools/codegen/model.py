@@ -79,7 +79,6 @@ class DispatchKey(Enum):
     PrivateUse3 = auto()
     EndOfBackendKeys = PrivateUse3
 
-    ZeroTensor = auto()
     Meta = auto()
     BackendSelect = auto()
     Named = auto()

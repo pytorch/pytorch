@@ -4,7 +4,14 @@
 namespace at {
 namespace native {
 
-Tensor _make_dual(const Tensor& primal, const Tensor& tangnet, int64_t level) {
+// We expect this code to only be reached in inference mode and when all inputs are inference tensors
+Tensor _make_dual(const Tensor& primal, const Tensor& tangent, int64_t level) {
+  TORCH_INTERNAL_ASSERT(
+      InferenceMode::is_enabled() && primal.is_inference() && tangent.is_inference(),
+      "Expected this function to only be reached in inference mode and when all the "
+      "inputs are inference tensors. You should NOT call this function directly as "
+      "native::_make_dual. Please use the dispatcher, i.e., at::_make_dual. Please "
+      "file an issue if you come across this error otherwise.");
   return at::alias(primal);
 }
 
