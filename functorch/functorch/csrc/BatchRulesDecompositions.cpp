@@ -147,6 +147,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(cross_entropy_loss);
   OP_DECOMPOSE(arctan2);
   OP_DECOMPOSE(layer_norm);
+  OP_DECOMPOSE(diag_backward);
 }
 
 }}
