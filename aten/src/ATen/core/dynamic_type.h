@@ -6,26 +6,40 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
-/**
- * bits       31    30        29    12         11      10      9     1 0 |
- * covariant | any | singleton | ... | Optional | Class | Dict | ... | Tensor |
- */
-#define FORALL_DYNAMIC_JIT_TYPES(_) \
-  _(Tensor, 0x00000001)             \
-  _(None, 0x00000002)               \
-  _(Bool, 0x00000004)               \
-  _(Int, 0x00000008)                \
-  _(Float, 0x00000010)              \
-  _(Complex, 0x00000020)            \
-  _(Number, 0x00000038)             \
-  _(String, 0x00000040)             \
-  _(List, 0x00000080)               \
-  _(Tuple, 0x80000100)              \
-  _(Dict, 0x00000200)               \
-  _(Class, 0x00000400)              \
-  _(Optional, 0x80000802)           \
-  _(AnyList, 0x40000080)            \
-  _(AnyTuple, 0xc0000100)           \
+using DynamicTypeBits = std::uint32_t;
+#define DYNAMIC_TYPE_BIT(x) (1u << x)
+
+constexpr DynamicTypeBits kDynamicCovariantTypeBit = DYNAMIC_TYPE_BIT(31);
+constexpr DynamicTypeBits kDynamicAnyTypeBit = DYNAMIC_TYPE_BIT(30);
+constexpr DynamicTypeBits kDynamicSingletonTypeBit = DYNAMIC_TYPE_BIT(29);
+
+constexpr DynamicTypeBits kDynamicNoneTypeBit = DYNAMIC_TYPE_BIT(1);
+constexpr DynamicTypeBits kDynamicIntTypeBit = DYNAMIC_TYPE_BIT(3);
+constexpr DynamicTypeBits kDynamicFloatTypeBit = DYNAMIC_TYPE_BIT(4);
+constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
+constexpr DynamicTypeBits kDynamicListTypeBit = DYNAMIC_TYPE_BIT(7);
+constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
+
+
+#define FORALL_DYNAMIC_TYPES(_)                                              \
+  _(Tensor, DYNAMIC_TYPE_BIT(0))                                             \
+  _(None, kDynamicNoneTypeBit)                                               \
+  _(Bool, DYNAMIC_TYPE_BIT(2))                                               \
+  _(Int, kDynamicIntTypeBit)                                                 \
+  _(Float, kDynamicFloatTypeBit)                                             \
+  _(Complex, kDynamicComplexTypeBit)                                         \
+  _(Number,                                                                  \
+    (kDynamicIntTypeBit | kDynamicFloatTypeBit | kDynamicComplexTypeBit))    \
+  _(String, DYNAMIC_TYPE_BIT(6))                                             \
+  _(List, kDynamicListTypeBit)                                               \
+  _(Tuple, (kDynamicTupleTypeBit | kDynamicCovariantTypeBit))                \
+  _(Dict, DYNAMIC_TYPE_BIT(9))                                               \
+  _(Class, DYNAMIC_TYPE_BIT(10))                                             \
+  _(Optional,                                                                \
+    (DYNAMIC_TYPE_BIT(11) | kDynamicNoneTypeBit | kDynamicCovariantTypeBit)) \
+  _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit))                     \
+  _(AnyTuple,                                                                \
+    (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit))  \
   _(Any, 0xffffffff)
 
 namespace c10 {
@@ -50,11 +64,11 @@ class DynamicType : public Type {
     std::vector<LabeledDynamicType> elems;
   };
 
-  enum class Tag : std::uint32_t {
+  enum class Tag : DynamicTypeBits {
 #define DYNAMIC_TYPE_ITEM(NAME, VAL) NAME = VAL,
-    FORALL_DYNAMIC_JIT_TYPES(DYNAMIC_TYPE_ITEM)
+    FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_ITEM)
 #undef DYNAMIC_TYPE_ITEM
-        Singleton = 0x20000000,
+        Singleton = kDynamicSingletonTypeBit,
   };
 
   bool operator==(const Type& rhs) const override;
@@ -63,10 +77,10 @@ class DynamicType : public Type {
     return "Dynamic";
   }
   static const TypeKind Kind = TypeKind::DynamicType;
+  static DynamicTypePtr create(Type& ty);
 
  private:
   friend struct Type;
-  static DynamicTypePtr create(Type& ty);
   static std::shared_ptr<const DynamicType> create(const Type& ty);
   DynamicType(const Type& other);
   bool equals(const DynamicType& other) const;
