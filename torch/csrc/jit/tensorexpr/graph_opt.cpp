@@ -207,6 +207,56 @@ std::shared_ptr<Graph> removeUnusedSelfArgument(
   return graph;
 }
 
+std::vector<int64_t> makeShapesSymbolic(
+    std::shared_ptr<Graph>& graph,
+    const std::vector<int64_t>& size_vals) {
+  std::unordered_set<Value*> values;
+  for (auto v : graph->inputs()) {
+    values.insert(v);
+  }
+  for (auto v : graph->outputs()) {
+    values.insert(v);
+  }
+  for (auto n : graph->nodes()) {
+    for (auto v : n->inputs()) {
+      values.insert(v);
+    }
+    for (auto v : n->outputs()) {
+      values.insert(v);
+    }
+  }
+  std::unordered_map<int64_t, int64_t> shape_to_sym_shape;
+  std::vector<int64_t> new_syms;
+  for (int64_t size_val : size_vals) {
+    auto new_shape_symbol = at::ShapeSymbol::newSymbol().value();
+    shape_to_sym_shape[size_val] = new_shape_symbol;
+    new_syms.push_back(new_shape_symbol);
+    graph->addInput("sym_shape")->setType(IntType::get());
+  }
+
+  for (auto v : values) {
+    if (!v->type()->cast<TensorType>()) {
+      continue;
+    }
+    auto tt = v->type()->expect<TensorType>();
+    if (!tt->symbolic_sizes().sizes()) {
+      continue;
+    }
+    std::vector<at::ShapeSymbol> shape_vec = *tt->symbolic_sizes().sizes();
+
+    auto new_sizes = c10::fmap(shape_vec, [&](const at::ShapeSymbol& shape) {
+      auto value = shape.value();
+      if (shape_to_sym_shape.count(value)) {
+        return shape_to_sym_shape.at(value);
+      }
+      return value;
+    });
+    v->setType(tt->withSymbolicShapes(c10::SymbolicShape(new_sizes)));
+  }
+
+  return new_syms;
+}
+
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch
