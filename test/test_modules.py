@@ -520,7 +520,9 @@ class TestModule(TestCase):
         name = module_info.module_cls.__name__
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
-        cudnn_greater_7_6 = torch.backends.cudnn.version() >= 7603
+        cudnn_greater_7_6 = False
+        if torch.backends.cudnn.is_available():
+            cudnn_greater_7_6 = torch.backends.cudnn.version() >= 7603
 
         def _get_mem_formats(channels_last=False, channels_last_3d=False):
             if channels_last:
