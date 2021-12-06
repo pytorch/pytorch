@@ -1185,7 +1185,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   auto opoverloadbundle_type = py::module::import("torch").attr("ops").attr("OpOverloadBundle");
   py::bool_ is_overloadbundle = py::isinstance(obj, opoverloadbundle_type);
   if (py::cast<bool>(is_overloadbundle)) {
-    std::cout<<"Entering py::cast<bool>(is_overloadbundle)\n";
     obj = opoverloadbundle_type.attr("op")(obj);
   }
 
