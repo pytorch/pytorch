@@ -71,8 +71,8 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
     data_out[i] = static_cast<output_t>(numel);
 }
 
-template <typename F, typename ...Args>
-Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... args) {
+template <typename F>
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
   TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
   TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
 
@@ -90,8 +90,17 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args&&... arg
   auto self_values = self.values();
   auto result_values = result.values();
 
-  op_out(self_values, std::forward<Args>(args)..., result_values);
+  op_out(self_values, result_values);
   return result;
+}
+
+template <typename F>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+
+  auto self_values = self.values();
+  op_inplace(self_values);
+  return self;
 }
 
 template <typename input_t, typename output_t>
@@ -179,7 +188,9 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
 
 #define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
   Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
-    return op_name##_sparse_csr_out(self, self);                           \
+    return unary_op_inplace(self, [](Tensor& t) {                          \
+      return t.op_name##_();                                               \
+    });                                                                    \
   }
 
 #define CREATE_UNARY_UFUNC(op_name)                                        \
@@ -192,7 +203,6 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
 
 // Exhaustive list of the unary ufuncs supported by sparse CSR
-CREATE_UNARY_UFUNC(angle);
 CREATE_UNARY_UFUNC(asin);
 CREATE_UNARY_UFUNC(asinh);
 CREATE_UNARY_UFUNC(atan);
@@ -217,6 +227,7 @@ CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
 
 // signbit, isneginf and isposinf currently don't have an inplace variant
+CREATE_UNARY_UFUNC_NO_INPLACE(angle);
 CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
 CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
 CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
