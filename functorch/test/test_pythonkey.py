@@ -214,6 +214,7 @@ make_fx_failures = {
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.ctc_loss'),
+    xfail('nn.functional.fractional_max_pool3d', device_type='cpu'),
     xfail('randn_like'), # randomness
     xfail('rand_like'), # randomness
     xfail('randint_like'), # randomness
