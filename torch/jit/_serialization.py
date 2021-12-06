@@ -147,8 +147,8 @@ def load(f, map_location=None, _extra_files=None):
         os.remove("scriptmodule.pt")
     """
 
-    # Populate upgrader map in torch.jit.load because
-    # this is the only place we actually use upgraders
+    # TODO (tugsuu) Putting this on top level creates
+    # circular import issue. We need to fix this later
     from torch.jit.operator_upgraders import populate_upgraders_map
     populate_upgraders_map()
 

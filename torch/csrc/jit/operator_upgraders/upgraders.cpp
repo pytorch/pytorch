@@ -26,8 +26,8 @@ int UpgradersMap::count() {
   return content_.size();
 }
 
-// this is used for testing, so copying is not a perf issue
-std::unordered_map<std::string, std::string> UpgradersMap::get_content() {
+const std::unordered_map<std::string, std::string>& UpgradersMap::
+    get_content() {
   std::lock_guard<std::mutex> _(lock);
   return content_;
 }
@@ -41,7 +41,7 @@ int get_upgraders_map_size() {
   return upgradersMap.count();
 }
 
-std::unordered_map<std::string, std::string> dump_upgraders_map() {
+const std::unordered_map<std::string, std::string>& dump_upgraders_map() {
   return upgradersMap.get_content();
 }
 
