@@ -680,7 +680,7 @@ Violating any of these will likely cause a runtime error:
   :meth:`CUDAGraph.capture_end<torch.cuda.CUDAGraph.capture_end>` calls.
   :class:`~torch.cuda.graph` and
   :func:`~torch.cuda.make_graphed_callables` set a side stream for you.)
-* Ops that sychronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
+* Ops that synchronize the CPU with the GPU (e.g., ``.item()`` calls) are prohibited.
 * CUDA RNG ops are allowed, but must use default generators. For example, explicitly constructing a
   new :class:`torch.Generator` instance and passing it as the ``generator`` argument to an RNG function
   is prohibited.
@@ -791,8 +791,8 @@ lets us capture and run graph-safe sections as graphs regardless::
     module3 = torch.nn.Linear(H, D_out).cuda()
 
     loss_fn = torch.nn.MSELoss()
-    optimizer = torch.optim.SGD(chain(module1.parameters() +
-                                      module2.parameters() +
+    optimizer = torch.optim.SGD(chain(module1.parameters(),
+                                      module2.parameters(),
                                       module3.parameters()),
                                 lr=0.1)
 
@@ -819,7 +819,7 @@ lets us capture and run graph-safe sections as graphs regardless::
         else:
             tmp = module3(tmp)  # forward ops run as a graph
 
-        loss = loss_fn(tmp, y)
+        loss = loss_fn(tmp, target)
         # module2's or module3's (whichever was chosen) backward ops,
         # as well as module1's backward ops, run as graphs
         loss.backward()
