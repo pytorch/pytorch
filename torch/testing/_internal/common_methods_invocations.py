@@ -7593,6 +7593,11 @@ def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, lo
         *[((S, S), dict(reduction=reduction, weight=make((S, S)))) for reduction in reductions],
     ]
 
+    if logits:
+        shapes_and_kwargs.extend(
+            [((S, S), dict(reduction=reduction, pos_weight=make((S,), low=0))) for reduction in reductions]
+        )
+
     return [
         SampleInput(
             (make if logits else make_prob)(shape, requires_grad=requires_grad),
@@ -14346,6 +14351,30 @@ op_db: List[OpInfo] = [
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+            ),
+        ),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: aten::mul_(self, *extra_args) is not possible because there exists a Tensor `other` in extra_args
+            # that has more elements than `self`. This happened due to `other` being vmapped over but `self` not being
+            # vmapped over at level 1. Please try to use out-of-place operators instead of aten::mul_.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_grad",
+            ),
+            # RuntimeError: one of the variables needed for gradient computation has been modified by an inplace
+            # operation: [torch.DoubleTensor [5, 5]], which is output 0 of SigmoidBackward0, is at version 1;
+            # expected version 0 instead.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
                 "TestJit",
                 "test_variant_consistency_jit",
             ),
