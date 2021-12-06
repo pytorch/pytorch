@@ -1,7 +1,17 @@
+import abc
 import torch
 from itertools import repeat
 import collections
 from torch.nn.modules.module import _addindent
+
+class ReferenceableQuantizedModule(torch.nn.Module):
+    """Wrapper for quantized modules than can be lowered from reference modules."""
+    __metaclass__ = abc.ABCMeta
+
+    @classmethod
+    @abc.abstractmethod
+    def from_reference(self, ref_module, output_scale, output_zero_point):
+        raise NotImplementedError
 
 def _quantize_weight(float_wt, observer):
     wt_scale, wt_zp = observer.calculate_qparams()

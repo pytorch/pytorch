@@ -1,27 +1,29 @@
 import torch
+from torch.nn.quantized.modules.utils import ReferenceableQuantizedModule
 from . import subgraph_rewriter_FORKED_DO_NOT_USE
 from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
 from .utils import _parent_name
+from typing import Dict, Type
 
 # Mapping from reference module class to the replacement quantized module class for lowering
-_lower_module_map = {
+LOWER_MODULE_MAP: Dict[Type[torch.nn.Module], Type[ReferenceableQuantizedModule]] = {
     torch.nn.quantized._reference.Linear: torch.nn.quantized.Linear,
     torch.nn.quantized._reference.Conv1d: torch.nn.quantized.Conv1d,
     torch.nn.quantized._reference.Conv2d: torch.nn.quantized.Conv2d,
     torch.nn.quantized._reference.Conv3d: torch.nn.quantized.Conv3d,
 }
 
-def _lower_ref(model: QuantizedGraphModule, ref_class: type) -> QuantizedGraphModule:
+def _lower_weighted_ref_module(model: QuantizedGraphModule, ref_class: Type[torch.nn.Module]) -> QuantizedGraphModule:
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
     and replace them with the quantized version of the ref module.
     """
-    if ref_class not in _lower_module_map:
+    if ref_class not in LOWER_MODULE_MAP:
         raise ValueError("Lowering is currently not supported for reference module %s" % ref_class.__name__)
-    q_class = _lower_module_map[ref_class]
+    q_class = LOWER_MODULE_MAP[ref_class]
 
     pattern = (torch.quantize_per_tensor,
                (ref_class, "dequantize"),
@@ -56,6 +58,7 @@ def _lower_ref(model: QuantizedGraphModule, ref_class: type) -> QuantizedGraphMo
         ref_module = modules[ref_node.target]
         output_scale = getattr(model, scale_node.target)
         output_zero_point = getattr(model, zero_point_node.target)
+        assert issubclass(q_class, ReferenceableQuantizedModule) # suppress mypy warnings
         q_module = q_class.from_reference(ref_module, output_scale, output_zero_point)
 
         # replace reference module with quantized module
@@ -80,8 +83,8 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function
     """
-    for ref_class in _lower_module_map.keys():
-        model = _lower_ref(model, ref_class)
+    for ref_class in LOWER_MODULE_MAP.keys():
+        model = _lower_weighted_ref_module(model, ref_class)
     model.recompile()
     for pattern, replacement in get_fbgemm_patterns_and_replacements():
         subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
