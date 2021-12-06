@@ -123,6 +123,7 @@ on:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.upload_test_reports(name='bazel') }}
+      !{{ common.upload_downloaded_files(name='bazel') }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
 {%- endblock %}
