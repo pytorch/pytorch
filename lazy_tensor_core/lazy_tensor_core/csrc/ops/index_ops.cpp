@@ -2,11 +2,12 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
+#include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
@@ -17,7 +18,6 @@
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace {
@@ -123,7 +123,7 @@ CanonicalIndexInfo TransposeToFront(at::Tensor base, at::TensorList indices) {
             adjacency_info.start_dim};
   }
   return {base.permute(dims), std::move(transposed_indices),
-          torch::lazy::InversePermutation(ToI64Vector(dims)), 0};
+          torch::lazy::InversePermutation(torch::lazy::ToI64Vector(dims)), 0};
 }
 
 torch::lazy::NodePtr IndexFillOp(const torch::lazy::Value& buffer, int64_t dim,

@@ -2,6 +2,7 @@
 #define COMPUTATION_CLIENT_UTIL_H_
 
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/hash.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -11,8 +12,6 @@
 #include <numeric>
 #include <type_traits>
 #include <vector>
-
-#include "torch/csrc/lazy/core/hash.h"
 
 namespace lazy_tensors {
 namespace util {

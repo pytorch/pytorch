@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/lazy/core/ir_util.h>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
@@ -13,7 +14,6 @@
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/unique.h"
-#include "torch/csrc/lazy/core/ir_metadata.h"
 namespace torch_lazy_tensors {
 namespace {
 

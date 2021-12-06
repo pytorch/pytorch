@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/debug_util.h"
 
 #include <torch/csrc/lazy/backend/backend_device.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
@@ -9,7 +10,6 @@
 #include <sstream>
 #include <unordered_set>
 
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
@@ -37,7 +37,7 @@ std::unordered_set<std::string>* LoadExperiments() {
   std::string experiments =
       lazy_tensors::sys_util::GetEnvString("LTC_EXPERIMENTAL", "");
   std::vector<std::string> experiment_list =
-      StrSplit(experiments, ':');
+      torch::lazy::StrSplit(experiments, ':');
   for (auto& name : experiment_list) {
     xset->insert(name);
   }

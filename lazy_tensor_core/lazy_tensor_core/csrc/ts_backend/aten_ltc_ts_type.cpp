@@ -1,13 +1,13 @@
 #include <ATen/Operators.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/library.h>
 
 #include "ATen/MetaFunctions.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/cat.h"
 #include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
@@ -110,8 +110,8 @@ at::Tensor LazyNativeFunctions::as_strided(
     c10::optional<int64_t> storage_offset) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
-  auto xsize = ToI64Vector(size);
-  auto xstride = ToI64Vector(stride);
+  auto xsize = torch::lazy::ToI64Vector(size);
+  auto xstride = torch::lazy::ToI64Vector(stride);
   if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided)>::call(self, size, stride,
@@ -126,8 +126,8 @@ const at::Tensor& LazyNativeFunctions::as_strided_(
     c10::optional<int64_t> storage_offset) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
-  auto xsize = ToI64Vector(size);
-  auto xstride = ToI64Vector(stride);
+  auto xsize = torch::lazy::ToI64Vector(size);
+  auto xstride = torch::lazy::ToI64Vector(stride);
   if (!torch::lazy::AsStrided::StrideIsSupported(xstride)) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP(as_strided_)>::call(self, size, stride,
@@ -192,7 +192,7 @@ at::Tensor LazyNativeFunctions::constant_pad_nd(const at::Tensor& self,
                                                 const at::Scalar& value) {
   LTC_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::constant_pad_nd(
-      TryGetLtcTensor(self), ToI64Vector(pad), value));
+      TryGetLtcTensor(self), torch::lazy::ToI64Vector(pad), value));
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor>
@@ -207,8 +207,9 @@ LazyNativeFunctions::convolution_backward_overrideable(
     LTC_FN_COUNTER("lazy::");
     auto result = lazy_tensor_aten_ops::convolution_backward_overrideable(
         TryGetLtcTensor(grad_output), TryGetLtcTensor(input),
-        TryGetLtcTensor(weight), ToI64Vector(stride), ToI64Vector(padding),
-        ToI64Vector(dilation), transposed, ToI64Vector(output_padding), groups,
+        TryGetLtcTensor(weight), torch::lazy::ToI64Vector(stride),
+        torch::lazy::ToI64Vector(padding), torch::lazy::ToI64Vector(dilation),
+        transposed, torch::lazy::ToI64Vector(output_padding), groups,
         std::move(output_mask));
     return std::make_tuple(CreateAtenFromLtcTensor(std::get<0>(result)),
                            CreateAtenFromLtcTensor(std::get<1>(result)),
@@ -298,15 +299,17 @@ at::Tensor LazyNativeFunctions::convolution_overrideable(
              ? CreateAtenFromLtcTensor(
                    lazy_tensor_aten_ops::convolution_overrideable(
                        TryGetLtcTensor(input), TryGetLtcTensor(weight),
-                       TryGetLtcTensor(*bias), ToI64Vector(stride),
-                       ToI64Vector(padding), ToI64Vector(dilation), transposed,
-                       ToI64Vector(output_padding), groups))
+                       TryGetLtcTensor(*bias), torch::lazy::ToI64Vector(stride),
+                       torch::lazy::ToI64Vector(padding),
+                       torch::lazy::ToI64Vector(dilation), transposed,
+                       torch::lazy::ToI64Vector(output_padding), groups))
              : CreateAtenFromLtcTensor(
                    lazy_tensor_aten_ops::convolution_overrideable(
                        TryGetLtcTensor(input), TryGetLtcTensor(weight),
-                       ToI64Vector(stride), ToI64Vector(padding),
-                       ToI64Vector(dilation), transposed,
-                       ToI64Vector(output_padding), groups));
+                       torch::lazy::ToI64Vector(stride),
+                       torch::lazy::ToI64Vector(padding),
+                       torch::lazy::ToI64Vector(dilation), transposed,
+                       torch::lazy::ToI64Vector(output_padding), groups));
 }
 
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
@@ -555,8 +558,8 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
                                         at::IntArrayRef dims) {
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
-  return CreateAtenFromLtcTensor(
-      lazy_tensor_aten_ops::permute(self_tensor, ToI64Vector(dims)));
+  return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::permute(
+      self_tensor, torch::lazy::ToI64Vector(dims)));
 }
 
 at::Tensor& LazyNativeFunctions::random_(
@@ -612,7 +615,7 @@ at::Tensor LazyNativeFunctions::repeat(const at::Tensor& self,
                                        at::IntArrayRef repeats) {
   LTC_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::repeat(
-      TryGetLtcTensor(self), ToI64Vector(repeats)));
+      TryGetLtcTensor(self), torch::lazy::ToI64Vector(repeats)));
 }
 
 at::Tensor LazyNativeFunctions::select(const at::Tensor& self, int64_t dim,
@@ -741,7 +744,7 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
   LTC_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   return CreateAtenFromLtcTensor(
-      lazy_tensor_aten_ops::view(self_tensor, ToI64Vector(size)));
+      lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
 }
 
 void InitializeAtenBindings() {}

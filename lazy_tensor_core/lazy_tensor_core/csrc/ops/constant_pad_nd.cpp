@@ -1,8 +1,9 @@
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/helpers.h"
+#include <torch/csrc/lazy/core/helpers.h>
+
 #include "lazy_tensor_core/csrc/ops/scalar.h"
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

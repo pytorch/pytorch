@@ -1,5 +1,7 @@
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 
+#include <torch/csrc/lazy/core/helpers.h>
+
 #include <fstream>
 #include <limits>
 #include <mutex>
@@ -7,7 +9,6 @@
 #include <thread>
 #include <unordered_set>
 
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/core/platform/stacktrace.h"
@@ -38,7 +39,7 @@ TrackerContext* LoadTrackerContext() {
 
     std::string fn_list =
         lazy_tensors::sys_util::GetEnvString("LTC_FNTRACKER_LIST", "");
-    for (auto& fn : torch_lazy_tensors::StrSplit(fn_list, ':')) {
+    for (auto& fn : torch::lazy::StrSplit(fn_list, ':')) {
       if (!fn.empty()) {
         tctx->tags.insert(std::string(fn));
       }
