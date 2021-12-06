@@ -77,7 +77,7 @@ class DynamicType : public Type {
     return "Dynamic";
   }
   static const TypeKind Kind = TypeKind::DynamicType;
-  static DynamicTypePtr create(Type& ty);
+  static TORCH_API DynamicTypePtr create(Type& ty);
 
  private:
   friend struct Type;
