@@ -185,6 +185,8 @@ vjp_fail = {
     xfail('tensor_split'),
     xfail('to_sparse'),
     xfail('nn.functional.ctc_loss'),
+    xfail('nn.functional.fractional_max_pool3d'),
+    xfail('nn.functional.fractional_max_pool2d'),
 }
 
 class TestOperators(TestCase):
@@ -282,7 +284,9 @@ class TestOperators(TestCase):
             self.assertEqual(tangent_outs, expected_tangent_outs)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_vjp', vjp_fail)
+    @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
+	xfail('nn.functional.conv_transpose3d', device_type='cuda'),
+    }))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
@@ -448,6 +452,13 @@ class TestOperators(TestCase):
         xfail('lu'),
         skip('qr'),  # Nondetermistic
         xfail('_masked.prod'), # calls aten::item
+        xfail('nn.functional.conv_transpose3d'),
+        xfail('stft'),
+        xfail('nn.functional.glu'),
+        xfail('nn.functional.conv_transpose1d', device_type='cuda'),
+        xfail('nn.functional.fractional_max_pool3d'),
+        xfail('as_strided'),
+        xfail('nn.functional.fractional_max_pool2d'),
     })
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
@@ -664,6 +675,24 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
+        xfail('nn.functional.conv_transpose3d'),
+        xfail('_masked.norm'),
+        xfail('_masked.normalize'),
+        xfail('nn.functional.bilinear'),
+        xfail('nn.functional.prelu'),
+        xfail('nn.functional.glu'),
+        xfail('nn.functional.fractional_max_pool3d'),
+        xfail('as_strided'),
+        xfail('linalg.solve_triangular'),
+        xfail('stft'),
+        xfail('nn.functional.rrelu'),
+        xfail('nn.functional.embedding_bag'),
+        xfail('nn.functional.softshrink'),
+        xfail('nn.functional.conv_transpose1d'),
+        xfail('nn.functional.max_pool3d'),
+        xfail('istft'),
+        xfail('nn.functional.fractional_max_pool2d'),
+        xfail('linalg.tensorsolve'),
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
@@ -718,6 +747,10 @@ class TestOperators(TestCase):
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('double', 'channels_last'),
         xfail('masked_select'),
+        xfail('nn.functional.fractional_max_pool3d'),
+	xfail('nn.functional.glu'),
+	xfail('as_strided'),
+	xfail('nn.functional.fractional_max_pool2d'),
     }))
     def test_vjpvmap(self, device, dtype, op):
         # NB: there is no vjpvmap_has_batch_rule test because that is almost
@@ -790,6 +823,11 @@ class TestDecompositionOpInfo(TestCase):
         skip('mvlgamma'),
         skip('eig'),
         skip('nn.functional.dropout'),
+        skip('_masked.softmin'),
+        skip('_masked.log_softmax'),
+        skip('stft'),
+        skip('_masked.softmax'),
+        skip('_masked.normalize'),
         # Some weird matmul stuff with int64 matmuls
         # inplace op
         skip('resize_'),
