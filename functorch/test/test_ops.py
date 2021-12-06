@@ -398,7 +398,6 @@ class TestOperators(TestCase):
         xfail('clamp', ''),
         xfail('diag_embed'),
         xfail('eig'),
-        xfail('nn.functional.conv_transpose2d'),
         xfail('view_as_complex'),
         xfail('fft.ihfft'),
         xfail('fft.ihfft'),
