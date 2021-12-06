@@ -244,45 +244,6 @@ def _recursive_wrap(
     return module, 0
 
 
-def auto_wrap(module: nn.Module, auto_wrap_policy: Optional[Callable] = None, **kwargs: Any) -> nn.Module:
-    """
-    Annotate that a module should be wrapped with the *wrapper_cls* from the
-    :func:`enable_wrap` context (if the context exists) and recursively wrap
-    children modules that meet the criteria given by :func:`auto_wrap_policy`. This
-    is useful for wrapping large complex layers.
-
-    .. note:: auto_wrap can only be applied to a module once because it
-        assumes none of the sub-modules is already wrapped and uses that
-        assumption to compute the wrapped vs. unwrapped parameters.
-        To get around this limitation, users can pre-assign ``wrapper_config``
-        attributes to the sub-modules they want to wrap (in multiple passes)
-        and then uses the ``config_auto_wrap_policy``.
-
-    .. warning:: It is not recommended to use :func:`auto_wrap` with
-        :class:`FullyShardedDataParallel` on modules that have shared
-        parameters, as the parameter sharing may be broken (i.e. end up not
-        shared) if the shared parameters are not (auto-)wrapped under the same
-        FSDP wrapper instance.
-
-    Usage::
-
-        with enable_wrap(**params):
-            # Wraps children modules.
-            self.l1 = auto_wrap(TransformerBlock())
-
-    Args:
-        module (nn.Module):
-            module to wrap (if in :func:`enable_wrap` context)
-        auto_wrap_policy (Callable):
-            a function to determine should Module to be wrapped.
-            (default: wrap if > 100M parameters)
-    """
-    if ConfigAutoWrap.in_autowrap_context:
-        wrapped_module, _ = ConfigAutoWrap.recursive_wrap(module, auto_wrap_policy=auto_wrap_policy, **kwargs)
-        return wrapped_module
-    return module
-
-
 class ConfigAutoWrap:
     """
     Helper class to wrap modules based on default config args via a context manager.
@@ -325,33 +286,3 @@ class ConfigAutoWrap:
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.disable_autowrap_context()
-
-    @staticmethod
-    def recursive_wrap(
-        module: nn.Module,
-        auto_wrap_policy: Optional[Callable],
-        **kwargs: Any
-    ) -> Tuple[nn.Module, int]:
-        """
-        Automatically wrap child modules of *module* that meet the given
-        criteria with :func:`auto_wrap`.
-
-        Args:
-            module (nn.Module):
-                module to recursively wrap
-            auto_wrap_policy (Callable, Optional):
-                optionally, override the :func:`auto_wrap_policy` from the context.
-
-        Returns:
-            (nn.Module, int):
-                Wrapped module and the number parameters wrapped recursively.
-        """
-        if auto_wrap_policy is None:
-            auto_wrap_policy = ConfigAutoWrap.auto_wrap_policy
-
-        return _recursive_wrap(
-            module=module,
-            auto_wrap_policy=auto_wrap_policy,  # type: ignore[arg-type]
-            wrapper_cls=ConfigAutoWrap.wrapper_cls,  # type: ignore[arg-type]
-            **{**ConfigAutoWrap.kwargs, **kwargs}
-        )
