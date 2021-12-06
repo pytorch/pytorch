@@ -191,8 +191,6 @@ class Wishart(ExponentialFamily):
 
         return sample
 
-        return sample
-
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
