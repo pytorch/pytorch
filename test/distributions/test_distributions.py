@@ -4415,9 +4415,9 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             ),
             (
-                Wishart(19 + positive_var, cov_tensor),
-                scipy.stats.wishart(19 + positive_var, cov_tensor)
-            ),            
+                Wishart(19 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
+                scipy.stats.wishart(19 + positive_var[0], cov_tensor),
+            ),
         ]
 
     def test_mean(self):
