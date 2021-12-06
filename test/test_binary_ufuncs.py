@@ -717,6 +717,7 @@ class TestBinaryUfuncs(TestCase):
     # Verifies that gcd throws an error when given an out of float16, bfloat16, or complex dtype
     #   because the jiterator does not support casting to these datatypes
     # TODO: FIXME: the jiterator should be updated to support these datatypes
+    @skipCUDAIfRocm
     @onlyCUDA
     def test_jiterator_unsupported(self, device):
         lhs = torch.tensor((1, 2, 3), device=device)
