@@ -189,6 +189,7 @@ jobs:
         name: Store Test Downloaded JSONs on Github
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         with:
+          name: test-jsons
           retention-days: 14
           if-no-files-found: warn
           path:
