@@ -735,6 +735,17 @@ template<> void blasTriangularSolve<float>(char side, char uplo, char trans, cha
 }
 #endif
 
+void _linalg_check_errors(
+    const Tensor& info,
+    const c10::string_view api_name,
+    bool is_matrix) {
+  if (is_matrix) {
+    singleCheckErrors(info.item<int64_t>(), api_name);
+  } else {
+    batchCheckErrors(info, api_name);
+  }
+}
+
 // Below of the definitions of the functions operating on a batch that are going to be dispatched
 // in the main helper functions for the linear algebra operations
 
@@ -1193,12 +1204,7 @@ Tensor linalg_inv(const Tensor &input) {
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message
-  if (input.dim() > 2) {
-    batchCheckErrors(info, "torch.linalg.inv");
-  } else {
-    singleCheckErrors(info.item<int64_t>(), "torch.linalg.inv");
-  }
-
+  at::_linalg_check_errors(info, "torch.linalg.inv", input.dim() == 2);
   return result;
 }
 
@@ -1483,12 +1489,7 @@ Tensor linalg_cholesky(const Tensor &self, bool upper) {
 
   // we pass check_errors=false above and do the check here
   // so that the name of the function is correct in the error message
-  if (self.dim() > 2) {
-    batchCheckErrors(info, "torch.linalg.cholesky");
-  } else {
-    singleCheckErrors(info.item<int64_t>(), "torch.linalg.cholesky");
-  }
-
+  at::_linalg_check_errors(info, "torch.linalg_cholesky", self.dim() == 2);
   return result;
 }
 
