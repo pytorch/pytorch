@@ -13,10 +13,12 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
 #include <torch/csrc/jit/passes/remove_redundant_profiles.h>
+#include <torch/csrc/jit/passes/symbolic_shape_runtime_fusion.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/operator_options.h>
+#include <torch/csrc/jit/runtime/symbolic_shape_registry.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
 #include <torch/csrc/jit/tensorexpr/kernel.h>
 #include <torch/csrc/utils/memory.h>
@@ -26,6 +28,12 @@ C10_DEFINE_bool(
     torch_jit_disable_cat,
     false,
     "disable aten::cat in TE fusion groups");
+
+C10_DEFINE_bool(
+    torch_jit_enable_dynamic_shape_fusion,
+    false,
+    "enable TE fusion using dynamic shapes");
+
 namespace torch {
 namespace jit {
 
@@ -149,6 +157,14 @@ bool tensorExprFuserEnabled() {
     return false;
   }
   return true;
+}
+
+bool tensorExprDynamicShapeFusionEnabled() {
+  return FLAGS_torch_jit_enable_dynamic_shape_fusion;
+}
+
+void setTensorExprDynamicShapeFusionEnabled(bool val) {
+  FLAGS_torch_jit_enable_dynamic_shape_fusion = val;
 }
 
 bool setTexprReductionsEnabled(bool value) {
@@ -489,10 +505,17 @@ class TensorExprFuser {
     // fusion is done.
     inlineSmallFusionGroups(graph_->block());
     GRAPH_DUMP("After inlining small fusion groups: ", graph_);
-    prepareFusionGroupAndGuardOutputs(graph_->block());
-    GRAPH_DUMP("After guarding fusion groups: ", graph_);
-    removeTensorTypeSpecializations(graph_->block());
-    GRAPH_DUMP("After removing tensor type specializations: ", graph_);
+    if (tensorExprDynamicShapeFusionEnabled()) {
+      VLOG(1) << "TensorExpr fusion with dynamic shapes is enabled"
+              << std::endl;
+      generalizeFusionGroups(graph_->block());
+      GRAPH_DUMP("After generalizing fusion groups: ", graph_);
+    } else {
+      prepareFusionGroupAndGuardOutputs(graph_->block());
+      GRAPH_DUMP("After guarding fusion groups: ", graph_);
+      removeTensorTypeSpecializations(graph_->block());
+      GRAPH_DUMP("After removing tensor type specializations: ", graph_);
+    }
   }
 
  private:
@@ -1013,6 +1036,14 @@ class TensorExprFuser {
     // A hook to optimizations limitter to allow bisecting the pass
     REQ(JIT_OPT_ALLOWED);
 
+    if (tensorExprDynamicShapeFusionEnabled()) {
+      // Allow only if the node has a shape function defined.
+      // ListConstruct node is an exception since that is needed to fuse
+      // aten::cat, though it does not have a shape function.
+      REQ(node->kind() == prim::ListConstruct ||
+          (node->maybeSchema() && shapeComputeGraphForSchema(node->schema())));
+    }
+
     return true;
   }
 
@@ -1128,6 +1159,26 @@ class TensorExprFuser {
     }
   }
 
+  void generalizeFusionGroups(Block* block) {
+    std::vector<Node*> fusion_groups;
+    for (Node* n : block->nodes()) {
+      for (Block* b : n->blocks()) {
+        generalizeFusionGroups(b);
+      }
+      if (n->kind() == prim::TensorExprGroup) {
+        fusion_groups.push_back(n);
+      }
+    }
+    for (Node* fusion_group : fusion_groups) {
+      VLOG(1) << "GenerateGuard for fusion group: " << *fusion_group;
+      if (!GenerateGuard(fusion_group)) {
+        VLOG(1) << "  Unfusing the fusion group because GenerateGuard failed"
+                << std::endl;
+        SubgraphUtils::unmergeSubgraph(fusion_group);
+      }
+    }
+  }
+
   // This function parses the option provided by the environment variable
   // "PYTORCH_TENSOREXPR_DONT_FUSE".
   // This variable allows users to disable fusion on a list of specified
@@ -1184,8 +1235,14 @@ void FuseTensorExprs(
 }
 
 Operation createTensorExprOp(const Node* node) {
-  auto kernel =
-      std::make_shared<tensorexpr::TensorExprKernel>(node->g(attr::Subgraph));
+  std::vector<int64_t> sym_shapes;
+  if (node->hasAttribute(attr::symbolic_shape_inputs)) {
+    sym_shapes = node->is(attr::symbolic_shape_inputs);
+  }
+  std::unordered_map<c10::Symbol, tensorexpr::NNCLoweringFunction>
+      custom_lowerings;
+  auto kernel = std::make_shared<tensorexpr::TensorExprKernel>(
+      node->g(attr::Subgraph), custom_lowerings, sym_shapes);
   return [kernel](Stack& stack) {
     RECORD_FUNCTION(kernel->getKernelName(), std::vector<c10::IValue>());
     kernel->run(stack);
