@@ -253,12 +253,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
             ? at::slow_conv_transpose2d_backward(
                   grad_output.to(device_type), input.to(device_type),
                   weight.to(device_type), kernel_size, stride, padding,
-                  output_padding, dilation,
-                  at::empty_like(grad_output, options,
-                                 at::MemoryFormat::Contiguous),
-                  at::empty_like(grad_output, options,
-                                 at::MemoryFormat::Contiguous),
-                  output_mask)
+                  output_padding, dilation, output_mask)
             : at::slow_conv_transpose3d_backward(
                   grad_output.to(device_type), input.to(device_type),
                   weight.to(device_type), kernel_size, stride, padding,

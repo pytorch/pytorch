@@ -18,11 +18,6 @@ const BackendImplInterface* getBackend() {
   return interface;
 }
 
-BackendRegistrar::BackendRegistrar(
-    const BackendImplInterface* backend_impl_interface) {
-  backend_impl_registry.store(backend_impl_interface);
-}
-
 at::Tensor MakeTensorFromComputationData(
     const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
