@@ -71,34 +71,8 @@ default_auto_wrap_policy.EXCLUDE_WRAP_MODULES = {nn.ModuleList, nn.ModuleDict}  
 default_auto_wrap_policy.FORCE_LEAF_MODULES = {nn.MultiheadAttention}  # type: ignore[attr-defined]
 
 
-def config_auto_wrap_policy(module: nn.Module, recurse: bool, unwrapped_params: int,) -> bool:
-    """Config based policy function for :func:`auto_wrap`.
-
-       Return true for a module to be wrapped if it is already tagged with
-       a ``wrapper_config`` attribute.
-
-    Args:
-       module (nn.Module):
-           The module to be considered in this decision.
-       recurse (bool):
-           Indicate if this is called to make a decision on whether we
-           should recurse down a subgraph of the module structure.
-           If False, it means this function is called to make a decision
-           on whether we should wrap the said module.
-       unwrapped_params (int):
-           The number of parameters yet to be wrapped in this module.
-           Unused by this function.
-    """
-    if recurse:
-        # We should always recurse.
-        return True
-    else:
-        # If we are not recursing, determine if we should wrap.
-        return hasattr(module, "wrapper_config")
-
-
 @contextlib.contextmanager
-def enable_wrap(auto_wrap_policy: Optional[Callable] = None, **wrapper_kwargs: Any) -> Generator[None, None, None]:
+def enable_wrap(**wrapper_kwargs: Any) -> Generator[None, None, None]:
     """
     Context manager to wrap modules using a wrapper.
 
@@ -114,24 +88,13 @@ def enable_wrap(auto_wrap_policy: Optional[Callable] = None, **wrapper_kwargs: A
         with enable_wrap(**params):
             # Wraps layer in FSDP by default if within context
             self.l1 = wrap(torch.nn.Linear(5, 5))
-            self.l2 = auto_wrap(
-                TransformerBlock(),
-                # Wraps children modules based on a different min_num_params
-                auto_wrap_policy=functools.partial(default_auto_wrap_policy, min_num_params=1e7)
-            )
 
     Args:
-        auto_wrap_policy (Callable, Optional):
-            Custom function to control how to do :func:`auto_wrap`. This is
-            useful to exclude unsupported modules or wrap based on sizes when
-            wrapping recursively. Note: modules annotated with :func:`wrap`
-            ignore this policy and will always be wrapped.
-            (default: :func:`default_auto_wrap_policy`)
         **wrapper_kwargs:
             Configuration settings that will be passed to all ``wrap``
             instances inside the context
     """
-    with ConfigAutoWrap(auto_wrap_policy, **wrapper_kwargs):
+    with ConfigAutoWrap(**wrapper_kwargs):
         yield
 
 
@@ -253,14 +216,12 @@ class ConfigAutoWrap:
     in_autowrap_context: bool = False  # Context flag
     wrapper_cls: Optional[Callable] = None  # The wrapper class
     kwargs: Dict[str, Any] = {}  # Wrapper's args
-    auto_wrap_policy: Optional[Callable] = None  # Used only in auto_wrap
 
-    def __init__(self, auto_wrap_policy: Optional[Callable] = None, **kwargs: Dict[str, Any]):
-        self.auto_wrap_policy = auto_wrap_policy
+    def __init__(self, **kwargs: Dict[str, Any]):
         self.kwargs = kwargs
 
     @staticmethod
-    def enable_autowrap_context(auto_wrap_policy: Optional[Callable], kwargs: Any) -> None:
+    def enable_autowrap_context(kwargs: Any) -> None:
         if ConfigAutoWrap.in_autowrap_context:
             raise NotImplementedError(
                 "You are already within an autowrap context and we currently do not supported nested autowrap."
@@ -271,7 +232,6 @@ class ConfigAutoWrap:
         ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.
-        ConfigAutoWrap.auto_wrap_policy = default_auto_wrap_policy if auto_wrap_policy is None else auto_wrap_policy
         ConfigAutoWrap.kwargs = kwargs
 
     @staticmethod
@@ -279,10 +239,9 @@ class ConfigAutoWrap:
         ConfigAutoWrap.in_autowrap_context = False
         ConfigAutoWrap.wrapper_cls = None
         ConfigAutoWrap.kwargs = {}
-        ConfigAutoWrap.auto_wrap_policy = None
 
     def __enter__(self) -> None:
-        self.enable_autowrap_context(self.auto_wrap_policy, self.kwargs)
+        self.enable_autowrap_context(self.kwargs)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.disable_autowrap_context()
