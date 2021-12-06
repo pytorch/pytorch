@@ -12,14 +12,11 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <torch/csrc/autograd/variable.h>
-#include <c10/util/ThreadLocalDebugInfo.h>
 #include <c10/util/irange.h>
+#include <ATen/FuncTorchTLS.h>
 
 namespace at {
 namespace functorch {
-
-// Initial autograd layer, because autograd is always "on"
-// thread_local std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1) };
 
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
 DynmetaData kDynMetaDataSingleton;
@@ -28,35 +25,31 @@ static DynmetaData& getGlobalDynmetaData() {
   return kDynMetaDataSingleton;
 }
 
-class DynamicLayerStackHolder : public c10::DebugInfoBase {
+class DynamicLayerStackHolder : public FuncTorchTLSBase {
  public:
   DynamicLayerStackHolder() {}
-  virtual ~DynamicLayerStackHolder() {}
 
+  std::unique_ptr<FuncTorchTLSBase> deepcopy() const override {
+    auto result = std::make_unique<DynamicLayerStackHolder>();
+    result->dynamicLayerStack = dynamicLayerStack;
+    return result;
+  }
+
+  // Initial autograd layer, because autograd is always "on"
+  // TODO: Get rid of this, it is bad for composability
   std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, true) };
 };
 
-thread_local std::shared_ptr<DynamicLayerStackHolder> kDynamicLayerStack;
-
 static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
-  if (kDynamicLayerStack != nullptr) {
-    // TODO: can figure out how to memoize this. std::call_once with thread_local?
-    return kDynamicLayerStack->dynamicLayerStack;
+  auto& state = functorchTLSAccessor();
+  if (state == nullptr) {
+    state = std::make_unique<DynamicLayerStackHolder>();
   }
-  if (ThreadLocalDebugInfo::current() != nullptr) {
-    // TODO: this is going to break if someone else uses PRODUCER_INFO
-    kDynamicLayerStack = std::static_pointer_cast<DynamicLayerStackHolder>(
-        ThreadLocalDebugInfo::_peek(c10::DebugInfoKind::PRODUCER_INFO));
-    TORCH_INTERNAL_ASSERT(kDynamicLayerStack != nullptr);
-    return kDynamicLayerStack->dynamicLayerStack;
-  }
-  kDynamicLayerStack = std::make_shared<DynamicLayerStackHolder>();
-  c10::ThreadLocalDebugInfo::_push(
-      // TODO: this isn't a PRODUCER_INFO, but there's nothing else we can use
-      c10::DebugInfoKind::PRODUCER_INFO,
-      kDynamicLayerStack);
-  TORCH_INTERNAL_ASSERT(kDynamicLayerStack != nullptr);
-  return kDynamicLayerStack->dynamicLayerStack;
+  // Raw pointer usage OK, `state` keeps the pointer alive
+  FuncTorchTLSBase* raw_state = state.get();
+  DynamicLayerStackHolder* holder = static_cast<DynamicLayerStackHolder*>(raw_state);
+  // TODO: Can memoize if perf is a problem
+  return holder->dynamicLayerStack;
 }
 
 std::shared_ptr<bool> getLifeHandleForLevel(int64_t level) {
