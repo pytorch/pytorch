@@ -55,7 +55,7 @@ torch::lazy::Value ApplyViewInfo(torch::lazy::Value ir_value, const ViewInfo& vi
           view_info.diagonal->dim2);
     default:
       LOG(ERROR) << "Invalid view type: "
-                 << lazy_tensors::util::GetEnumValue(view_info.view_type);
+                 << torch::lazy::GetEnumValue(view_info.view_type);
   }
 }
 
@@ -110,7 +110,7 @@ torch::lazy::Value ApplyUpdate(torch::lazy::Value ir_value,
         break;
       default:
         LOG(ERROR) << "Invalid view type: "
-                   << lazy_tensors::util::GetEnumValue(view_info.view_type);
+                   << torch::lazy::GetEnumValue(view_info.view_type);
     }
   }
   return result;

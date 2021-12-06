@@ -83,14 +83,14 @@ LazyTensor::Data* LazyTensor::data() const {
 
 int64_t LazyTensor::size(int64_t dim) const {
   auto tensor_shape = shape();
-  int rank = tensor_shape.get().dim();
+  int rank = tensor_shape.Get().dim();
   int dim_index = GetCanonicalDimensionIndex(dim, rank);
-  return tensor_shape.get().size(dim_index);
+  return tensor_shape.Get().size(dim_index);
 }
 
-at::ScalarType LazyTensor::dtype() const { return shape().get().scalar_type(); }
+at::ScalarType LazyTensor::dtype() const { return shape().Get().scalar_type(); }
 
-lazy_tensors::util::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
+torch::lazy::MaybeRef<torch::lazy::Shape> LazyTensor::shape() const {
   if (data()->view != nullptr) {
     return data()->view->shape();
   }
@@ -188,10 +188,10 @@ void LazyTensor::SetIrValue(torch::lazy::Value ir_value) {
 
 void LazyTensor::SetInPlaceIrValue(torch::lazy::Value ir_value) {
   auto tensor_shape = shape();
-  if (tensor_shape.get().scalar_type() !=
+  if (tensor_shape.Get().scalar_type() !=
       torch::lazy::GetShapeFromTsValue(ir_value).scalar_type()) {
     ir_value = torch::lazy::MakeNode<ir::ops::Cast>(
-        ir_value, tensor_shape.get().scalar_type());
+        ir_value, tensor_shape.Get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
 }
@@ -400,14 +400,14 @@ void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
 }
 
 void LazyTensor::UpdateFromTensorOut(at::Tensor tensor) {
-  if (data()->view != nullptr && shape().get().numel() != tensor.numel()) {
+  if (data()->view != nullptr && shape().Get().numel() != tensor.numel()) {
     data()->view = nullptr;
   }
   UpdateFromTensor(std::move(tensor), /*sync=*/false);
 }
 
 void LazyTensor::UpdateFromTensorOut(const LazyTensor& tensor) {
-  if (data()->view != nullptr && shape().get().numel() != tensor.shape().get().numel()) {
+  if (data()->view != nullptr && shape().Get().numel() != tensor.shape().Get().numel()) {
     data()->view = nullptr;
   }
   SetIrValue(tensor.GetIrValue());

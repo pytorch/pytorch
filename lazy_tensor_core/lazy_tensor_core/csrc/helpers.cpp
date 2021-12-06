@@ -6,7 +6,7 @@
 
 #include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 
@@ -61,7 +61,7 @@ std::vector<int64_t> MakeTransposePermutation(int64_t dim0, int64_t dim1,
                                               int64_t rank) {
   int64_t canonical_dim0 = GetCanonicalDimensionIndex(dim0, rank);
   int64_t canonical_dim1 = GetCanonicalDimensionIndex(dim1, rank);
-  auto permute_dims = lazy_tensors::util::Iota<int64_t>(rank);
+  auto permute_dims = torch::lazy::Iota<int64_t>(rank);
   std::swap(permute_dims[canonical_dim0], permute_dims[canonical_dim1]);
   return permute_dims;
 }

@@ -27,7 +27,7 @@
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 #include "lazy_tensors/core/platform/macros.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
@@ -273,7 +273,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
       auto post_order = torch::lazy::Util::ComputePostOrder(roots);
       if (post_order.size() > nodes_threshold) {
         ss << "Tensor: id=" << tensor.GetUniqueId()
-           << ", shape=" << tensor.shape().get()
+           << ", shape=" << tensor.shape().Get()
            << ", device=" << tensor.GetDevice()
            << ", ir_nodes=" << post_order.size() << "\n";
         for (size_t i = post_order.size(); i > 0; --i) {

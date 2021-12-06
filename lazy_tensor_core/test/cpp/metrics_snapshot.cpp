@@ -2,7 +2,7 @@
 
 #include <regex>
 
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace cpp_test {

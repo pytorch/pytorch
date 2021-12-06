@@ -3,7 +3,7 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace ir {

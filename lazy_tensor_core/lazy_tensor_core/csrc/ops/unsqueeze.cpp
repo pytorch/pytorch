@@ -1,6 +1,6 @@
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
 
-#include "lazy_tensors/computation_client/util.h"
+#include <torch/csrc/lazy/core/util.h>
 
 namespace torch_lazy_tensors {
 namespace ir {

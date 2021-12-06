@@ -123,9 +123,9 @@ class DeviceLockerArena {
 
   // Use a set to impose an order on the device locking sequence (ABBA
   // prevention).
-  std::vector<lazy_tensors::util::ExceptionCleanup> LockDevices(
+  std::vector<torch::lazy::ExceptionCleanup> LockDevices(
       const std::set<torch::lazy::BackendDevice>& devices) {
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     unlocker.reserve(devices.size());
     for (auto& device : devices) {
       unlocker.emplace_back(LockDevice(device));
@@ -134,12 +134,12 @@ class DeviceLockerArena {
   }
 
  private:
-  lazy_tensors::util::ExceptionCleanup LockDevice(const torch::lazy::BackendDevice& device) {
+  torch::lazy::ExceptionCleanup LockDevice(const torch::lazy::BackendDevice& device) {
     auto locker = DeviceLockerArena::Get()->GetLocker(device);
     locker->Lock();
-    return lazy_tensors::util::ExceptionCleanup(
+    return torch::lazy::ExceptionCleanup(
         [locker = std::move(locker)](
-            lazy_tensors::util::ExceptionCleanup::StatusType status) {
+            torch::lazy::ExceptionCleanup::StatusType status) {
           locker->Unlock(std::move(status));
         });
   }
@@ -190,7 +190,7 @@ class DataCacheArena {
   struct TensorHasher {
     size_t operator()(const at::Tensor& tensor) const {
       return torch::lazy::HashReduce(torch::lazy::HashCombine(
-          lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
+          torch::lazy::GetEnumValue(tensor.scalar_type()),
           torch::lazy::TensorHash(tensor)));
     };
   };
@@ -471,7 +471,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<torch::lazy::BackendDevice> 
   }
   }
   // The LockDevices() API returns a vector of
-  // lazy_tensors::util::ExceptionCleanup object, which is going to be freed
+  // torch::lazy::ExceptionCleanup object, which is going to be freed
   // immediately, turning this operation into a lock barrier.
   DeviceLockerArena::Get()->LockDevices(wait_devices);
 }
@@ -555,9 +555,9 @@ void LazyGraphExecutor::Async::Wait() {
   mwait.Wait();
   // Accessing other Async members is safe only after MultiWait::Wait()
   // completes.
-  lazy_tensors::util::ExceptionCleanup::StatusType status;
+  torch::lazy::ExceptionCleanup::StatusType status;
   for (auto& cleanup : unlocker) {
-    const lazy_tensors::util::ExceptionCleanup::StatusType& cleanup_status =
+    const torch::lazy::ExceptionCleanup::StatusType& cleanup_status =
         cleanup.GetStatus();
     if (cleanup_status != nullptr) {
       if (status == nullptr) {
@@ -915,7 +915,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       // surfaced when the user tries to acquire the device locks the next time.
       std::exception_ptr exptr = std::current_exception();
       for (auto& unlocker : async->unlocker) {
-        unlocker.SetStatus(exptr);
+        unlocker.SetStatus(std::move(exptr));
       }
       throw;
     }
