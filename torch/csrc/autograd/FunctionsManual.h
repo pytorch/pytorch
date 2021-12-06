@@ -194,6 +194,22 @@ Tensor triangular_solve_jvp(
   const bool transpose,
   const bool unitriangular
 );
+Tensor linalg_solve_triangular_forward_AD(
+    const Tensor& A_t,
+    const Tensor& B_t,
+    const Tensor& A,
+    const Tensor& X,
+    const bool upper,
+    const bool left,
+    const bool unitriangular);
+std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
+    const Tensor& grad,
+    const Tensor& A,
+    const Tensor& X,
+    const bool upper,
+    const bool left,
+    const bool unitriangular,
+    std::array<bool, 2> output_mask);
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
                                                        IntArrayRef expand1, IntArrayRef expand2, IntArrayRef expand3,
                                                        IntArrayRef sumdim, std::array<bool, 3> grad_mask);
@@ -309,9 +325,10 @@ Tensor i1e_backward(
     const Tensor& result);
 std::tuple<Tensor, Tensor> lu_solve_backward(
   const Tensor& grad,
-  const Tensor& self,
+  const Tensor& X,
   const Tensor& LU_data,
-  const Tensor& LU_pivots
+  const Tensor& LU_pivots,
+  const std::array<bool, 2>& grad_input_mask
 );
 Tensor lu_solve_jvp(
   const Tensor& X,
