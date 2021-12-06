@@ -277,14 +277,6 @@ FusionKernelRuntime::FusionKernelRuntime(
   } else {
     auto complete_fusion_heuristic = maybe_complete_fusion_heuristic.value();
 
-    // Translate welfords if apply
-    if (fusion_copy->hasWelford()) {
-      bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
-          fusion_copy.get(), inputs);
-      if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
-      }
-    }
     // Take ownership of the transformed fusion
     single_kernel_fusion_ = std::move(fusion_copy);
 

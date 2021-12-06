@@ -1740,9 +1740,10 @@ TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
     const at::ArrayRef<IValue>& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
+  auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).begin(),
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).end());
+      ir_utils::filterByType<WelfordOp>(exprs).begin(),
+      ir_utils::filterByType<WelfordOp>(exprs).end());
 
   if (wouldTranslateToPersistent(orignal_welfords)) {
     for (auto welford : orignal_welfords) {
@@ -1859,6 +1860,21 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
         [&original_to_test_map](Val* out) {
           return original_to_test_map.clone(out);
         });
+
+    // If only average is used from welford, we should still translate, but we
+    // might not detect persistence if variance isn't actually used/marked as an
+    // output in the test.
+    for (auto welford_to_translate : copied_welfords) {
+      auto avg = welford_to_translate->outAvg();
+      auto var = welford_to_translate->outVar();
+      if (avg->uses().empty()) {
+        test_group_outputs_.push_back(avg);
+      }
+
+      if (var->uses().empty()) {
+        test_group_outputs_.push_back(var);
+      }
+    }
 
     // Temporarily localize test copy around
     //  the group boundary

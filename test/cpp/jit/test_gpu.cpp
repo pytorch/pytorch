@@ -16013,7 +16013,8 @@ TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
   fusion->addInput(tv0);
 
   auto tvs = Welford(tv0, {1});
-  fusion->addOutput(tvs.var_sum);
+  auto tv_out = add(tv0, broadcast(tvs.avg, {false, true}));
+  fusion->addOutput(tv_out);
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
 
   auto run_test = [&executor_cache,
@@ -16023,9 +16024,13 @@ TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
     auto outputs = executor_cache.runFusionWithInputs({t0});
     // Square sums does not fit well in the testValidate assumptions,
     //  so we just compare the divided output here.
-    outputs[0] /= inner_size;
-    auto t1 = t0.var({1}, false);
-    testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
+    testValidate(
+        fusion,
+        outputs,
+        {t0},
+        {t0.add(t0.mean({1}).unsqueeze(1))},
+        __LINE__,
+        __FILE__);
 
     return executor_cache.getMostRecentKernelRuntime();
   };
@@ -16033,18 +16038,22 @@ TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
   // Run a translated welford
   auto runtime1 = run_test(64);
   // Check it was translated
-  TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 2);
   TORCH_CHECK(
-      runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
-      ScheduleHeuristic::Persistent);
+      runtime1->fusionSegments()->groups().size() == 1 &&
+      runtime1->fusionSegments()->groups()[0]->exprs().size() > 2);
 
   // Run an un-translated welford
   auto runtime2 = run_test(65536);
-  // Check it was not translated
-  TORCH_CHECK(runtime2->singleKernelFusion()->unordered_exprs().size() == 1);
-  TORCH_CHECK(
-      runtime2->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
-      ScheduleHeuristic::Reduction);
+
+  bool found_welford = false;
+  for (auto group : runtime2->fusionSegments()->groups()) {
+    for (auto expr : group->exprs()) {
+      if (expr->isA<WelfordOp>()) {
+        found_welford = true;
+      }
+    }
+  }
+  TORCH_CHECK(found_welford);
 }
 
 TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
@@ -16056,10 +16065,12 @@ TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
   fusion->addInput(tv0);
 
   auto tvs1 = Welford(tv0, {1});
-  auto tvs2 = Welford(tv0, {1});
+  auto tv_out1 = add(tv0, broadcast(tvs1.avg, {false, true}));
+  fusion->addOutput(tv_out1);
 
-  fusion->addOutput(tvs1.var_sum);
-  fusion->addOutput(tvs2.var_sum);
+  auto tvs2 = Welford(tv0, {1});
+  auto tv_out2 = add(tv0, broadcast(tvs2.avg, {false, true}));
+  fusion->addOutput(tv_out2);
 
   FusionExecutorCache executor_cache(std::move(fusion_ptr));
 
@@ -16071,10 +16082,8 @@ TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
 
     // Square sums does not fit well in the testValidate assumptions,
     //  so we just compare the divided output here.
-    outputs[0] /= inner_size;
-    outputs[1] /= inner_size;
-    auto t1 = t0.var({1}, false);
-    testValidate(fusion, outputs, {t0}, {t1, t1}, __LINE__, __FILE__);
+    auto out = t0.add(t0.mean({1}).unsqueeze(1));
+    testValidate(fusion, outputs, {t0}, {out, out}, __LINE__, __FILE__);
 
     return executor_cache.getMostRecentKernelRuntime();
   };
@@ -16082,15 +16091,22 @@ TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
   // Run a translated welford
   auto runtime1 = run_test(64);
   // Check it was translated
-  TORCH_CHECK(runtime1->singleKernelFusion()->unordered_exprs().size() > 4);
   TORCH_CHECK(
-      runtime1->schedulerHeuristics()->singleKernelHeuristics()->heuristc() ==
-      ScheduleHeuristic::Persistent);
+      runtime1->fusionSegments()->groups().size() == 1 &&
+      runtime1->fusionSegments()->groups()[0]->exprs().size() > 4);
 
   // Run an un-translated welford
   auto runtime2 = run_test(65536);
   // // Check it was not translated
-  TORCH_CHECK(runtime2->singleKernelFusion()->unordered_exprs().size() == 2);
+  bool found_welford = false;
+  for (auto group : runtime2->fusionSegments()->groups()) {
+    for (auto expr : group->exprs()) {
+      if (expr->isA<WelfordOp>()) {
+        found_welford = true;
+      }
+    }
+  }
+  TORCH_CHECK(found_welford);
 }
 
 TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
@@ -16152,16 +16168,18 @@ TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
     at::Tensor t0 = at::randn({128, inner_size}, options);
     auto outputs = executor_cache.runFusionWithInputs({t0});
 
-    auto t1 = t0.mean({1}).unsqueeze(1) + t0;
-    auto t2 = t0.sum({1}).unsqueeze(1) + t0;
+    auto t1 = t0.to(c10::kDouble).mean({1}).unsqueeze(1) + t0;
+    auto t2 = t0.to(c10::kDouble).sum({1}).unsqueeze(1) + t0;
     testValidate(fusion, outputs, {t0}, {t2, t1}, __LINE__, __FILE__);
 
     return executor_cache.getMostRecentKernelRuntime();
   };
 
   for (auto inner_size : {4096, 8192, 32768}) {
-    auto runtime = run_test(4096);
-    TORCH_CHECK(!runtime->isSegmented());
+    auto runtime = run_test(inner_size);
+    TORCH_CHECK(
+        !runtime->isSegmented() ||
+        runtime->fusionSegments()->groups().size() == 1);
   }
 }
 

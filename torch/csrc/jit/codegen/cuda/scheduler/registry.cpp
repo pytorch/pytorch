@@ -900,6 +900,12 @@ class PersistentKernelScheduler : public SchedulerEntry {
   }
 
   static bool canScheduleCompileTime(Fusion* fusion) {
+    auto welford_ops = findReductionOps<WelfordOp>(fusion);
+    // For persistent schedule we want welford translated to average and
+    // standard deviation reductions.
+    if (!welford_ops.empty()) {
+      return false;
+    }
     auto view_tvs = scheduler_utils::getViewTVs(fusion);
     if (view_tvs.size() > 0) {
       return false;
