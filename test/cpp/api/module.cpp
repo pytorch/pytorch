@@ -71,6 +71,11 @@ TEST_F(ModuleTest, ZeroGradWithUndefined) {
   ASSERT_FALSE(module.y.grad().defined());
 
   ASSERT_EQ(module.x.grad().sum().item<float>(), 0);
+
+  module.zero_grad(true); // set_to_none = true
+
+  ASSERT_FALSE(module.x.grad().defined());
+  ASSERT_FALSE(module.y.grad().defined());
 }
 
 TEST_F(ModuleTest, RegisterModuleThrowsForEmptyOrDottedName) {

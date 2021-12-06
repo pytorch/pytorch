@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat
@@ -108,7 +109,11 @@ Indexing, Slicing, Joining, Mutating Ops
     permute
     reshape
     row_stack
+    select
     scatter
+    diagonal_scatter
+    select_scatter
+    slice_scatter
     scatter_add
     split
     squeeze
