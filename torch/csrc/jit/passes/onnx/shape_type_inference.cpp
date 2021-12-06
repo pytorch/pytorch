@@ -2039,6 +2039,7 @@ void ONNXShapeTypeInference(
     Node* n,
     const ParamMap& params_dict,
     int opset_version) {
+  std::unordered_map<std::string, onnx::TensorShapeProto> generatedShapeDataByName;
   SetGraphInputTypeReliable(n->owningGraph());
   GRAPH_UPDATE(
       "Running ONNX shape inference for node: ", n->kind().toDisplayString());
@@ -2073,7 +2074,7 @@ void ONNXShapeTypeInference(
 
       // infer shape
       try {
-        onnx::shape_inference::InferShapes(*model_proto);
+        onnx::shape_inference::InferShapesAndDataPropagation(*model_proto, generatedShapeDataByName);
         UpdateOutputTypeByONNXProto(n, clone_node, *model_proto, symbol_map);
       } catch (std::runtime_error& ex) {
         // TODO: include this as warning once we have a more consolidated
@@ -2098,6 +2099,25 @@ void ONNXShapeTypeInference(
           "ONNX graph after shape inference: ", prettyPrint(*model_proto));
     }
   }
+  for (auto output: n->outputs()) {
+    if (generatedShapeDataByName.find(output->debugName()) != generatedShapeDataByName.end()) {
+      auto shape_data = generatedShapeDataByName.find(output->debugName())->second;
+      std::vector<::c10::ShapeSymbol> final_shape;
+      int rank = shape_data.dim_size();
+      final_shape.reserve(rank);
+      for (int i = 0; i < rank; ++i) {
+        final_shape.push_back(::c10::ShapeSymbol::fromStaticSize(shape_data.dim(i).dim_value()));
+      }
+      auto options = c10::TensorOptions().dtype(at::kLong).device(at::kCPU);
+      auto f =
+          at::from_blob(final_shape.data(), {rank}, at::kLong)
+              .to(at::kCPU);
+      // Need copy here
+      at::Tensor f_copy = at::empty({rank}, options);
+      ConstantValueMap::SetValue(n->output()->debugName(), f_copy);
+      UpdateShape(output, c10::SymbolicShape(final_shape));
+    }
+  }  
 
   SpecialPostProcess(n);
   if (IsValidONNXNode(n)) {
