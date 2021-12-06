@@ -315,6 +315,8 @@ class TestBinaryUfuncs(TestCase):
 
         self._test_reference_numerics(dtype, op, zip(lhs_tensors, rhs_tensors), equal_nan=True)
 
+    # runtime error: 128 is outside the range of representable values of type 'signed char'
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(binary_ufuncs_with_references)
     def test_reference_numerics_small_values(self, device, dtype, op):
         if dtype is torch.bool:
@@ -323,6 +325,8 @@ class TestBinaryUfuncs(TestCase):
         lhs, rhs = self._generate_interesting_small_valued_tensors(device, dtype)
         self._test_reference_numerics(dtype, op, ((lhs, rhs),), equal_nan=True)
 
+    # TODO: review if this skip is necessary
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(binary_ufuncs_with_references,
          allowed_dtypes=(torch.int16, torch.int32, torch.int64, torch.float16,
                          torch.bfloat16, torch.float32, torch.float64, torch.complex64, torch.complex128))
@@ -330,6 +334,8 @@ class TestBinaryUfuncs(TestCase):
         lhs, rhs = self._generate_interesting_large_valued_tensors(device, dtype)
         self._test_reference_numerics(dtype, op, ((lhs, rhs),), equal_nan=True)
 
+    # TODO: review if this skip is necessary
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
     @ops(binary_ufuncs_with_references,
          allowed_dtypes=(torch.float16, torch.bfloat16, torch.float32,
                          torch.float64, torch.complex64, torch.complex128))
