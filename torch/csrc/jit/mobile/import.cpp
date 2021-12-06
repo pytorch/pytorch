@@ -8,6 +8,7 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
@@ -17,12 +18,10 @@
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-
 #include <exception>
 #include <fstream>
 #include <string>
 #include <vector>
-#include "caffe2/serialize/versions.h"
 
 // The import process to serialize the bytecode package.
 // An example for bytecode.pkl of a small mobile_module looks like:
@@ -410,16 +409,18 @@ void BytecodeDeserializer::parseMethods(
     bool use_upgrader =
         (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
 
-    // 3. If upgrader is needed, change change the OP instrunction to CALL
-    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
-    // function and do the actual change)
     parseInstructions(
         function_name,
         std::move(ins_list),
         debug_handles_m_tuple,
-        function.get(),
-        use_upgrader,
-        operator_version_);
+        function.get());
+
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    if (use_upgrader) {
+      applyUpgrader(function.get(), operator_version_);
+    }
 
     parseConstants(consts_list, function.get());
 
