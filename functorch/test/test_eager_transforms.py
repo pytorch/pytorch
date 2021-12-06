@@ -1343,7 +1343,6 @@ class TestJac(TestCase):
         y = torch.randn(1, device=device)
         self._test_against_reference(h, (x, y), jacapi)
 
-    @unittest.skip("TODO(rzou): There's a race condition in DynamicLayerStack")
     @jacrev_and_jacfwd
     def test_against_reference_correctness_different_devices(self, device, jacapi):
         def f(x, y):
