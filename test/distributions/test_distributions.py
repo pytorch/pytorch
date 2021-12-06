@@ -3488,6 +3488,23 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(weibull.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_wishart_shape_scalar_params(self):
+        wishart = Wishart(1, torch.tensor([[1.]]))
+        self.assertEqual(wishart._batch_shape, torch.Size())
+        self.assertEqual(wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(wishart.sample().size(), torch.Size((1, 1)))
+        self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 1, 1)))
+        self.assertRaises(ValueError, wishart.log_prob, self.scalar_sample)
+
+    def test_wishart_shape_tensor_params(self):
+        wishart = Wishart(torch.tensor([1., 1.]), torch.tensor([[[1.]], [[1.]]]))
+        self.assertEqual(wishart._batch_shape, torch.Size((2,)))
+        self.assertEqual(wishart._event_shape, torch.Size((1, 1)))
+        self.assertEqual(wishart.sample().size(), torch.Size((2, 1, 1)))
+        self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
+        self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
+        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size())
+
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
