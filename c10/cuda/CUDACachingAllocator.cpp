@@ -1651,8 +1651,8 @@ void parseArgs() {
             int version;
             C10_CUDA_CHECK(cudaDriverGetVersion(&version));
             TORCH_CHECK(version >= 11040,
-                        "backend::cudaMallocAsync requires CUDA runtime "
-                        "11.4 or newer, but cudaDriverGetVersion returned"
+                        "backend:cudaMallocAsync requires CUDA runtime "
+                        "11.4 or newer, but cudaDriverGetVersion returned ",
                         version);
 #else
             TORCH_CHECK(false,
