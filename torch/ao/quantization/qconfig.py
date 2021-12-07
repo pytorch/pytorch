@@ -23,6 +23,7 @@ from .observer import (
     MovingAverageMinMaxObserver,
     NoopObserver,
     PlaceholderObserver,
+    ReuseInputObserver,
     default_debug_observer,
     default_dynamic_quant_observer,
     default_float_qparams_observer,
@@ -31,6 +32,7 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    default_reuse_input_observer,
 )
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -170,6 +172,12 @@ default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight
 Fused version of `default_qat_config`, has performance benefits.
 """
 
+default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
+                                      weight=NoopObserver)
+"""
+Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
+"""
+
 def get_default_qconfig(backend='fbgemm'):
     """
     Returns the default PTQ qconfig for the specified backend.
@@ -243,6 +251,20 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
         else:
             qconfig = default_qat_qconfig_v2
     return qconfig
+
+def get_default_qconfig_dict(backend='fbgemm', version=0):
+    qconfig = get_default_qconfig(backend)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
+def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+    qconfig = get_default_qat_qconfig(backend, version=version)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
 
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
@@ -355,3 +377,8 @@ def activation_is_memoryless(qconfig: QConfig):
         return _is_memoryless(act.activation_post_process)
     else:
         return _is_memoryless(act)
+
+def is_reuse_input_qconfig(qconfig: Union[QConfig, QConfigDynamic, None]):
+    return qconfig is not None and \
+        isinstance(qconfig.activation(), ReuseInputObserver) and \
+        isinstance(qconfig.weight(), NoopObserver)
