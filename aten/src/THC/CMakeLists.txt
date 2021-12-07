@@ -4,15 +4,12 @@ PARENT_SCOPE)
 
 set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THCTensor.cpp
-
-  ${CMAKE_CURRENT_SOURCE_DIR}/THCSleep.cu
   PARENT_SCOPE)
 
 install(FILES
           THC.h
           THCGeneral.h
           THCGeneral.hpp
-          THCSleep.h
           THCTensor.h
           THCAtomics.cuh
           THCGenerateByteType.h

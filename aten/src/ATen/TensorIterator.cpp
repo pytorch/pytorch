@@ -545,7 +545,6 @@ DimVector TensorIteratorBase::invert_perm(IntArrayRef input) const {
 }
 
 void TensorIteratorBase::allocate_or_resize_outputs() {
-
   for (const auto i : c10::irange(num_outputs_)) {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
@@ -935,14 +934,6 @@ void TensorIteratorBase::build_binary_op(const TensorBase& out, const TensorBase
       .add_owned_output(out)
       .add_owned_input(a)
       .add_owned_input(b));
-}
-
-void TensorIteratorBase::build_borrowing_binary_op_coerce_to_scalar(const TensorBase& out, const TensorBase& a, const TensorBase& b) {
-  build(BINARY_OP_CONFIG()
-    .coerce_to_scalar(true)
-    .add_output(out)
-    .add_input(a)
-    .add_input(b));
 }
 
 void TensorIteratorBase::build_borrowing_binary_op(
@@ -1429,13 +1420,6 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
   mark_resize_outputs(config);
   // compute the result dtype and device
   compute_types(config);
-
-  if (config.coerce_to_scalar_) {
-    TORCH_INTERNAL_ASSERT(num_outputs_ == 1, "coerce_to_scalar is not supported for multi-output operators");
-    set_output(0, {}, {}, original_options(operands_[0]), names_);
-    return;
-  }
-
   // try fast setup output tensor, if failed, fallback to normal setup
   if (!fast_set_up(config)) {
     // compute each tensor's stride after broadcasting
