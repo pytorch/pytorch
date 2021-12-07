@@ -53,7 +53,12 @@ class Wishart(ExponentialFamily):
     support = constraints.positive_definite
     has_rsample = True
 
-    def __init__(self, df=None, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
+    def __init__(self,
+                 df: torch.Tensor = None,
+                 covariance_matrix: torch.Tensor = None,
+                 precision_matrix: torch.Tensor = None,
+                 scale_tril: torch.Tensor = None,
+                 validate_args=None):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
             "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
@@ -186,7 +191,7 @@ class Wishart(ExponentialFamily):
         support_check = self.support.check(sample)
         while not support_check.all():
             fix_list = support_check.logical_not().nonzero(as_tuple=True)
-            sample[fix_list] = self.rsample([len(fix_list)])
+            sample[fix_list] = self.rsample([len(fix_list)]).split(1)
             support_check = self.support.check(sample)
 
         return sample
