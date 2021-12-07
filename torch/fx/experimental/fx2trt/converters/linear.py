@@ -50,6 +50,25 @@ def common_linear(network, mod, input_val, layer_name, is_quantized):
     return layer.get_output(0)
 
 
+def common_linear_relu(network, mod, input_val, layer_name, is_quantized):
+    linear_output = common_linear(
+        network,
+        mod,
+        input_val=input_val,
+        layer_name=f"{layer_name}_linear",
+        is_quantized=is_quantized,
+    )
+
+    layer = network.add_activation(
+        input=linear_output, type=trt.ActivationType.RELU)
+    layer.name = f"{layer_name}_relu"
+
+    if is_quantized:
+        mark_as_int8_layer(layer, linear_output.dynamic_range)
+
+    return layer.get_output(0)
+
+
 @tensorrt_converter(torch.nn.modules.linear.Linear)
 def linear(network, submod, args, kwargs, layer_name):
     # args/kwargs should have already been normalized to kwargs
@@ -71,4 +90,18 @@ def quantized_linear(network, submod, args, kwargs, layer_name):
         raise RuntimeError(f"Quantized Linear received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    return common_linear(network, submod, input_val, layer_name, is_quantized=True)
+    return common_linear(network, submod, input_val
+        , layer_name, is_quantized=True)
+
+
+@tensorrt_converter(torch.nn.intrinsic.quantized.modules.linear_relu.LinearReLU)
+def quantized_linear_relu(network, submod, args, kwargs, layer_name):
+    input_val = args[0]
+
+    if not isinstance(input_val, trt.tensorrt.ITensor):
+        raise RuntimeError(f"QuantizedLinearReLU received input {input_val} "
+            "that is not part of the TensorRt region!")
+
+    return common_linear_relu(network, submod, input_val=input_val,
+                              layer_name=f"{layer_name}_linear",
+                              is_quantized=True)
