@@ -3186,7 +3186,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('bfloat16', 'channels_last'),
         xfail('byte', 'channels_last'),
         xfail('char', 'channels_last'),
-        xfail('diagonal_scatter'),
         xfail('double', 'channels_last'),
         xfail('float', 'channels_last'),
         xfail('half', 'channels_last'),

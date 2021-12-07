@@ -660,7 +660,6 @@ class TestOperators(TestCase):
         xfail('fft.rfft2'),
         xfail('nn.functional.embedding'),
         xfail('cross'),
-        xfail('diagonal_scatter'),
         xfail('double', 'channels_last'),
         xfail('linalg.cross'),
         xfail('nn.functional.conv1d'),
