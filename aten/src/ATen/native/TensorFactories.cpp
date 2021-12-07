@@ -436,6 +436,27 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 
 namespace {
 
+// The ZeroTensor allocator ignores whatever allocation is requested and always
+// gives you nullptr
+struct ZeroTensorAllocator final : public at::Allocator {
+  ZeroTensorAllocator(at::Device device) : device_(device) {};
+  ~ZeroTensorAllocator() override = default;
+  static void deleter(void* const pointer) {
+    TORCH_INTERNAL_ASSERT(!pointer);
+  }
+  DataPtr allocate(const size_t nbytes) const override {
+    return {nullptr, nullptr, &deleter, device_};
+  }
+  DeleterFnPtr raw_deleter() const override {
+    return deleter;
+  }
+  at::Device device_;
+};
+
+at::Allocator* GetZeroTensorAllocator(ZeroTensorAllocator& zt) {
+  return &zt;
+}
+
 // Performs dtype inference for full
 TensorOptions infer_full_options(
   const Scalar& fill_value,
@@ -1063,13 +1084,11 @@ Tensor _efficientzerotensor(IntArrayRef size,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
-  caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
-  Tensor tensor = detail::make_tensor<TensorImpl>(c10::DispatchKeySet({at::DispatchKey::ZeroTensor}), dtype_, device);
-  // Default TensorImpl has size [0]
-  if (size.size() != 1 || size[0] != 0) {
-    tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  }
-  return tensor;
+    auto device_ = device_or_default(device);
+    auto allocator = ZeroTensorAllocator(device_);
+    auto dtype_ = dtype_or_default(dtype);
+    auto r = at::detail::empty_generic(size, GetZeroTensorAllocator(allocator), at::DispatchKey::ZeroTensor, dtype_, device_, c10::nullopt);
+    return r;
 }
 
 Tensor& zeros_out(IntArrayRef size, Tensor& result) {
