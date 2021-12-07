@@ -488,6 +488,40 @@ def get_inputs_from_args_and_kwargs(args, kwargs, input_names):
     return inputs
 
 
+def sign(
+    network: TRTNetwork,
+    input_val: TRTTensor,
+    target: Target,
+    name: str
+) -> TRTTensor:
+    """
+    Sign is calculated as below:
+       x = input
+       sign = (exp(x) // exp(abs(x))) * 2 - 1
+       For positive number and 0, (exp(x) // exp(abs(x))) yield 1; for negative number, (exp(x) // exp(abs(x))) yield 0.
+       With multiply 2, the value become 2(for pos and 0) and 0(for neg).
+       Finally minus 1, the value become 1(for pos and 0) and -1(for neg).
+
+    Args:
+        network (TRTNetwork): TensorRT network object.
+        input_val (TRTTensor): The input tensor.
+        target (Target): fx node target.
+        name (str): Name of the fx node with optional suffix.
+
+    Returns:
+        A TensorRT tensor represent the result of sign operator.
+    """
+    input_exp_output = add_unary_layer(network, input_val, trt.UnaryOperation.EXP, target, f"{name}_prod_exp")
+    input_abs_output = add_unary_layer(network, input_val, trt.UnaryOperation.ABS, target, f"{name}_prod_abs")
+    input_abs_exp_output = add_unary_layer(network, input_abs_output, trt.UnaryOperation.EXP, target, f"{name}_prod_abs_exp")
+    floor_div_output = add_binary_elementwise_layer(network, input_exp_output, input_abs_exp_output,
+                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_exp_floor_div")
+    double_floor_div_output = add_binary_elementwise_layer(network, floor_div_output, 2,
+                                                           trt.ElementWiseOperation.PROD, target, f"{name}_floor_div*2")
+    return add_binary_elementwise_layer(network, double_floor_div_output, 1,
+                                        trt.ElementWiseOperation.SUB, target, f"{name}_sign")
+
+
 def trunc_div(
     input: TRTTensor,
     other: TRTTensor,
@@ -499,42 +533,29 @@ def trunc_div(
     Perform trunc divide on Tensor, result of divide will be round toward zero.
     This means for positive number, it will be floor round; for negative number,
     it will be ceil round. Example: [2.1, 0.8, -3.2] -> [2, 0, -3].
+
     Args:
         input: divisor.
         other: dividend.
         network: INetworkDefinition.
         target: node target.
         name: namespace for the op
+
     Returns:
         A TensorRT tensor represent the result of trunc divide.
     """
     prod_output = add_binary_elementwise_layer(network, input, other, trt.ElementWiseOperation.PROD, target, f"{name}_prod")
-
-    # get sign:
-    # x = input * other
-    # sign = (exp(x) // exp(abs(x))) * 2 - 1
-    # For positive number and 0, (exp(x) // exp(abs(x))) yield 1; for negative number, (exp(x) // exp(abs(x))) yield 0.
-    # With multiply 2, the value become 2(for pos and 0) and 0(for neg).
-    # Finally minus 1, the value become 1(for pos and 0) and -1(for neg).
-    prod_exp_output = add_unary_layer(network, prod_output, trt.UnaryOperation.EXP, target, f"{name}_prod_exp")
-    prod_abs_output = add_unary_layer(network, prod_output, trt.UnaryOperation.ABS, target, f"{name}_prod_abs")
-    prod_abs_exp_output = add_unary_layer(network, prod_abs_output, trt.UnaryOperation.EXP, target, f"{name}_prod_abs_exp")
-    floor_div_output = add_binary_elementwise_layer(network, prod_abs_output, prod_abs_exp_output,
-                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_exp_floor_div")
-    double_floor_div_output = add_binary_elementwise_layer(network, floor_div_output, 2,
-                                                           trt.ElementWiseOperation.PROD, target, f"{name}_double_floor_div")
-    sign_output = add_binary_elementwise_layer(network, double_floor_div_output, 1,
-                                               trt.ElementWiseOperation.SUB, target, f"{name}_binary_sign")
+    sign_output = sign(network, prod_output, target, name)
 
     # Convert constant input into ITensor for UnaryOperation
-    if not isinstance(input, TRTTensor):
+    if not isinstance(input, trt.tensorrt.ITensor):
         input = get_trt_tensor(network, input, f"{name}_input")
-    if not isinstance(other, TRTTensor):
+    if not isinstance(other, trt.tensorrt.ITensor):
         other = get_trt_tensor(network, other, f"{name}_other", dtype=torch_dtype_from_trt(input.dtype))
 
-    abs_a_output = add_unary_layer(network, input, trt.UnaryOperation.ABS, target, f"{name}_abs_a")
-    abs_b_output = add_unary_layer(network, other, trt.UnaryOperation.ABS, target, f"{name}_abs_b")
-    abs_floor_output = add_binary_elementwise_layer(network, abs_a_output, abs_b_output,
+    abs_input_output = add_unary_layer(network, input, trt.UnaryOperation.ABS, target, f"{name}_abs_input")
+    abs_other_output = add_unary_layer(network, other, trt.UnaryOperation.ABS, target, f"{name}_abs_other")
+    abs_floor_output = add_binary_elementwise_layer(network, abs_input_output, abs_other_output,
                                                     trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_floor_div")
     output = add_binary_elementwise_layer(network, abs_floor_output, sign_output,
                                           trt.ElementWiseOperation.PROD, target, f"{name}_output")
