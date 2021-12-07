@@ -550,7 +550,7 @@ Tensor cross_entropy_loss_label_smoothing(
           // loss is normalized by the weights to be consistent with nll_loss_nd
           ret = smooth_loss.sum() / weight.gather(0, target.masked_select(~mask).flatten()).sum();
         } else {
-          ret = smooth_loss.mean();
+          ret = smooth_loss.masked_select(~mask).mean();
         }
         break;
       case Reduction::Sum:
