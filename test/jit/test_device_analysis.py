@@ -33,13 +33,14 @@ class TestDeviceAnalysis(JitTestCase):
 
         self.assertEqual(len(graph_inputs), len(example_devices))
         for graph_i, device_i in zip(graph_inputs, example_devices):
-            if isinstance(graph_i, torch.Tensor):
+            if device_i is not None:
                 graph_i.setType(graph_i.type().with_device(device_i))
 
         torch._C._jit_pass_propagate_device(graph)
 
     def assert_device_equal(self, fn, in_devices, expected_device):
         graph = torch.jit.script(fn).graph
+        print(graph)
         self.prop_device_on_graph(graph, in_devices)
         actual_device = self.node_output_device(graph)
 
@@ -64,7 +65,7 @@ class TestDeviceAnalysis(JitTestCase):
             return x + x
 
         def relu_(x):
-            return relu_(x)
+            return torch.nn.functional.relu_(x)
 
         functions = [add_self, relu_]
 
@@ -80,8 +81,8 @@ class TestDeviceAnalysis(JitTestCase):
 
     def test_device_arg(self):
         # Test that no device gets propagated when arg is passed in
-        def set_device(x, device_name):
-            return x.to(device_name)
+        def set_device(x, device_name: torch.device):
+            return x.to(device=device_name)
 
         for in_device in self.device_types:
             self.assert_device_equal(set_device, [in_device, None], None)

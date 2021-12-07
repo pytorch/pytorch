@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/library.h>
 #include <memory>
+#include "ATen/core/List.h"
 
 namespace torch {
 namespace jit {
@@ -90,6 +91,17 @@ bool propWithNoDevice(Node* n) {
   return device.has_value() && setReturnsToDevice(n, device.value());
 }
 
+
+bool isDeviceArgumentType(const TypePtr type) {
+  // Have to deal with Union Types (and Optional Types are treated as a Union type)
+  for (auto& subtype: type->containedTypes()){
+    if (isDeviceArgumentType(subtype)){
+      return true;
+    }
+  }
+  return DeviceObjType::get() == type;
+}
+
 bool defaultDeviceProp(Node* n) {
   // Detecting of the op has a device object argument
   // as there is implicit string conversion to device
@@ -97,7 +109,7 @@ bool defaultDeviceProp(Node* n) {
   auto input_vec = n->inputs();
   for (int i = 0; i < arguments.size(); i++) {
     Argument& argument = arguments[i];
-    if (argument.type() == DeviceObjType::get()) {
+    if (isDeviceArgumentType(argument.type())) {
       // Optional args are filled in by torchscript with default val
       auto input_val = toIValue(n->inputs().at(i));
       if (!input_val.has_value()) {
@@ -105,7 +117,11 @@ bool defaultDeviceProp(Node* n) {
         return false;
       }
       if (input_val->isNone()) {
-        return propWithNoDevice(n);
+        continue;
+      }
+      if (!input_val->isDevice()){
+        // Bail on union types
+        return false;
       }
       TORCH_INTERNAL_ASSERT(input_val->isDevice())
       Device device = input_val->toDevice();
@@ -123,8 +139,8 @@ struct DeviceTypePropagationPass {
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    at::ArrayRef<Block*> blocks = graph_->block();
     bool changed = false;
+    at::ArrayRef<Block*> blocks = graph_->block();
     for (auto block : blocks) {
       changed |= processBlock(block);
     }
