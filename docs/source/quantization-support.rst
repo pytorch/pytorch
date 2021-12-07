@@ -6,7 +6,7 @@ torch.ao.quantization
 
 This module contains Eager mode quantization APIs.
 
-.. currentmodule:: torch.quantization
+.. currentmodule:: torch.ao.quantization
 
 Top level APIs
 ^^^^^^^^^^^^^^
@@ -56,7 +56,7 @@ torch.ao.quantization.quantize_fx
 
 This module contains FX graph mode quantization APIs (prototype).
 
-.. currentmodule:: torch.quantization.quantize_fx
+.. currentmodule:: torch.ao.quantization.quantize_fx
 
 .. autosummary::
     :toctree: generated
@@ -165,7 +165,7 @@ torch.ao.quantization.fake_quantize
 This module implements modules which are used to perform fake quantization
 during QAT.
 
-.. currentmodule:: torch.quantization.fake_quantize
+.. currentmodule:: torch.ao.quantization.fake_quantize
 
 .. autosummary::
     :toctree: generated
@@ -194,7 +194,7 @@ torch.ao.quantization.qconfig
 This module defines `QConfig` and `QConfigDynamic` objects which are used
 to configure quantization settings for individual ops.
 
-.. currentmodule:: torch.quantization.qconfig
+.. currentmodule:: torch.ao.quantization.qconfig
 
 .. autosummary::
     :toctree: generated
