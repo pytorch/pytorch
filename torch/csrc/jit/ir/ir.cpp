@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <string>
@@ -1141,6 +1142,7 @@ bool Node::isNondeterministic() const {
       "aten::bernoulli(Tensor self, *, Generator? generator) -> Tensor",
       "aten::bernoulli(Tensor self, float p, *, Generator? generator) -> Tensor",
       "aten::multinomial(Tensor self, int num_samples, bool replacement, *, Generator? generator) -> Tensor",
+      "aten::native_dropout(Tensor input, float p, bool? train) -> (Tensor, Tensor)",
       "aten::normal(Tensor mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(float mean, Tensor std, *, Generator? generator) -> Tensor",
       "aten::normal(Tensor mean, float std, *, Generator? generator) -> Tensor",
@@ -2300,6 +2302,15 @@ OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
     auto op = getOperatorForLiteral(sig);
     ops[Symbol::fromQualString(op->schema().name())].push_back(op);
   }
+}
+
+std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
+  std::vector<std::shared_ptr<Operator>> result;
+  for (const auto& kv : ops) {
+    auto ops_for_symbol = kv.second;
+    result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
+  }
+  return result;
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {
