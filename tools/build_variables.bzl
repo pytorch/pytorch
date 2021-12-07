@@ -22,6 +22,7 @@ GENERATED_CPP = [
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
+    "autograd/generated/python_return_types.cpp",
     "autograd/generated/python_sparse_functions.cpp",
     "autograd/generated/python_special_functions.cpp",
     "autograd/generated/python_torch_functions_0.cpp",
@@ -653,6 +654,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
@@ -880,6 +882,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
+        "autograd/generated/python_return_types.cpp",
         "autograd/generated/python_sparse_functions.cpp",
         "autograd/generated/python_special_functions.cpp",
         "autograd/generated/python_torch_functions_0.cpp",
