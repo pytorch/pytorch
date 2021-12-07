@@ -3,14 +3,14 @@ from dataclasses import dataclass
 from tools.codegen.context import method_with_native_function
 from tools.codegen.model import (BackendIndex, NativeFunction,
                                  NativeFunctionsGroup)
-from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType,
+from tools.codegen.api.types import (BaseCType, OptionalCType, NamedCType, scalarT,
                                      VectorCType, kernel_signature)
 import tools.codegen.api.dispatcher as dispatcher
 from tools.codegen.api.lazy import LazyIrSchema, isValueType
 from tools.codegen.dest.lazy_ts_lowering import ts_lowering_body
 
 
-def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
+def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     """
     Given a NamedCType from a lazy IR schema,
     generate a c++ string for materializing an rvalue of that arg for passing into
@@ -18,8 +18,14 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
     """
     if isValueType(arg.type):
         if isinstance(arg.type, BaseCType):
+            if arg.name in schema.wrapped_scalar_names:
+                return f"LazyGraphExecutor::Get()->GetIrValueForScalar({arg.name}, *device)"
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
+            if arg.name in schema.wrapped_scalar_names:
+                return f"{arg.name} ? " \
+                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalar(*{arg.name}, *device)) : " \
+                    "c10::nullopt"
             return f"lazy_{arg.name} ? " \
                    f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \
                    "c10::nullopt"
@@ -35,11 +41,11 @@ def node_ctor_arg_rvalue_string(arg: NamedCType) -> str:
         else:
             return f"{arg.name}"
 
-def node_ctor_inputs(func: LazyIrSchema) -> str:
+def node_ctor_inputs(schema: LazyIrSchema) -> str:
     """
     Produce a formatted string with the arguments as passed into the constructor of a node class.
     """
-    node_ctor_values = [node_ctor_arg_rvalue_string(arg) for arg in func.filtered_types()]
+    node_ctor_values = [node_ctor_arg_rvalue_string(arg, schema) for arg in schema.filtered_types()]
     return ",\n                              ".join(node_ctor_values)
 
 
@@ -127,9 +133,12 @@ class {schema.node_name} : public {self.node_base} {{
 """, ]
 
 
-def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str) -> str:
+def lazy_tensor_decls(value_types: List[NamedCType], tensor_class: str, schema: LazyIrSchema) -> str:
     lazy_tensor_decls: List[str] = []
     for t in value_types:
+        if t.name in schema.wrapped_scalar_names:
+            # no lazy tensor wrapper for scalars that are promoted to IR values
+            continue
         if isinstance(t.type, BaseCType):
             lazy_tensor_decls.append(
                 f"{tensor_class} lazy_{t.name} = "
@@ -162,7 +171,7 @@ class GenLazyNativeFuncDefinition:
 
         value_types_names = ", ".join([f"{t.name}" for t in value_types])
         get_device_str = f"""auto device = bridge::GetBackendDevice({value_types_names});"""
-        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
+        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
         node_ctor_input_str = node_ctor_inputs(schema)
 
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
@@ -253,7 +262,7 @@ class GenLazyShapeInferenceDefinition:
         # Lazy IR stuff
         schema = LazyIrSchema(f.func)
         value_types = schema.filtered_types(values=True, scalars=False)
-        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class)
+        lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
         node_ctor_input_str = node_ctor_inputs(schema)
 
         # Only generate shape/dtype fn for non-structured kernels,
