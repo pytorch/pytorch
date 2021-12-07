@@ -24,9 +24,8 @@ do
 done
 lipo -i ${ZIP_DIR}/install/lib/*.a
 echo "BUILD_LITE_INTERPRETER: ${BUILD_LITE_INTERPRETER}"
-export BUILD_LITE_INTERPRETER=${BUILD_LITE_INTERPRETER}
 # copy the umbrella header and license
-if [ BUILD_LITE_INTERPRETER = "1" ]; then
+if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     cp ${PROJ_ROOT}/ios/LibTorch-Lite.h ${ZIP_DIR}/src/
 else
     cp ${PROJ_ROOT}/ios/LibTorch.h ${ZIP_DIR}/src/
@@ -35,7 +34,7 @@ cp ${PROJ_ROOT}/LICENSE ${ZIP_DIR}/
 # zip the library
 export DATE="$(date -u +%Y%m%d)"
 export IOS_NIGHTLY_BUILD_VERSION="1.11.0.${DATE}"
-if [ BUILD_LITE_INTERPRETER = "1" ]; then
+if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     # libtorch_lite_ios_nightly_1.11.0.20210810.zip
     ZIPFILE="libtorch_lite_ios_nightly_${IOS_NIGHTLY_BUILD_VERSION}.zip"
 else
@@ -62,7 +61,7 @@ set +x
 # echo "AWS SECRET: ${AWS_SECRET_ACCESS_KEY}"
 aws s3 cp ${ZIPFILE} s3://ossci-ios-build/ --acl public-read
 
-if [ BUILD_LITE_INTERPRETER = "1" ]; then
+if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     # create a new LibTorch-Lite-Nightly.podspec from the template
     echo "cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec"
     cp ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec.template ${PROJ_ROOT}/ios/LibTorch-Lite-Nightly.podspec
