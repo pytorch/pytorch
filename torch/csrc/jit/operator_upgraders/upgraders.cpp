@@ -32,6 +32,21 @@ const std::unordered_map<std::string, std::string>& UpgradersMap::
   return content_;
 }
 
+void UpgradersMap::set_content_for_test(
+    const std::unordered_map<std::string, std::string>& content) {
+  std::lock_guard<std::mutex> _(lock);
+  for (const auto& entry : content) {
+    content_.insert(entry);
+  }
+}
+void UpgradersMap::remove_content_for_test(
+    const std::unordered_map<std::string, std::string>& content) {
+  std::lock_guard<std::mutex> _(lock);
+  for (const auto& entry : content) {
+    content_.erase(entry.first);
+  }
+}
+
 void populate_upgraders_map(
     const std::unordered_map<std::string, std::string>& content) {
   upgradersMap.set_content(content);
@@ -43,6 +58,16 @@ int get_upgraders_map_size() {
 
 const std::unordered_map<std::string, std::string>& dump_upgraders_map() {
   return upgradersMap.get_content();
+}
+
+void populate_test_upgraders(
+    const std::unordered_map<std::string, std::string>& content) {
+  upgradersMap.set_content_for_test(content);
+}
+
+void remove_test_upgraders(
+    const std::unordered_map<std::string, std::string>& content) {
+  upgradersMap.remove_content_for_test(content);
 }
 
 } // namespace jit
