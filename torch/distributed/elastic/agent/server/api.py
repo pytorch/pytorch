@@ -901,6 +901,11 @@ class SimpleElasticAgent(ElasticAgent):
             f"Local worker group finished ({self._worker_group.state}). "
             f"Waiting {self._exit_barrier_timeout} seconds for other agents to finish"
         )
+
+        spec = self._worker_group.spec
+        rdzv_handler = spec.rdzv_handler
+        rdzv_handler.shutdown()
+
         start = time.time()
         try:
             store_util.barrier(
