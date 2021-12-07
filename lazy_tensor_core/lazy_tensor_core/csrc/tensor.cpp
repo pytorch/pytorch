@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"

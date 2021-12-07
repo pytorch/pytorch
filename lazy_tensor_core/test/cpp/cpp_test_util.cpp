@@ -1,12 +1,12 @@
 #include "cpp_test_util.h"
 
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 
 #include <iostream>
 #include <string>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/tensor_util.h"
@@ -171,12 +171,12 @@ bool CloseValues(at::Tensor tensor1, at::Tensor tensor2, double rtol,
 
 std::string GetTensorTextGraph(at::Tensor tensor) {
   LazyTensor xtensor = TryGetLtcTensor(tensor);
-  return ir::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
+  return torch::lazy::DumpUtil::ToText({xtensor.GetIrValue().node.get()});
 }
 
 std::string GetTensorDotGraph(at::Tensor tensor) {
   LazyTensor xtensor = TryGetLtcTensor(tensor);
-  return ir::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
+  return torch::lazy::DumpUtil::ToDot({xtensor.GetIrValue().node.get()});
 }
 
 void TestBackward(

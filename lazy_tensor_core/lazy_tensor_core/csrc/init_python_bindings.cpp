@@ -3,6 +3,7 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/util.h>
 
@@ -13,7 +14,6 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
@@ -282,7 +282,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
             break;
           }
         }
-        ss << ir::DumpUtil::PostOrderToText(post_order, roots);
+        ss << torch::lazy::DumpUtil::PostOrderToText(post_order, roots);
         ss << "\n\n";
       }
     }
@@ -435,14 +435,14 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_get_ltc_tensors_dot",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
-            return ir::DumpUtil::ToDot(nodes);
+            return torch::lazy::DumpUtil::ToDot(nodes);
           };
           return GetTensorsDump(tensors, coverter);
         });
   m.def("_get_ltc_tensors_text",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
-            return ir::DumpUtil::ToText(nodes);
+            return torch::lazy::DumpUtil::ToText(nodes);
           };
           return GetTensorsDump(tensors, coverter);
         });

@@ -1,10 +1,10 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
@@ -493,9 +493,9 @@ std::string LazyGraphExecutor::DumpBackendComputation(
       ir_values.push_back(std::move(ir_value));
     }
   }
-  return !ir_values.empty()
-             ? ir::DumpUtil::ToBackend(ir_values, torch::lazy::BackendDevice())
-             : std::string();
+  return !ir_values.empty() ? torch::lazy::DumpUtil::ToBackend(
+                                  ir_values, torch::lazy::BackendDevice())
+                            : std::string();
 }
 
 torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
