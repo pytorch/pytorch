@@ -18276,7 +18276,7 @@ TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
 
 // Repro of #1102 and #1129
 TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
@@ -18646,7 +18646,7 @@ TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1133_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
@@ -19093,7 +19093,7 @@ TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
 }
 
 TEST(NVFuserTest, FusionIssue1223_CUDA) {
-  if (at::cuda::getDeviceProperties(0)->major < 6) {
+  if (at::cuda::getDeviceProperties(0)->major < 7) {
     return;
   }
   Fusion fusion;
