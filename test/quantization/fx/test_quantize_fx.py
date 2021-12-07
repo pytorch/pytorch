@@ -46,6 +46,7 @@ from torch.ao.quantization import (
     float_qparams_weight_only_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
+    get_default_qconfig_dict,
     fuse_modules,
     prepare,
     prepare_qat,
@@ -1407,9 +1408,15 @@ class TestQuantizeFx(QuantizationTestCase):
             ns.call_module(nn.Linear),
             ns.call_function(torch.quantize_per_tensor),
             ns.call_module(nnq.Linear),
-            ns.call_method("dequantize"),
-            ns.call_function(torch.add),
-            ns.call_function(torch.quantize_per_tensor),
+            # the following pattern is produced, but it's fused into
+            # torch.ops.quantized.add, Note this is not intended
+            # behavior, we plan to hornor qconfig=None settings
+            # but it depends on https://github.com/pytorch/pytorch/issues/69025
+            # TODO: fix this after the subgraph_rewriter support
+            # ns.call_method("dequantize"),
+            # ns.call_function(torch.add),
+            # ns.call_function(torch.quantize_per_tensor),
+            ns.call_function(torch.ops.quantized.add),
             ns.call_function(torch.ops.quantized.add),
             # m1
             ns.call_module(nnq.Linear),
@@ -3248,19 +3255,19 @@ class TestQuantizeFx(QuantizationTestCase):
                                         "module_name": [("mods1.0", None)]}
 
                 node_occurrence = {
-                    ns.call_function(torch.quantize_per_tensor): 2,
+                    ns.call_function(torch.quantize_per_tensor): 1,
                     ns.call_function(torch.nn.functional.linear): 1,
                     ns.call_function(torch.ops.quantized.linear): 1,
                     ns.call_function(torch.ops.quantized.add): 1,
-                    ns.call_method("dequantize"): 2
+                    ns.call_function(torch.ops.quantized.mul): 1,
+                    ns.call_method("dequantize"): 1,
                 }
                 order_check = [
                     ns.call_function(torch.nn.functional.linear),
                     ns.call_function(torch.quantize_per_tensor),
                     ns.call_function(torch.ops.quantized.linear),
                     ns.call_function(torch.ops.quantized.add),
-                    ns.call_method("dequantize"),
-                    ns.call_function(torch.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized.mul),
                     ns.call_module(nnq.Linear),
                     ns.call_method("dequantize"),
                 ]
@@ -3342,6 +3349,54 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
                         DEFAULT_OUTPUT_OBSERVER_MAP)
 
+    def test_reuse_input_qconfig(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.reshape()
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = x.reshape()
+                return x
+
+        options = itertools.product([M1, M2], [True, False])
+        for M, is_qat in options:
+            m = M1().eval()
+            m = prepare_fx(m, get_default_qconfig_dict())
+            m = convert_fx(m)
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(nnq.Conv2d),
+                ns.call_method("reshape"),
+                ns.call_method("dequantize"),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list)
+
+            m = M2().eval()
+            m = prepare_fx(m, get_default_qconfig_dict())
+            m = convert_fx(m)
+            node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 0,
+                ns.call_method("dequnatize"): 0,
+            }
+            node_list = [
+                ns.call_method("reshape"),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_occurrence=node_occurrence,
+                expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -3963,6 +4018,38 @@ class TestQuantizeFxOps(QuantizationTestCase):
             operator.add, operator.iadd, torch.ops.quantized.add_relu)
         self._test_binary_op_relu_float16_impl(
             operator.add, operator.iadd)
+
+    def test_add_relu_multiple_uses_of_relu(self):
+        class Sub(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.relu = torch.nn.ReLU(inplace=True)
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = Sub()
+
+            def forward(self, x, y):
+                x = x + y
+                x = self.sub.relu(x)
+                x = x + y
+                x = self.sub.relu(x)
+                return x
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_function(torch.ops.quantized.add_relu): 2,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        # check the model is scriptable
+        m = torch.jit.script(m)
+        # check the model is runnable
+        m(torch.randn(3), torch.randn(3))
 
     @skipIfNoFBGEMM
     def test_mul_relu(self):
