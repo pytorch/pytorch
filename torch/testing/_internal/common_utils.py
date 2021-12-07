@@ -1213,8 +1213,8 @@ class CudaMemoryLeakCheck():
     # Stores CUDA memory data provided by PyTorch's caching allocator and
     #   the CUDA driver.
     #
-    # NOTE: The undocumented torch.cuda.mem_get_info() returns the # free bytes and
-    #  the total bytes on the GPU in a tuple.
+    # NOTE: The undocumented torch.cuda.mem_get_info() returns
+    #   (#free bytes, #total bytes available) on the GPU
     def __enter__(self):
         self.caching_allocator_befores = []
         self.driver_befores = []
@@ -1223,15 +1223,18 @@ class CudaMemoryLeakCheck():
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            driver_mem_allocated = torch.cuda.mem_get_info(i)[1]
-            if caching_allocator_mem_allocated > 0 or driver_mem_allocated > 0:
+            # NOTE: gc is based exclusively on caching allocator memory
+            #   because the driver will always have some bytes in use (context size)
+            if caching_allocator_mem_allocated > 0:
                 gc.collect()
                 torch.cuda.empty_cache()
                 break
 
         for i in range(num_devices):
             self.caching_allocator_befores.append(torch.cuda.memory_allocated(i))
-            self.driver_befores.append(torch.cuda.mem_get_info(i)[1])
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
+            self.driver_befores.append(driver_mem_allocated)
 
     def __exit__(self, exec_type, exec_value, traceback):
         # Don't check for leaks if an exception was thrown
@@ -1243,35 +1246,11 @@ class CudaMemoryLeakCheck():
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            driver_mem_allocated = torch.cuda.mem_get_info(i)[1]
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
 
-            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
-                msg = """Caching allocator allocated memory was higher after {}!
-                         Caching allocator allocated memory was {} and is now reported as {}
-                         on device {}.
-                         CUDA driver allocated memory was {} and is now {}.""".format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
-                warnings.warn(msg)
-                discrepancy_detected = True
-                # NOTE: intentionally not breaking here or below so this can print additional
-                #   diagnostic info
-            elif driver_mem_allocated > self.driver_befores[i]:
-                msg = """Driver API allocated memory was higher after {}!
-                         Caching allocator allocated memory was {} and is now reported as {}
-                         on device {}.
-                         CUDA driver allocated memory was {} and is now {}.""".format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
-                warnings.warn(msg)
+            if (caching_allocator_mem_allocated > self.caching_allocator_befores[i] or
+                    driver_mem_allocated > self.driver_befores[i]):
                 discrepancy_detected = True
 
         if not discrepancy_detected:
@@ -1289,7 +1268,8 @@ class CudaMemoryLeakCheck():
 
         for i in range(num_devices):
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            driver_mem_allocated = torch.cuda.mem_get_info(i)[1]
+            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
+            driver_mem_allocated = bytes_total - bytes_free
 
             caching_allocator_discrepancy = False
             driver_discrepancy = False
