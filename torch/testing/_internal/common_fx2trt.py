@@ -138,7 +138,6 @@ class TRTTestCase(unittest.TestCase):
             ops_in_mod >= ops, f"expected ops {ops}, actuall ops {ops_in_mod}"
         )
 
-
     def assert_unexpected_op(self, mod, ops):
         for node in mod.graph.nodes:
             if (node.op == "call_module"):
