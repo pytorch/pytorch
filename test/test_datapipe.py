@@ -650,11 +650,11 @@ class IDP_NoLen(IterDataPipe):
             yield i
 
 
-def _fake_fn(data, *args, **kwargs):
+def _fake_fn(data):
     return data
 
 
-def _fake_filter_fn(data, *args, **kwargs):
+def _fake_filter_fn(data):
     return data >= 5
 
 
@@ -669,10 +669,10 @@ class TestFunctionalIterDataPipe(TestCase):
         arr = range(10)
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (), {}),
-            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (_fake_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
             (dp.iter.Collator, dp.iter.IterableWrapper(arr), (), {}),
-            (dp.iter.Collator, dp.iter.IterableWrapper(arr), (_fake_fn, (0, ), {'test': True}), {}),
-            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (_fake_filter_fn, (0, ), {'test': True}), {}),
+            (dp.iter.Collator, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
+            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (_fake_filter_fn, (0, )), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1051,11 +1051,6 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        map_dp = input_dp.map(fn=fn, fn_args=(torch.int, ), fn_kwargs={'sum': True})
-        self.assertEqual(len(input_dp), len(map_dp))
-        for x, y in zip(map_dp, input_dp):
-            self.assertEqual(x, torch.tensor(y, dtype=torch.int).sum())
-
         from functools import partial
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
@@ -1343,11 +1338,12 @@ class TestFunctionalIterDataPipe(TestCase):
                 return data >= val
             return True
 
-        filter_dp = input_ds.filter(filter_fn=_filter_fn, fn_args=(5, ))
+        from functools import partial
+        filter_dp = input_ds.filter(partial(_filter_fn, val=5))
         for data, exp in zip(filter_dp, range(10)):
             self.assertEqual(data, exp)
 
-        filter_dp = input_ds.filter(filter_fn=_filter_fn, fn_kwargs={'val': 5, 'clip': True})
+        filter_dp = input_ds.filter(partial(_filter_fn, val=5, clip=True))
         for data, exp in zip(filter_dp, range(5, 10)):
             self.assertEqual(data, exp)
 
