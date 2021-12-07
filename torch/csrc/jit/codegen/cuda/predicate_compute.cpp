@@ -256,61 +256,57 @@ UnswitchPredicateKey::UnswitchPredicateKey()
 // concrete domains are used to uniquely collect all necessary
 // unswitch predicates.
 UnswitchPredicateKey::UnswitchPredicateKey(
-    IterDomain* predicated_concrete_id,
-    const ReferenceTensor& reference)
+    IterDomain* predicated_consumer_id,
+    TensorView* consumer_tv,
+    IterDomain* predicated_concrete_id)
     : predicated_concrete_id_(predicated_concrete_id) {
+  const auto gpu_lower = GpuLower::current();
+
   // Initialize the parallelized domain map
   for (auto pt : kParallelTypeThreads) {
     parallel_concrete_ids_.insert({pt, nullptr});
   }
 
-  // The id parameter is a concrete domain. Needs to find the
-  // corresponding reference domain to find leaf domains that are
-  // parallelized.
-  IterDomain* predicated_ref_id =
-      reference.concrete_to_id.at(predicated_concrete_id_);
-  TensorDomain* ref_td = reference.domain;
-
-  std::vector<Val*> all_parallelized_ref_leaf_ids;
+  std::vector<Val*> all_parallelized_consumer_leaf_ids;
   std::copy_if(
-      ref_td->domain().begin(),
-      ref_td->domain().end(),
-      std::back_inserter(all_parallelized_ref_leaf_ids),
+      consumer_tv->domain()->domain().begin(),
+      consumer_tv->domain()->domain().end(),
+      std::back_inserter(all_parallelized_consumer_leaf_ids),
       [](IterDomain* x) { return isParallelTypeThread(x->getParallelType()); });
 
-  // If the reference is not parallelized at all, no need to
+  // If the consumer domais are not parallelized at all, no need to
   // differentiate keys based on how the predicated id is parallelized
-  if (all_parallelized_ref_leaf_ids.empty()) {
+  if (all_parallelized_consumer_leaf_ids.empty()) {
     return;
   }
 
-  // All domains that are parallelized descendants of predicated_ref_id
-  auto all_parallelized_ref_ids = DependencyCheck::getAllValsBetween(
-      {predicated_ref_id}, all_parallelized_ref_leaf_ids);
+  // All domains that are parallelized descendants of predicated_consumer_id
+  auto all_parallelized_consumer_ids = DependencyCheck::getAllValsBetween(
+      {predicated_consumer_id}, all_parallelized_consumer_leaf_ids);
   // Just pick leaf domains
-  std::vector<IterDomain*> parallelized_ref_leaf_ids;
+  std::vector<IterDomain*> parallelized_consumer_leaf_ids;
   std::copy_if(
-      ref_td->domain().begin(),
-      ref_td->domain().end(),
-      std::back_inserter(parallelized_ref_leaf_ids),
+      consumer_tv->domain()->domain().begin(),
+      consumer_tv->domain()->domain().end(),
+      std::back_inserter(parallelized_consumer_leaf_ids),
       [&](IterDomain* x) {
         return std::find(
-                   all_parallelized_ref_ids.begin(),
-                   all_parallelized_ref_ids.end(),
-                   x) != all_parallelized_ref_ids.end();
+                   all_parallelized_consumer_ids.begin(),
+                   all_parallelized_consumer_ids.end(),
+                   x) != all_parallelized_consumer_ids.end();
       });
 
-  if (parallelized_ref_leaf_ids.empty()) {
-    // None of the parallelized leaf domains are derived from predicated_ref_id
+  if (parallelized_consumer_leaf_ids.empty()) {
+    // None of the parallelized leaf domains are derived from
+    // predicated_consumer_id
     return;
   }
 
   // Find the corresponding concrete id for each parallel type
-  for (auto ref_leaf : parallelized_ref_leaf_ids) {
-    auto pt = ref_leaf->getParallelType();
-    auto it = reference.id_to_concrete.find(ref_leaf);
-    TORCH_INTERNAL_ASSERT(it != reference.id_to_concrete.end());
-    auto concrete_leaf = it->second;
+  for (auto consumer_leaf : parallelized_consumer_leaf_ids) {
+    auto pt = consumer_leaf->getParallelType();
+    auto concrete_leaf =
+        gpu_lower->caIndexMap().getConcreteMappedID(consumer_leaf);
     parallel_concrete_ids_.at(pt) = concrete_leaf;
   }
 }
@@ -388,7 +384,7 @@ kir::Bool* PredicateCompute::getInlinePredicate(
   bool non_zero_start_found = false;
   for (const auto& pred_info : pred_info_vec) {
     if (pred_type == PredicateType::ReductionWrite) {
-      const auto& consumer_ids = pred_info.consumerIds();
+      const auto& consumer_ids = pred_info.rootIds();
       bool pred_for_reduction_axis = false;
       for (auto consumer_id : consumer_ids) {
         if (consumer_id->isReduction()) {
@@ -505,13 +501,15 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     bool first_key_set = false;
 
     for (auto root_id : root_ids) {
+      auto concrete_root_id =
+          gpu_lower->caIndexMap().getConcreteMappedID(root_id);
       auto kir_root_id = gpu_lower->lowerValue(root_id)->as<kir::IterDomain>();
 
       if (kir_root_id->isBroadcast()) {
         continue;
       }
 
-      UnswitchPredicateKey key(root_id, reference);
+      UnswitchPredicateKey key(root_id, out_tv->fuserTv(), concrete_root_id);
       auto inserted = predicated_keys_.insert(key).second;
       add_pred = add_pred || inserted;
 

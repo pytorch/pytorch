@@ -80,8 +80,9 @@ class UnswitchPredicateKey {
   UnswitchPredicateKey();
 
   UnswitchPredicateKey(
-      IterDomain* predicated_concrete_id,
-      const ReferenceTensor& reference);
+      IterDomain* predicated_consumer_id,
+      TensorView* consumer_tv,
+      IterDomain* predicated_concrete_id);
 
   bool operator==(const UnswitchPredicateKey& other) const {
     return predicated_concrete_id_ == other.predicated_concrete_id_ &&
