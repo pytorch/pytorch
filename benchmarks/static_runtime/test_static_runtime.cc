@@ -208,50 +208,64 @@ TEST(StaticRuntime, Logit) {
   testStaticRuntime(logit_script_3, args_2, {c, b});
 }
 
-// TODO: check for dynamic shapes
 TEST(StaticRuntime, EmbeddingBag) {
   const std::string embedding_bag_default = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c)
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   const std::string embedding_bag_mean = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c, False, 1)
+        x, y, z, _ = torch.embedding_bag(a, b, c, False, 1)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   const std::string embedding_bag_max = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c, False, 2)
+        x, y, z, _ = torch.embedding_bag(a, b, c, False, 2)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   const std::string embedding_bag_sum_last_offset = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c, False, 0, False, None, True)
+        x, y, z, _ = torch.embedding_bag(a, b, c, False, 0, False, None, True)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   const std::string embedding_bag_mean_last_offset = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c, False, 1, False, None, True)
+        x, y, z, _ = torch.embedding_bag(a, b, c, False, 1, False, None, True)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   const std::string embedding_bag_max_last_offset = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.embedding_bag(a, b, c, False, 2, False, None, True)
+        x, y, z, _ = torch.embedding_bag(a, b, c, False, 2, False, None, True)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
   )JIT";
 
   at::Tensor weight = torch::randn({3, 11}, at::ScalarType::Float);
   at::Tensor input = torch::tensor({0, 1, 0, 2});
   at::Tensor offset = torch::tensor({0, 2, 4});
-
   std::vector<IValue> args{weight, input, offset};
-
   testStaticRuntime(embedding_bag_default, args);
   testStaticRuntime(embedding_bag_mean, args);
   testStaticRuntime(embedding_bag_max, args);
   testStaticRuntime(embedding_bag_sum_last_offset, args);
   testStaticRuntime(embedding_bag_mean_last_offset, args);
   testStaticRuntime(embedding_bag_max_last_offset, args);
+
+  at::Tensor weight2 = torch::randn({10, 11}, at::ScalarType::Float);
+  at::Tensor input2 = torch::tensor({0, 1, 0, 2, 1});
+  at::Tensor offset2 = torch::tensor({0, 1, 2, 3, 4, 5});
+  std::vector<IValue> args2{weight2, input2, offset2};
+  testStaticRuntime(embedding_bag_default, args, args2);
+  testStaticRuntime(embedding_bag_mean, args, args2);
+  testStaticRuntime(embedding_bag_max, args, args2);
+  testStaticRuntime(embedding_bag_sum_last_offset, args, args2);
+  testStaticRuntime(embedding_bag_mean_last_offset, args, args2);
+  testStaticRuntime(embedding_bag_max_last_offset, args, args2);
 }
 
 TEST(StaticRuntime, EmbeddingBagWithManagedOutput) {
@@ -969,6 +983,20 @@ TEST(StaticRuntime, to) {
         return (c)
   )JIT";
 
+  const auto to_script_fails_managed_output_check = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float()
+        return e
+  )JIT";
+
+  const auto to_script_memory_planning_fail = R"JIT(
+    def forward(self, a, b):
+        d = a.half() * b.half()
+        e = d.float().relu()
+        return e
+  )JIT";
+
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
     auto other = at::randn({4, 3, 1, 2}, b);
@@ -988,6 +1016,8 @@ TEST(StaticRuntime, to) {
     }
     testStaticRuntime(to_script_other, args2);
     testStaticRuntime(to_script_alias, {a});
+    testStaticRuntime(to_script_memory_planning_fail, {a, a});
+    testStaticRuntime(to_script_fails_managed_output_check, {a, a});
 
     // dynamic shapes
     testStaticRuntime(to_script_dtype, args0, {a2, b, c, d, e});
