@@ -4433,7 +4433,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Wishart(19 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
-                scipy.stats.wishart(19 + positive_var[0], cov_tensor),
+                scipy.stats.wishart(19 + positive_var[0].item(), cov_tensor),
             ),
         ]
 
