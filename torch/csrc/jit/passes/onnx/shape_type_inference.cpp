@@ -1472,7 +1472,7 @@ void ComputeConstant(Node* n, int opset_version) {
           auto input0_shape_value = input0_shape_size.value();
           if (ConstantValueMap::HasValue(n->input(1)->debugName())) {
             // When value of `shape` is statically known,
-            // shape of expand output can be computed.
+            // output shape can be computed.
             auto shape_temp = ConstantValueMap::GetValueInto1DInt64Vector(
                 n->input(1)->debugName());
             auto final_shape =
@@ -1485,7 +1485,7 @@ void ComputeConstant(Node* n, int opset_version) {
                   ConstantValueMap::GetShapeInto1DInt64VectorWithOneUnknown(
                       n->input(1)->debugName())) {
             // When shape of `shape` is statically known,
-            // rank of expand output can be computed.
+            // output rank can be computed.
             TORCH_INTERNAL_ASSERT(
                 expand_shape.value().size() == 1,
                 "`Shape` input to `Expand` should be a 1-D tensor. Instead got rank ",
