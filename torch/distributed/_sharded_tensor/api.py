@@ -440,10 +440,10 @@ class ShardedTensor(object):
             assert shard_meta in local_shard_metadatas, \
                 "local shard metadata not in sharded_tensor_metadata!"
 
+            _raise_if_mismatch(tensor_properties.layout, local_shard_tensor.layout, "layout", current_rank, True)
             if not local_shard_tensor.is_contiguous():
                 raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-            _raise_if_mismatch(tensor_properties.layout, local_shard_tensor.layout, "layout", current_rank, True)
             _raise_if_mismatch(shard_meta.shard_sizes, list(local_shard_tensor.size()), "size", current_rank)
             _raise_if_mismatch(tensor_properties.pin_memory, local_shard_tensor.is_pinned(), "pin_memory", current_rank, True)
             _raise_if_mismatch(local_device, local_shard_tensor.device, "device", current_rank)
