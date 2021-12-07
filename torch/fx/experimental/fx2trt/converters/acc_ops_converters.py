@@ -370,10 +370,9 @@ def acc_ops_layer_norm(network, target, args, kwargs, name):
     gamma = to_numpy(kwargs["weight"].reshape(*shape))
     beta = to_numpy(kwargs["bias"].reshape(*shape))
     eps = kwargs["eps"]
-    normalized_shape = kwargs["normalized_shape"]
 
     axes = 0
-    for d in range(len(normalized_shape)):
+    for d in range(len(shape)):
         axes |= 1 << (len(input_val.shape) - d - 1)
 
     # E[x]
