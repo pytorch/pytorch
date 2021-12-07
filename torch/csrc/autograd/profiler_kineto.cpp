@@ -41,7 +41,7 @@ inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return getTime() / 1000;
+  return torch::profiler::impl::getTime() / 1000;
 #endif // USE_KINETO
 }
 }  // namespace

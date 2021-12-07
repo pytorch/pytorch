@@ -10,6 +10,7 @@
 
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/generated/variable_factories.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/api/module.h>
@@ -75,8 +76,6 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
-using namespace torch::autograd::profiler;
 
 namespace torch {
 namespace jit {
@@ -2664,7 +2663,8 @@ TEST(ComputeFlopsTest, Basic) {
 
   // Test unknown operator
   std::unordered_map<std::string, c10::IValue> extra_args;
-  flops = computeFlops(std::string("aten::unknown"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::unknown"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d
@@ -2680,7 +2680,8 @@ TEST(ComputeFlopsTest, Basic) {
   extra_args["padding"] = at::IValue(at::IntArrayRef(padding));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
   extra_args["dilation"] = at::IValue(at::IntArrayRef(dilation));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 13440);
 
   // Test aten::conv2d fail
@@ -2688,7 +2689,8 @@ TEST(ComputeFlopsTest, Basic) {
   weight_size = {4, 5, 6};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(weight_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 2
@@ -2696,14 +2698,16 @@ TEST(ComputeFlopsTest, Basic) {
   stride = {0, 0};
   extra_args["weight_size"] = at::IValue(at::IntArrayRef(input_size));
   extra_args["stride"] = at::IValue(at::IntArrayRef(stride));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::conv2d fail 3
   extra_args.clear();
   input_size = {4, 5, 6, 7};
   extra_args["input_size"] = at::IValue(at::IntArrayRef(input_size));
-  flops = computeFlops(std::string("aten::conv2d"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::conv2d"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::mm
@@ -2712,11 +2716,13 @@ TEST(ComputeFlopsTest, Basic) {
   std::vector<int64_t> mat2_sizes = {6, 5, 4, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test aten::addmm
-  flops = computeFlops(std::string("aten::addmm"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::addmm"), extra_args);
   ASSERT_EQ(flops, 43200);
 
   // Test aten::bmm
@@ -2725,30 +2731,35 @@ TEST(ComputeFlopsTest, Basic) {
   mat2_sizes = {7, 6, 3};
   extra_args["mat1_size"] = at::IValue(at::IntArrayRef(mat1_sizes));
   extra_args["mat2_size"] = at::IValue(at::IntArrayRef(mat2_sizes));
-  flops = computeFlops(std::string("aten::bmm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::bmm"), extra_args);
   ASSERT_EQ(flops, 1260);
 
   // Test aten::baddbmm
-  flops = computeFlops(std::string("aten::baddbmm"), extra_args);
+  flops = torch::profiler::impl::computeFlops(
+      std::string("aten::baddbmm"), extra_args);
   ASSERT_EQ(flops, 1260);
 
   // Test mm out of range
   extra_args.clear();
-  flops = computeFlops(std::string("aten::mm"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mm"), extra_args);
   ASSERT_EQ(flops, 0);
 
   // Test aten::add.Tensor
   extra_args.clear();
   std::vector<int64_t> mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::add"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::add"), extra_args);
   ASSERT_EQ(flops, 360);
 
   // Test aten::mul.Tensor
   extra_args.clear();
   mat_sizes = {3, 4, 5, 6};
   extra_args["mat_size"] = at::IValue(at::IntArrayRef(mat_sizes));
-  flops = computeFlops(std::string("aten::mul"), extra_args);
+  flops =
+      torch::profiler::impl::computeFlops(std::string("aten::mul"), extra_args);
   ASSERT_EQ(flops, 360);
 }
 

@@ -568,7 +568,7 @@ void LegacyEvent::record(bool record_cuda) {
     cuda_stubs()->record(&device_, &cuda_event, &cpu_ns_);
     return;
   }
-  cpu_ns_ = getTime();
+  cpu_ns_ = torch::profiler::impl::getTime();
 }
 
 /* static */ LegacyEvent LegacyEvent::fromIValue(const at::IValue& eventIValue) {

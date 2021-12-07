@@ -15,6 +15,7 @@
 #include <c10d/comm.hpp>
 #include <c10d/default_comm_hooks.hpp>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/variable.h>
 #ifndef _WIN32
 #include <torch/csrc/distributed/autograd/context/context.h>
@@ -29,7 +30,7 @@ constexpr int kDDPRuntimeLoggingSampleRate = 100;
 constexpr int kUnsetTime = -1;
 
 inline int64_t current_time_in_nanos() {
-  return torch::autograd::profiler::getTime();
+  return torch::profiler::impl::getTime();
 }
 
 // Forward declaration
