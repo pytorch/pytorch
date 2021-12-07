@@ -12,12 +12,8 @@ struct UpgraderEntry {
   std::string old_schema;
 };
 
-const static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperatorVersionMap(
-    {{"aten::_test_serialization_subcmul",
-      {{3,
-        "_test_serialization_subcmul_0_2",
-        "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"}}},
-     {"aten::div.Tensor",
+static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperatorVersionMap(
+    {{"aten::div.Tensor",
       {{4,
         "div_Tensor_0_3",
         "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},
@@ -49,6 +45,14 @@ const static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperat
 std::unordered_map<std::string, std::vector<UpgraderEntry>>
 get_operator_version_map() {
   return kOperatorVersionMap;
+}
+
+void add_test_entry(std::string op_name, UpgraderEntry entry) {
+  kOperatorVersionMap[op_name].push_back(entry);
+}
+
+void remove_test_entry(std::string op_name) {
+  kOperatorVersionMap.erase(op_name);
 }
 
 } // namespace jit

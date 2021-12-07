@@ -36,3 +36,48 @@ class TestUpgraders(JitTestCase):
         upgraders_dump_second_time = torch._C._dump_upgraders_map()
         self.assertTrue(upgraders_size == upgraders_size_second_time)
         self.assertTrue(upgraders_dump == upgraders_dump_second_time)
+
+    def test_add_value_to_version_map(self):
+        map_before_test = torch._C._get_operator_version_map()
+
+        upgrader_bumped_version = 3
+        upgrader_name = "_test_serialization_subcmul_0_2"
+        upgrader_schema = "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"
+        dummy_entry = torch._C._UpgraderEntry(upgrader_bumped_version, upgrader_name, upgrader_schema)
+
+        torch._C._add_test_entry("aten::_test_serialization_subcmul", dummy_entry)
+        map_after_test = torch._C._get_operator_version_map()
+        self.assertTrue("aten::_test_serialization_subcmul" in map_after_test)
+        self.assertTrue(len(map_after_test) - len(map_before_test) == 1)
+        torch._C._remove_test_entry("aten::_test_serialization_subcmul")
+        map_after_remove_test = torch._C._get_operator_version_map()
+        self.assertTrue("aten::_test_serialization_subcmul" not in map_after_remove_test)
+        self.assertEqual(len(map_after_remove_test), len(map_before_test))
+
+    def test_populated_test_upgrader_graph(self):
+        @torch.jit.script
+        def f():
+            return 0
+
+        buffer = io.BytesIO()
+        torch.jit.save(f, buffer)
+        buffer.seek(0)
+        torch.jit.load(buffer)
+
+        # upgrader map should have populated now
+        upgraders_size = torch._C._get_upgraders_map_size()
+
+        test_map = {"a": "b", "c": "d"}
+        torch._C._populate_test_upgraders(test_map)
+        upgraders_size_after_test = torch._C._get_upgraders_map_size()
+        self.assertEqual(upgraders_size_after_test - upgraders_size, 2)
+        upgraders_dump = torch._C._dump_upgraders_map()
+        self.assertTrue("a" in upgraders_dump)
+        self.assertTrue("c" in upgraders_dump)
+
+        torch._C._remove_test_upgraders(test_map)
+        upgraders_size_after_remove_test = torch._C._get_upgraders_map_size()
+        self.assertTrue(upgraders_size_after_remove_test == upgraders_size)
+        upgraders_dump_after_remove_test = torch._C._dump_upgraders_map()
+        self.assertTrue("a" not in upgraders_dump_after_remove_test)
+        self.assertTrue("c" not in upgraders_dump_after_remove_test)
