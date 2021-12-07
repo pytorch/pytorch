@@ -2078,7 +2078,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::alltoall(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
     std::vector<at::Tensor>& tensors,
     int dstRank,
-    int /* unused */) {
+    int tag) {
+  if (tensors[0].device().type() != at::DeviceType::CUDA && ucc_pg) {
+    return ucc_pg->send(tensors, dstRank, tag);
+  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -2098,7 +2101,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::send(
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recv(
     std::vector<at::Tensor>& tensors,
     int srcRank,
-    int /* unused */) {
+    int tag) {
+  if (tensors[0].device().type() != at::DeviceType::CUDA && ucc_pg) {
+    return ucc_pg->recv(tensors, srcRank, tag);
+  }
   check_gpu_tensors(tensors);
   auto ret = pointToPoint(
       tensors,
@@ -2179,8 +2185,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(
-    std::vector<at::Tensor>& /* unused */,
-    int /* unused */) {
+    std::vector<at::Tensor>& tensors,
+    int tag) {
+  if (tensors[0].device().type() != at::DeviceType::CUDA && ucc_pg) {
+    return ucc_pg->recvAnysource(tensors, tag);
+  }
   TORCH_CHECK(false, "ProcessGroupNCCL does not support recvAnysource");
 }
 
