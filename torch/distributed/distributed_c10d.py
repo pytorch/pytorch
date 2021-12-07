@@ -123,7 +123,7 @@ class Backend(object):
         elif value == Backend.UNDEFINED:
             raise ValueError("Invalid backend: '{}'".format(name))
         elif value != Backend.GLOO and value != Backend.NCCL and value != Backend.MPI:
-            value = name
+            value = name.lower()
         return value
 
     @classmethod

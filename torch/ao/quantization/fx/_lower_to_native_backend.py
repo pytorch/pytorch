@@ -85,8 +85,15 @@ def _lower_to_native_backend(model: QuantizedGraphModule) -> QuantizedGraphModul
     """
     for ref_class in LOWER_MODULE_MAP.keys():
         model = _lower_weighted_ref_module(model, ref_class)
-    model.recompile()
-    for pattern, replacement in get_fbgemm_patterns_and_replacements():
-        subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement)
+    for pattern, replacement, match_filters in get_fbgemm_patterns_and_replacements():
+        # eliminate the possibility of an infinite loop
+        MAX_ITER = 1000
+        cur_iter = 0
+        while cur_iter < MAX_ITER:
+            cur_iter += 1
+            # replace the pattern until there is no more matches
+            matches = subgraph_rewriter_FORKED_DO_NOT_USE.replace_pattern(model, pattern, replacement, match_filters)
+            if not matches:
+                break
     model.graph.lint()
     return model
