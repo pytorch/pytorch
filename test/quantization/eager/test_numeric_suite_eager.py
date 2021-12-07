@@ -461,6 +461,8 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
             q_model = quantize_dynamic(model)
             compare_and_validate_results(model, q_model, linear_data)
 
+# TODO check that this works for models with convT
+
     @override_qengines
     def test_compare_model_outputs_lstm_dynamic(self):
         r"""Compare the output of LSTM layer in dynamic quantized model and corresponding
