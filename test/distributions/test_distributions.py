@@ -3489,7 +3489,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_wishart_shape_scalar_params(self):
-        wishart = Wishart(1, torch.tensor([[1.]]))
+        wishart = Wishart(torch.tensor(1), torch.tensor([[1.]]))
         self.assertEqual(wishart._batch_shape, torch.Size())
         self.assertEqual(wishart._event_shape, torch.Size((1, 1)))
         self.assertEqual(wishart.sample().size(), torch.Size((1, 1)))
@@ -4432,8 +4432,8 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             ),
             (
-                Wishart(19 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
-                scipy.stats.wishart(19 + positive_var[0].item(), cov_tensor),
+                Wishart(20 + positive_var[0], cov_tensor),  # scipy var for Wishart only supports scalars
+                scipy.stats.wishart(20 + positive_var[0].item(), cov_tensor),
             ),
         ]
 
