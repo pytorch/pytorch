@@ -623,7 +623,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   uint64_t seq_{0};
 
   // ProcessGroupUCC shared library handle
-  std::shared_ptr<at::DynamicLibrary> ucc_pg;
+  std::shared_ptr<at::DynamicLibrary> ucc_lib;
 };
 
 } // namespace c10d

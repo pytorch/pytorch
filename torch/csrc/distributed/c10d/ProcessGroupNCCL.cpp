@@ -593,8 +593,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-  ucc_pg = loadTorchUCC();
-  if (ucc_pg) {
+  ucc_lib = loadTorchUCC();
+  if (ucc_lib) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
   } else {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so not used";
