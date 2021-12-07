@@ -1,5 +1,7 @@
 #include <ATen/core/dynamic_type.h>
 
+#include <string>
+
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
@@ -17,6 +19,29 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
 }
 } // namespace
 
+std::string DynamicType::str() const {
+  std::string ret = "Dynamic<";
+  ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
+  ret += ">";
+  if (tag_ == Tag::Class) {
+    auto name = class_->name();
+    ret += "[" + (name ? name->qualifiedName() : "Unknown Class") + "]";
+  } else if (tag_ == Tag::Singleton) {
+    ret += "[kind:" + std::to_string(static_cast<int>(typeKind_)) + "]";
+  } else if (arguments_.elems.size() > 0) {
+    ret += "[";
+    for (const auto& arg : arguments_.elems) {
+      if (arg.label) {
+        ret += *arg.label + ":";
+      }
+      ret += arg.ty->str();
+      ret += ",";
+    }
+    ret += "]";
+  }
+  return ret;
+}
+
 DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
   elems.reserve(args.size());
   for (const auto& arg : args) {
@@ -25,12 +50,12 @@ DynamicType::Arguments::Arguments(c10::ArrayRef<TypePtr> args) {
 }
 
 DynamicType::Arguments::Arguments(
-    const c10::FunctionSchema& schema,
+    const std::vector<c10::string_view>& names,
     c10::ArrayRef<TypePtr> args)
     : Arguments(args) {
-  TORCH_INTERNAL_ASSERT(schema.arguments().size() == args.size());
+  TORCH_INTERNAL_ASSERT(names.size() == args.size());
   for (size_t i = 0; i < args.size(); i++) {
-    elems[i].label = schema.arguments()[i].name();
+    elems[i].label = std::string{names[i]};
   }
 }
 
@@ -94,7 +119,11 @@ DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
 
   if (auto tup = other.castRaw<TupleType>()) {
     if (auto schema = tup->schema()) {
-      new (&arguments_) Arguments(*schema, args);
+      std::vector<c10::string_view> names;
+      for (const auto& args : schema->arguments()) {
+        names.push_back(args.name());
+      }
+      new (&arguments_) Arguments(names, args);
       return;
     }
   }
@@ -115,7 +144,7 @@ bool DynamicType::equals(const DynamicType& other) const {
     case Tag::Singleton:
       return typeKind_ == other.typeKind_;
     default:
-      return compare(
+      return compareArguments(
           other, [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
             return a.equals(b);
           });
@@ -123,11 +152,7 @@ bool DynamicType::equals(const DynamicType& other) const {
 }
 
 bool DynamicType::operator==(const Type& rhs) const {
-  if (auto dyn = rhs.castRaw<DynamicType>()) {
-    return equals(*dyn);
-  }
-
-  return false;
+  return equals(*create(rhs));
 }
 
 bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
@@ -137,7 +162,7 @@ bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
       return true;
     }
     if (contains(tag_, kDynamicCovariantTypeBit)) {
-      if (compare(
+      if (compareArguments(
               *other,
               [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
                 return a.isSubtypeOf(b);
