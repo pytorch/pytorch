@@ -3648,6 +3648,7 @@ class TestKL(TestCase):
             (lognormal, lognormal),
             (laplace, normal),
             (normal, gumbel),
+            (normal, laplace),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
             (pareto, chi2),
