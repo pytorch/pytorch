@@ -175,7 +175,7 @@ def run_frozen_optimizations(
         )
 
 
-def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
+def optimize_for_inference(mod: ScriptModule, other_methods: Optional[List[str]] = None) -> ScriptModule:
     """
     Performs a set of optimization passes to optimize a model for the
     purposes of inference. If the model is not already frozen, optimize_for_inference
@@ -209,8 +209,12 @@ def optimize_for_inference(mod: ScriptModule) -> ScriptModule:
             "optimize_for_inference expects a ScriptModule as input. "
             "Please use torch.jit.script or torch.jit.trace to script your 'nn.Module'.")
 
-    if hasattr(mod, "training"):
-        mod = freeze(mod.eval())
+    if other_methods is None:
+        other_methods = []
 
-    torch._C._jit_pass_optimize_for_inference(mod._c)
+    if hasattr(mod, "training"):
+        mod = freeze(mod.eval(), preserved_attrs=other_methods)
+
+    torch._C._jit_pass_optimize_for_inference(mod._c, other_methods)
+
     return mod
