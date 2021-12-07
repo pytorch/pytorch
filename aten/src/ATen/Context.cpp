@@ -147,6 +147,21 @@ void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
 }
 
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+}
+
 bool Context::allowFP16ReductionCuBLAS() const {
   return allow_fp16_reduction_cublas;
 }
