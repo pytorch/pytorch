@@ -94,7 +94,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     Shape:
         - input: :math:`(N, \texttt{in\_features})` or :math:`(\texttt{in\_features})`
-        - target: :math:`(N)` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
+        - target: :math:`(N)` or :math:`()` where each value satisfies :math:`0 <= \texttt{target[i]} <= \texttt{n\_classes}`
         - output1: :math:`(N)` or :math:`()`
         - output2: ``Scalar``
 
@@ -166,36 +166,33 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             i2h.reset_parameters()
             h2o.reset_parameters()
 
-    def forward(self, input: Tensor, target: Tensor) -> _ASMoutput:
-        targ_dim = target.dim()
+    def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
+        targ_dim = target_.dim()
 
         if targ_dim == 1:
-            if input.size(0) != target.size(0):
+            if input_.size(0) != target_.size(0):
                 raise RuntimeError('Input and target should have the same size '
                                    'in the batch dimension.')
-            if input.dim() != 2:
+            if input_.dim() != 2:
                 raise RuntimeError('1D target tensor expects 2D input tensors, ' 
-                                   'but found inputs with size', input.size())
+                                   'but found inputs with size', input_.size())
         elif targ_dim == 0:
-            if input.dim() != 1:
+            if input_.dim() != 1:
                 raise RuntimeError('0D target tensor expects 1D input tensors, ' 
-                                   'but found inputs with size', input.size())
+                                   'but found inputs with size', input_.size())
         else:
             raise RuntimeError('0D or 1D target tensor expected, ' 
                                'multi-target not supported')
 
-        if targ_dim == 0:
-            new_input = input.unsqueeze(0)
-            new_target = target.unsqueeze(0)
-        else:
-            new_input = input
-            new_target = target
+        is_batched = targ_dim > 0
+        input = input_ if is_batched else input_.unsqueeze(0)
+        target = target_ if is_batched else target_.unsqueeze(0)
 
         used_rows = 0
-        batch_size = new_target.size(0)
+        batch_size = target.size(0)
 
-        output = new_input.new_zeros(batch_size)
-        gather_inds = new_target.new_empty(batch_size)
+        output = input.new_zeros(batch_size)
+        gather_inds = target.new_empty(batch_size)
 
         cutoff_values = [0] + self.cutoffs
         for i in range(len(cutoff_values) - 1):
@@ -203,24 +200,24 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             low_idx = cutoff_values[i]
             high_idx = cutoff_values[i + 1]
 
-            target_mask = (new_target >= low_idx) & (new_target < high_idx)
+            target_mask = (target >= low_idx) & (target < high_idx)
             row_indices = target_mask.nonzero().squeeze()
 
             if row_indices.numel() == 0:
                 continue
 
             if i == 0:
-                gather_inds.index_copy_(0, row_indices, new_target[target_mask])
+                gather_inds.index_copy_(0, row_indices, target[target_mask])
 
             else:
-                relative_target = new_target[target_mask] - low_idx
-                input_subset = new_input.index_select(0, row_indices)
+                relative_target = target[target_mask] - low_idx
+                input_subset = input.index_select(0, row_indices)
 
                 cluster_output = self.tail[i - 1](input_subset)
                 cluster_index = self.shortlist_size + i - 1
 
                 gather_inds.index_fill_(0, row_indices, cluster_index)
-
+                
                 cluster_logprob = log_softmax(cluster_output, dim=1)
                 local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
                 output.index_copy_(0, row_indices, local_logprob.squeeze(1))
@@ -231,15 +228,15 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             raise RuntimeError("Target values should be in [0, {}], "
                                "but values in range [{}, {}] "
                                "were found. ".format(self.n_classes - 1,
-                                                     new_target.min().item(),
-                                                     new_target.max().item()))
+                                                     target.min().item(),
+                                                     target.max().item()))
 
-        head_output = self.head(new_input)
+        head_output = self.head(input)
         head_logprob = log_softmax(head_output, dim=1)
         output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
         loss = (-output).mean()
 
-        if targ_dim == 0:
+        if not is_batched:
             output = output.squeeze(0)
 
         return _ASMoutput(output, loss)
