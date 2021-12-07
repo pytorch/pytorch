@@ -1424,7 +1424,7 @@ class TestFunctionalMapDataPipe(TestCase):
             Tuple[Type[MapDataPipe], MapDataPipe, Tuple, Dict[str, Any]]
         ] = [
             (dp.map.Mapper, dp.map.SequenceWrapper(arr), (), {}),
-            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,), {'test': True}), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,)), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1553,15 +1553,7 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.float)
             )
 
-        map_dp = input_dp.map(fn=fn, fn_args=(torch.int,), fn_kwargs={'sum': True})
-        self.assertEqual(len(input_dp), len(map_dp))
-        for index in arr:
-            self.assertEqual(
-                map_dp[index], torch.tensor(input_dp[index], dtype=torch.int).sum()
-            )
-
         from functools import partial
-
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
         for index in arr:
