@@ -556,6 +556,22 @@ TEST(Expr, DynamicShapeAdd) {
   testWithSize(37);
 }
 
+TEST(Expr, OutOfBounds) {
+  ExprHandle N(10);
+  ExprHandle start(0);
+  ExprHandle stop(15);
+  VarHandle i("i", kInt);
+
+  BufHandle X("X", {N}, kInt);
+
+  auto body = Store::make(X, {i}, i);
+  auto stmt = For::make(i, start, stop, body);
+
+  PaddedBuffer<int> data(20);
+
+  EXPECT_ANY_THROW(SimpleIREvaluator(stmt, {X})(data));
+}
+
 void testCond01() {
   const int N = 16;
   PaddedBuffer<float> a_v(N);

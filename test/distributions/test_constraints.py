@@ -9,9 +9,13 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 
 EXAMPLES = [
     (constraints.symmetric, False, [[2., 0], [2., 2]]),
-    (constraints.positive_definite, True, [[2., 0], [2., 2]]),
+    (constraints.positive_definite, False, [[2., 0], [2., 2]]),
     (constraints.symmetric, True, [[3., -5], [-5., 3]]),
     (constraints.positive_definite, False, [[3., -5], [-5., 3]]),
+    (constraints.symmetric, True, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.positive_definite, False, [[[1., -2], [-2., 1]], [[2., 3], [3., 2]]]),
+    (constraints.symmetric, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
+    (constraints.positive_definite, True, [[[4., 2], [2., 4]], [[3., -1], [-1., 3]]]),
 ]
 
 CONSTRAINTS = [
@@ -54,8 +58,7 @@ def build_constraint(constraint_fn, args, is_cuda=False):
                                                                                  reason='CUDA not found.'))])
 def test_constraint(constraint_fn, result, value, is_cuda):
     t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
-    assert constraint_fn.check(t(value)).all() == result, \
-        "Error in checking postive example of {}".format(constraint_fn)
+    assert constraint_fn.check(t(value)).all() == result
 
 
 @pytest.mark.parametrize('constraint_fn, args', [(c[0], c[1:]) for c in CONSTRAINTS])
