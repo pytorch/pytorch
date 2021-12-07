@@ -136,7 +136,6 @@ genrule(
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
         "aten/src/ATen/RegisterSparseCsrCPU.cpp",
-        "aten/src/ATen/RegisterZeroTensor.cpp",
         "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
         "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
         "aten/src/ATen/RegisterMeta.cpp",
@@ -239,6 +238,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
@@ -392,7 +392,6 @@ filegroup(
     name = "thc_srcs_cu",
     srcs = [
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
