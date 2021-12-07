@@ -29,6 +29,9 @@ TORCH_LIBRARY_IMPL(aten, Negative, m) {
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
 
+  // See test_layout_check_for_primal_with_conj_bit in test_autograd.py
+  m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+
   // linear algebra functions
   m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
   m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
