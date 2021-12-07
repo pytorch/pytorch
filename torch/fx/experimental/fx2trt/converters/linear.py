@@ -1,6 +1,6 @@
 import torch
 import tensorrt as trt
-from torch.fx.experimental.fx2trt.fx2trt import tensorrt_converter
+from torch.fx.experimental.fx2trt.converter_registry import tensorrt_converter
 
 from .converter_utils import mark_as_int8_layer, to_numpy, get_dyn_range
 
@@ -90,8 +90,7 @@ def quantized_linear(network, submod, args, kwargs, layer_name):
         raise RuntimeError(f"Quantized Linear received input {input_val} that is not part "
                            "of the TensorRT region!")
 
-    return common_linear(network, submod, input_val
-        , layer_name, is_quantized=True)
+    return common_linear(network, submod, input_val, layer_name, is_quantized=True)
 
 
 @tensorrt_converter(torch.nn.intrinsic.quantized.modules.linear_relu.LinearReLU)
