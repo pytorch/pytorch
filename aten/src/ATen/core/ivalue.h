@@ -790,18 +790,6 @@ struct TORCH_API IValue final {
   at::Generator toGenerator() &&;
   at::Generator toGenerator() const&;
 
-  // for debugging
-  std::string tagKind() const {
-    switch (tag) {
-#define DEFINE_CASE(x) \
-  case Tag::x:         \
-    return #x;
-      TORCH_FORALL_TAGS(DEFINE_CASE)
-#undef DEFINE_CASE
-    }
-    return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag)) + ")";
-  }
-
   // generic v.to<at::Tensor>() implementations
   // that can be used in special functions like pop/push
   // that use template meta-programming.
@@ -933,6 +921,35 @@ struct TORCH_API IValue final {
 #undef DEFINE_TAG
   };
 
+ public:
+  // for debugging
+  struct OpaqueTag {
+    std::string str() const {
+      switch (tag_) {
+#define DEFINE_CASE(x) \
+  case Tag::x:         \
+    return #x;
+        TORCH_FORALL_TAGS(DEFINE_CASE)
+#undef DEFINE_CASE
+      }
+      return "InvalidTag(" + c10::guts::to_string(static_cast<int>(tag_)) + ")";
+    }
+
+   private:
+    friend IValue;
+    OpaqueTag(Tag tag) : tag_(tag) {}
+    Tag tag_;
+  };
+
+  OpaqueTag lazyTagKind() const {
+    return OpaqueTag(tag);
+  }
+
+  std::string tagKind() const {
+    return OpaqueTag(tag).str();
+  }
+
+ private:
   template <
       class T,
       class NullType = c10::detail::intrusive_target_default_null_type<T>>
