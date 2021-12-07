@@ -34,7 +34,7 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
     //
     // TODO(#61485): functorch wrapped tensors should not go through the
     // fast path. This is a hack, longer term solutions are in the issue
-    if (output.is_cpu() && !isFuncTorchWrappedTensor(output)) {
+    if (output.is_cpu() && !isTensorSubclassLike(output)) {
       at::native::resize_(output, shape);
     } else {
       output.resize_(shape);

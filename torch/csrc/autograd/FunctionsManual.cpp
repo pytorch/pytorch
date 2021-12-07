@@ -207,13 +207,16 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    Tensor is_eq_max;
+    Tensor self_and_norm_isnan;
+    const auto self_isnan = self.isnan();
+    const auto norm_isnan = norm.isnan();
     if (!areAnyTensorSubclassLike({self, norm})) {
-      // optimization: use in-place
-      is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+      // optimization
+      self_and_norm_isnan = self_isnan.logical_and_(norm_isnan);
     } else {
-      is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and(norm.isnan())).type_as(self);
+      self_and_norm_isnan = self_isnan.logical_and(norm_isnan);
     }
+    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan);
     self_scaled = self.sgn() * is_eq_max;
     Tensor nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
@@ -664,11 +667,16 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
+    Tensor pred;
+    const auto self_ge_min = self >= min;
+    const auto self_le_max = self <= min;
     if (!areAnyTensorSubclassLike({self, min, max})) {
       // fastpath
-      return where((self >= min).logical_and_(self <= max), grad, zero);
+      pred = self_ge_min.logical_and_(self_le_max);
+    } else {
+      pred = self_ge_min.logical_and(self_le_max);
     }
-    return where((self >= min).logical_and(self <= max), grad, zero);
+    return where(pred, grad, zero);
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
     return where(self >= min, grad, zero);
@@ -692,20 +700,28 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   auto zero = at::scalar_tensor(0., grad.options());
   if (max.defined() && min.defined()) {
     if (grad_input_mask[0]) {
+      Tensor pred;
+      const auto self_lt_min = self < min;
+      const auto min_lt_max = min < max;
       if (!areAnyTensorSubclassLike({self, min, max})) {
         // fastpath
-        std::get<0>(ret) = where((self < min).logical_and_(min < max) , grad, zero);
+        pred = self_lt_min.logical_and_(min_lt_max);
       } else {
-        std::get<0>(ret) = where((self < min).logical_and(min < max) , grad, zero);
+        pred = self_lt_min.logical_and(min_lt_max);
       }
+      std::get<0>(ret) = where(pred, grad, zero);
     }
     if (grad_input_mask[1]) {
+      Tensor pred;
+      const auto self_gt_max = self > max;
+      const auto max_lt_min = max < min;
       if (!areAnyTensorSubclassLike({self, min, max})) {
         // fastpath
-        std::get<1>(ret) = where((self > max).logical_or_(max < min), grad, zero);
+        pred = self_gt_max.logical_or_(max_lt_min);
       } else {
-        std::get<1>(ret) = where((self > max).logical_or(max < min), grad, zero);
+        pred = self_gt_max.logical_or(max_lt_min);
       }
+      std::get<1>(ret) = where(pred, grad, zero);
     }
   } else if (min.defined() && grad_input_mask[0]) {
     std::get<0>(ret) = where(self < min, grad, zero);
@@ -974,7 +990,7 @@ Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tenso
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
     return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
   }
-  auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
+  auto mask = (input == value).logical_or_(input.isnan().logical_and(value.isnan()));
   return mask * (grad / mask.sum());
 }
 

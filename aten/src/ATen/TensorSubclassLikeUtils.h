@@ -28,13 +28,12 @@ constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
 
 constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
     DispatchKey::Batched,
+    DispatchKey::SparseCPU,
+    DispatchKey::SparseCUDA,
+    DispatchKey::SparseCsrCPU,
+    DispatchKey::SparseCsrCUDA,
     DispatchKey::Meta,
     DispatchKey::Python});
-
-inline bool isFuncTorchWrappedTensor(const Tensor& tensor) {
-  auto key_set = tensor.unsafeGetTensorImpl()->key_set();
-  return !(key_set & kFunctorchWrappedTensors).empty();
-}
 
 inline bool isTensorSubclassLike(const Tensor& tensor) {
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();
