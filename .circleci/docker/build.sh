@@ -138,10 +138,21 @@ case "$image" in
     VISION=yes
     KATEX=yes
     ;;
+  pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7)
+    CUDA_VERSION=11.5.0
+    CUDNN_VERSION=8
+    ANACONDA_PYTHON_VERSION=3.6
+    CMAKE_VERSION=3.10.3
+    GCC_VERSION=7
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    ;;
   pytorch-linux-xenial-py3-clang5-asan)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.13.5
     PROTOBUF=yes
     DB=yes
     VISION=yes
@@ -165,7 +176,7 @@ case "$image" in
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c)
     ANACONDA_PYTHON_VERSION=3.6
     CLANG_VERSION=5.0
-    CMAKE_VERSION=3.10.3
+    CMAKE_VERSION=3.13.5
     LLVMDEV=yes
     PROTOBUF=yes
     ANDROID=yes
@@ -294,6 +305,16 @@ fi
 
 tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 
+# If we are trying to use nvidia cuda image make sure it exists, otherwise use IMAGE from ghcr.io
+# this logic currently only exists for ubuntu
+if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
+  IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+  if ! DOCKER_CLI_EXPERIMENTAL=enabled docker manifest inspect "${IMAGE_NAME}" >/dev/null 2>/dev/null; then
+    IMAGE_NAME="ghcr.io/pytorch/nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
+    INSTALL_CUDNN="True"
+  fi
+fi
+
 # Build image
 # TODO: build-arg THRIFT is not turned on for any image, remove it once we confirm
 # it's no longer needed.
@@ -329,6 +350,8 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
+       --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
+       --build-arg "INSTALL_CUDNN=${INSTALL_CUDNN}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
@@ -347,6 +370,7 @@ function drun() {
 }
 
 if [[ "$OS" == "ubuntu" ]]; then
+
   if !(drun lsb_release -a 2>&1 | grep -qF Ubuntu); then
     echo "OS=ubuntu, but:"
     drun lsb_release -a

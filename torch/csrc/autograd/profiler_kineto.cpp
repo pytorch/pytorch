@@ -135,64 +135,57 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       return;
     }
     auto end_time = ctx->endUS;
-#ifdef USE_KINETO
-    libkineto::GenericTraceActivity op(
-        cpu_trace->span,
-        libkineto::ActivityType::CPU_OP,
-        evt_name);
-    op.device = libkineto::processId();
-    op.resource = libkineto::systemThreadId();
-    op.id = ctx->correlationId;
-    op.startTime = ctx->startUs;
-    op.endTime = end_time;
-    // optimization - postpone shapesToStr till finalizeCPUTrace
-    // is called from disableProfiler
-    // if (ctx->shapes && !ctx->shapes->empty()) {
-    //   op.inputDims = shapesToStr(*ctx->shapes);
-    // }
 
-    libkineto::api().activityProfiler().recordThreadInfo();
-#endif // USE_KINETO
-    {
-      std::lock_guard<std::mutex> guard(state_mutex_);
-      kineto_events_.emplace_back();
-      kineto_events_.back()
-          .name(evt_name)
-          .startUs(ctx->startUs)
-          .durationUs(end_time - ctx->startUs)
-          .correlationId(ctx->correlationId)
-          .deviceType(c10::DeviceType::CPU)
-          .startThreadId(ctx->startThreadId)
-          .endThreadId(ctx->endThreadId)
-          .sequenceNr(ctx->sequenceNr)
-          .fwdThreadId(ctx->fwdThreadId)
-          .scope(ctx->recFunScope)
-          .setAsync(is_async)
-          .debugHandle(ctx->debug_handle);
-      if (ctx->shapes && !ctx->shapes->empty()) {
-        kineto_events_.back().shapes(*ctx->shapes);
-      }
-      if (ctx->dtypes && !ctx->dtypes->empty()) {
-        kineto_events_.back().dtypes(*ctx->dtypes);
-      }
-      if (ctx->stack && !ctx->stack->empty()) {
-        kineto_events_.back().stack(*ctx->stack);
-      }
-      if (ctx->module_hierarchy) {
-        kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
-      }
-      if (ctx->extraArgs && !ctx->extraArgs->empty()) {
-        kineto_events_.back().flops(computeFlops(std::string(evt_name), *ctx->extraArgs));
-      }
-      kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
-      kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
+    std::lock_guard<std::mutex> guard(state_mutex_);
 #ifdef USE_KINETO
+    if (cpu_trace) {
+      libkineto::GenericTraceActivity op(
+          cpu_trace->span,
+          libkineto::ActivityType::CPU_OP,
+          evt_name);
+      op.device = libkineto::processId();
+      op.resource = libkineto::systemThreadId();
+      op.id = ctx->correlationId;
+      op.startTime = ctx->startUs;
+      op.endTime = end_time;
+      libkineto::api().activityProfiler().recordThreadInfo();
       cpu_trace->activities.emplace_back(std::move(op));
-#endif // USE_KINETO
     }
+#endif // USE_KINETO
+
+    kineto_events_.emplace_back();
+    kineto_events_.back()
+        .name(evt_name)
+        .startUs(ctx->startUs)
+        .durationUs(end_time - ctx->startUs)
+        .correlationId(ctx->correlationId)
+        .deviceType(c10::DeviceType::CPU)
+        .startThreadId(ctx->startThreadId)
+        .endThreadId(ctx->endThreadId)
+        .sequenceNr(ctx->sequenceNr)
+        .fwdThreadId(ctx->fwdThreadId)
+        .scope(ctx->recFunScope)
+        .setAsync(is_async)
+        .debugHandle(ctx->debug_handle);
+    if (ctx->shapes && !ctx->shapes->empty()) {
+      kineto_events_.back().shapes(*ctx->shapes);
+    }
+    if (ctx->dtypes && !ctx->dtypes->empty()) {
+      kineto_events_.back().dtypes(*ctx->dtypes);
+    }
+    if (ctx->stack && !ctx->stack->empty()) {
+      kineto_events_.back().stack(*ctx->stack);
+    }
+    if (ctx->module_hierarchy) {
+      kineto_events_.back().moduleHierarchy(*ctx->module_hierarchy);
+    }
+    if (ctx->extraArgs && !ctx->extraArgs->empty()) {
+      kineto_events_.back().flops(computeFlops(std::string(evt_name), *ctx->extraArgs));
+    }
+    kineto_events_.back().cuda_event_start_ = ctx->cuda_event_start_;
+    kineto_events_.back().cuda_event_end_ = ctx->cuda_event_end_;
   }
 
-  // TODO: use kineto
   void reportMemoryUsage(
       void* ptr,
       int64_t alloc_size,
@@ -203,39 +196,41 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       std::lock_guard<std::mutex> guard(state_mutex_);
       auto start_time = getTimeUs();
 #ifdef USE_KINETO
-      libkineto::api().activityProfiler().recordThreadInfo();
+      if (cpu_trace) {
+        libkineto::api().activityProfiler().recordThreadInfo();
 
-      cpu_trace->activities.emplace_back(
-          libkineto::GenericTraceActivity(
-            cpu_trace->span,
-            libkineto::ActivityType::CPU_INSTANT_EVENT,
-            kMemoryEventName));
-        auto& act = cpu_trace->activities.back();
-        act.device = libkineto::processId();
-        act.resource = libkineto::systemThreadId();
+        cpu_trace->activities.emplace_back(
+            libkineto::GenericTraceActivity(
+              cpu_trace->span,
+              libkineto::ActivityType::CPU_INSTANT_EVENT,
+              kMemoryEventName));
+          auto& act = cpu_trace->activities.back();
+          act.device = libkineto::processId();
+          act.resource = libkineto::systemThreadId();
 
-        act.startTime = start_time;
-        act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
-        act.addMetadata("Device Id", std::to_string(device.index()));
-        act.addMetadata(
-            "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
-        act.addMetadata("Bytes", std::to_string(alloc_size));
-        if (total_allocated >= 0) {
-          act.addMetadata("Total Allocated", std::to_string(total_allocated));
-        }
-        if (total_reserved >= 0) {
-          act.addMetadata("Total Reserved", std::to_string(total_reserved));
-        }
+          act.startTime = start_time;
+          act.addMetadata("Device Type", std::to_string((int8_t)device.type()));
+          act.addMetadata("Device Id", std::to_string(device.index()));
+          act.addMetadata(
+              "Addr", std::to_string(reinterpret_cast<intptr_t>(ptr)));
+          act.addMetadata("Bytes", std::to_string(alloc_size));
+          if (total_allocated >= 0) {
+            act.addMetadata("Total Allocated", std::to_string(total_allocated));
+          }
+          if (total_reserved >= 0) {
+            act.addMetadata("Total Reserved", std::to_string(total_reserved));
+          }
+      }
 #endif // USE_KINETO
 
-        kineto_events_.emplace_back();
-        auto& evt = kineto_events_.back();
-        evt.name(kMemoryEventName)
-          .startUs(start_time)
-          .deviceIndex(device.index())
-          .deviceType(device.type())
-          .nBytes(alloc_size)
-          .startThreadId(at::RecordFunction::currentThreadId());
+      kineto_events_.emplace_back();
+      auto& evt = kineto_events_.back();
+      evt.name(kMemoryEventName)
+        .startUs(start_time)
+        .deviceIndex(device.index())
+        .deviceType(device.type())
+        .nBytes(alloc_size)
+        .startThreadId(at::RecordFunction::currentThreadId());
     }
   }
 
@@ -297,6 +292,25 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
         kineto_event.deviceType(deviceTypeFromActivity(activity.type()));
       }
     }
+  }
+
+  std::unique_ptr<libkineto::ActivityTraceInterface> finalizeTrace() {
+    cpu_trace->span.endTime = getTimeUs();
+
+    // Call events post processing callback before finalizing trace, if there is one.
+    if (getEventPostProcessingCallback()) {
+      getEventPostProcessingCallback()(kineto_events_);
+    }
+    finalizeCPUTrace();
+    {
+      std::lock_guard<std::mutex> guard(state_mutex_);
+      libkineto::api().activityProfiler().transferCpuTrace(std::move(cpu_trace));
+    }
+
+    auto trace = libkineto::api().activityProfiler().stopTrace();
+    TORCH_CHECK(trace);
+    addTraceEvents(*trace);
+    return trace;
   }
 
   void finalizeCPUTrace() {
@@ -480,7 +494,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
       auto iter = tidSeq2activity.find(key);
       if (iter != tidSeq2activity.end()) {
         libkineto::GenericTraceActivity* fwd = iter->second;
+#ifdef USE_KINETO_UPDATED
+        fwd->flow.start = true;
+#else
         activity.flow.linkedActivity = fwd; // Only destination side set this, to distinguish with start side.
+#endif
         activity.flow.id = fwd->flow.id = fwd_bwd_link_id;
         activity.flow.type = fwd->flow.type = libkineto::kLinkFwdBwd;
         ++fwd_bwd_link_id;
@@ -630,7 +648,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           }
 
           kineto_ctx_ptr->endUS = getTimeUs();
-          state_ptr->reportClientActivity(fn.name().str(), fn.isAsync(), kineto_ctx_ptr);
+          state_ptr->reportClientActivity(fn.name(), fn.isAsync(), kineto_ctx_ptr);
 #ifdef USE_KINETO
           libkineto::api().activityProfiler().popCorrelationId();
 #endif // USE_KINETO
@@ -849,22 +867,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
   }
 
 #ifdef USE_KINETO
-  state_ptr->cpu_trace->span.endTime = getTimeUs();
-
-  // Call events post processing callback before finalizing trace, if there is one.
-  if (state_ptr->getEventPostProcessingCallback()) {
-    state_ptr->getEventPostProcessingCallback()(state_ptr->kineto_events_);
+  auto trace = state_ptr->finalizeTrace();
+#endif
+  if (config.with_stack) {
+    python_tracer::call(python_tracer::Command::kClear);
   }
-  state_ptr->finalizeCPUTrace();
-  libkineto::api().activityProfiler().transferCpuTrace(std::move(state_ptr->cpu_trace));
-
-  auto trace = libkineto::api().activityProfiler().stopTrace();
-  TORCH_CHECK(trace);
-  state_ptr->addTraceEvents(*trace);
-#endif // USE_KINETO
-if (config.with_stack) {
-  python_tracer::call(python_tracer::Command::kClear);
-}
 #ifdef USE_KINETO
   return std::make_unique<ProfilerResult>(
       state_ptr->start_time_,
