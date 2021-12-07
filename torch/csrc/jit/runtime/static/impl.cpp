@@ -176,10 +176,11 @@ bool mayContainAlias(
 //  Map each value to all values that are alive at the same time.
 using LivenessMap = FastMap<const Value*, FastSet<const Value*>>;
 
-std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+template <typename Map>
+std::string dumpMapFromValuesToListsOrSetsOfOtherValues(const Map& map) {
   std::ostringstream oss;
   oss << "{";
-  for (const auto& p : liveness_map) {
+  for (const auto& p : map) {
     oss << "{%" << p.first->debugName() << ": {";
     for (const auto* val : p.second) {
       oss << "%" << val->debugName() << ", ";
@@ -189,6 +190,10 @@ std::string dumpLivenessMap(const LivenessMap& liveness_map) {
   oss << "}";
   return oss.str();
 }
+
+std::string dumpLivenessMap(const LivenessMap& liveness_map) {
+  return dumpMapFromValuesToListsOrSetsOfOtherValues(liveness_map);
+};
 
 //  The algorithm does a traversal of the execution graph
 //  while keeping track of the live values.
@@ -204,15 +209,6 @@ LivenessMap GetLivenessMap(
   // block nodes)
   std::vector<const Value*> values_in_creation_order;
   FastMap<const Value*, size_t> values_to_idx_in_creation_order;
-  for (const auto* node : graph->nodes()) {
-    values_to_idx_in_creation_order.reserve(
-        values_to_idx_in_creation_order.size() + node->outputs().size());
-    for (const auto* v : node->outputs()) {
-      values_to_idx_in_creation_order.emplace(
-          v, values_in_creation_order.size());
-      values_in_creation_order.emplace_back(v);
-    }
-  }
 
   // presence of a Value in live_values_use_chain means the Value alive
   // Value mapped to set of Nodes that may use the Value (i.e., use-chain of
@@ -221,6 +217,42 @@ LivenessMap GetLivenessMap(
   // Node mapped to set of Values that the Node may use (i.e., def-chain of node
   // inputs)
   FastMap<const Node*, FastSet<const Value*>> live_nodes_def_chain;
+
+  {
+    // Set container capacity
+    size_t live_values_size = 0, live_nodes_size = 0,
+           values_in_creation_size = 0;
+    for (const auto* node : graph->nodes()) {
+      bool has_live_value = false;
+      for (const auto* v : node->outputs()) {
+        ++values_in_creation_size;
+        if (!value_group.isAlwaysAlive(v)) {
+          ++live_values_size;
+          has_live_value = true;
+        }
+      }
+      // All inputs and ouputs should be alive at the same time.
+      live_values_size += node->inputs().size();
+      if (has_live_value) {
+        ++live_nodes_size;
+      }
+    }
+
+    live_nodes_def_chain.reserve(live_nodes_size);
+    live_values_use_chain.reserve(live_values_size);
+    liveness_map.reserve(live_values_size);
+    values_in_creation_order.reserve(values_in_creation_size);
+    values_to_idx_in_creation_order.reserve(values_in_creation_size);
+  }
+
+  // Construct values_in_creation
+  for (const auto* node : graph->nodes()) {
+    for (const auto* v : node->outputs()) {
+      values_to_idx_in_creation_order.emplace(
+          v, values_in_creation_order.size());
+      values_in_creation_order.emplace_back(v);
+    }
+  }
 
   // add v to the current liveness_map
   std::function<void(const Value* v)> add_live_value_fn = [&](const Value* v) {
@@ -268,7 +300,12 @@ LivenessMap GetLivenessMap(
     // for all the values in the alias set,
     // we set them "alive"
     for (auto* aliased_v : refined_aliases) {
-      GRAPH_DEBUG("aliased_v: %", aliased_v->debugName());
+      GRAPH_DEBUG(
+          "aliased_v: %",
+          aliased_v->debugName(),
+          " (for %",
+          v->debugName(),
+          ")");
       add_live_value_fn(aliased_v);
     }
   };
@@ -280,6 +317,11 @@ LivenessMap GetLivenessMap(
         live_values_use_chain[v].erase(node);
         if (!live_values_use_chain[v].size()) {
           // v is now dead
+          GRAPH_DEBUG(
+              "%",
+              v->debugName(),
+              " is now dead after ",
+              node->output(0)->debugName())
           live_values_use_chain.erase(v);
         }
       }
@@ -535,6 +577,10 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
     }
     seen.emplace_back(v);
   }
+
+  GRAPH_DEBUG(
+      "same_storage_values: ",
+      dumpMapFromValuesToListsOrSetsOfOtherValues(same_storage_values));
 
   return same_storage_values;
 }
@@ -866,6 +912,7 @@ StaticModule::StaticModule(
   // to ProcessedNode.
   AliasDb alias_db(
       graph_, /*isFrozen=*/false, /*enablePreciseTupleContainerAnalysis=*/true);
+  GRAPH_DEBUG("AliasDb: ", alias_db.toString());
 
   // Construct constant and function nodes
   for (Node* node : graph_->nodes()) {
@@ -1004,6 +1051,56 @@ StaticModule::StaticModule(
     value_to_same_storage_values_ =
         GenerateSameStorageValues(lm, value_group_, values, alias_db);
   }
+
+  prepareForMemoryPlanner();
+}
+
+void StaticModule::prepareForMemoryPlanner() {
+  if (!opts_.enable_out_variant) {
+    return;
+  }
+
+  // Never manage graph outputs so that we can do std::move(output_ivalue).
+  // This does not affect performance if the graph returns a collection object.
+  FastSet<const Value*> graph_output_values(
+      graph_->outputs().begin(), graph_->outputs().end());
+
+  // collect register indices of outputs of ops with out variant
+  for (ProcessedNode& pnode : nodes_) {
+    if (!pnode.has_out_variant()) {
+      continue;
+    }
+    auto outputs = pnode.node()->outputs();
+    for (const auto i : c10::irange(outputs.size())) {
+      const Value* out_v = outputs[i];
+      // Types are stored in the underlying TorchScript IR
+      bool is_tensor_type = out_v->type()->castRaw<TensorType>();
+      if (opts_.manage_output_tensors && is_tensor_type &&
+          graph_output_values.find(out_v) == graph_output_values.end() &&
+          value_group_.isOutputAlias(out_v)) {
+        managed_output_tensor_values_.insert(out_v);
+        continue;
+      }
+      if (value_group_.isAlwaysAlive(out_v)) {
+        continue;
+      }
+      if (is_tensor_type) {
+        managed_tensor_values_.insert(out_v);
+      } else if (is_optimizable_container_type(pnode.node())) {
+        // We "leak" certain container types because their allocations
+        // take a long time
+        leaked_values_.insert(out_v);
+      }
+    }
+  }
+
+  for (const Value* output : graph_->outputs()) {
+    managed_tensor_values_.erase(output);
+  }
+  GRAPH_DEBUG("managed_tensor_values: ", dumpValueSet(managed_tensor_values_));
+  GRAPH_DEBUG(
+      "managed_output_tensor_values_: ",
+      dumpValueSet(managed_output_tensor_values_));
 }
 
 const StaticModuleOptions& StaticModule::opts() const {
@@ -1036,13 +1133,13 @@ Node* StaticModule::findNodeWithKindForTesting(const std::string& kind) const {
 
 c10::IValue StaticModule::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   return runtime()(args, kwargs);
 }
 
 c10::IValue StaticModule::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   return runtime()(std::move(args), kwargs);
 }
 
@@ -1080,7 +1177,7 @@ StaticRuntime::~StaticRuntime() = default;
 
 void StaticRuntime::set_inputs(
     const std::vector<IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
@@ -1117,7 +1214,7 @@ void StaticRuntime::set_inputs(
 
 void StaticRuntime::set_inputs(
     std::vector<IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   if (!kwargs.empty()) {
     // This is not ideal
     TORCH_CHECK(
@@ -1161,6 +1258,9 @@ void StaticRuntime::create_memory_planner() {
         this,
         static_module_.values_share_same_storage(),
         static_module_.value_group(),
+        static_module_.managed_tensor_values(),
+        static_module_.managed_output_tensor_values(),
+        static_module_.leaked_values(),
         static_module_.opts().enable_out_variant,
         manage_output_tensors_enabled_);
   }
@@ -1301,7 +1401,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   // We assume inference workloads, so we do not need
   // autograd. Enabling this is a significant win on dispatcher
   // overhead because it saves a round of dispatch for at least some
@@ -1351,7 +1451,7 @@ c10::IValue StaticRuntime::run_impl(
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl_record_functions(
     IValueList&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   bool pre_sampled = false;
   if (C10_UNLIKELY(at::shouldRunRecordFunction(&pre_sampled))) {
     at::RecordFunction guard(
@@ -1370,7 +1470,7 @@ c10::IValue StaticRuntime::run_impl_record_functions(
 
 c10::IValue StaticRuntime::operator()(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
 #ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(args, kwargs);
 #else
@@ -1380,7 +1480,7 @@ c10::IValue StaticRuntime::operator()(
 
 c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
 #ifdef PYTORCH_DISABLE_NET_PROFILING
   return run_impl(std::move(args), kwargs);
 #else
@@ -1407,8 +1507,7 @@ std::string generate_latency_json(const std::string& label, double millis) {
 
 void StaticRuntime::benchmark(
     const std::vector<std::vector<c10::IValue>>& args_list,
-    const std::vector<std::unordered_map<std::string, c10::IValue>>&
-        kwargs_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs,
     bool print_per_node_time,
@@ -1507,7 +1606,7 @@ void StaticRuntime::benchmark(
   check_for_memory_leak();
 
 #ifndef NDEBUG
-  std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  KeywordArgs empty_kwargs;
   display_nodes(
       args_list[0], kwargs_list.size() > 0 ? kwargs_list[0] : empty_kwargs);
 #endif
@@ -1515,8 +1614,7 @@ void StaticRuntime::benchmark(
 
 float StaticRuntime::benchmark_model(
     const std::vector<std::vector<c10::IValue>>& args_list,
-    const std::vector<std::unordered_map<std::string, c10::IValue>>&
-        kwargs_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
@@ -1524,7 +1622,7 @@ float StaticRuntime::benchmark_model(
       kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
-  const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  const KeywordArgs empty_kwargs;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
     for (const auto j : c10::irange(args_list.size())) {
@@ -1600,7 +1698,7 @@ void display_pnode_info(const ProcessedNode& pnode) {
 
 void StaticRuntime::display_nodes(
     const std::vector<c10::IValue>& args,
-    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+    const KeywordArgs& kwargs) {
   c10::InferenceMode mode;
   if (planner_) {
     planner_->allocate();
@@ -1625,8 +1723,7 @@ void StaticRuntime::display_nodes(
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
     const std::vector<std::vector<c10::IValue>>& args_list,
-    const std::vector<std::unordered_map<std::string, c10::IValue>>&
-        kwargs_list,
+    const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(
@@ -1637,7 +1734,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   }
 
   const bool is_kwargs_empty = kwargs_list.size() == 0;
-  const std::unordered_map<std::string, c10::IValue> empty_kwargs;
+  const KeywordArgs empty_kwargs;
   bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for
   // explanation.
@@ -1770,7 +1867,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (planner_ && planner_->isManagedOutputTensorValue(val)) {
+      if (planner_ && isManagedOutputTensorValue(val)) {
         // `ival` contains a managed output tensor that the runtime doesn't
         // reclaim at the end of an iteration, but the client does so
         // by explicitly calling `StaticRuntime::deallocateOutputTensors`.
@@ -1832,7 +1929,7 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
     for (const auto i : c10::irange(pnode.num_outputs())) {
       const IValue* ival = &pnode.Output(i);
       const Value* val = pnode.node()->output(i);
-      if (!planner_->isManagedOutputTensorValue(val)) {
+      if (!isManagedOutputTensorValue(val)) {
         continue;
       }
       const auto& t = ival->toTensor();
@@ -1849,8 +1946,18 @@ bool StaticRuntime::checkOutputTensorMemoryLeaks() {
   return true;
 }
 
-bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) {
+bool StaticRuntime::isManagedOutputTensor(const IValue& ivalue) const {
   return planner_ && planner_->isManagedOutputTensor(ivalue);
+}
+
+bool StaticRuntime::isManagedOutputTensorValue(const Value* value) const {
+  // It's possible that manage_output_tensors_ was disabled after initializing
+  // managed_output_tensor_values, so we have to check that flag here.
+  if (!planner_ || !manage_output_tensors_enabled_) {
+    return false;
+  }
+  const auto& managed_outputs = static_module_.managed_output_tensor_values();
+  return managed_outputs.find(value) != managed_outputs.end();
 }
 
 void StaticRuntime::disableManageOutputTensors() {

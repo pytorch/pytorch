@@ -135,7 +135,7 @@ def build_sparse_fp16_trt(model, input_shape=None, sparse_params=None, logger_le
     interp = TRTInterpreter(
         model, [InputTensorSpec(torch.Size(input_shape), torch.float, has_batch_dim=False)],
         logger_level=logger_level)
-    interpreter_result = interp.run(fp16_mode=True, sparse_mode=True)
+    interpreter_result = interp.run(fp16_mode=True, sparse_weight=True)
     return TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
 
 
@@ -202,7 +202,7 @@ def build_sparse_int8_trt(model, input_shape=None, logger_level=None):
         [InputTensorSpec(torch.Size([-1, *data.shape[1:]]), torch.float,
                          shape_ranges=[([1] + input_shape, [5] + input_shape, [10] + input_shape)], has_batch_dim=True)],
         explicit_batch_dimension=True, explicit_precision=True, logger_level=logger_level)
-    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_mode=True)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_weight=True)
     trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("explicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
@@ -264,7 +264,7 @@ def build_sparse_int8_trt_implicit_quant(model, input_shape=None, logger_level=N
     shape_prop.ShapeProp(traced_model).propagate(data)
     traced_model = NormalizeArgs(traced_model).transform()
     interp = TRTInterpreter(traced_model, InputTensorSpec.from_tensors([data]), logger_level=logger_level)
-    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_mode=True, strict_type_constraints=True)
+    interpreter_result = interp.run(fp16_mode=False, int8_mode=True, sparse_weight=True, strict_type_constraints=True)
     trt_mod = TRTModule(interpreter_result.engine, interpreter_result.input_names, interpreter_result.output_names)
     trt_res = trt_mod(data.cuda())
     print("implicit quant result diff max", torch.max(ref_res - trt_res.cpu()))
