@@ -53,7 +53,7 @@ class Wishart(ExponentialFamily):
     support = constraints.positive_definite
     has_rsample = True
 
-    def __init__(self, covariance_matrix=None, precision_matrix=None, scale_tril=None, df=None, validate_args=None):
+    def __init__(self, df=None, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
         assert (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) == 1, \
             "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
 
