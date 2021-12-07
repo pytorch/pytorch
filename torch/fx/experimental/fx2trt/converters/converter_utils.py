@@ -1,26 +1,25 @@
-from typing import Callable, Any, Tuple, Sequence, Union, List, Optional
+from typing import Any, Tuple, Sequence, Union, List, Optional
 
 import numpy as np
 import tensorrt as trt
 import torch
-from torch.fx.experimental.fx2trt.fx2trt import torch_dtype_from_trt
-
-Target = Union[Callable[..., Any], str]
-ShapeType = Union[Sequence[int], trt.Dims]
+from torch.fx.node import Target
+from torch.fx.experimental.fx2trt.types import *  # noqa: F403
+from torch.fx.experimental.fx2trt.utils import torch_dtype_from_trt
 
 
 def get_trt_plugin(
     plugin_name: str,
-    field_collection: List[trt.PluginFieldCollection],
+    field_collection: List[TRTPluginFieldCollection],
     version: str,
     plugin_namespace: str = ""
-) -> trt.IPluginV2:
+) -> TRTPlugin:
     """
     Get a TensorRT plugin based on the given parameters.
 
     Args:
         plugin_name (str): Name of the plugin.
-        field_collection (List[trt.PluginFieldCollection]): Parameters that needed
+        field_collection (List[TRTPluginFieldCollection]): Parameters that needed
             to create a plugin using the plugin creator.
         version (str): Version of the plugin.
         plugin_namespace (str): Namespace of the plugin.
@@ -54,12 +53,12 @@ def get_positive_dim(dim: int, dim_size: int) -> int:
     return dim
 
 
-def set_layer_name(layer: trt.ILayer, target: Target, name: str) -> None:
+def set_layer_name(layer: TRTLayer, target: Target, name: str) -> None:
     """
     Set the TensorRT layer name to "[TensorRT Layer Type]_[Original Op Name]_[FX Node Name with Suffix]"
 
     Args:
-        layer (trt.ILayer): A TensorRT layer of which we want to set the name.
+        layer (TRTLayer): A TensorRT layer of which we want to set the name.
         target (Target): A fx node.target. For call_function node, it's the function that
             the node represents.
         name (str): Consists of fx node.name with optional suffix.
@@ -117,12 +116,12 @@ def to_numpy(tensor: Optional[torch.Tensor]) -> Optional[np.ndarray]:
     return tensor.cpu().detach().contiguous().numpy()
 
 
-def has_dynamic_shape(shape: ShapeType) -> bool:
+def has_dynamic_shape(shape: Shape) -> bool:
     """
     Determine if the given shape has dynamic dim. i.e. if there're -1 in shape.
 
     Args:
-        shape (ShapeType): Shape of a tensor. Essentially is a sequence of integers.
+        shape (Shape): Shape of a tensor. Essentially is a sequence of integers.
 
     Returns:
         A boolean value indicates whether there's dynamic dim in the shape.
@@ -163,16 +162,16 @@ def get_axes_for_reduce_op(
 
 
 def create_constant(
-    network: trt.INetworkDefinition,
+    network: TRTNetwork,
     value: Union[int, float, torch.Tensor],
     name: str,
     dtype: Optional[torch.dtype],
-) -> trt.tensorrt.ITensor:
+) -> TRTTensor:
     """
     Add a TensorRT constant layer whose value is `value` to `network`.
 
     Args:
-        network (trt.INetworkDefinition): A TensorRT network to which we want to add
+        network (TRTNetwork): A TensorRT network to which we want to add
             a constant layer.
         value (Union[int, float, torch.Tensor]): A literal value or a PyTorch tensor
             that will be used as value of the added TensorRT Constant layer.
@@ -198,17 +197,17 @@ def create_constant(
 
 
 def get_trt_tensor(
-    network: trt.INetworkDefinition,
+    network: TRTNetwork,
     input_val: Any,
     name: str,
     dtype: Optional[torch.dtype] = None
-) -> trt.tensorrt.ITensor:
+) -> TRTTensor:
     """
     Given a value of random type, we try to convert it to a TensorRT ITensor.
     An runtime error is raised if we're not able to do that.
 
     Args:
-        network (trt.INetworkDefinition): A TensorRT network. If we want to
+        network (TRTNetwork): A TensorRT network. If we want to
             add a TensorRT Constant layer, we will add it to this network.
         input_val (Any): An value that we want to convert to a TensorRT ITensor.
         name (str): The name of the created TensorRT Constant layer if there's
@@ -221,7 +220,7 @@ def get_trt_tensor(
     """
     if isinstance(input_val, (torch.Tensor, int, float)):
         return create_constant(network, input_val, name, dtype)
-    elif not isinstance(input_val, trt.tensorrt.ITensor):
+    elif not isinstance(input_val, TRTTensor):
         raise RuntimeError(
             f"Received input {input_val} of name {name} that "
             "is not part of the TensorRT region!"
@@ -231,18 +230,18 @@ def get_trt_tensor(
 
 
 def prepend_ones(
-    network: trt.INetworkDefinition,
-    tensor: trt.tensorrt.ITensor,
+    network: TRTNetwork,
+    tensor: TRTTensor,
     name: str,
     num_prepend_ones: int,
-) -> trt.tensorrt.ITensor:
+) -> TRTTensor:
     """
     Prepend 1s to the shape of TensorRT ITensor `tensor`.
 
     Args:
-        network (trt.INetworkDefinition): The TensorRT network that `tensor`
+        network (TRTNetwork): The TensorRT network that `tensor`
             belongs to.
-        tensor (trt.tensorrt.ITensor): A TensorRT tensor.
+        tensor (TRTTensor): A TensorRT tensor.
         name (str): Name of the TensorRT Shuffle layer which is used to prepend
             1s.
         num_prepend_ones (int): Number of 1s that will be prepend.
@@ -276,21 +275,21 @@ def prepend_ones(
 
 
 def broadcast(
-    network: trt.INetworkDefinition,
-    a: trt.tensorrt.ITensor,
-    b: trt.tensorrt.ITensor,
+    network: TRTNetwork,
+    a: TRTTensor,
+    b: TRTTensor,
     a_name: str,
     b_name: str,
     preset_diff: int = 0
-) -> Tuple[trt.tensorrt.ITensor, trt.tensorrt.ITensor]:
+) -> Tuple[TRTTensor, TRTTensor]:
     """
     Broadcast two TensorRT tensors to the same number of dimensions by
     prepending 1s to the tensor with less number of dimensions.
 
     Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        a (trt.tensorrt.ITensor): A TensorRT ITensor.
-        b (trt.tensorrt.ITensor): A TensorRT ITensor.
+        network (TRTNetwork): TensorRT network object.
+        a (TRTTensor): A TensorRT ITensor.
+        b (TRTTensor): A TensorRT ITensor.
         a_name (str): Name of tensor a.
         b_name (str): Name of tensor b.
         preset_diff (int): The difference of number of dimensions after broadcast.
@@ -314,14 +313,15 @@ def broadcast(
 
     return a, b
 
+
 def add_binary_elementwise_layer(
-    network: trt.INetworkDefinition,
-    lhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
-    rhs_val: Union[int, float, trt.tensorrt.ITensor, torch.Tensor],
+    network: TRTNetwork,
+    lhs_val: Union[int, float, TRTTensor, torch.Tensor],
+    rhs_val: Union[int, float, TRTTensor, torch.Tensor],
     op_type: trt.ElementWiseOperation,
     target: Target,
     name: str
-) -> trt.tensorrt.ITensor:
+) -> TRTTensor:
     """
     This function adds a TensorRT elementwise layer. We only allow at most one
     operand to not be a trt tensor, otherwise, we should const fold it first.
@@ -334,10 +334,10 @@ def add_binary_elementwise_layer(
     tensor are not allowed to have larger ranks than the trt tensor operand.
 
     Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        lhs_val (trt.tensorrt.ITensor): Left operand of the binary operation. Could
+        network (TRTNetwork): TensorRT network object.
+        lhs_val (TRTTensor): Left operand of the binary operation. Could
             be a TensorRT tensor, a PyTorch tensor or a simple value.
-        rhs_val (trt.tensorrt.ITensor): Right operand of the binary operation. Similar
+        rhs_val (TRTTensor): Right operand of the binary operation. Similar
             to lhs_val.
         op_type (trt.ElementWiseOperation): Type of the TensorRT elementwise binary operation.
         target (Target): Target of fx node.
@@ -349,10 +349,10 @@ def add_binary_elementwise_layer(
     dtype = None
     is_lhs_trt_tensor = False
     is_rhs_trt_tensor = False
-    if isinstance(lhs_val, trt.tensorrt.ITensor):
+    if isinstance(lhs_val, TRTTensor):
         dtype = torch_dtype_from_trt(lhs_val.dtype)
         is_lhs_trt_tensor = True
-    if isinstance(rhs_val, trt.tensorrt.ITensor):
+    if isinstance(rhs_val, TRTTensor):
         dtype = torch_dtype_from_trt(rhs_val.dtype)
         is_rhs_trt_tensor = True
     if not is_lhs_trt_tensor and not is_rhs_trt_tensor:
@@ -378,18 +378,18 @@ def add_binary_elementwise_layer(
 
 
 def add_unary_layer(
-    network: trt.INetworkDefinition,
-    input_val: trt.tensorrt.ITensor,
+    network: TRTNetwork,
+    input_val: TRTTensor,
     operation_type: trt.UnaryOperation,
     target: Target,
     name: str,
-) -> trt.tensorrt.ITensor:
+) -> TRTTensor:
     """
     Add a TensorRT Unary layer to `network`.
 
     Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        input_val (trt.tensorrt.ITensor): Input to the unary op. Must be a TensorRT tensor.
+        network (TRTNetwork): TensorRT network object.
+        input_val (TRTTensor): Input to the unary op. Must be a TensorRT tensor.
         op_type (trt.ElementWiseOperation): Type of the TensorRT unary operation.
         target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
@@ -397,7 +397,7 @@ def add_unary_layer(
     Returns:
         The output of TensorRT Unary layer.
     """
-    if not isinstance(input_val, trt.tensorrt.ITensor):
+    if not isinstance(input_val, TRTTensor):
         raise RuntimeError(
             f"{operation_type} received input {input_val} that is not part "
             "of the TensorRT region!"
@@ -408,33 +408,43 @@ def add_unary_layer(
 
 
 def add_activation_layer(
-    network: trt.INetworkDefinition,
-    input_val: trt.tensorrt.ITensor,
+    network: TRTNetwork,
+    input_val: TRTTensor,
     operation_type: trt.ActivationType,
     target: Target,
     name: str,
-) -> trt.tensorrt.ITensor:
+    alpha: Optional[Any] = None,
+    beta: Optional[Any] = None,
+) -> TRTTensor:
     """
     Add a TensorRT Activation layer to `network`.
 
     Args:
-        network (trt.INetworkDefinition): TensorRT network object.
-        input_val (trt.tensorrt.ITensor): Input to the activation op.
+        network (TRTNetwork): TensorRT network object.
+        input_val (TRTTensor): Input to the activation op.
             Must be a TensorRT tensor.
         op_type (trt.ElementWiseOperation): Type of the TensorRT activation
             operation.
         target (Target): Target of fx node.
         name (str): The name we want to assign to the created TensorRT layer.
+        alpha (Optional[Any]): If not None, we will use it to set the alpha
+            attribute of the created TensorRT activation layer.
+        beta (Optional[Any]): If not None, we will use it to set the beta
+            attribute of the created TensorRT activation layer.
 
     Returns:
         The output of TensorRT Activation layer.
     """
-    if not isinstance(input_val, trt.tensorrt.ITensor):
+    if not isinstance(input_val, TRTTensor):
         raise RuntimeError(
             f"{operation_type} received input {input_val} that is not part "
             "of the TensorRT region!"
         )
     layer = network.add_activation(input_val, operation_type)
+    if alpha:
+        layer.alpha = alpha
+    if beta:
+        layer.beta = beta
     set_layer_name(layer, target, name)
     return layer.get_output(0)
 
@@ -476,3 +486,78 @@ def get_inputs_from_args_and_kwargs(args, kwargs, input_names):
         else:
             inputs.append(kwargs[key])
     return inputs
+
+
+def sign(
+    network: TRTNetwork,
+    input_val: TRTTensor,
+    target: Target,
+    name: str
+) -> TRTTensor:
+    """
+    Sign is calculated as below:
+       x = input
+       sign = (exp(x) // exp(abs(x))) * 2 - 1
+       For positive number and 0, (exp(x) // exp(abs(x))) yield 1; for negative number, (exp(x) // exp(abs(x))) yield 0.
+       With multiply 2, the value become 2(for pos and 0) and 0(for neg).
+       Finally minus 1, the value become 1(for pos and 0) and -1(for neg).
+
+    Args:
+        network (TRTNetwork): TensorRT network object.
+        input_val (TRTTensor): The input tensor.
+        target (Target): fx node target.
+        name (str): Name of the fx node with optional suffix.
+
+    Returns:
+        A TensorRT tensor represent the result of sign operator.
+    """
+    input_exp_output = add_unary_layer(network, input_val, trt.UnaryOperation.EXP, target, f"{name}_prod_exp")
+    input_abs_output = add_unary_layer(network, input_val, trt.UnaryOperation.ABS, target, f"{name}_prod_abs")
+    input_abs_exp_output = add_unary_layer(network, input_abs_output, trt.UnaryOperation.EXP, target, f"{name}_prod_abs_exp")
+    floor_div_output = add_binary_elementwise_layer(network, input_exp_output, input_abs_exp_output,
+                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_exp_floor_div")
+    double_floor_div_output = add_binary_elementwise_layer(network, floor_div_output, 2,
+                                                           trt.ElementWiseOperation.PROD, target, f"{name}_floor_div*2")
+    return add_binary_elementwise_layer(network, double_floor_div_output, 1,
+                                        trt.ElementWiseOperation.SUB, target, f"{name}_sign")
+
+
+def trunc_div(
+    input: TRTTensor,
+    other: TRTTensor,
+    network: TRTNetwork,
+    target: Target,
+    name: str
+) -> TRTTensor:
+    """
+    Perform trunc divide on Tensor, result of divide will be round toward zero.
+    This means for positive number, it will be floor round; for negative number,
+    it will be ceil round. Example: [2.1, 0.8, -3.2] -> [2, 0, -3].
+
+    Args:
+        input: divisor.
+        other: dividend.
+        network: INetworkDefinition.
+        target: node target.
+        name: namespace for the op
+
+    Returns:
+        A TensorRT tensor represent the result of trunc divide.
+    """
+    prod_output = add_binary_elementwise_layer(network, input, other, trt.ElementWiseOperation.PROD, target, f"{name}_prod")
+    sign_output = sign(network, prod_output, target, name)
+
+    # Convert constant input into ITensor for UnaryOperation
+    if not isinstance(input, trt.tensorrt.ITensor):
+        input = get_trt_tensor(network, input, f"{name}_input")
+    if not isinstance(other, trt.tensorrt.ITensor):
+        other = get_trt_tensor(network, other, f"{name}_other", dtype=torch_dtype_from_trt(input.dtype))
+
+    abs_input_output = add_unary_layer(network, input, trt.UnaryOperation.ABS, target, f"{name}_abs_input")
+    abs_other_output = add_unary_layer(network, other, trt.UnaryOperation.ABS, target, f"{name}_abs_other")
+    abs_floor_output = add_binary_elementwise_layer(network, abs_input_output, abs_other_output,
+                                                    trt.ElementWiseOperation.FLOOR_DIV, target, f"{name}_floor_div")
+    output = add_binary_elementwise_layer(network, abs_floor_output, sign_output,
+                                          trt.ElementWiseOperation.PROD, target, f"{name}_output")
+
+    return output
