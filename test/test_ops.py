@@ -12,16 +12,21 @@ from torch.testing._internal.common_dtype import floating_and_complex_types_and,
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
-     TEST_WITH_ASAN, IS_WINDOWS)
+     TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
-    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
+    (deviceCountAtLeast, instantiate_device_type_tests, ops, onlyCPU,
+     onlyCUDA, onlyNativeDeviceTypes, skipCUDAIfRocm, OpDTypes, skipMeta)
 from torch.testing._internal.common_jit import JitCommonTestCase, check_against_reference
 from torch.testing._internal.jit_metaprogramming_utils import create_script_fn, create_traced_fn, \
     check_alias_annotation
 from torch.testing._internal.jit_utils import disable_autodiff_subgraph_inlining
 import torch.testing._internal.opinfo_helper as opinfo_helper
+from torch.testing._internal.composite_compliance import _check_composite_compliance
+
+# TODO: fixme https://github.com/pytorch/pytorch/issues/68972
+torch.set_default_dtype(torch.float32)
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -198,13 +203,22 @@ class TestCommon(TestCase):
 
     # Tests that the function and its (ndarray-accepting) reference produce the same
     #   values on the tensors from sample_inputs func for the corresponding op.
+    # This test runs in double and complex double precision because
+    # NumPy does computation internally using double precision for many functions
+    # resulting in possible equality check failures.
     @onlyNativeDeviceTypes
     @suppress_warnings
-    @ops(_ref_test_ops, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
+    @ops(_ref_test_ops, allowed_dtypes=(torch.float64, torch.long, torch.complex128))
     def test_reference_testing(self, device, dtype, op):
-        sample_inputs = op.sample_inputs(device, dtype)
-        for sample_input in sample_inputs:
-            self.compare_with_reference(op, op.ref, sample_input)
+        try:
+            # Sets the default dtype to NumPy's default dtype of double
+            cur_default = torch.get_default_dtype()
+            torch.set_default_dtype(torch.double)
+            sample_inputs = op.sample_inputs(device, dtype)
+            for sample_input in sample_inputs:
+                self.compare_with_reference(op, op.ref, sample_input, exact_dtype=(dtype is not torch.long))
+        finally:
+            torch.set_default_dtype(cur_default)
 
     @skipMeta
     @onlyNativeDeviceTypes
@@ -272,16 +286,21 @@ class TestCommon(TestCase):
             # TODO: FIXME: only validates grad on first tensor input
             self.assertEqual(actual_grad, expected_grad)
 
-    # Validates ops implement the correct out= behavior
-    # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
-    #   for a description of the correct behavior
-    # TODO: operations that support out= but don't support float
-    #   are not covered by this test.
-    @ops(op_db, allowed_dtypes=(torch.float,))
-    def test_out(self, device, dtype, op):
+    # Separates one case from the following test_out because many ops don't properly implement the
+    #   incorrectly sized out parameter warning properly yet
+    # Cases test here:
+    #   - out= with the correct dtype and device, but the wrong shape
+    @ops(op_db, dtypes=OpDTypes.none)
+    def test_out_warning(self, device, op):
         # TODO: verify the op doesn't support the out= kwarg
         if not op.supports_out:
             self.skipTest("Skipped! Op doesn't support out= kwarg.")
+
+        # Prefers running in float32 but has a fallback for the first listed supported dtype
+        supported_dtypes = op.supported_dtypes(self.device_type)
+        if len(supported_dtypes) == 0:
+            self.skipTest("Skipped! Op has not supported dtypes on this device.")
+        dtype = torch.float32 if torch.float32 in supported_dtypes else list(supported_dtypes)[0]
 
         # NOTE: only tests on first sample
         samples = op.sample_inputs(device, dtype)
@@ -307,6 +326,144 @@ class TestCommon(TestCase):
             # assumes (see above) that out is an iterable of tensors
             return tuple(map(fn, out))
 
+        # Extracts strides from a tensor or iterable of tensors into a tuple
+        def _extract_strides(out):
+            if isinstance(out, torch.Tensor):
+                return (out.stride(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.stride(), out))
+
+        # Extracts data pointers from a tensor or iterable of tensors into a tuple
+        # NOTE: only extracts on the CPU and CUDA device types since some
+        #   device types don't have storage
+        def _extract_data_ptrs(out):
+            if self.device_type != 'cpu' and self.device_type != 'cuda':
+                return ()
+
+            if isinstance(out, torch.Tensor):
+                return (out.data_ptr(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.data_ptr(), out))
+
+        def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
+            out = _apply_out_transform(transform, expected)
+            original_strides = _extract_strides(out)
+            original_ptrs = _extract_data_ptrs(out)
+
+            op_out(out=out)
+            final_strides = _extract_strides(out)
+            final_ptrs = _extract_data_ptrs(out)
+
+            self.assertEqual(expected, out)
+
+            if compare_strides_and_data_ptrs:
+                self.assertEqual(original_strides, final_strides)
+                self.assertEqual(original_ptrs, final_ptrs)
+
+        # Case: out= with the correct dtype and device, but the wrong shape
+        #   Expected behavior: resize with a warning.
+        def _case_two_transform(t):
+            wrong_shape = list(t.shape)
+
+            if len(wrong_shape) == 0:
+                # Handles scalar tensor case (empty list)
+                wrong_shape = [2]
+            else:
+                wrong_shape[-1] = wrong_shape[-1] + 1
+            return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
+
+        _compare_out(_case_two_transform, compare_strides_and_data_ptrs=False)
+
+        # Additional validates that the appropriate warning is thrown
+        out = _apply_out_transform(_case_two_transform, expected)
+        msg_fail = "Resized a non-empty tensor but did not warn about it."
+        with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg=msg_fail):
+            op_out(out=out)
+
+    # Validates ops implement the correct out= behavior
+    # See https://github.com/pytorch/pytorch/wiki/Developer-FAQ#how-does-out-work-in-pytorch
+    #   for a description of the correct behavior
+    # Validates the following cases:
+    #   - Case 0: out has the correct shape, dtype, and device but is full of extremal values
+    #   - Case 1: out has the correct shape, dtype, and device but is noncontiguous
+    #   - Case 2: out has the correct dtype and device, but is zero elements
+    #   - Case 3: out has the correct shape and dtype, but is on a different device type
+    #   - Case 4: out has the with correct shape and device, but a dtype that cannot
+    #       "safely" cast to
+    @ops(op_db, dtypes=OpDTypes.none)
+    def test_out(self, device, op):
+        # TODO: verify the op doesn't support the out= kwarg
+        if not op.supports_out:
+            self.skipTest("Skipped! Op doesn't support out= kwarg.")
+
+        # Prefers running in float32 but has a fallback for the first listed supported dtype
+        supported_dtypes = op.supported_dtypes(self.device_type)
+        if len(supported_dtypes) == 0:
+            self.skipTest("Skipped! Op has not supported dtypes on this device.")
+        dtype = torch.float32 if torch.float32 in supported_dtypes else list(supported_dtypes)[0]
+
+        # NOTE: only tests on first sample
+        samples = op.sample_inputs(device, dtype)
+        sample = samples[0]
+
+        # calls it normally to get the expected result
+        expected = op(sample.input, *sample.args, **sample.kwargs)
+        op_out = partial(op, sample.input, *sample.args, **sample.kwargs)
+
+        # Short-circuits if output is not a single tensor or an
+        #   iterable of tensors
+
+        if not isinstance(expected, torch.Tensor) and not is_iterable_of_tensors(expected, include_empty=True):
+            self.skipTest("Skipped! Only supports single tensor or iterable of tensor outputs.")
+
+        # A wrapper around map that works with single tensors and always
+        #   instantiates the map. Used below to apply transforms to
+        #   single tensor and iterable tensor outputs.
+        def _apply_out_transform(fn, out):
+            if isinstance(out, torch.Tensor):
+                return fn(out)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(fn, out))
+
+        # Extracts strides from a tensor or iterable of tensors into a tuple
+        def _extract_strides(out):
+            if isinstance(out, torch.Tensor):
+                return (out.stride(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.stride(), out))
+
+        # Extracts data pointers from a tensor or iterable of tensors into a tuple
+        # NOTE: only extracts on the CPU and CUDA device types since some
+        #   device types don't have storage
+        def _extract_data_ptrs(out):
+            if self.device_type != 'cpu' and self.device_type != 'cuda':
+                return ()
+
+            if isinstance(out, torch.Tensor):
+                return (out.data_ptr(),)
+
+            # assumes (see above) that out is an iterable of tensors
+            return tuple(map(lambda t: t.data_ptr(), out))
+
+        def _compare_out(transform, *, compare_strides_and_data_ptrs=True):
+            out = _apply_out_transform(transform, expected)
+            original_strides = _extract_strides(out)
+            original_ptrs = _extract_data_ptrs(out)
+
+            op_out(out=out)
+            final_strides = _extract_strides(out)
+            final_ptrs = _extract_data_ptrs(out)
+
+            self.assertEqual(expected, out)
+
+            if compare_strides_and_data_ptrs:
+                self.assertEqual(original_strides, final_strides)
+                self.assertEqual(original_ptrs, final_ptrs)
+
         # Case 0: out= with the correct shape, dtype, and device
         #   but NaN values for floating point and complex tensors, and
         #   maximum values for integer tensors.
@@ -319,19 +476,7 @@ class TestCommon(TestCase):
                 # for non-integer types fills with NaN
                 return torch.full_like(t, float('nan'))
 
-        out = _apply_out_transform(_case_zero_transform, expected)
-        result = op_out(out=out)
-        self.assertEqual(expected, out)
-
-        # Checks that the returned value shares storage with out
-        # NOTE: only checks on the CPU and CUDA device types since some
-        #   device types don't have storage
-        if self.device_type == 'cpu' or self.device_type == 'cuda':
-            if isinstance(out, torch.Tensor):
-                self.assertEqual(out.storage().data_ptr(), result.storage().data_ptr())
-            else:
-                for out_t, result_t in zip(out, result):
-                    self.assertEqual(out_t.storage().data_ptr(), result_t.storage().data_ptr())
+        _compare_out(_case_zero_transform)
 
         # Case 1: out= with the correct shape, dtype, and device,
         #   but noncontiguous.
@@ -342,61 +487,19 @@ class TestCommon(TestCase):
                                device=t.device,
                                noncontiguous=True)
 
-        # Extracts strides from a tensor or iterable of tensors into a tuple
-        def _extract_strides(out):
-            if isinstance(out, torch.Tensor):
-                return (out.stride(),)
+        _compare_out(_case_one_transform)
 
-            # assumes (see above) that out is an iterable of tensors
-            return tuple(map(lambda t: t.stride(), out))
-
-        def _extract_data_ptrs(out):
-            if isinstance(out, torch.Tensor):
-                return (out.data_ptr(),)
-
-            # assumes (see above) that out is an iterable of tensors
-            return tuple(map(lambda t: t.data_ptr(), out))
-
-
-        out = _apply_out_transform(_case_one_transform, expected)
-        original_strides = _extract_strides(out)
-        original_ptrs = _extract_data_ptrs(out)
-
-        op_out(out=out)
-        final_strides = _extract_strides(out)
-        final_ptrs = _extract_data_ptrs(out)
-
-        self.assertEqual(expected, out)
-        self.assertEqual(original_strides, final_strides)
-        self.assertEqual(original_ptrs, final_ptrs)
-
-        # Case 2: out= with the correct dtype and device, but the wrong shape
-        #   Expected behavior: resize with a warning.
-        def _case_two_transform(t):
-            wrong_shape = list(t.shape)
-
-            if len(wrong_shape) == 0:
-                # Handles scalar tensor case (empty list)
-                wrong_shape = [2]
-            else:
-                wrong_shape[-1] = wrong_shape[-1] + 1
-            return make_tensor(wrong_shape, dtype=t.dtype, device=t.device)
-
-        out = _apply_out_transform(_case_two_transform, expected)
-        msg_fail = "Resized a non-empty tensor but did not warn about it."
-        with self.assertWarnsRegex(UserWarning, "An output with one or more elements", msg=msg_fail):
-            op_out(out=out)
-        self.assertEqual(expected, out)
-
-        # Case 3: out= with the correct dtype and device, but an empty
-        #   tensor.
+        # Case 2: out= with the correct dtype and device, but has no elements.
         #   Expected behavior: resize without warning.
-        def _case_three_transform(t):
+        def _case_two_transform(t):
             return make_tensor((0,),
                                dtype=t.dtype,
                                device=t.device)
 
-        out = _apply_out_transform(_case_three_transform, expected)
+        _compare_out(_case_two_transform, compare_strides_and_data_ptrs=False)
+
+        # Also validates that no warning is thrown when this out is resized
+        out = _apply_out_transform(_case_two_transform, expected)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             op_out(out=out)
@@ -406,9 +509,7 @@ class TestCommon(TestCase):
             if "An output with one or more elements" in str(w.message):
                 self.fail("Resizing an out= argument with no elements threw a resize warning!")
 
-        self.assertEqual(expected, out)
-
-        # Case 4: out= with correct shape and dtype, but wrong device.
+        # Case 3: out= with correct shape and dtype, but wrong device.
         wrong_device = None
         if torch.device(device).type != 'cpu':
             wrong_device = 'cpu'
@@ -416,15 +517,15 @@ class TestCommon(TestCase):
             wrong_device = 'cuda'
 
         if wrong_device is not None:
-            def _case_four_transform(t):
+            def _case_three_transform(t):
                 return make_tensor(t.shape, dtype=t.dtype, device=wrong_device)
 
-            out = _apply_out_transform(_case_four_transform, expected)
+            out = _apply_out_transform(_case_three_transform, expected)
             msg_fail = f"Expected RuntimeError when calling with input.device={device} and out.device={wrong_device}"
             with self.assertRaises(RuntimeError, msg=msg_fail):
                 op_out(out=out)
 
-        # Case 5: out= with correct shape and device, but a dtype
+        # Case 4: out= with correct shape and device, but a dtype
         #   that output cannot be "safely" cast to (long).
         #   Expected behavior: error.
         # NOTE: this case is filtered by dtype since some ops produce
@@ -435,10 +536,10 @@ class TestCommon(TestCase):
         _dtypes = floating_and_complex_types_and(torch.float16, torch.bfloat16)
         if (isinstance(expected, torch.Tensor) and expected.dtype in _dtypes or
                 (not isinstance(expected, torch.Tensor) and any(t.dtype in _dtypes for t in expected))):
-            def _case_five_transform(t):
+            def _case_four_transform(t):
                 return make_tensor(t.shape, dtype=torch.long, device=t.device)
 
-            out = _apply_out_transform(_case_five_transform, expected)
+            out = _apply_out_transform(_case_four_transform, expected)
             msg_fail = "" if not isinstance(expected, torch.Tensor) else \
                        ("Expected RuntimeError when doing an unsafe cast from a result of dtype "
                         f"{expected.dtype} into an out= with dtype torch.long")
@@ -567,6 +668,24 @@ class TestCommon(TestCase):
             inplace_samples = list(filter(lambda sample: not sample.broadcasts_input, samples))
             _test_inplace_preserve_storage(inplace_samples, inplace_variants)
 
+    # Checks if the operator (if it is composite) is written to support most
+    # backends and Tensor subclasses. See "CompositeImplicitAutograd Compliance"
+    # in aten/src/ATen/native/README.md for more details
+    #
+    # NB: onlyCPU because CompositeImplicitAutograd ops go through the same
+    # codepath on all devices. Ideally we'd use a meta device here but coverage
+    # for that is not good yet.
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, '__torch_dispatch__ does not work in fbcode')
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_composite_compliance(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        for sample in samples:
+            args = [sample.input] + list(sample.args)
+            kwargs = sample.kwargs
+            _check_composite_compliance(op, args, kwargs)
+
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
@@ -586,7 +705,7 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_undefined_grad=True, check_batched_grad=None):
+                      check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -634,7 +753,8 @@ class TestGradients(TestCase):
                                           fast_mode=op.gradcheck_fast_mode,
                                           check_forward_ad=check_forward_ad,
                                           check_backward_ad=check_backward_ad,
-                                          check_undefined_grad=check_undefined_grad))
+                                          check_undefined_grad=check_undefined_grad,
+                                          check_batched_forward_grad=check_batched_forward_grad))
             elif check == 'gradgradcheck':
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 self.assertTrue(gradgradcheck(fn, gradcheck_args,
@@ -653,10 +773,11 @@ class TestGradients(TestCase):
                 self.assertTrue(False, msg="Unknown check requested!")
 
     def _grad_test_helper(self, device, dtype, op, variant, *, check_forward_ad=False, check_backward_ad=True,
-                          check_undefined_grad=True, check_batched_grad=None):
+                          check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
         return self._check_helper(device, dtype, op, variant, 'gradcheck', check_forward_ad=check_forward_ad,
                                   check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
-                                  check_batched_grad=check_batched_grad)
+                                  check_batched_grad=check_batched_grad,
+                                  check_batched_forward_grad=check_batched_forward_grad)
 
     def _gradgrad_test_helper(self, device, dtype, op, variant):
         return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
@@ -721,16 +842,19 @@ class TestGradients(TestCase):
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
     def _forward_grad_helper(self, device, dtype, op, variant):
-        if op.supports_forward_ad:
+        # TODO: clean up how attributes are passed to gradcheck from OpInfos
+        def call_grad_test_helper():
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_undefined_grad=False, check_batched_grad=False)
+                                   check_undefined_grad=False, check_batched_grad=False,
+                                   check_batched_forward_grad=op.check_batched_forward_grad)
+        if op.supports_forward_ad:
+            call_grad_test_helper()
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it\."
             hint_msg = ("Running forward AD for an OP that has does not support it did not "
                         "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
-                self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                       check_undefined_grad=False, check_batched_grad=False)
+                call_grad_test_helper()
 
     @_gradcheck_ops(op_db)
     def test_forward_mode_AD(self, device, dtype, op):
