@@ -1846,7 +1846,7 @@ class TestNN(NNTestCase):
         # Check copy works
         copy = parameter_dict.copy()
 
-        # Check all keys are present and have equal alues
+        # Check all keys are present and have equal values
         for key in parameter_dict:
             self.assertTrue(key in copy)
             self.assertEqual(parameter_dict[key], copy[key])
@@ -1874,6 +1874,7 @@ class TestNN(NNTestCase):
 
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
+        self.assertTrue(parameter_dict.setdefault('p26') is None)
         check()
 
         parameters2 = OrderedDict([
