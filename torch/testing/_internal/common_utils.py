@@ -1,3 +1,6 @@
+# type: ignore
+# The above tells mypy to ignore this file
+
 r"""Importing this file must **not** initialize CUDA context. test_distributed
 relies on this assumption to properly run. This means that when this is imported
 no CUDA calls shall be made, including torch.cuda.device_count(), etc.
