@@ -8,6 +8,9 @@ from torch.fx.node import _get_qualified_name
 from torch.fx.passes.shape_prop import TensorMetadata
 import numpy
 
+Shape = Tuple[int, ...]
+ShapeRange = Tuple[Shape, Shape, Shape]
+
 
 class TRTInterpreterResult(NamedTuple):
     engine: Any
@@ -305,19 +308,75 @@ class InputTensorSpec(NamedTuple):
         if the engine want to run with dynamic shape.
     """
 
-    shape: torch.Size
+    shape: Shape
     dtype: torch.dtype
     device: torch.device = torch.device("cpu")
-    shape_ranges: List[Tuple[Tuple[int, ...], Tuple[int, ...], Tuple[int, ...]]] = []
+    shape_ranges: List[ShapeRange] = []
     has_batch_dim: bool = True
 
     @classmethod
-    def from_tensor(cls, tensor: torch.Tensor):
+    def from_tensor(cls, tensor: torch.Tensor) -> "InputTensorSpec":
+        """
+        Produce an InputTenosrSpec named tuple which contains the
+        information of the given PyTorch tensor.
+
+        Args:
+            tensor (torch.Tensor): A PyTorch tensor.
+
+        Returns:
+            An InputTensorSpec named tuple.
+        """
         return cls(tensor.shape, tensor.dtype, tensor.device)
 
     @classmethod
-    def from_tensors(cls, tensors: Iterable[torch.Tensor]):
+    def from_tensors(cls, tensors: Iterable[torch.Tensor]) -> List["InputTensorSpec"]:
+        """
+        Produce a list of InputTenosrSpec named tuples which contain
+        the information of all the given PyTorch tensors.
+
+        Args:
+            tensors (Iterable[torch.Tensor]): A list of PyTorch tensors.
+
+        Returns:
+            A list of InputTensorSpec named tuples.
+        """
         return [cls.from_tensor(t) for t in tensors]
+
+    @classmethod
+    def from_tensors_with_dynamic_batch_size(
+        cls,
+        tensors: Sequence[torch.Tensor],
+        batch_size_range: Tuple[int, int, int]
+    ) -> List["InputTensorSpec"]:
+        """
+        Produce a list of InputTenosrSpec named tuples which would contain
+        the information of all the given PyTorch tensors. The produced input
+        tensor specs will treat all tensors' first dimension as batch dimension
+        and mark them as dynmaic.
+
+        Args:
+            tensors (Sequence[torch.Tensor]): A list of PyTorch tensors.
+            batch_size_range (Tuple[int, int, int]): The first integer indicates
+                the smallest batch size allowed. The second integer indiceates
+                the batch size that we'll optimize for. The third integer indicates
+                the largest batch size allowed.
+
+        Returns:
+            A list of InputTensorSpec named tuples with dynamic ranges.
+        """
+        input_specs = []
+        batch_size = tensors[0].size(0)
+
+        for i, tensor in enumerate(tensors):
+            assert (
+                batch_size == tensor.size(0)
+            ), f"The {i}th tensor (shape: {tensor.shape}) doesn't have the correct batch size: {batch_size}."
+            shape = list(tensor.shape)
+            shape[0] = -1
+            shape_ranges: List[ShapeRange] = [tuple(tuple([bs] + shape[1:]) for bs in batch_size_range)]  # type: ignore[list-item]
+            input_specs.append(cls(tuple(shape), tensor.dtype, tensor.device, shape_ranges))
+
+        return input_specs
 
 
 def get_dynamic_dims(shape):
