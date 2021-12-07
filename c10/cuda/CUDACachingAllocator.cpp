@@ -1631,7 +1631,7 @@ void parseArgs() {
           size_t val2 = stoi(kv[1]);
           TORCH_CHECK(
               val2 > THC::kLargeBuffer / (1024 * 1024),
-              "CachingAllocator option max_split_size_mb too small, must be >= ",
+              "CachingAllocator option max_split_size_mb too small, must be > ",
               THC::kLargeBuffer / (1024 * 1024),
               "");
           val2 = std::max(val2, THC::kLargeBuffer / (1024 * 1024));
