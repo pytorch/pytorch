@@ -597,7 +597,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   if (ucc_lib) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
   } else {
-    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so not used";
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
   }
 }
 
