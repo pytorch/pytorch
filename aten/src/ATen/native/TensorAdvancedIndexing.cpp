@@ -223,6 +223,18 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
     at::assert_no_overlap(result, source);
   }
 
+  // A hack to run TensorIterator checks in the meta function.
+  // See comment: https://github.com/pytorch/pytorch/pull/65993#discussion_r760307417
+  // TODO: (@krshrimali) Try inheriting from TensorIteratorBase instead.
+  if (result.device() == kMeta) {
+    auto selfSlice = result.select(dim, 0);
+    auto sourceSlice = source.select(dim, 0);
+    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
+    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
+    auto self_dim_size = result.size(dim);
+    auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
+  }
+
   return TORCH_PRECOMPUTE_STRUCT(index_add)().set_dim(dim);
 }
 
