@@ -33,7 +33,7 @@ class _ThreadingDataLoader2:
             for dp in self.datapipes:
                 if dp not in exclude_datapipes:
                     try:
-                        value = dp.nonblocking_next()  # TODO: call nonblocking_getitem(index) for MapDataPipe
+                        value = dp.nonblocking_next()
                         yield value
                     except StopIteration:
                         exclude_datapipes.append(dp)

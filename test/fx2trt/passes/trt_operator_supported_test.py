@@ -60,3 +60,19 @@ class TestTRTOperatorSupport(unittest.TestCase):
                 self.assertTrue(op_support.is_node_supported(mod, node))
             elif node.target == acc_ops.gelu:
                 self.assertFalse(op_support.is_node_supported(mod, node))
+
+    def test_support_node_with_int_attr(self):
+        class TestModule(nn.Module):
+            def forward(self, x):
+                zeros = torch.randint(3, 5, (1,))
+                zeros = zeros.to(torch.int64)
+                scale = torch.randn(1)
+                return torch.quantize_per_tensor(x, scale, zeros, torch.quint8)
+
+        mod = TestModule()
+        traced_mod = acc_tracer.trace(mod, torch.randn(5, 2))
+        op_support = create_trt_operator_support(use_implicit_batch_dim=True)
+
+        for node in traced_mod.graph.nodes:
+            if node.target == acc_ops.quantize_per_tensor:
+                self.assertTrue(op_support.is_node_supported(mod, node))

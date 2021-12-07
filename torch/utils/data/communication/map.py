@@ -90,7 +90,7 @@ def DataPipeBehindQueues(source_datapipe, protocol, full_stop=False, blocking_re
                     continue
                 except IndexError as e:
                     # Alternatively, we can just allow the underlying DataPipe to throw an exception?
-                    protocol.response_stop_iteration()
+                    protocol.response_index_out_of_bound()
                     if full_stop:
                         forever = False
                     else:
