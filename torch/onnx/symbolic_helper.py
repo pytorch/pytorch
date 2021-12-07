@@ -17,14 +17,15 @@ from torch._C import OptionalType
 # Note [Edit Symbolic Files]
 # EDITING THIS FILE AND SYMBOLIC_OPSET<VERSION> FILES? READ THIS FIRST!
 #
-# - These files are ONLY for ATen operators (e.g., operators that show up in the
-#   trace as aten::blah).  If you need to special case a primitive operator,
-#   look at _run_symbolic_function
-# - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
-#   tensors are always first, then non-tensor arguments.
-# - Parameter names must *exactly* match the names in VariableType.cpp, because
+# - Module-level functions are called to convert the corresponding op in the `aten` domain.
+#   E.g. symbolic_opset9.foo is called to convert aten::foo.
+#   Symbolic functions for other domains are staticmethods in classes named after the domain.
+#   E.g. symbolic_opset9.Prim.ConstantChunk is called to convert prim::ConstantChunk.
+# - Parameter names must *exactly* match the names in
+#   aten/src/ATen/native/native_functions.yaml, because
 #   dispatch is done with keyword arguments.
-# - Looking for inplace ops?  They're detected by the trailing underscore, and
+# - Looking for inplace ops?  They're detected by
+#   `_jit_pass_onnx_remove_inplace_ops_for_onnx`, and
 #   transparently dispatched to their non inplace versions in
 #   "run_symbolic_function".   See Note [Export inplace]
 #
@@ -42,6 +43,19 @@ from torch._C import OptionalType
 # on the number of dimensions which is better than relying on
 # concrete shapes. Doing so will make the export symbolics
 # more robust to different graphs.
+#
+# ----------------------------------------------------------------------------------
+# Extra context for symbolic functions
+# ----------------------------------------------------------------------------------
+#
+# In general, symbolic functions only require inputs and attributes to
+# the original node. In rare circumstances, extra context may be required.
+# For example, symbolic function for `prim::Loop` needs access to the subblock of
+# the original node.
+# A symbolic function that has a first arg (before the Graph object) with the
+# type annotation of torch.onnx.SymbolicContext will be called with that additional context.
+# During export, it is populated from `utils._run_symbolic_function`
+# to contain the context for each node being converted.
 
 # ---------------------------------------------------------------------------------
 # Helper functions
