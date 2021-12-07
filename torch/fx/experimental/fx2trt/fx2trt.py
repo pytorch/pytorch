@@ -143,6 +143,7 @@ class TRTInterpreter(torch.fx.Interpreter):
         max_workspace_size=1 << 25,
         fp16_mode=True,
         int8_mode=False,
+        sparse_weights=False,
         force_fp32_output=False,
         strict_type_constraints=False,
         algorithm_selector=None,
@@ -178,6 +179,10 @@ class TRTInterpreter(torch.fx.Interpreter):
 
         if int8_mode:
             builder_config.set_flag(trt.BuilderFlag.INT8)
+
+        if sparse_weights:
+            assert fp16_mode or int8_mode, "We can only enable sparsity in fp16 or int8 mode."
+            builder_config.set_flag(trt.BuilderFlag.SPARSE_WEIGHTS)
 
         if strict_type_constraints:
             builder_config.set_flag(trt.BuilderFlag.STRICT_TYPES)
