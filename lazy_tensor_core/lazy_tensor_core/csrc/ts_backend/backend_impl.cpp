@@ -75,7 +75,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     } else if (tensor.device().type() == at::kCPU && tensor.numel() == 1) {
       // calling .item() on singleton cpu tensor is fast, and using fill is a safe,
       // async way to copy cpu to cuda for a single value
-      auto device_tensor = at::full({}, tensor.item(), options);
+      auto device_tensor = at::full(tensor.sizes(), tensor.item(), options);
       return std::make_shared<TSData>(device_tensor, shape, device);
     } else {
       return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/false), shape, device);
