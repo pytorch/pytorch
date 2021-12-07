@@ -1057,7 +1057,7 @@ def _run_symbolic_function(g, block, n, inputs, env, operator_export_type=Operat
             attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
             outputs = n.outputsSize()
             attrs["outputs"] = outputs
-            return _aten_op(g, op_name, *inputs, aten=True, **attrs)
+            return g.at(op_name, *inputs, aten=True, **attrs)
         else:
             raise sym_registry.UnsupportedOperatorError(domain, op_name, opset_version)
     except RuntimeError:
