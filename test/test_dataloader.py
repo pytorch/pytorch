@@ -2111,7 +2111,7 @@ class TestDataLoader2_EventLoop(TestCase):
         with self.assertRaisesRegex(IndexError, "out of bound"):
             local_datapipe[1000]
 
-        # __len__ Test: Ensure that
+        # __len__ Test: Ensure that the correct length is returned
         local_datapipe = communication.map.QueueWrapperForMap(
             communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
         self.assertEqual(input_len, len(local_datapipe))
