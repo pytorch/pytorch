@@ -189,6 +189,36 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
     return module_inputs
 
 
+def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    
+    def bilinear_reference_fn(m, p, x1, x2, bias=True):
+        intermediate = torch.einsum('bk,ikj->bij', x1, p[0])
+        result = torch.einsum('bij,bj->bi', intermediate, x2)
+        if bias:
+            if x1.shape[0] == 1:
+                result = result.view(-1) + p[1]
+            else:
+                result = result + p[1].view(1, -1).expand(x1.shape[0], 40)
+        return result
+
+    module_inputs = [
+        ModuleInput(constructor_input=FunctionInput(20, 30, 40),
+                    forward_input=FunctionInput(make_input(shape=(128, 20)), make_input(shape=(128, 30))),
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
+        ModuleInput(constructor_input=FunctionInput(20, 30, 40, bias=False),
+                    forward_input=FunctionInput(make_input(shape=(128, 20)), make_input(shape=(128, 30))),
+                    desc='no_bias',
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2, bias=False)),
+        ModuleInput(constructor_input=FunctionInput(20, 30, 40),
+                    forward_input=FunctionInput(make_input(shape=(20)), make_input(shape=(30))),
+                    desc='no_batch_dim',
+                    reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
+    ]
+
+    return module_inputs
+
+
 def module_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     make_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
@@ -384,6 +414,8 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_L1Loss),
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
+    ModuleInfo(torch.nn.Bilinear,
+               module_inputs_func=module_inputs_torch_nn_Bilinear),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
     ModuleInfo(torch.nn.Hardswish,
