@@ -1271,6 +1271,56 @@ class AbstractTestCases:
                 self._test_scatter_base(self, lambda t: t, 'scatter_', reduction=method)
                 self._test_scatter_base(self, lambda t: t, 'scatter_', True, reduction=method)
 
+        def test_scatter_reduce(self):
+            dtype = device = None
+
+            output_size = 10
+            shape = [5, 10, 20]
+
+            index = torch.randint(0, output_size, shape, dtype=torch.long, device=device)
+            input = torch.randn(shape, dtype=dtype, device=device)
+
+            for dim in range(len(shape)):
+                output = input._scatter_reduce(dim, index, "sum", output_size=output_size)
+
+                output_shape = copy.copy(shape)
+                output_shape[dim] = output_size
+                self.assertEqual(output.shape, output_shape)
+
+                expected = torch.zeros(output_shape, dtype=dtype, device=device)
+                for i, j, k in itertools.product(range(shape[0]), range(shape[1]), range(shape[2])):
+                    v = input[i, j, k]
+                    m = index[i, j, k]
+
+                    if dim == 0:
+                        i = m
+                    elif dim == 1:
+                        j = m
+                    else:
+                        k = m
+
+                    expected[i, j, k] += v
+
+                self.assertTrue(torch.allclose(output, expected))
+
+                torch._scatter_reduce(input, dim, index, "sum", out=output)
+                self.assertTrue(torch.allclose(output, expected))
+
+            with self.assertRaisesRegex(RuntimeError, "Expected `dim` to be in range -3 to 2"):
+                torch._scatter_reduce(input, 4, index, "sum")
+
+            with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
+                index2 = torch.randint(0, output_size, (10, ), dtype=torch.long, device=device)
+                torch._scatter_reduce(input, 0, index2, "sum")
+
+            with self.assertRaisesRegex(RuntimeError, "`reduce` argument must be 'sum'"):
+                torch._scatter_reduce(input, 2, index, "mean")
+
+            with self.assertRaisesRegex(RuntimeError, "Expected `index` values to be in range 0 to 2"):
+                input2 = torch.randn(10, dtype=dtype, device=device)
+                index2 = torch.tensor([0, 1, 0, 1, 2, 3, 3, 4, 4, 3])
+                torch._scatter_reduce(input2, 0, index2, "sum", output_size=2)
+
         def test_structseq_repr(self):
             a = torch.arange(250).reshape(5, 5, 10)
             expected = """
@@ -4596,7 +4646,7 @@ else:
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypes(torch.half, torch.float)
     def test_exponential_no_zero(self, device, dtype):
         # naively, 0 in exponential can be generated with probability 2^-24
         # so we need more samples to check if it's not generated
@@ -5472,7 +5522,7 @@ else:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -5482,7 +5532,7 @@ else:
         self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -6072,8 +6122,8 @@ else:
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
     @onlyCUDA
-    @dtypesIfCUDA(*(get_all_complex_dtypes() +
-                    get_all_int_dtypes()))
+    @dtypes(*(get_all_complex_dtypes() +
+              get_all_int_dtypes()))
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
@@ -7396,6 +7446,30 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyCUDA
+    def test_dlpack_default_stream(self, device):
+        class DLPackTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __dlpack_device__(self):
+                return self.tensor.__dlpack_device__()
+
+            def __dlpack__(self, stream=None):
+                if torch.version.hip is None:
+                    assert stream == 1
+                else:
+                    assert stream == 0
+                capsule = self.tensor.__dlpack__(stream)
+                converted = True
+                return capsule
+
+        # CUDA-based tests runs on non-default streams
+        with torch.cuda.stream(torch.cuda.default_stream()):
+            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            from_dlpack(x)
+
+    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
@@ -8115,16 +8189,34 @@ else:
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @skipXLA
     def test_skip_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             self.assertTrue(False)
+
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
+    def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
+        # Verify that self.assertRaisesRegex only checks the Error and ignores
+        # message for non-native devices.
+        x = torch.randn((10, 3), device=device)
+        t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
+        invalid_weight = torch.randn(4, device=device)
+        msg = "weight tensor should be defined either for all 3 classes or no classes"
+
+        # XLA raises RuntimeError with a different message.
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
