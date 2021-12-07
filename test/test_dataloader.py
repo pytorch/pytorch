@@ -2090,17 +2090,34 @@ class TestDataLoader2_EventLoop(TestCase):
             req_queue.put(communication.messages.TerminateRequest())
             _ = res_queue.get()
             process.join()
-        it = list(range(100))
+
+        input_len = 100
+        it = list(range(input_len))
         numbers_dp = SequenceWrapper(it)
-        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(numbers_dp)
+        (process, req_queue, res_queue, _thread_local_datapipe) = communication.eventloop.SpawnThreadForDataPipeline(
+            numbers_dp)
 
         process.start()
-        local_datapipe = communication.map.QueueWrapper(
+
+        # Functional Test: Ensure that you can retrieve every element from the Queue and DataPipe
+        local_datapipe = communication.map.QueueWrapperForMap(
             communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
         actual = list(local_datapipe)
+        self.assertEqual([(x, x) for x in range(100)], actual)
+
+        # Functional Test: raise Error when input
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        with self.assertRaisesRegex(IndexError, "out of bound"):
+            local_datapipe[1000]
+
+        # __len__ Test: Ensure that
+        local_datapipe = communication.map.QueueWrapperForMap(
+            communication.protocol.MapDataPipeQueueProtocolClient(req_queue, res_queue))
+        self.assertEqual(input_len, len(local_datapipe))
+
         clean_me(process, req_queue, res_queue)
 
-        self.assertEqual([(x, x) for x in range(100)], actual)
 
 class StringDataset(Dataset):
     def __init__(self):

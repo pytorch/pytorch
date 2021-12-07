@@ -25,6 +25,13 @@ class NonBlockingMap(MapDataPipe):
                 if NonBlockingMap.not_available_hook is not None:
                     NonBlockingMap.not_available_hook()
 
+    def __len__(self):
+        try:
+            return self.nonblocking_len()
+        except NotAvailable:
+            if NonBlockingMap.not_available_hook is not None:
+                NonBlockingMap.not_available_hook()
+
     def nonblocking_len(self):
         raise NotImplementedError(
             "nonblocking_len is not implemented for %s" % self.__class__)
@@ -103,7 +110,7 @@ def DataPipeBehindQueues(source_datapipe, protocol, full_stop=False, blocking_re
             raise Exception('Unrecognized type of request received', request)
 
 
-class QueueWrapper(NonBlockingMap):
+class QueueWrapperForMap(NonBlockingMap):
     """
         Creates map.DataPipe which reads data from the DataLoader.Queue
     """
@@ -127,7 +134,7 @@ class QueueWrapper(NonBlockingMap):
             raise NotAvailable
         if isinstance(response, communication.messages.StopIterationResponse):
             self._stop_iteration = True
-            raise StopIteration
+            raise IndexError(f"Index {index} is out of bound.")
         return response.key, response.value
 
     def nonblocking_len(self):
