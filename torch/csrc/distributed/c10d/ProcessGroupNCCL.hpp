@@ -370,6 +370,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // may indicate that there is some sort of collective desynchronization.
   uint64_t getSequenceNumberForGroup() override;
 
+  // Tests if the UCC fallback path is available
+  bool isUCCAvailable() const;
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(
@@ -624,6 +627,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 
   // ProcessGroupUCC shared library handle
   std::shared_ptr<at::DynamicLibrary> ucc_lib;
+  c10::intrusive_ptr<ProcessGroup> ucc_pg;
 };
 
 } // namespace c10d

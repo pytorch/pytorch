@@ -596,6 +596,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   ucc_lib = loadTorchUCC();
   if (ucc_lib) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    typedef void *fn(void *);
+    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib->sym("_Z28createProcessGroupUCCForNCCLPv"));
+    struct args_t {
+      const c10::intrusive_ptr<Store>& store;
+      int rank = -1;
+      int size = -1;
+    };
+    args_t args {
+      .store = store,
+      .rank = rank,
+      .size = size
+    };
+    auto raw_ucc_pg = static_cast<ProcessGroup *>(createProcessGroupUCCForNCCL(&args));
+    ucc_pg = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
+    LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
   } else {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
   }
@@ -2209,6 +2224,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       [&](std::vector<at::cuda::CUDAStream>&) {},
       OpType::_ALLGATHER_BASE,
       "nccl:_all_gather_base");
+}
+
+bool ProcessGroupNCCL::isUCCAvailable() const {
+  return ucc_pg;
 }
 
 } // namespace c10d
