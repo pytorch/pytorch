@@ -2174,7 +2174,7 @@ class TestDistributions(TestCase):
     def test_wishart_shape(self):
         df = (torch.rand(5, requires_grad=True) + 1) * 10
         df_no_batch = (torch.rand([], requires_grad=True) + 1) * 10
-        df_multi_batch = (torch.randn(6, 5, requires_grad=True) + 1) * 10
+        df_multi_batch = (torch.rand(6, 5, requires_grad=True) + 1) * 10
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
@@ -2247,7 +2247,7 @@ class TestDistributions(TestCase):
         dist1 = Wishart(df, cov)
         dist2 = Wishart(df, precision_matrix=prec)
         dist3 = Wishart(df, scale_tril=scale_tril)
-        ref_dist = scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy())
+        ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
@@ -2281,15 +2281,15 @@ class TestDistributions(TestCase):
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
         self._check_sampler_sampler(Wishart(df, cov),
-                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
                                     'Wishart(df={}, covariance_matrix={})'.format(df, cov),
                                     multivariate=True)
         self._check_sampler_sampler(Wishart(df, precision_matrix=prec),
-                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
                                     'Wishart(df={}, precision_matrix={})'.format(df, prec),
                                     multivariate=True)
         self._check_sampler_sampler(Wishart(df, scale_tril=scale_tril),
-                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
                                     'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
                                     multivariate=True)
 
@@ -3645,7 +3645,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(wishart.sample().size(), torch.Size((2, 1, 1)))
         self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
         self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
-        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((1,)))
+        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size())
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
