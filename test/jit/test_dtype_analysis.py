@@ -98,7 +98,7 @@ class TestDtypeBase(JitTestCase):
         )
 
     @staticmethod
-    def node_output_dtype(graph):
+    def node_output_dtypes(graph):
         dtypes = []
         for out in graph.outputs():
             if isinstance(out.type(), torch._C.TensorType):
@@ -109,7 +109,7 @@ class TestDtypeBase(JitTestCase):
 
     @staticmethod
     def node_output_dtype_single(graph):
-        dtypes = TestDtypeBase.node_output_dtype(graph)
+        dtypes = TestDtypeBase.node_output_dtypes(graph)
         assert len(dtypes) == 1
         return dtypes[0]
 
@@ -324,8 +324,9 @@ class TestDtypeAnalysis(TestDtypeBase):
 
 class TestDtypeCustomRules(TestDtypeBase):
     def assert_output_dtype_equal(self, expected_res, prop_graph):
-        actual_dtype = self.node_output_dtype(prop_graph)
+        actual_dtype = self.node_output_dtypes(prop_graph)
         if len(actual_dtype) == 1:
+            # For len=1, there is no tuple packing for expected_res.
             self.assert_tensor_dtype_equal(expected_res, actual_dtype[0])
         else:
             self.assertEqual(len(expected_res), len(actual_dtype))
@@ -337,12 +338,18 @@ class TestDtypeCustomRules(TestDtypeBase):
             return
         self.assertEqual(tensor_output.dtype, graph_dtype)
 
-    @ops([op for op in op_db if op.aten_name in custom_rules_works_list])
-    def test_custom_rules(self, device, dtype, op):
-        # Return fn, inputs_fn for all
-        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
-        input_args = [sample_input.input, *sample_input.args]
-        expected_res = op(*input_args, **sample_input.kwargs)
+    def custom_rules_test_base(self, device, dtype, op, allow_eager_fail=False):
+        try:
+            sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
+            input_args = [sample_input.input, *sample_input.args]
+            expected_res = op(*input_args, **sample_input.kwargs)
+
+        except Exception as e:
+            if allow_eager_fail:
+                return
+            else:
+                raise e
+
         func = op.get_op()
         traced_fn = create_traced_fn(self, func)
 
@@ -354,53 +361,29 @@ class TestDtypeCustomRules(TestDtypeBase):
         input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
         self.prop_dtype_on_graph(graph, input_tensors)
         self.assert_output_dtype_equal(expected_res, graph)
+
+    @ops([op for op in op_db if op.aten_name in custom_rules_works_list])
+    def test_custom_rules(self, device, dtype, op):
+        self.custom_rules_test_base(device, dtype, op)
 
     @ops([op for op in op_db if op.aten_name in custom_rules_works_list])
     def test_custom_rules_ints(self, device, dtype, op):
         # This is done because opinfos currently only runs on floats.
         # Return fn, inputs_fn for all
-        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
-
         if dtype == torch.float32:
             dtype = torch.int32
         else:
             dtype = torch.int64
 
-        input_args = [sample_input.input, *sample_input.args]
-        expected_res = op(*input_args, **sample_input.kwargs)
-        func = op.get_op()
-        traced_fn = create_traced_fn(self, func)
-
-        # Have to run the traced function to actually generate the trace
-        traced_fn(sample_input.input, *sample_input.args, **sample_input.kwargs)
-
-        # Run the Dtype Analysis
-        graph = traced_fn.graph  # Note this is a cached graph
-        input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
-        self.prop_dtype_on_graph(graph, input_tensors)
-        self.assert_output_dtype_equal(expected_res, graph)
+        # Because ints are not always implemented, we need to allow for eager to fail
+        self.custom_rules_test_base(device, dtype, op, allow_eager_fail=True)
 
     @expectedFailure
     @ops([op for op in op_db if op.aten_name in custom_rules_expected_failure_list])
     def test_custom_rules_expected_failure(self, device, dtype, op):
-        # Return fn, inputs_fn for all
-        sample_input = op.sample_inputs(device, dtype, requires_grad=False)[0]
-        input_args = [sample_input.input, *sample_input.args]
-        expected_res = op(*input_args, **sample_input.kwargs)
-        func = op.get_op()
-        traced_fn = create_traced_fn(self, func)
-
-        # Have to run the traced function to actually generate the trace
-        traced_fn(sample_input.input, *sample_input.args, **sample_input.kwargs)
-
-        # Run the Dtype Analysis
-        graph = traced_fn.graph  # Note this is a cached graph
-        input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
-        self.prop_dtype_on_graph(graph, input_tensors)
-        self.assert_output_dtype_equal(expected_res, graph)
+        self.custom_rules_test_base(device, dtype, op)
 
 
 TestDtypeCustomRulesCPU = None
-instantiate_device_type_tests(TestDtypeCustomRules, globals(), only_for=("cpu",))
 # This creates TestDtypeCustomRulesCPU
-assert TestDtypeCustomRulesCPU
+instantiate_device_type_tests(TestDtypeCustomRules, globals(), only_for=("cpu",))

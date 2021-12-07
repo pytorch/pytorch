@@ -11220,6 +11220,12 @@ dedent """
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
+    def test_union_to_number(self):
+        @torch.jit.script
+        def fn(x: Union[int, complex, float], y: Union[int, complex, float]):
+            return x + y
+        FileCheck().check(": Scalar):").run(fn.graph)
+
     def test_reassign_module_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\''):
             class ReassignSelfLHS(torch.jit.ScriptModule):
