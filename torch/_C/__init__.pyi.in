@@ -445,6 +445,13 @@ class FunctionSchema:
     returns: List[Argument]
     ...
 
+class _UpgraderEntry:
+    bumped_at_version: _int
+    upgrader_name: str
+    old_schema: str
+
+def _get_operator_version_map() -> Dict[str, List[_UpgraderEntry]]: ...
+
 # Defined in torch/csrc/jit/python/script_init.cpp
 class ScriptModuleSerializer(object):
     def __init__(self, export_writer: PyTorchFileWriter) -> None: ...
