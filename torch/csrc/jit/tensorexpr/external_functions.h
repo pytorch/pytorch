@@ -14,9 +14,17 @@
   _(nnc_aten_adaptive_avg_pool2d)     \
   _(nnc_aten_mean)                    \
   _(nnc_aten_addmm)                   \
+  _(nnc_aten_quantized_conv1d)        \
   _(nnc_aten_quantized_conv2d)        \
   _(nnc_aten_quantized_conv2d_relu)   \
+  _(nnc_aten_quantized_linear)        \
+  _(nnc_aten_quantized_linear_relu)   \
   _(nnc_aten_quantized_add)           \
+  _(nnc_aten_quantized_cat)           \
+  _(nnc_aten_quantized_mul)           \
+  _(nnc_aten_quantized_mul_scalar)    \
+  _(nnc_aten_quantized_relu)          \
+  _(nnc_aten_quantized_sigmoid)       \
   _(nnc_aten_quantize_per_tensor)     \
   _(nnc_aten_dequantize)              \
   _(nnc_aten_upsample_nearest2d)

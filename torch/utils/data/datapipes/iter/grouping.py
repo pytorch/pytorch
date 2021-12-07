@@ -47,8 +47,8 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         datapipe: Iterable DataPipe being batched
         batch_size: The size of each batch
         drop_last: Option to drop the last batch if it's not full
-        unbatch_level: Specifies if it necessary to unbatch source data before
-            applying new batching rule
+        wrapper_class: wrapper to apply onto each batch (type `List`) before yielding,
+            defaults to DataChunk
     """
     datapipe: IterDataPipe
     batch_size: int
@@ -59,16 +59,11 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
                  datapipe: IterDataPipe,
                  batch_size: int,
                  drop_last: bool = False,
-                 unbatch_level: int = 0,
                  wrapper_class=DataChunk,
                  ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
-        if unbatch_level == 0:
-            self.datapipe = datapipe
-        else:
-            self.datapipe = datapipe.unbatch(unbatch_level=unbatch_level)
-        self.unbatch_level = unbatch_level
+        self.datapipe = datapipe
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.length = None
@@ -84,12 +79,11 @@ class BatcherIterDataPipe(IterDataPipe[DataChunk]):
         if len(batch) > 0:
             if not self.drop_last:
                 yield self.wrapper_class(batch)
-            batch = []
 
     def __len__(self) -> int:
         if self.length is not None:
             return self.length
-        if isinstance(self.datapipe, Sized) and self.unbatch_level == 0:
+        if isinstance(self.datapipe, Sized):
             if self.drop_last:
                 self.length = len(self.datapipe) // self.batch_size
             else:
@@ -315,7 +309,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
                 if result_to_yield is not None:
                     yield self.wrapper_class(result_to_yield)
 
-        while buffer_size:
-            (result_to_yield, buffer_size) = self._remove_biggest_key(buffer_elements, buffer_size)
-            if result_to_yield is not None:
-                yield self.wrapper_class(result_to_yield)
+        for key in tuple(buffer_elements.keys()):
+            res = buffer_elements.pop(key)
+            buffer_size -= len(res)
+            yield self.wrapper_class(res)
