@@ -31,6 +31,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── selective_extern_packages
                 │   └── version
                 ├── main
                 │   └── main
@@ -54,6 +55,7 @@ class TestMisc(PackageTestCase):
             """\
                 ├── .data
                 │   ├── extern_modules
+                │   ├── selective_extern_packages
                 │   └── version
                 ├── main
                 │   └── main

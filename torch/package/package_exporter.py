@@ -193,7 +193,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        do_selective_intern: bool = False,
+        do_selective_intern: bool = True,
     ):
         """
         Create an exporter.
@@ -586,7 +586,7 @@ class PackageExporter:
         self, package: str, resource: str, obj: Any, dependencies: bool = True
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
-        the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
+        the archive rather than a stand-alone file. Standard pickle does not save the code, only the objects.
         If ``dependencies`` is true, this method will also scan the pickled objects for which modules are required
         to reconstruct them and save the relevant code.
 

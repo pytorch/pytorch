@@ -14,6 +14,7 @@ import re
 import builtins
 import math
 import warnings
+import re
 
 
 if TYPE_CHECKING:
@@ -781,6 +782,18 @@ class Graph:
         op = _snake_case(op)
         return op
 
+    def _sanitize_for_selective_intern(self, code):
+        """
+        selective intern transforms torch into an interned package in order to allow users to
+        extern most parts of it, while interning the unstable bits like torch.fb. This is primarily
+        done in the Importer, therefore, it is not sanitized using the reduce functions and
+        symbols involving torch transform into <torch_package_XX>.torch which causes compilation errors.
+        """
+        code.globals["torch"] = torch
+        code.src = re.sub(r"<torch_package_([0-9]*)>\.torch","torch",code.src)
+        return code
+
+
     @compatibility(is_backward_compatible=True)
     def python_code(self, root_module: str) -> PythonCode:
         """
@@ -841,7 +854,9 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(root_module, namespace)
+            code = self._python_code(root_module, namespace)
+            code = self._sanitize_for_selective_intern(code)
+            return code
 
     def _python_code(self, root_module: str, namespace: _Namespace) -> PythonCode:
         free_vars: List[str] = []
@@ -936,6 +951,7 @@ class Graph:
 
         def emit_node(node : Node):
             maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
+
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
@@ -975,6 +991,7 @@ class Graph:
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
+
                 body.append(f'{repr(node)}{maybe_type_annotation} = '
                             f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return

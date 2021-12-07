@@ -202,7 +202,8 @@ class PackageImporter(Importer):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-
+            # print(saved_id)
+            # print('\n\n')
             if typename == "storage":
                 storage_type, key, location, size = data
                 dtype = storage_type.dtype
@@ -306,6 +307,20 @@ class PackageImporter(Importer):
         except BaseException:
             return []
 
+    def _is_selective_extern_node(self, name):
+        return name in self.selective_extern_packages
+
+    def _is_package_or_module_node(self, name):
+        cur: _PathNode = self.root
+        atoms = name.split(".")
+        for atom in atoms:
+            cur = cur.children.get(atom, None)
+            if cur is None:
+                return False
+            if isinstance(cur, _ExternNode):
+                return False
+        return isinstance(cur, (_PackageNode, _ModuleNode))
+
     def _make_module(
         self, name: str, filename: Optional[str], is_package: bool, parent: str
     ):
@@ -377,7 +392,9 @@ class PackageImporter(Importer):
         return module
 
     def _check_if_viable_parent(self, cur, child, name):
-        if not isinstance(cur, (_PackageNode, _SelectiveExternNode)) or child not in cur.children:
+        if isinstance(cur, _SelectiveExternNode):
+            return
+        if not isinstance(cur, (_PackageNode)) or child not in cur.children:
             raise ModuleNotFoundError(
                 f'No module named "{name}" with in self-contained archive "{self.filename}"'
                 f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
@@ -400,6 +417,10 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         for atom in name.split("."):
             self._check_if_viable_parent(cur, atom, name)
+            if isinstance(cur, _SelectiveExternNode):
+                if atom not in cur.children:
+                    module = self.modules[name] = importlib.import_module(name)
+                    return module
             cur = cur.children[atom]
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
@@ -599,9 +620,10 @@ class PackageImporter(Importer):
         self, atoms: List[str]
     ) -> "Union[_PackageNode, _ExternNode, _SelectiveExternNode]":
         cur = self.root
+        if len(atoms) == 0:
+            return cur
         if (
-            len(atoms) == 1
-            and atoms[0] in self.selective_extern_packages
+            atoms[0] in self.selective_extern_packages
             and atoms[0] not in cur.children
         ):
             node = cur.children[atoms[0]] = _SelectiveExternNode(None)

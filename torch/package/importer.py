@@ -120,7 +120,8 @@ class Importer(ABC):
                 else "'sys_importer'"
             )
             return module_name, location, importer_name
-
+        print(get_obj_info(obj))
+        print(get_obj_info(obj2))
         obj_module_name, obj_location, obj_importer_name = get_obj_info(obj)
         obj2_module_name, obj2_location, obj2_importer_name = get_obj_info(obj2)
         msg = (

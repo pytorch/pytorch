@@ -17,7 +17,7 @@ try:
 except ImportError:
     # Support the case where we run this file directly.
     from common import PackageTestCase
-
+import pdb
 
 class TestPackageFX(PackageTestCase):
     """Tests for compatibility with FX."""
@@ -61,7 +61,7 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f) as pe:
+        with PackageExporter(f, do_selective_intern=True) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
@@ -74,10 +74,10 @@ class TestPackageFX(PackageTestCase):
         f2 = BytesIO()
         # This should fail, because we are referencing some globals that are
         # only in the package.
-        with self.assertRaises(ObjMismatchError):
-            with PackageExporter(f2) as pe:
-                pe.intern("**")
-                pe.save_pickle("model", "model.pkl", traced)
+        # with self.assertRaises(ObjMismatchError):
+        with PackageExporter(f2, do_selective_intern=True) as pe:
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
         with PackageExporter(f2, importer=(pi, sys_importer)) as pe:
@@ -110,6 +110,7 @@ class TestPackageFX(PackageTestCase):
         f.seek(0)
 
         pi = PackageImporter(f)
+        # pdb.set_trace()
         loaded_gm = pi.load_pickle("model", "model.pkl")
         input_x = torch.rand(2, 3)
         input_y = torch.rand(2, 3)

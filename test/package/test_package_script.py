@@ -25,6 +25,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = skipIf(not HAS_TORCHVISION, "no torchvision")
+import pdb
 
 
 class TestPackageScript(PackageTestCase):
