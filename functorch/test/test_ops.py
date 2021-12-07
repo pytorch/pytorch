@@ -285,7 +285,7 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vjp', vjp_fail.union({
-	xfail('nn.functional.conv_transpose3d', device_type='cuda'),
+	skip('nn.functional.conv_transpose3d', device_type='cuda'),  # numerical precision
     }))
     def test_vjp(self, device, dtype, op):
         if not op.supports_autograd:
@@ -319,7 +319,9 @@ class TestOperators(TestCase):
             _test(a_op)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestOperators', 'test_vjpvjp', vjp_fail)
+    @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
+        skip('nn.functional.conv_transpose3d'),  # numerical precision problem
+    }))
     def test_vjpvjp(self, device, dtype, op):
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
