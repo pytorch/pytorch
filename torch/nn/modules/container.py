@@ -650,7 +650,7 @@ class ParameterDict(Module):
         return self._parameters.popitem()
 
     def get(self, key: str, default: Optional['Parameter'] = None) -> 'Parameter | None':
-        r"""Return the parameter associated with key if present. 
+        r"""Return the parameter associated with key if present.
         Otherwise return default if provided, None if not.
 
         Args:
