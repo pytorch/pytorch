@@ -52,6 +52,18 @@ class Adam(Optimizer):
         for group in self.param_groups:
             group.setdefault('amsgrad', False)
 
+    def foreach_view_as_real(self,param):
+        param_r = []
+        for p in param:
+            param_r.append(torch.view_as_real(p))
+        return param_r
+
+    def foreach_view_as_complex(self,param):
+        param_c = []
+        for p in param:
+            param_c.append(torch.view_as_complex(p))
+        return param_c
+
     @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -95,7 +107,6 @@ class Adam(Optimizer):
                     if amsgrad:
                         # Maintains max of all exp. moving avg. of sq. grad. values
                         state['max_exp_avg_sq'] = torch.zeros_like(p, memory_format=torch.preserve_format)
-
                 exp_avg.append(state['exp_avg'])
                 exp_avg_sq.append(state['exp_avg_sq'])
 
@@ -115,6 +126,13 @@ class Adam(Optimizer):
             #
             # Decay the first and second moment running average coefficient
             #
+            is_complex = torch.is_complex(params_with_grad[0])
+            if is_complex:
+                grads = self.foreach_view_as_real(grads)
+                exp_avg = self.foreach_view_as_real(exp_avg)
+                exp_avg_sq = self.foreach_view_as_real(exp_avg_sq)
+                params_with_grad = self.foreach_view_as_real(params_with_grad)
+
             torch._foreach_mul_(exp_avg, beta1)
             torch._foreach_add_(exp_avg, grads, alpha=1 - beta1)
 
@@ -122,6 +140,8 @@ class Adam(Optimizer):
             torch._foreach_addcmul_(exp_avg_sq, grads, grads, 1 - beta2)
 
             if amsgrad:
+                if is_complex:
+                        max_exp_avg_sq = self.foreach_view_as_real(max_exp_avg_sq)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq)
 
@@ -138,7 +158,8 @@ class Adam(Optimizer):
 
             step_size = [(group['lr'] / bc) * -1 for bc in bias_correction1]
             torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-
+            if is_complex:
+                params_with_grad = self.foreach_view_as_complex(params_with_grad)
         return loss
 
     # TODO: refactor to a base class once foreach ops are in a good shape.

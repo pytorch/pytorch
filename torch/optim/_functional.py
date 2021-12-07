@@ -92,21 +92,35 @@ def adam(params: List[Tensor],
         if weight_decay != 0:
             grad = grad.add(param, alpha=weight_decay)
 
+        is_complex = torch.is_complex(param)
+        if is_complex:
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
+            param = torch.view_as_real(param)
+
         # Decay the first and second moment running average coefficient
         exp_avg.mul_(beta1).add_(grad, alpha=1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad.conj(), value=1 - beta2)
         if amsgrad:
+
+            if is_complex:
+                max_exp_avg_sq = torch.view_as_real(max_exp_avg_sqs[i])
+            else:
+                max_exp_avg_sq = max_exp_avg_sqs[i]
+
             # Maintains the maximum of all 2nd moment running avg. till now
-            torch.maximum(max_exp_avg_sqs[i], exp_avg_sq, out=max_exp_avg_sqs[i])
+            torch.maximum(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
             # Use the max. for normalizing running avg. of gradient
-            denom = (max_exp_avg_sqs[i].sqrt() / math.sqrt(bias_correction2)).add_(eps)
+            denom = (max_exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
         else:
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
         step_size = lr / bias_correction1
 
         param.addcdiv_(exp_avg, denom, value=-step_size)
-
+        if is_complex:
+            param = torch.view_as_complex(param)
 
 def adamw(params: List[Tensor],
           grads: List[Tensor],

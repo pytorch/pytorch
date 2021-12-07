@@ -539,6 +539,23 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -1"):
                 optimizer(None, lr=1e-2, weight_decay=-1)
 
+    def test_adam_complex(self):
+        for optimizer in [optim.Adam,optim_mt.Adam]:
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001)
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, betas=(0.3,0.555))
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001, betas=(0.3,0.555), eps = 1e-6 )
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001,  betas=(0.3,0.555), eps = 1e-6, weight_decay=1 )
+            )
+            self._test_complex_optimizer(
+                lambda param: optimizer([param], lr=0.001,  betas=(0.3,0.555), eps = 1e-6, weight_decay=1, amsgrad=True)
+            )
     # Test whether variance parameter is always real
     def test_complex_adam_variance(self):
         complex_param = torch.randn(5, 5, dtype=torch.complex64, requires_grad=True)
