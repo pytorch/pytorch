@@ -20,7 +20,6 @@ constexpr DynamicTypeBits kDynamicComplexTypeBit = DYNAMIC_TYPE_BIT(5);
 constexpr DynamicTypeBits kDynamicListTypeBit = DYNAMIC_TYPE_BIT(7);
 constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
 
-
 #define FORALL_DYNAMIC_TYPES(_)                                              \
   _(Tensor, DYNAMIC_TYPE_BIT(0))                                             \
   _(None, kDynamicNoneTypeBit)                                               \
@@ -44,13 +43,51 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
 
 namespace c10 {
 
-struct FunctionSchema;
 struct LabeledDynamicType;
 class DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 
-// Low dependency jit type with minimal subtyping and structucing support,
-// designed for embedded cases.
+/**
+ * DynamicType is designed as a low dependency type system for TorchScript. The
+ * existing JIT types are used for both compilation and runtime, which makes
+ * sense for server contexts because we often compile and run the model in
+ * the same process, however this doesn't hold for mobile devices where we
+ * always compiles a model ahead of time, therefore there will be dependencies
+ * which are not needed, but built with mobile runtime causing binary size
+ * bloat, by design. Why linkers don't strip unused deps? It is because the
+ * existing (server) JIT types are defined by overriding virtual functions from
+ * the JIT base type, which makes controlling the binary size for mobile even
+ * harder because linkers have to include all possible overrides for a single
+ * callsite.
+ *
+ * The core problem is about the complexity to implement and maintain a single
+ * type system for both analysis and execution purposes. Although they should
+ * have the exactly same semantics, in practice implement a unified abstraction
+ * adds conceptual and representational overhead for both sides of the world.
+ *
+ * To address the issues, DynamicType implements a minimal subset of JIT types
+ * and uses a generic algorithm to test all subtyping relations. To achieve
+ * this, we assign each dynamic type a single integer tag to represent its
+ * semantics. More specifically, a dynamic type is defined as a set of "control
+ * bits" and "data bits", where control bits describe the special behavior when
+ * testing a type and data bits map to identity of each nominal type. We use bit
+ * operations to perform all the tests.
+ *
+ * For example, a "covariant bit" is a control bit used to describe if a type
+ * is covariant, right now the most used one is tuple type, and in addition to
+ * the control bit, tuple type's data bit is the 8th bit from the LSB. Control
+ * bits start from MSB and data bits start from LSB.
+ *
+ * If two types are equal, then they are subtype of each other, also if the bits
+ * from one type tag is subset of the other tag, it automatically becomes a
+ * subtype of the other. This simplifies the subtyping logic a lot, and over the
+ * long term it is possible to adopt this scheme on the server side as well.
+ * Special cases can be added but they generally should not take too much code
+ * size.
+ *
+ * DynamicType doesn't necessarily inherit from c10::Type, we might want to
+ * inherit from c10::Type to reduce the migration cost.
+ */
 class DynamicType : public Type {
   using ClassTypePtr = std::shared_ptr<const c10::ClassType>;
 
@@ -60,7 +97,7 @@ class DynamicType : public Type {
   struct Arguments {
     Arguments() = default;
     Arguments(c10::ArrayRef<TypePtr>);
-    Arguments(const c10::FunctionSchema&, c10::ArrayRef<TypePtr>);
+    Arguments(const std::vector<c10::string_view>&, c10::ArrayRef<TypePtr>);
     std::vector<LabeledDynamicType> elems;
   };
 
@@ -73,9 +110,7 @@ class DynamicType : public Type {
 
   bool operator==(const Type& rhs) const override;
   bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const override;
-  std::string str() const override {
-    return "Dynamic";
-  }
+  std::string str() const override;
   static const TypeKind Kind = TypeKind::DynamicType;
   static TORCH_API DynamicTypePtr create(Type& ty);
 
@@ -88,7 +123,7 @@ class DynamicType : public Type {
   bool equals(const DynamicType& other) const;
 
   template <typename F>
-  bool compare(const DynamicType& other, F&& f) const {
+  bool compareArguments(const DynamicType& other, F&& f) const {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }
@@ -108,6 +143,9 @@ class DynamicType : public Type {
   };
 };
 
+/**
+ * A implementation detail to support NamedTuple.
+ */
 struct LabeledDynamicType {
   c10::optional<std::string> label;
   DynamicTypePtr ty;
