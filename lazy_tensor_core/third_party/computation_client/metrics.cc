@@ -8,7 +8,6 @@
 #include <sstream>
 
 #include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/core/platform/macros.h"
 
 namespace lazy_tensors {
 namespace metrics {
@@ -234,7 +233,7 @@ std::string Metric::Repr(double value) const { return GetData()->Repr(value); }
 
 MetricData* Metric::GetData() const {
   MetricData* data = data_.load();
-  if (TF_PREDICT_FALSE(data == nullptr)) {
+  if (C10_UNLIKELY(data == nullptr)) {
     // The RegisterMetric() API is a synchronization point, and even if multiple
     // threads enters it, the data will be created only once.
     MetricsArena* arena = MetricsArena::Get();
@@ -251,7 +250,7 @@ Counter::Counter(std::string name) : name_(std::move(name)), data_(nullptr) {}
 
 CounterData* Counter::GetData() const {
   CounterData* data = data_.load();
-  if (TF_PREDICT_FALSE(data == nullptr)) {
+  if (C10_UNLIKELY(data == nullptr)) {
     // The RegisterCounter() API is a synchronization point, and even if
     // multiple threads enters it, the data will be created only once.
     MetricsArena* arena = MetricsArena::Get();
@@ -286,23 +285,24 @@ std::string MetricFnBytes(double value) {
 }
 
 std::string MetricFnTime(double value) {
+  const int kNumUnits = 6;
   static struct TimePart {
     const char* suffix;
     double scaler;
     int width;
     int precision;
     char fill;
-  } const time_parts[] = {
+  } const time_parts[kNumUnits] = {
       {"d", 86400.0 * 1e9, 2, 0, '0'}, {"h", 3600.0 * 1e9, 2, 0, '0'},
       {"m", 60.0 * 1e9, 2, 0, '0'},    {"s", 1e9, 2, 0, '0'},
       {"ms", 1e6, 3, 0, '0'},          {"us", 1e3, 7, 3, '0'},
   };
   int count = 0;
   std::stringstream ss;
-  for (size_t i = 0; i < TF_ARRAYSIZE(time_parts); ++i) {
+  for (size_t i = 0; i < kNumUnits; ++i) {
     const TimePart& part = time_parts[i];
     double ctime = value / part.scaler;
-    if (ctime >= 1.0 || count > 0 || i + 1 == TF_ARRAYSIZE(time_parts)) {
+    if (ctime >= 1.0 || count > 0 || i + 1 == kNumUnits) {
       ss.precision(part.precision);
       ss.width(part.width);
       ss.fill(part.fill);
