@@ -39,31 +39,83 @@ class StorageGroup {
   std::vector<at::Tensor*> group_{};
 };
 
-/// There are three types of ops in a processed graph in Static Runtime:
-///   1. op with _out variant
-///   2. view producing op
-///   3. tensor producing op (could be replaced with type 1 by adding the _out
-///      variant to Static Runtime)
-/// In Static Runtime, type 2 ops are replaced with their corespoinding copy
-/// versions when enable_out_variant is enabled and become type 1 ops.The memory
-/// planner only manages tensors that are outputs of type 1 ops. For type 3, the
-/// output tensors are allocated inside the operator and can't be directly
-/// managed by memory planner.
-///
-/// Memory planner tries to minimize the number of memory allocations by
-/// tracking the output tensors of ops with _out variants with unique DataPtr
-/// (part of StorageImpl). It tries to do this in several steps:
-///   1. record the max memory usage for each Tensor with unique DataPtr at the
-///      end of each iteration
-///   2. in the next iteration, allocate the buffer for the max total usage and
-///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory. In the first iteration, we rely on
-///      the default allocator for memory allocation.
-///   3. free the buffer at the end of each iteration
-/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
-/// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
-/// not supported.
+// There are three types of ops in a processed graph in Static Runtime:
+//   1. op with _out variant
+//   2. view producing op
+//   3. tensor producing op (could be replaced with type 1 by adding the _out
+//      variant to Static Runtime)
+// In Static Runtime, type 2 ops are replaced with their corespoinding copy
+// versions when enable_out_variant is enabled and become type 1 ops.The memory
+// planner only manages tensors that are outputs of type 1 ops. For type 3, the
+// output tensors are allocated inside the operator and can't be directly
+// managed by memory planner.
+//
+// Memory planner tries to minimize the number of memory allocations by
+// tracking the output tensors of ops with _out variants with unique DataPtr
+// (part of StorageImpl). It tries to do this in several steps:
+//   1. record the max memory usage for each Tensor with unique DataPtr at the
+//      end of each iteration
+//   2. in the next iteration, allocate the buffer for the max total usage and
+//      compute the offset of each allocation with regard to the single memory
+//      buffer, optionally reusing memory. In the first iteration, we rely on
+//      the default allocator for memory allocation.
+//   3. free the buffer at the end of each iteration
+// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
+// Only models with simple output types are supported, i.e. None, Tensor or
+// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
+// not supported.
+//
+// Additional Optimizations:
+//
+// [Borrowed IValue Outputs]
+// A few native ops (notably, `static_runtime::dict_unpack` and
+// `static_runtime::VarTupleUnpack`) simply unpack IValues to a bunch of
+// outputs without modification. For example, `dict_unpack` does the following:
+// for each key in inputs:
+//     output[i] = dict_input[key]
+// We could implement this with IValue copies (e.g. with IValue::operator=).
+// However, this is not ideal, since it will trigger refcount bumps internally.
+// Moving is also out of the question, since that would mangle the inputs.
+// To get around this, we can use borrowed references to the original IValues
+// using the machinery provided by `c10::MaybeOwnedTraits<IValue>`.
+// Borrowing essentially lets us create a reference to an input without refcount
+// bumps; see `ATen/core/ivalue_inl.h` for the implementation.
+// Note that this optimization only applies to unmanaged outputs. In
+// MemoryPlanner::deallocate, normal unmanaged values are reclaimed by
+// reference counting (`ival = IValue()`). However, we must be more careful when
+// dealing with unmanaged IValues. There are two cases:
+// 1. If the borrowed IValue is not an output, we can simply use
+//    the tools in `c10::MaybeOwnedTraints<IValue>` to clear the IValue to None
+//    without triggering a refcount decrement.
+// 2. If the borrowed IValue is an output, we will want to turn it into a strong
+//    reference. We trigger a refcount increment in that case.
+// When adding an op that borrows outputs, be sure that the memory planner is
+// updated accordingly! The list of ops that borrow outputs is in
+// `borrowsOutputs` (`impl.h`).
+//
+// [Maybe Copy]
+// See `ReplaceWithMaybeCopy` in `passes.cpp` for a detailed explanation of the
+// graph transformation and the rationale behind this optimization. The memory
+// handles ops that might copy in the following manner:
+// 1. When initializing StaticModule, add everything that _might_ be managed to
+//    the set `managed_tensor_values`.
+// 2. During memory planner initialization, if we encounter a value in
+//    `managed_tensor_values` that was not set during the first iteration, check
+//    that the op producing the value is a special maybe-copy case
+//    (`isUnmanagedSpecialCase`). If it is, do not manage the value. Otherwise,
+//    a critical error has occurred.
+// When adding a new maybe-copy op, make sure the memory planner knows that it's
+// a special case.
+//
+// [Managed Output Tensors]
+// The memory planner is able to manage output tensors if the appropriate
+// `StaticModuleOptions` are set. However, the memory planner handles output
+// tensors separately from regular intermediate tensors:
+// 1. They don't participate in memory reuse.
+// 2. The memory planner cannot reclaim their backing storage until they have
+//    been explicitly freed by the client.
+// Clients should use `StaticRuntime::deallocateOutputTensors()` to free output
+// tensor storage.
 
 class MemoryPlanner {
  public:
