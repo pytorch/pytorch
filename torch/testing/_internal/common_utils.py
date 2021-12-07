@@ -1219,17 +1219,18 @@ class CudaMemoryLeakCheck():
         self.caching_allocator_befores = []
         self.driver_befores = []
 
-        # Performs a gc if requiried (required if any CUDA memory is held)
+        # Performs a gc if required (required if any CUDA memory is held)
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
             # NOTE: gc is based exclusively on caching allocator memory
-            #   because the driver will always have some bytes in use (context size)
+            #   because the driver will always have some bytes in use (context size?)
             if caching_allocator_mem_allocated > 0:
                 gc.collect()
                 torch.cuda.empty_cache()
                 break
 
+        # Acquires caching allocator and driver statistics before the test is run
         for i in range(num_devices):
             self.caching_allocator_befores.append(torch.cuda.memory_allocated(i))
             bytes_free, bytes_total = torch.cuda.mem_get_info(i)
@@ -1241,18 +1242,19 @@ class CudaMemoryLeakCheck():
         if exec_type is not None:
             return
 
-        # Compares after statistics, looking for an increase in memory usage
+        # Compares caching allocator before/after statistics
+        # An increase in allocated memory is a discrepancy indicating a possible
+        #   memory leak
         discrepancy_detected = False
         num_devices = torch.cuda.device_count()
         for i in range(num_devices):
             caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
-            bytes_free, bytes_total = torch.cuda.mem_get_info(i)
-            driver_mem_allocated = bytes_total - bytes_free
 
-            if (caching_allocator_mem_allocated > self.caching_allocator_befores[i] or
-                    driver_mem_allocated > self.driver_befores[i]):
+            if caching_allocator_mem_allocated > self.caching_allocator_befores[i]:
                 discrepancy_detected = True
+                break
 
+        # Short-circuits if no discrepancy detected
         if not discrepancy_detected:
             return
 
@@ -1261,7 +1263,9 @@ class CudaMemoryLeakCheck():
         if TEST_WITH_ROCM:
             return
 
-        # Validates the discrepancy
+        # Validates the discrepancy persists after garbage collection and
+        #   is confirmed by the driver API
+
         # GCs and clears the cache
         gc.collect()
         torch.cuda.empty_cache()
@@ -1280,8 +1284,25 @@ class CudaMemoryLeakCheck():
             if driver_mem_allocated > self.driver_befores[i]:
                 driver_discrepancy = True
 
-            # A validated driver discrepancy is a failure
-            if driver_discrepancy:
+            if caching_allocator_discrepancy and not driver_discrepancy:
+                # Just raises a warning if the leak is not validated by the
+                #   driver API
+                # NOTE: this suggests a problem with the caching allocator
+                msg = """CUDA caching allocator reports a memory leak not
+                        verified by the driver API in {}!
+                        Caching allocator allocated memory was {} and is now reported as {}
+                        on device {}.
+                        CUDA driver allocated memory was {}, and is now {}.""".format(
+                    self.name,
+                    self.caching_allocator_befores[i],
+                    caching_allocator_mem_allocated,
+                    i,
+                    self.driver_befores[i],
+                    driver_mem_allocated)
+                warnings.warn(msg)
+            elif caching_allocator_discrepancy and driver_discrepancy:
+                # A caching allocator discrepancy validated by the driver API is a
+                #   failure
                 msg = """CUDA driver API confirmed a leak in {}!
                          Caching allocator allocated memory was {} and is now reported as {}
                          on device {}.
@@ -1293,22 +1314,6 @@ class CudaMemoryLeakCheck():
                     self.driver_befores[i],
                     driver_mem_allocated)
                 self.testcase.fail(msg)
-            elif caching_allocator_discrepancy:
-                # Just raises a warning if the leak is not validated by the
-                #   driver API
-                # NOTE: this indicates a problem with the caching allocator
-                msg = """CUDA caching allocator reports a memory leak not
-                         verified by the driver API in {}!
-                         Caching allocator allocated memory was {} and is now reported as {}
-                         on device {}.
-                         CUDA driver allocated memory was {}, and is now {}.""".format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
-                warnings.warn(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
