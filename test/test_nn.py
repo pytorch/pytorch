@@ -18295,6 +18295,45 @@ class TestNNDeviceType(NNTestCase):
                 self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
 
 
+    def test_cross_entropy_label_smoothing_weight_ignore_indices(self, device):
+        reductions = ['none', 'mean', 'sum']
+        label_smoothings = [0.05, 0.15]
+
+        weight = torch.tensor([0.3, 0.6], device=device)
+        inp1 = torch.tensor([[0.3, 0.4], [1, 2]], device=device)
+        inp2 = torch.tensor([[0.3, 0.6], [1, 2]], device=device)
+
+        targ_default_ignore_index = torch.tensor([-100, 1], device=device)
+        targ_negative_ignore_index = torch.tensor([-2, 1], device=device)
+        targ_positive_ignore_index = torch.tensor([2, 1], device=device)
+
+        for reduction, label_smoothing in product(reductions, label_smoothings):
+            def check_equal(loss, inp1, inp2, targ):
+                l1 = loss(inp1, targ)
+                l2 = loss(inp2, targ)
+                self.assertEqual(l1, l2)
+
+            # Default ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       weight=weight)
+            check_equal(loss, inp1, inp2, targ_default_ignore_index)
+
+            # negative ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       ignore_index=-2,
+                                       weight=weight)
+            check_equal(loss, inp1, inp2, targ_negative_ignore_index)
+
+            # positive ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       ignore_index=2,
+                                       weight=weight)
+            check_equal(loss, inp1, inp2, targ_positive_ignore_index)
+
+
     def test_softshrink_negative(self, device):
         input = torch.randn(5, device=device, requires_grad=True)
         m = torch.nn.Softshrink(-1)
