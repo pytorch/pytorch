@@ -23,6 +23,13 @@ from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
+# Module types in this list are allowed to be used by multiple 'call_module'
+# nodes. Module types not in this list will not be matched if they are used by
+# multiple 'call_module' nodes.
+MODULE_TYPES_SAFE_TO_USE_BY_MULTIPLE_NODES = set([
+    torch.nn.ReLU,
+])
+
 class MatchAllNode:
     """ A node pattern that matches all nodes
     """
@@ -79,7 +86,9 @@ def is_match(
         # The following two lines are True if the current module has
         # more than one node using it
         node.op == 'call_module' and
-        module_name_to_num_node_users[node.target] > 1  # type: ignore[index]
+        module_name_to_num_node_users[node.target] > 1 and  # type: ignore[index]
+        # Exclude module types which should be usable by multiple nodes
+        not type(modules[node.target]) in MODULE_TYPES_SAFE_TO_USE_BY_MULTIPLE_NODES  # type: ignore[index]
     ):
         # If a module is used by more than one node, we cannot safely
         # fuse this module without further analysis of the uses. For now,
