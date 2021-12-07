@@ -3635,19 +3635,6 @@ def foo(x):
             scripted = torch.jit.script(check_subclass_warn)
         FileCheck().check("TorchScript will treat type annotations of Tensor").run(str(warns[0]))
 
-    def test_check_union_annotation(self):
-        def test_func(a: Union[int, float], b: Optional[int]):
-            return 0
-
-        scripted_func = torch.jit.script(test_func)
-        graph_rep = str(scripted_func.graph)
-        code_rep = str(scripted_func.code)
-        # TS graph IR for Union should be annotated as Union()
-        FileCheck().check("Union(").check("int?").run(graph_rep)
-        # Serialized code for Union should be annotated as Union[]
-        FileCheck().check("Union[").check("Optional[int]").run(code_rep)
-        self.checkScript(test_func, (5, 6))
-
     def test_first_class_module(self):
         class Foo(torch.jit.ScriptModule):
             def __init__(self):
