@@ -1197,6 +1197,38 @@ class TestONNXRuntime(unittest.TestCase):
         x = torch.tensor(-3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    def test_tanhshrink(self):
+        model = torch.nn.Tanhshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_hardshrink(self):
+        model = torch.nn.Hardshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # Testing edge cases
+        x = torch.tensor(0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_softshrink(self):
+        model = torch.nn.Softshrink()
+
+        x = torch.rand(3, 3).to(dtype=torch.float32)
+        self.run_test(model, x)
+
+        # Testing edge cases
+        x = torch.tensor(0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+        x = torch.tensor(-0.5).to(dtype=torch.float32)
+        self.run_test(model, x)
+
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
             def forward(self, x):
