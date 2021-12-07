@@ -1016,7 +1016,8 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
   py::class_<UpgraderEntry>(m, "_UpgraderEntry")
-      .def_property_readonly("bumped_at_version",
+      .def_property_readonly(
+          "bumped_at_version",
           [](const UpgraderEntry& self) { return self.bumped_at_version; })
       .def_property_readonly(
           "upgrader_name",
