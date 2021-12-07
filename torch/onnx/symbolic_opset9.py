@@ -2405,7 +2405,10 @@ rnn_relu = _one_hidden_rnn("RNN_RELU")
 def _dim_arange(g, like, dim):
     like_shape = g.op("Shape", like)
     stop = g.op("Gather", like_shape, g.op("Constant", value_t=torch.tensor(dim)), axis_i=0)
-    if sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK:
+    # Caffe2-specific op
+    is_caffe2_aten_fallback = (sym_help._operator_export_type == torch.onnx.OperatorExportTypes.ONNX_ATEN_FALLBACK and
+                               torch.onnx._CAFFE2_ATEN_FALLBACK)
+    if is_caffe2_aten_fallback:
         return g.op("_caffe2::Range", stop)
     else:
         # aten::arange(Scalar end, ScalarType dtype, Layout, Device, bool pin_memory)
@@ -2426,7 +2429,7 @@ def contiguous(g, input, memory_format):
 
 @parse_args("v", "v", "i")
 def _pack_padded_sequence(g, input, lengths, batch_first):
-    # There currently is no PackPadded operator in ONNX. We rely on an
+    # Currently there is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
     if batch_first:
