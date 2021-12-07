@@ -2,11 +2,19 @@
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Utils.h>
 
+#ifdef MAKE_VULKAN_THREADSAFE
+#include <mutex>
+#endif /* MAKE_VULKAN_THREADSAFE */
+
 namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
 namespace {
+
+#ifdef MAKE_VULKAN_THREADSAFE
+std::mutex queue_mutex;
+#endif /* MAKE_VULKAN_THREADSAFE */
 
 VkCommandPool create_command_pool(
     const VkDevice device,
@@ -488,7 +496,20 @@ void Command::Pool::submit(
       nullptr,
     };
 
+#ifdef MAKE_VULKAN_THREADSAFE
+    {
+      // vkQueueSubmit is not thread-safe, only one thread can push the commands at a time.
+      // (See https://vkguide.dev/docs/chapter-1/vulkan_command_flow/#vulkan-command-execution)
+      // The number of available queues depends on GPU. It could be 1 and we cannot assume we can create multiple queues.
+      // Thus, we need to avoid calling vkQueueSubmit from multiple threads at the same time.
+      // When running Vulkan backend in different threads without any locking mechanism,
+      // vkQueueSubmit will get the VK_ERROR_INITIALIZATION_FAILED(-3) error.
+      std::lock_guard<std::mutex> guard(queue_mutex);
+      VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+    }
+#else
     VK_CHECK(vkQueueSubmit(queue, 1u, &submit_info, fence.handle()));
+#endif /* MAKE_VULKAN_THREADSAFE */
   }
 }
 
