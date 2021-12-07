@@ -125,6 +125,8 @@ class TestGenAutogradFunctions(unittest.TestCase):
         assert 'grad_z = grads[2]' not in definition
         assert 'grad_z = grads[1]' in definition
 
+        self.assertTrue(False)
+
 
 # Represents the most basic NativeFunction. Use dataclasses.replace()
 # to edit for use.
