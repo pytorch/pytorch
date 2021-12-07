@@ -58,7 +58,6 @@ TsNode::TsNode(OpKind op, OpList operands,
            /* node_hash */ HashCombine(op.hash(), hash_seed),
            /* dag_hash */
            OperandHashes(operands, HashCombine(op.hash(), hash_seed))) {
-  // shapes_.push_back(GetOpShape(shape_fn));
   shapes_ = GetOpShape(shape_fn);
 }
 
@@ -72,7 +71,6 @@ TsNode::TsNode(OpKind op, OpList operands, size_t num_outputs,
 void TsNode::SetShapeDeferred(
     const std::function<Shape()>& shape_fn) {
   shapes_ = GetOpShape(shape_fn);
-  // shapes_.push_back(GetOpShape(shape_fn));
 }
 
 TsNode::TsNode(OpKind op, Shape shape, size_t num_outputs)
