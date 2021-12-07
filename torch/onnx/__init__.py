@@ -10,7 +10,7 @@ ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
 
 producer_name = "pytorch"
 producer_version = _C._onnx.PRODUCER_VERSION
-constant_folding_opset_versions = [9, 10, 11, 12, 13, 14]
+constant_folding_opset_versions = [9, 10, 11, 12, 13, 14, 15]
 
 
 class ExportTypes:
