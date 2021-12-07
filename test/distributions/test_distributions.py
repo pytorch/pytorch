@@ -2172,9 +2172,9 @@ class TestDistributions(TestCase):
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     def test_wishart_shape(self):
-        df = (torch.rand(5, 3, requires_grad=True) + 1) * 10
-        df_no_batch = (torch.rand(3, requires_grad=True) + 1) * 10
-        df_multi_batch = (torch.randn(6, 5, 3, requires_grad=True) + 1) * 10
+        df = (torch.rand(5, requires_grad=True) + 1) * 10
+        df_no_batch = (torch.rand([], requires_grad=True) + 1) * 10
+        df_multi_batch = (torch.randn(6, 5, requires_grad=True) + 1) * 10
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
@@ -2189,22 +2189,22 @@ class TestDistributions(TestCase):
         scale_tril_batched = torch.linalg.cholesky(cov_batched)
 
         # ensure that sample, batch, event shapes all handled correctly
-        self.assertEqual(Wishart(df, cov).sample().size(), (5, 3))
-        self.assertEqual(Wishart(df_no_batch, cov).sample().size(), (3,))
-        self.assertEqual(Wishart(df_multi_batch, cov).sample().size(), (6, 5, 3))
-        self.assertEqual(Wishart(df, cov).sample((2,)).size(), (2, 5, 3))
-        self.assertEqual(Wishart(df_no_batch, cov).sample((2,)).size(), (2, 3))
-        self.assertEqual(Wishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3))
-        self.assertEqual(Wishart(df, cov).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, 3))
-        self.assertEqual(Wishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df, cov).sample().size(), (5, 3, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample().size(), (3, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample().size(), (6, 5, 3, 3))
+        self.assertEqual(Wishart(df, cov).sample((2,)).size(), (2, 5, 3, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2,)).size(), (2, 3, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df, cov).sample((2, 7)).size(), (2, 7, 5, 3, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, 3, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3, 3))
+        self.assertEqual(Wishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3, 3))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3, 3))
 
         # check gradients
         # Modified and applied the same tests for multivariate_normal
@@ -2308,7 +2308,7 @@ class TestDistributions(TestCase):
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
-        self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
+        self.assertEqual(d.mean, empirical_mean, atol=0.05, rtol=0)
         empirical_var = samples.var(0)
         self.assertEqual(d.variance, empirical_var, atol=0.05, rtol=0)
 
@@ -3645,7 +3645,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(wishart.sample().size(), torch.Size((2, 1, 1)))
         self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
         self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
-        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size())
+        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((1,)))
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
