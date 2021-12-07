@@ -78,7 +78,7 @@ class Wishart(ExponentialFamily):
             batch_shape = torch.broadcast_shapes(covariance_matrix.shape[:-2], df.shape)
             event_shape = covariance_matrix.shape[-2:]
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
-        else:
+        elif precision_matrix is not None:
             assert precision_matrix.dim() > 1, \
                 "precision_matrix must be at least two-dimensional, with optional leading batch dimensions"
             if df is None:
