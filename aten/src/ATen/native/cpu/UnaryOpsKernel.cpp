@@ -27,7 +27,7 @@
 namespace at {
 namespace native {
 
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 using namespace vec;
 
@@ -563,7 +563,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
           }
 
 #define IMPLEMENT_FLOAT_KERNEL(op)                                                  \
-  namespace CPU_CAPABILITY {                                                        \
+  inline namespace CPU_CAPABILITY {                                                 \
   void op##_kernel(TensorIteratorBase& iter) {                                      \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                    \
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \
@@ -577,7 +577,7 @@ static void erfcx_kernel(TensorIteratorBase& iter){
   REGISTER_DISPATCH(op##_stub, &CPU_CAPABILITY::op##_kernel)
 
 #define IMPLEMENT_COMPLEX_KERNEL(op)                                                             \
-  namespace CPU_CAPABILITY {                                                                     \
+  inline namespace CPU_CAPABILITY {                                                              \
   void op##_kernel(TensorIteratorBase& iter) {                                                   \
     TORCH_INTERNAL_ASSERT(iter.ntensors() == 2);                                                 \
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, iter.dtype(), #op "_vml_cpu", [&]() { \

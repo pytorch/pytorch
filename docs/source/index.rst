@@ -42,6 +42,7 @@ Features described in this documentation are classified by release status:
 
    cpp_index
    Javadoc <https://pytorch.org/javadoc/>
+   torch::deploy <deploy>
 
 .. toctree::
    :maxdepth: 1
