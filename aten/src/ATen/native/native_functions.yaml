@@ -4341,14 +4341,21 @@
 - func: square(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CPU, CUDA: square
+    SparseCsrCPU, SparseCsrCUDA: square_sparse_csr
 
 - func: square_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CPU, CUDA: square_
+    SparseCsrCPU, SparseCsrCUDA: square_sparse_csr_
 
 - func: square.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: square_out
+    SparseCsrCPU, SparseCsrCUDA: square_sparse_csr_out
 
 - func: std(Tensor self, bool unbiased=True) -> Tensor
   device_check: NoCheck   # TensorIterator

@@ -11628,6 +11628,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
                    supports_forward_ad=True,
+                   supports_sparse_csr=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/52549
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
@@ -11644,6 +11645,9 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     dtypes=[torch.bfloat16]),
+                       # Forward Mode AD support not added yet for square
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD'),
+                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                    ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),

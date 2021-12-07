@@ -1222,6 +1222,10 @@
   self: -0.5 * grad * result.pow(3).conj()
   result: auto_element_wise
 
+- name: square(Tensor self) -> Tensor
+  self: pow_backward(grad, self, 2)
+  result: auto_element_wise
+
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
