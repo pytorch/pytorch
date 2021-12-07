@@ -2172,9 +2172,9 @@ class TestDistributions(TestCase):
 
     # We applied same tests in Multivariate Normal distribution for Wishart distribution
     def test_wishart_shape(self):
-        df = torch.rand(5, 3, requires_grad=True) + 1
-        df_no_batch = torch.rand(3, requires_grad=True) + 1
-        df_multi_batch = torch.randn(6, 5, 3, requires_grad=True) + 1
+        df = (torch.rand(5, 3, requires_grad=True) + 1) * 10
+        df_no_batch = (torch.rand(3, requires_grad=True) + 1) * 10
+        df_multi_batch = (torch.randn(6, 5, 3, requires_grad=True) + 1) * 10
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
@@ -2189,22 +2189,22 @@ class TestDistributions(TestCase):
         scale_tril_batched = torch.linalg.cholesky(cov_batched)
 
         # ensure that sample, batch, event shapes all handled correctly
-        self.assertEqual(Wishart(df * cov.size(-1), cov).sample().size(), (5, 3))
-        self.assertEqual(Wishart(df_no_batch * cov.size(-1), cov).sample().size(), (3,))
-        self.assertEqual(Wishart(df_multi_batch * cov.size(-1), cov).sample().size(), (6, 5, 3))
-        self.assertEqual(Wishart(df * cov.size(-1), cov).sample((2,)).size(), (2, 5, 3))
-        self.assertEqual(Wishart(df_no_batch * cov.size(-1), cov).sample((2,)).size(), (2, 3))
-        self.assertEqual(Wishart(df_multi_batch * cov.size(-1), cov).sample((2,)).size(), (2, 6, 5, 3))
-        self.assertEqual(Wishart(df * cov.size(-1), cov).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df_no_batch * cov.size(-1), cov).sample((2, 7)).size(), (2, 7, 3))
-        self.assertEqual(Wishart(df_multi_batch * cov.size(-1), cov).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df * cov_batched.size(-1), cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df_no_batch * cov_batched.size(-1), cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df_multi_batch * cov_batched.size(-1), cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df * prec.size(-1), precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df * prec_batched.size(-1), precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(Wishart(df * scale_tril.size(-1), scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(Wishart(df * scale_tril_batched.size(-1), scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df, cov).sample().size(), (5, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample().size(), (3,))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample().size(), (6, 5, 3))
+        self.assertEqual(Wishart(df, cov).sample((2,)).size(), (2, 5, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2,)).size(), (2, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3))
+        self.assertEqual(Wishart(df, cov).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(Wishart(df_no_batch, cov).sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(Wishart(df, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(Wishart(df, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
         # Modified and applied the same tests for multivariate_normal
@@ -2221,13 +2221,13 @@ class TestDistributions(TestCase):
                 return Wishart(nu, sigma, prec, scale_tril).log_prob(samples)
             gradcheck(gradcheck_func, (wishart_samples, df, covariance, precision, scale_tril), raise_exception=True)
 
-        wishart_log_prob_gradcheck(df * cov.size(-1), cov)
-        wishart_log_prob_gradcheck(df_multi_batch * cov.size(-1), cov)
-        wishart_log_prob_gradcheck(df_multi_batch * cov_batched.size(-1), cov_batched)
-        wishart_log_prob_gradcheck(df * prec.size(-1), None, prec)
-        wishart_log_prob_gradcheck(df_no_batch * prec_batched.size(-1), None, prec_batched)
-        wishart_log_prob_gradcheck(df * scale_tril.size(-1), None, None, scale_tril)
-        wishart_log_prob_gradcheck(df_no_batch * scale_tril_batched.size(-1), None, None, scale_tril_batched)
+        wishart_log_prob_gradcheck(df, cov)
+        wishart_log_prob_gradcheck(df_multi_batch, cov)
+        wishart_log_prob_gradcheck(df_multi_batch, cov_batched)
+        wishart_log_prob_gradcheck(df, None, prec)
+        wishart_log_prob_gradcheck(df_no_batch, None, prec_batched)
+        wishart_log_prob_gradcheck(df, None, None, scale_tril)
+        wishart_log_prob_gradcheck(df_no_batch, None, None, scale_tril_batched)
 
     def test_wishart_stable_with_precision_matrix(self):
         x = torch.randn(10)
@@ -2236,7 +2236,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_wishart_log_prob(self):
-        df = torch.rand(3, requires_grad=True) + 1
+        df = (torch.rand([], requires_grad=True) + 1) * 10
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
@@ -2244,10 +2244,10 @@ class TestDistributions(TestCase):
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
-        dist1 = Wishart(df * cov.size(-1), cov)
-        dist2 = Wishart(df * prec.size(-1), precision_matrix=prec)
-        dist3 = Wishart(df * scale_tril.size(-1), scale_tril=scale_tril)
-        ref_dist = scipy.stats.wishart((df * cov.size(-1)).detach().numpy(), cov.detach().numpy())
+        dist1 = Wishart(df, cov)
+        dist2 = Wishart(df, precision_matrix=prec)
+        dist3 = Wishart(df, scale_tril=scale_tril)
+        ref_dist = scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy())
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
@@ -2257,12 +2257,12 @@ class TestDistributions(TestCase):
         self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
-        df = torch.rand(5, 3, requires_grad=True) + 1
+        df = (torch.rand(5, 3, requires_grad=True) + 1) * 3
         tmp = torch.randn(5, 3, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
-        dist_batched = Wishart(df * cov.size(-1), cov)
-        dist_unbatched = [Wishart(df[i] * cov[i].size(-1), cov[i]) for i in range(df.size(0))]
+        dist_batched = Wishart(df, cov)
+        dist_unbatched = [Wishart(df[i], cov[i]) for i in range(df.size(0))]
 
         x = dist_batched.sample((10,))
         batched_prob = dist_batched.log_prob(x)
@@ -2274,38 +2274,38 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_wishart_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = torch.rand(3, requires_grad=True) + 1
+        df = (torch.rand([], requires_grad=True) + 1) * 3
         tmp = torch.randn(3, 10)
         cov = (torch.matmul(tmp, tmp.t()) / tmp.size(-1)).requires_grad_()
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
-        self._check_sampler_sampler(Wishart(df * cov.size(-1), cov),
-                                    scipy.stats.wishart((df * cov.size(-1)).detach().numpy(), cov.detach().numpy()),
-                                    'Wishart(df={}, covariance_matrix={})'.format(df * cov.size(-1), cov),
+        self._check_sampler_sampler(Wishart(df, cov),
+                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    'Wishart(df={}, covariance_matrix={})'.format(df, cov),
                                     multivariate=True)
-        self._check_sampler_sampler(Wishart(df * prec.size(-1), precision_matrix=prec),
-                                    scipy.stats.wishart((df * prec.size(-1)).detach().numpy(), cov.detach().numpy()),
-                                    'Wishart(df={}, precision_matrix={})'.format(df * prec.size(-1), prec),
+        self._check_sampler_sampler(Wishart(df, precision_matrix=prec),
+                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    'Wishart(df={}, precision_matrix={})'.format(df, prec),
                                     multivariate=True)
-        self._check_sampler_sampler(Wishart(df * scale_tril.size(-1), scale_tril=scale_tril),
-                                    scipy.stats.wishart((df * scale_tril.size(-1)).detach().numpy(), cov.detach().numpy()),
-                                    'Wishart(df={}, scale_tril={})'.format(df * scale_tril.size(-1), scale_tril),
+        self._check_sampler_sampler(Wishart(df, scale_tril=scale_tril),
+                                    scipy.stats.wishart(df.detach().numpy(), cov.detach().numpy()),
+                                    'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
                                     multivariate=True)
 
     def test_wishart_properties(self):
-        df = torch.rand(5) + 1
+        df = (torch.rand([]) + 1) * 5
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
-        m = Wishart(df=df * scale_tril.size(-1), scale_tril=scale_tril)
+        m = Wishart(df=df, scale_tril=scale_tril)
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
         self.assertEqual(m.scale_tril, torch.linalg.cholesky(m.covariance_matrix))
 
     def test_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = torch.rand(5) + 1
+        df = (torch.rand([]) + 1) * 5
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
-        d = Wishart(df=df * scale_tril.size(-1), scale_tril=scale_tril)
+        d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.01, rtol=0)
