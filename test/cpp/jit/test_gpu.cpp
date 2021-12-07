@@ -6755,6 +6755,9 @@ TEST(NVFuserTest, FusionGridReduction8_CUDA) {
 }
 
 TEST(NVFuserTest, FusionGridReduction9_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13460,6 +13463,9 @@ TEST(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
 }
 
 TEST(NVFuserTest, FusionGridPersistence_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13493,6 +13499,9 @@ TEST(NVFuserTest, FusionGridPersistence_CUDA) {
 }
 
 TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13528,6 +13537,9 @@ TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
 }
 
 TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13566,6 +13578,9 @@ TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
 }
 
 TEST(NVFuserTest, FusionWelfordPersistence2_CUDA) {
+  if (at::cuda::getDeviceProperties(0)->major < 6) {
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
