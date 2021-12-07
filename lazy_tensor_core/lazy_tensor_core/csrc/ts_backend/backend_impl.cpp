@@ -71,10 +71,11 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     at::TensorOptions options = tensor.options().device(default_device_type_.c10Type());
     if (tensor.device().type() == default_device_type_.c10Type()) {
       return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
-    } else if (tensor.numel() == 1) {
-      // TODO(whc) seemed like these should have been 'wrapped numbers' but
-      // tensor.unsafeGetTensorImpl()->is_wrapped_number() was returning false
-      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
+    } else if (tensor.device().type() == at::kCPU && tensor.numel() == 1) {
+      // calling .item() on singleton cpu tensor is fast, and using fill is a safe,
+      // async way to copy cpu to cuda for a single value
+      auto device_tensor = at::full({}, tensor.item(), options);
+      return std::make_shared<TSData>(device_tensor, shape, device);
     } else {
       return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/false), shape, device);
     }
