@@ -177,7 +177,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sort|TensorTopK).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sort|TensorTopK|TensorModeKernel|IndexKernel).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -405,7 +405,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_fft_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_linalg_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -449,7 +451,9 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_fft_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_linalg_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -527,6 +531,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     list(APPEND TORCH_SRCS ${DELEGATE_SRCS})
     if(IOS AND USE_COREML_DELEGATE)
       set(COREML_DELEGATE_SRCS
+        ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/cpp/context.cpp
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLBackend.mm
         ${TORCH_SRC_DIR}/csrc/jit/backends/coreml/objc/PTMCoreMLExecutor.mm
       )
@@ -800,11 +805,11 @@ torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_cpu PRIVATE
-      "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+      "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   # Exclude some files from using PCH
   set_source_files_properties(
-      # Errors when ATen.h is included
-      ${Torch_BINARY_DIR}/aten/src/ATen/core/TensorMethods.cpp
+      # Not built with OpenMP, so PCH is invalid
+      ${Torch_SOURCE_DIR}/aten/src/ATen/MapAllocator.cpp
       # Builds with incompatible compiler flags
       ${Caffe2_CPU_SRCS_AVX2}
       ${Caffe2_CPU_SRCS_AVX512}
@@ -889,7 +894,7 @@ if(USE_ROCM)
 
   if(USE_PRECOMPILED_HEADERS)
     target_precompile_headers(torch_hip PRIVATE
-        "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>")
+        "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
 elseif(USE_CUDA)
   set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
@@ -931,12 +936,10 @@ elseif(USE_CUDA)
   if(USE_PRECOMPILED_HEADERS)
     if(BUILD_SPLIT_CUDA)
       target_precompile_headers(torch_cuda_cpp PRIVATE
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
     else()
       target_precompile_headers(torch_cuda PRIVATE
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/ATen.h>"
-          "$<$<COMPILE_LANGUAGE:CXX>:ATen/cuda/CUDAContext.h>")
+          "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
     endif()
   endif()
 endif()
@@ -1128,6 +1131,11 @@ endif()
     "${TORCH_SRC_DIR}/library.h"
     "${TORCH_SRC_DIR}/custom_class_detail.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+  if(USE_DEPLOY)
+    install(FILES
+      "${TORCH_SRC_DIR}/deploy.h"
+      DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+  endif()
 
 
   if(BUILD_TEST)
