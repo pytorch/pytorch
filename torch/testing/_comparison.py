@@ -696,14 +696,20 @@ class TensorLikePair(Pair):
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
         r"""TODO"""
-        self._compare_regular_values_equal(
+        self._compare_regular_values_close(
             torch.tensor(actual.q_scale()),
             torch.tensor(expected.q_scale()),
+            rtol=rtol,
+            atol=atol,
+            equal_nan=equal_nan,
             identifier=lambda default_identifier: f"Scale of quantized {default_identifier.lower()}",
         )
-        self._compare_regular_values_equal(
+        self._compare_regular_values_close(
             torch.tensor(actual.q_zero_point()),
             torch.tensor(expected.q_zero_point()),
+            rtol=rtol,
+            atol=atol,
+            equal_nan=equal_nan,
             identifier=lambda default_identifier: f"Zero point of quantized {default_identifier.lower()}",
         )
 
@@ -719,29 +725,6 @@ class TensorLikePair(Pair):
                     f"{actual.q_per_channel_axis()} != {expected.q_per_channel_axis()}"
                 ),
             )
-        self._compare_regular_values_equal(
-            actual.q_per_channel_scales(),
-            expected.q_per_channel_scales(),
-            identifier=lambda default_identifier: f"Per-channel scales of quantized {default_identifier.lower()}",
-        )
-        self._compare_regular_values_equal(
-            actual.q_per_channel_zero_points(),
-            expected.q_per_channel_zero_points(),
-            identifier=lambda default_identifier: f"Per-channel zero points of quantized {default_identifier.lower()}",
-        )
-
-    def _compare_per_channel_affine_float_qparams(
-        self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> None:
-        r"""TODO"""
-        if actual.q_per_channel_axis() != expected.q_per_channel_axis():
-            raise self._make_error_meta(
-                AssertionError,
-                (
-                    f"The quantization dimension of per-channel quantized tensors with float parameters does not match: "
-                    f"{actual.q_per_channel_axis()} != {expected.q_per_channel_axis()}"
-                ),
-            )
         self._compare_regular_values_close(
             actual.q_per_channel_scales(),
             expected.q_per_channel_scales(),
@@ -749,7 +732,7 @@ class TensorLikePair(Pair):
             atol=atol,
             equal_nan=equal_nan,
             identifier=lambda default_identifier: (
-                f"Per-channel scales of quantized {default_identifier.lower()} with float parameters"
+                f"Per-channel scales of quantized {default_identifier.lower()}"
             ),
         )
         self._compare_regular_values_close(
@@ -759,14 +742,14 @@ class TensorLikePair(Pair):
             atol=atol,
             equal_nan=equal_nan,
             identifier=lambda default_identifier: (
-                f"Per-channel zero points of quantized {default_identifier.lower()} with float parameters"
+                f"Per-channel zero points of quantized {default_identifier.lower()}"
             ),
         )
 
     _QUANTIZED_COMPONENT_COMPARE_FNS = {
         torch.per_tensor_affine: _compare_per_tensor_quantized_components,
         torch.per_channel_affine: _compare_per_channel_quantized_components,
-        torch.per_channel_affine_float_qparams: _compare_per_channel_affine_float_qparams,
+        torch.per_channel_affine_float_qparams: _compare_per_channel_quantized_components,
     }
 
     def _compare_quantized_values(
