@@ -5746,6 +5746,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
 
+    @override_qengines
     def test_qat_embedding_linear(self):
         for device in get_supported_device_types():
             class EmbeddingLinear(torch.nn.Module):
