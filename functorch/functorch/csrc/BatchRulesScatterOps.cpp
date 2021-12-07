@@ -425,6 +425,26 @@ Tensor select_scatter_decomp(
   return at::scatter(self, dim, index_.expand_as(self), source.unsqueeze(dim).expand_as(self));
 }
 
+std::tuple<Tensor, optional<int64_t>> diagonal_scatter_batch_rule(
+    const Tensor &self, c10::optional<int64_t> self_bdim,
+    const Tensor &src, c10::optional<int64_t> src_bdim,
+    int64_t offset, int64_t dim1, int64_t dim2)
+{
+  auto self_ = moveBatchDimToFront(self, self_bdim);
+  auto src_ = moveBatchDimToFront(src, src_bdim);
+
+  auto batch_size = get_bdim_size2(self, self_bdim, src, src_bdim);
+
+  self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+  src_ = ensure_has_bdim(src_, src_bdim.has_value(), batch_size);
+
+  auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+  dim1 = maybe_wrap_dim(dim1, self_logical_rank) + 1;
+  dim2 = maybe_wrap_dim(dim2, self_logical_rank) + 1;
+
+  return std::make_tuple(at::diagonal_scatter(self_, src_, offset, dim1, dim2), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
@@ -432,6 +452,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
+  VMAP_SUPPORT("diagonal_scatter", diagonal_scatter_batch_rule);
   VMAP_SUPPORT("gather", gather_batch_rule);
   VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
   VMAP_SUPPORT("scatter.value", scatter_value_batch_rule);
