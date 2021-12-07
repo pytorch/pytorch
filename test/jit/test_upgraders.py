@@ -36,3 +36,31 @@ class TestUpgraders(JitTestCase):
         upgraders_dump_second_time = torch._C._dump_upgraders_map()
         self.assertTrue(upgraders_size == upgraders_size_second_time)
         self.assertTrue(upgraders_dump == upgraders_dump_second_time)
+
+    def test_populated_test_upgrader_graph(self):
+        @torch.jit.script
+        def f():
+            return 0
+
+        buffer = io.BytesIO()
+        torch.jit.save(f, buffer)
+        buffer.seek(0)
+        torch.jit.load(buffer)
+
+        # upgrader map should have populated now
+        upgraders_size = torch._C._get_upgraders_map_size()
+
+        test_map = {"a": "b", "c": "d"}
+        torch._C._populate_test_upgraders(test_map)
+        upgraders_size_after_test = torch._C._get_upgraders_map_size()
+        self.assertEqual(upgraders_size_after_test - upgraders_size, 2)
+        upgraders_dump = torch._C._dump_upgraders_map()
+        self.assertTrue("a" in upgraders_dump)
+        self.assertTrue("c" in upgraders_dump)
+
+        torch._C._remove_test_upgraders(test_map)
+        upgraders_size_after_remove_test = torch._C._get_upgraders_map_size()
+        self.assertTrue(upgraders_size_after_remove_test == upgraders_size)
+        upgraders_dump_after_remove_test = torch._C._dump_upgraders_map()
+        self.assertTrue("a" not in upgraders_dump_after_remove_test)
+        self.assertTrue("c" not in upgraders_dump_after_remove_test)
