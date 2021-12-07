@@ -451,8 +451,8 @@ as follows:
             &x_\text{out} = (Q_\text{input}-z)*s
         \end{aligned}
 
-where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the 
-scale :math:`s` and zero point :math:`z` are then computed 
+where :math:`\text{clamp}(.)` is the same as :func:`~torch.clamp` while the
+scale :math:`s` and zero point :math:`z` are then computed
 as decribed in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specifically:
 
     .. math::
@@ -471,10 +471,10 @@ as decribed in :class:`~torch.ao.quantization.observer.MinMaxObserver`, specific
                 &z = Q_\text{min} - \text{round}(x_\text{min} / s)
         \end{aligned}
 
-where :math:`[x_\text{min}, x_\text{max}]` denotes the range of the input data while 
-:math:`Q_\text{min}` and :math:`Q_\text{max}` are respectively the minimum and maximum values of the quantized dtype. 
+where :math:`[x_\text{min}, x_\text{max}]` denotes the range of the input data while
+:math:`Q_\text{min}` and :math:`Q_\text{max}` are respectively the minimum and maximum values of the quantized dtype.
 
-Note that the choice of :math:`s` and :math:`z` implies that zero is represented with no quantization error whenever zero is within 
+Note that the choice of :math:`s` and :math:`z` implies that zero is represented with no quantization error whenever zero is within
 the range of the input data or symmetric quantization is being used.
 
 Additional data types and quantization schemes can be implemented through
