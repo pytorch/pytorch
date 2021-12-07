@@ -1,7 +1,8 @@
 #include "lazy_tensor_core/csrc/ops/collective_permute.h"
 
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -10,7 +11,7 @@ namespace ops {
 CollectivePermute::CollectivePermute(
     const torch::lazy::Value& input, const torch::lazy::Value& token,
     std::vector<std::pair<int64_t, int64_t>> source_target_pairs)
-    : torch::lazy::TsNode(ltc_collective_permute, {input, token},
+    : torch::lazy::TsNode(torch::lazy::ltc_collective_permute, {input, token},
                           /*num_outputs=*/2,
                           torch::lazy::MHash(source_target_pairs)),
       source_target_pairs_(std::move(source_target_pairs)) {

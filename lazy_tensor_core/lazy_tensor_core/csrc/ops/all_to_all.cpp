@@ -1,7 +1,8 @@
 #include "lazy_tensor_core/csrc/ops/all_to_all.h"
 
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -11,7 +12,7 @@ AllToAll::AllToAll(const torch::lazy::Value& input,
                    const torch::lazy::Value& token, int64_t split_dimension,
                    int64_t concat_dimension, int64_t split_count,
                    std::vector<std::vector<int64_t>> groups)
-    : torch::lazy::TsNode(ltc_all_to_all, {input, token},
+    : torch::lazy::TsNode(torch::lazy::ltc_all_to_all, {input, token},
                           /*num_outputs=*/2,
                           torch::lazy::MHash(split_dimension, concat_dimension,
                                              split_count, groups)),

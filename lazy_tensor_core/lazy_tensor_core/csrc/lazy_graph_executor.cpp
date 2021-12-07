@@ -1,6 +1,7 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
@@ -9,7 +10,6 @@
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensors/computation_client/metrics.h"
@@ -368,7 +368,7 @@ class DeviceContextArena {
 };
 
 bool ShouldSyncIrValue(const torch::lazy::Value& ir_value) {
-  return ir_value->op() != ir::ops::ltc_not_supported;
+  return ir_value->op() != torch::lazy::ltc_not_supported;
 }
 
 // Return true if no tensor in the list has an underlying IR (leaf or

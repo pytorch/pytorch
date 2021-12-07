@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
@@ -19,7 +20,6 @@
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
@@ -72,25 +72,24 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerAsStrided(torch::lazy::NodeCast<torch::lazy::AsStrided>(
           node, torch::lazy::OpKind(at::aten::as_strided)));
     }
-    if (node->op() ==
-        *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update) {
+    if (node->op() == *torch::lazy::ltc_as_strided_view_update) {
       return LowerAsStridedViewUpdate(
           torch::lazy::NodeCast<torch::lazy::AsStridedViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update));
+              node, *torch::lazy::ltc_as_strided_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_cast) {
+    if (node->op() == *torch::lazy::ltc_cast) {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
-          node, *torch_lazy_tensors::ir::ops::ltc_cast));
+          node, *torch::lazy::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select_view_update) {
+    if (node->op() == *torch::lazy::ltc_select_view_update) {
       return LowerSelectViewUpdate(
           torch::lazy::NodeCast<torch::lazy::SelectViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_select_view_update));
+              node, *torch::lazy::ltc_select_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_narrow_view_update) {
+    if (node->op() == *torch::lazy::ltc_narrow_view_update) {
       return LowerNarrowViewUpdate(
           torch::lazy::NodeCast<torch::lazy::NarrowViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_narrow_view_update));
+              node, *torch::lazy::ltc_narrow_view_update));
     }
     if (node->op().op == at::prim::Constant) {
       return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
@@ -172,10 +171,10 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       return LowerView(torch::lazy::NodeCast<torch::lazy::View>(
           node, torch::lazy::OpKind(at::aten::view)));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_device_data) {
+    if (node->op() == *torch::lazy::ltc_device_data) {
       const torch_lazy_tensors::ir::ops::DeviceData* device_data_node =
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::DeviceData>(
-              node, *torch_lazy_tensors::ir::ops::ltc_device_data);
+              node, *torch::lazy::ltc_device_data);
       return {loctx()->GetParameter(device_data_node->data())};
     }
     std::vector<torch::jit::NamedValue> arguments;
