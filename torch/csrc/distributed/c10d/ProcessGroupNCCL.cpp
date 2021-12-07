@@ -1,4 +1,5 @@
 #include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/UCCForNCCL.hpp>
 #include <sstream>
 
 #ifdef USE_C10D_NCCL
@@ -591,6 +592,13 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "\nUSE_HIGH_PRIORITY_STREAM: "
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
+
+  ucc_pg = loadTorchUCC();
+  if (ucc_pg) {
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+  } else {
+    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so not used";
+  }
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
