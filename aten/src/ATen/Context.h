@@ -3,6 +3,7 @@
 #include <ATen/core/ATenGeneral.h>
 #include <ATen/core/Generator.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/LinalgBackend.h>
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/detail/CUDAHooksInterface.h>
@@ -128,6 +129,9 @@ class TORCH_API Context {
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
 
+  at::LinalgBackend linalgPreferredBackend() const;
+  void setLinalgPreferredBackend(at::LinalgBackend);
+
   // Note [Enabling Deterministic Operations]
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   // Operations in PyTorch that normally act nondeterministically, but have an alternate
@@ -249,6 +253,7 @@ class TORCH_API Context {
   bool allow_tf32_cublas = true;
   bool allow_fp16_reduction_cublas = true;
   bool enabled_mkldnn = true;
+  at::LinalgBackend linalg_preferred_backend = at::LinalgBackend::Default;
   #ifdef C10_MOBILE
   bool release_original_weights = true;
   #else
