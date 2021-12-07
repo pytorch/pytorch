@@ -27,7 +27,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 
 namespace torch {
 namespace lazy {

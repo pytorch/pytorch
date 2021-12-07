@@ -9,7 +9,6 @@
 
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 

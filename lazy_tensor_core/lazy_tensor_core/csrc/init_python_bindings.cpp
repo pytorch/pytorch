@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/util.h>
 
 #include <cstring>
@@ -19,7 +20,6 @@
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
 #include "lazy_tensors/computation_client/metrics.h"
@@ -303,7 +303,8 @@ std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
 std::vector<at::Tensor> GetLtcTensorsFromAten(
     const std::vector<at::Tensor>& aten_tensors,
     const std::vector<std::string>& devices) {
-  auto data_handles = CreateTensorsData(aten_tensors, GetLtcDevices(devices));
+  auto data_handles =
+      torch::lazy::CreateTensorsData(aten_tensors, GetLtcDevices(devices));
 
   std::vector<at::Tensor> lazy_tensors;
   lazy_tensors.reserve(data_handles.size());
