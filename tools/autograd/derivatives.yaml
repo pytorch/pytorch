@@ -1223,7 +1223,7 @@
   result: auto_element_wise
 
 - name: square(Tensor self) -> Tensor
-  self: pow_backward(grad, self, 2)
+  self: 2 * grad * self.conj()
   result: auto_element_wise
 
 - name: scatter.src(Tensor self, int dim, Tensor index, Tensor src) -> Tensor

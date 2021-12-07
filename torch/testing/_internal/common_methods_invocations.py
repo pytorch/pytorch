@@ -12176,9 +12176,6 @@ op_db: List[OpInfo] = [
                        # Reference: https://github.com/pytorch/pytorch/pull/52551#issuecomment-782596181
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
                                     dtypes=[torch.bfloat16]),
-                       # Forward Mode AD support not added yet for square
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD'),
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
                    ),),
     OpInfo('lerp',
            dtypes=floating_and_complex_types(),
