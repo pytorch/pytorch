@@ -225,6 +225,8 @@ void FusionExecutor::compileFusion(
         block_size > 0, "launch param inferred block size < 0");
   }
 
+  block_size_high_water_mark =
+      block_size.has_value() ? block_size.value() : block_size_high_water_mark;
   compiled_kernel_ = executor_utils::nvrtcCompile(
       structured_code,
       (kernelNamespace() + "::" + kernelName()).c_str(),
@@ -677,6 +679,20 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     launch_params =
         computeLaunchParams(launch_constraints, expr_eval, warp_size_);
+
+    // Recompile the kernel if the number of threads in the block has increased
+    if(launch_params.nThreads() > block_size_high_water_mark){
+      const auto kernel = lowered_.kernel();
+      const auto kernel_code =
+          codegen::generateCudaKernel(kernel, kernelName());
+      const auto structured_code = getStructuredCode(kernel_code);
+      block_size_high_water_mark = launch_params.nThreads();
+      compiled_kernel_ = executor_utils::nvrtcCompile(
+          structured_code,
+          (kernelNamespace() + "::" + kernelName()).c_str(),
+          fusion_id_,
+          block_size_high_water_mark);
+    }
 
     if (kernel()->summary().has_cooperative_grid_reduction) {
 #ifndef __HIP_PLATFORM_HCC__
