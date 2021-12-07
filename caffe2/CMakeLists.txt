@@ -177,7 +177,7 @@ endif()
 if(BUILD_SPLIT_CUDA)
   # Splitting the source files that'll be in torch_cuda between torch_cuda_cu and torch_cuda_cpp
   foreach(tmp ${Caffe2_GPU_SRCS})
-    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sort|TensorTopK).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
+    if("${tmp}" MATCHES "(.*aten.*\\.cu|.*(b|B)las.*|.*((s|S)olver|Register.*CUDA|Legacy|THC|TensorShapeCUDA|BatchLinearAlgebra|ReduceOps|Equal|Activation|ScanKernels|Sort|TensorTopK|TensorModeKernel|IndexKernel).*\\.cpp)" AND NOT "${tmp}" MATCHES ".*(THC((CachingHost)?Allocator|General)).*")
       # Currently, torch_cuda_cu will have all the .cu files in aten, as well as some others that depend on those files
       list(APPEND Caffe2_GPU_SRCS_CU ${tmp})
     else()
@@ -557,6 +557,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/interpreter.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/model_compatibility.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/module.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/flatbuffer_loader.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/observer.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_bytecode.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/parse_operators.cpp
@@ -591,8 +592,10 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_bytecode.cpp
       ${TORCH_SRC_DIR}/csrc/jit/serialization/export_module.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/serialization/flatbuffer_serializer.cpp
       ${TORCH_SRC_DIR}/csrc/jit/codegen/fuser/cpu/fused_kernel.cpp
       ${TORCH_SRC_DIR}/csrc/jit/api/module_save.cpp
+      ${TORCH_SRC_DIR}/csrc/jit/testing/module_differ.cpp
       ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
     )
 
@@ -1130,6 +1133,11 @@ endif()
     "${TORCH_SRC_DIR}/library.h"
     "${TORCH_SRC_DIR}/custom_class_detail.h"
     DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+  if(USE_DEPLOY)
+    install(FILES
+      "${TORCH_SRC_DIR}/deploy.h"
+      DESTINATION ${TORCH_INSTALL_INCLUDE_DIR}/torch)
+  endif()
 
 
   if(BUILD_TEST)
@@ -1634,6 +1642,32 @@ if(APPLE AND USE_PYTORCH_METAL)
     target_link_libraries(torch_cpu PUBLIC ${metal} ${mps} ${foundation} ${accelerate})
   endif()
 endif()
+
+
+set(schema ${TORCH_SRC_DIR}/csrc/jit/serialization/mobile_bytecode.fbs)
+set(generated_include
+"${TORCH_ROOT}/build/torch/csrc/jit/serialization/mobile_bytecode_generated.h")
+## cann add--reflect-names
+add_custom_command(
+  OUTPUT ${generated_include}
+  COMMAND bash ${TORCH_ROOT}/scripts/gen_flatbuffer.sh
+  DEPENDS ${schema}
+  WORKING_DIRECTORY "${TORCH_ROOT}"
+  COMMENT "Generating mobile_bytecode_generated.h"
+)
+add_library(mobile_bytecode_generated_h INTERFACE)
+target_sources(
+  mobile_bytecode_generated_h
+  INTERFACE ${generated_include}
+)
+add_dependencies(mobile_bytecode_generated_h flatc ${generated_include})
+target_include_directories(
+  mobile_bytecode_generated_h
+  INTERFACE ${TORCH_ROOT}/build)
+
+add_dependencies(torch_cpu mobile_bytecode_generated_h)
+target_link_libraries(
+  torch_cpu PRIVATE mobile_bytecode_generated_h flatbuffers)
 
 # Note [Global dependencies]
 # Some libraries (e.g. OpenMPI) like to dlopen plugins after they're initialized,
