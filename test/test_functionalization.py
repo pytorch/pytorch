@@ -85,6 +85,25 @@ $2 = torch._ops.aten.add($0, tensor([[1., 1.],
         [1., 1.],
         [1., 1.]]))""")
 
+    def test_tensor_list_composite(self):
+        def f(x):
+            # Test an op with TensorList input
+            y = torch.block_diag(x, x)
+            return y
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        # Only seeing copy_() calls in the logs are actually expected:
+        # - block_diag is a CompositeImplicitAutograd op, implemented in terms of copy_() and a few other ops.
+        # - copy_() doesn't have an out-of-place variant, so the pass leaves it alone
+        # - the other ops are all not called on the input tensor, which means that the LoggingTensor doesn't see them
+        # We can update the output of this test if/when these tests eventually use LoggingTensor with PythonMode
+        self.assertExpectedInline('\n'.join(logs), """\
+$0 = input('input')
+$1 = torch._ops.aten.copy_(tensor([[1., 1.],
+        [1., 1.]]), $0)
+$2 = torch._ops.aten.copy_(tensor([[1., 1.],
+        [1., 1.]]), $0)""")
+
     def test_diagonal(self):
         def f(x):
             # test: view ops that take a subset of the original tensor (select/diagonal)
@@ -286,6 +305,22 @@ $0 = input('input')
 $1 = torch._ops.aten._to_copy($0, dtype=6, layout=0, device=device(type='cpu'), pin_memory=False)
 $2 = torch._ops.aten.expand($1, [2])
 $3 = torch._ops.aten.add($2, $0)""")
+
+    def test_nested_functions_propagate_updates(self):
+        def g(x):
+            # Create a view of x
+            y = x[0]
+            y.add_(1)
+            # The view, y, gets deallocated at the end of this function
+
+        def f(x):
+            # Calling g(x) should mutate x
+            g(x)
+            # We expect x to be synced here, even though the alias created in g() has been deallocated!
+            y = x + x
+            return y
+
+        self.assert_functionalization(f, torch.ones(2, 2))
 
 if __name__ == '__main__':
     run_tests()
