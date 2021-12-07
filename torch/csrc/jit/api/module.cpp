@@ -491,7 +491,9 @@ void optimize_for_inference(std::shared_ptr<Graph> graph) {
 }
 } // namespace
 
-Module optimize_for_inference(Module& module, const std::vector<std::string>& other_methods) {
+Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods) {
   // if not frozen yet
   if (module._ivalue()->type()->hasAttribute("training")) {
     auto mod = freeze(module, {}, true);
