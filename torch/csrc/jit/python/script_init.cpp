@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
@@ -31,9 +32,12 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
+#include <torch/csrc/jit/testing/module_differ.h>
 
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 
@@ -47,6 +51,7 @@
 #include <pybind11/stl_bind.h>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -1762,18 +1767,42 @@ void initJitScriptBindings(PyObject* module) {
       });
   m.def(
       "_load_for_lite_interpreter",
-      [](const std::string& filename, py::object map_location) {
+      [](const std::string& filename,
+         py::object map_location,
+         bool is_flatbuffer = false) {
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
           AT_ASSERT(THPDevice_Check(map_location.ptr()));
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        return _load_for_mobile(filename, optional_device);
+        if (is_flatbuffer) {
+          return load_mobile_module_from_file(filename, optional_device);
+        } else {
+          return _load_for_mobile(filename, optional_device);
+        }
       });
   m.def(
+      "_save_mobile_module",
+      [](const torch::jit::mobile::Module& m, std::string& filename) {
+        save_mobile_module(m, filename);
+      });
+  m.def(
+      "_module_equals",
+      [](const torch::jit::mobile::Module& lhs,
+         const torch::jit::mobile::Module& rhs) {
+        return moduleEquals(lhs, rhs);
+      });
+  m.def("_jit_module_to_mobile", [](const torch::jit::Module& mod) {
+    CompilationOptions options;
+    return jitModuleToMobile(mod, options);
+  });
+
+  m.def(
       "_load_for_lite_interpreter_from_buffer",
-      [](const std::string& buffer, py::object map_location) {
+      [](const std::string& buffer,
+         py::object map_location,
+         bool is_flatbuffer = false) {
         std::istringstream in(buffer);
         c10::optional<at::Device> optional_device;
         if (!map_location.is(py::none())) {
@@ -1781,7 +1810,16 @@ void initJitScriptBindings(PyObject* module) {
           optional_device =
               reinterpret_cast<THPDevice*>(map_location.ptr())->device;
         }
-        return _load_for_mobile(in, optional_device);
+        if (is_flatbuffer) {
+          size_t size = buffer.size();
+          std::shared_ptr<char> data(
+              static_cast<char*>(malloc(size)), free); // NOLINT
+          memcpy(data.get(), buffer.data(), size); // NOLINT
+          return parse_and_initialize_mobile_module(
+              std::move(data), size, optional_device);
+        } else {
+          return _load_for_mobile(in, optional_device);
+        }
       });
   m.def(
       "_backport_for_mobile",
