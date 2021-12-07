@@ -3,6 +3,7 @@
 #include <c10/util/Logging.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
@@ -11,7 +12,6 @@
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/unique.h"
 namespace torch_lazy_tensors {
@@ -166,7 +166,7 @@ class DataCacheArena {
     ;
     torch::lazy::BackendDataPtr device_data = cache->Get(tensor);
     if (device_data == nullptr) {
-      at::Tensor tensor_copy = CopyTensor(tensor);
+      at::Tensor tensor_copy = torch::lazy::CopyTensor(tensor);
       device_data = TensorToDataHandle(tensor_copy, device);
       cache->Add(std::move(tensor_copy), device_data);
       LTC_COUNTER("DeviceDataCacheMiss", 1);
@@ -274,8 +274,8 @@ class DeviceContextArena {
     DeviceContext* devctx = GetDeviceContext(device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     if (!devctx->seed_ir_value) {
-      devctx->seed_ir_value =
-          IrValueFromScalar(MakeIntScalar(devctx->seed), kSeedType, device);
+      devctx->seed_ir_value = IrValueFromScalar(
+          torch::lazy::MakeIntScalar(devctx->seed), kSeedType, device);
     }
     // Keep the running seed as scalar as well, so we can return it directly
     // without executing graphs.
@@ -283,9 +283,9 @@ class DeviceContextArena {
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
     torch::lazy::Value k =
-        ir::ops::ScalarOp(MakeIntScalar(kSeedMul), kSeedType);
+        ir::ops::ScalarOp(torch::lazy::MakeIntScalar(kSeedMul), kSeedType);
     torch::lazy::Value b =
-        ir::ops::ScalarOp(MakeIntScalar(kSeedAdd), kSeedType);
+        ir::ops::ScalarOp(torch::lazy::MakeIntScalar(kSeedAdd), kSeedType);
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
   }
@@ -508,7 +508,7 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const torch::lazy::BackendDevice& device) {
-  if (IsSpecialScalar(value)) {
+  if (torch::lazy::IsSpecialScalar(value)) {
     return ir::ops::ScalarOp(value, type);
   }
   return GetDeviceDataIrValue(value, type, device);
@@ -628,7 +628,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   if (!at_tensors.empty()) {
     LTC_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<torch::lazy::BackendDataPtr> handles =
-        CreateTensorsData(at_tensors, devices);
+        torch::lazy::CreateTensorsData(at_tensors, devices);
     for (size_t i = 0; i < handles.size(); ++i) {
       // If we are here, it means that the IR Value for the tensor is not
       // present. Also, we uploaded the at::Tensor data to the device, but such

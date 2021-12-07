@@ -2,6 +2,7 @@
 
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 #include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
@@ -10,7 +11,6 @@
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
@@ -263,7 +263,7 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
   bool read_only = false;
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
-    if (IsSpecialScalar(value)) {
+    if (torch::lazy::IsSpecialScalar(value)) {
       return ir::ops::ScalarOp(std::move(value), tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
@@ -357,7 +357,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
     // The GetDataHandle() call will trigger an ApplyPendingGraph() if an IR
     // Node is available on the tensor.
     std::vector<at::Tensor> tensors =
-        DataHandlesToTensors({GetDataHandle()}, dtype());
+        torch::lazy::DataHandlesToTensors({GetDataHandle()}, dtype());
     tensor = std::move(tensors.front());
     if (!detached) {
       SetTensorData(tensor);
@@ -373,7 +373,7 @@ at::Tensor LazyTensor::ToTensor(bool detached) {
       } else {
         // Otherwise we need to make a copy to prevent the caller changing our
         // version.
-        tensor = CopyTensor(tensor);
+        tensor = torch::lazy::CopyTensor(tensor);
       }
     }
   }
@@ -393,7 +393,8 @@ void LazyTensor::SetTensor(at::Tensor tensor) {
 
 void LazyTensor::UpdateFromTensor(at::Tensor tensor, bool sync) {
   if (sync) {
-    at::Tensor typed_tensor = CopyTensor(tensor, dtype(), /*copy=*/false);
+    at::Tensor typed_tensor =
+        torch::lazy::CopyTensor(tensor, dtype(), /*copy=*/false);
     SetIrValue(GetIrValueForTensor(typed_tensor, GetDevice()));
   } else {
     SetTensorData(tensor);

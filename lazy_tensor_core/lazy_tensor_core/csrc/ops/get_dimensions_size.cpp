@@ -1,9 +1,7 @@
 #include "lazy_tensor_core/csrc/ops/get_dimensions_size.h"
 
-#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
-#include <torch/csrc/lazy/core/util.h>
+#include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch_lazy_tensors {
 namespace ir {

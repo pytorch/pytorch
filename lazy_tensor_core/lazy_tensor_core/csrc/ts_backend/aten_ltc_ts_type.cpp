@@ -2,6 +2,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/library.h>
 
@@ -12,7 +13,6 @@
 #include "lazy_tensor_core/csrc/ops/random.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
@@ -59,7 +59,8 @@ at::Tensor DoBinaryOp(const at::Tensor& self, const at::Tensor& other,
                       const B& bin_op) {
   at::ScalarType dtype = at::result_type(self, other);
   std::pair<LazyTensor, LazyTensor> operands =
-      GetBinaryOperands(UnwrapNumber(self, dtype), UnwrapNumber(other, dtype));
+      GetBinaryOperands(torch::lazy::UnwrapNumber(self, dtype),
+                        torch::lazy::UnwrapNumber(other, dtype));
   LazyTensor result = bin_op(operands.first, operands.second);
   return CreateAtenFromLtcTensor(result);
 }
@@ -326,7 +327,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
-        CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
+        torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
   } else {
     if (!dst_tensor.CurrentIrValue()) {
@@ -358,7 +359,7 @@ at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
   } else if (!dst_tensor) {
     at::Tensor tensor = self_tensor.ToTensor(/*detached=*/true);
     at::Tensor typed_tensor =
-        CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
+        torch::lazy::CopyTensor(tensor, dst.scalar_type(), /*copy=*/false);
     dst.resize_as_(typed_tensor).copy_(typed_tensor);
   } else {
     // at this point we know dst is a lazy tensor

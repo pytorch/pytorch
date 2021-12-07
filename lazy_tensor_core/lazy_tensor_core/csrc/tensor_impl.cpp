@@ -3,10 +3,10 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 #include "c10/util/Exception.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -160,7 +160,7 @@ void LTCTensorImpl::setup_size_properties() {
     sizes_and_strides_.set_sizes(shape.Get().sizes());
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
-    updated_strides = ComputeArrayStrides(shape.Get().sizes());
+    updated_strides = torch::lazy::ComputeArrayStrides(shape.Get().sizes());
     for (int i = 0; i < updated_strides.size(); i++) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }
