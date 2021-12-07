@@ -48,12 +48,15 @@ ALLOW_LIST = [
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
     ("aten::diagonal_backward", datetime.date(9999, 1, 1)),
     ("aten::rowwise_prune", datetime.date(9999, 1, 1)),
-    ("aten::_triangular_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::thnn_conv2d_forward", datetime.date(2021, 9, 30)),
-    ("aten::thnn_conv2d_backward", datetime.date(2021, 9, 30)),
+    ("aten::_slow_conv2d_forward", datetime.date(2022, 1, 31)),
+    ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
@@ -69,9 +72,12 @@ ALLOW_LIST = [
     ("aten::unbind", datetime.date(2021, 11, 20)),
     ("aten::hsplit", datetime.date(2021, 11, 20)),
     ("aten::dsplit", datetime.date(2021, 11, 20)),
+    ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("caffe2::", datetime.date(2021, 10, 23)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
+    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
+    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -97,7 +103,7 @@ def allow_listed(schema):
 dont_parse_list = [
     ("_TorchScriptTesting.*", datetime.date(2099, 9, 17)),
     ("test_backend", datetime.date(2099, 9, 17)),
-    ("dist_c10d", datetime.date(2021, 1, 30)),
+    ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
 
