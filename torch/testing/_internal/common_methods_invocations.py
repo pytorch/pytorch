@@ -1,6 +1,3 @@
-# type: ignore
-# The above tells mypy to ignore this file
-
 from functools import wraps, partial
 from itertools import product, chain
 import itertools
