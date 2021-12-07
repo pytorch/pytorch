@@ -2,7 +2,7 @@ from typing import List, Optional
 import unittest
 
 import torch
-from torch.fx.experimental.fx2trt.fx2trt import (
+from torch.fx.experimental.fx2trt import (
     InputTensorSpec,
 )
 
