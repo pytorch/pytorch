@@ -5,11 +5,11 @@ import cimodel.lib.miniutils as miniutils
 class IOSNightlyJob:
     def __init__(self,
                  variant,
-                 is_fulljit=False,
+                 is_full_jit=False,
                  is_upload=False):
 
         self.variant = variant
-        self.is_full_jit = is_fulljit
+        self.is_full_jit = is_full_jit
         self.is_upload = is_upload
 
     def get_phase_name(self):
@@ -43,6 +43,7 @@ class IOSNightlyJob:
             "build_environment": "-".join(["libtorch"] + self.get_common_name_pieces(True)),
             "requires": extra_requires,
             "context": "org-member",
+            "filters": {"branches": {"only": "nightly"}},
         }
 
         if not self.is_upload:
@@ -70,13 +71,13 @@ BUILD_CONFIGS = [
 ]
 
 BUILD_CONFIGS_FULL_JIT = [
-    IOSNightlyJob("x86_64", is_fulljit=True),
-    IOSNightlyJob("arm64", is_fulljit=True),
+    IOSNightlyJob("x86_64", is_full_jit=True),
+    IOSNightlyJob("arm64", is_full_jit=True),
 ]
 
 WORKFLOW_DATA = BUILD_CONFIGS + BUILD_CONFIGS_FULL_JIT + [
-    IOSNightlyJob("binary", is_fulljit=False, is_upload=True),
-    IOSNightlyJob("binary", is_fulljit=True, is_upload=True),
+    IOSNightlyJob("binary", is_full_jit=False, is_upload=True),
+    IOSNightlyJob("binary", is_full_jit=True, is_upload=True),
 ]
 
 
