@@ -28,7 +28,6 @@
 #include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 #include "lazy_tensors/computation_client/thread_pool.h"
-#include "lazy_tensors/core/platform/macros.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
@@ -230,12 +229,12 @@ void StepMarker(const std::string& device_str,
   LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
   LazyGraphExecutor::Get()->MarkStep(device);
   bool debug_mode = lazy_tensors::sys_util::GetEnvBool("PT_LTC_DEBUG", false);
-  if (TF_PREDICT_FALSE(debug_mode)) {
+  if (C10_UNLIKELY(debug_mode)) {
     std::string report = lazy_tensors::metrics::CreatePerformanceReport();
     if (!report.empty()) {
       std::string fout =
           lazy_tensors::sys_util::GetEnvString("PT_LTC_DEBUG_FILE", "");
-      if (TF_PREDICT_FALSE(!fout.empty())) {
+      if (C10_UNLIKELY(!fout.empty())) {
         std::ofstream out_file(fout, std::ios_base::app);
         out_file << report;
       } else {
