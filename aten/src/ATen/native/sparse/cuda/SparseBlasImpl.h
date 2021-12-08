@@ -39,6 +39,13 @@ void triangular_solve_out_sparse_csr(
     bool transpose,
     bool unitriangular);
 
+void sampled_addmm_out_sparse_csr(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const at::sparse_csr::SparseCsrTensor& result);
+
 } // namespace cuda
 } // namespace impl
 } // namespace sparse
