@@ -7296,11 +7296,9 @@ each output element's normal distribution
 The :attr:`std` is a tensor with the standard deviation of
 each output element's normal distribution
 
-The shapes of :attr:`mean` and :attr:`std` don't need to match, but the
-total number of elements in each tensor need to be the same.
-
-.. note:: When the shapes do not match, the shape of :attr:`mean`
-          is used as the shape for the returned output tensor
+The shapes of :attr:`mean`, :attr:`std`, and :attr:`out` (if present) must
+match exactly.  Unless the size of :attr:`out` is zero, then it will be resized
+based on the supplied arguments, which must still match.
 
 .. note:: When :attr:`std` is a CUDA tensor, this function synchronizes
           its device with the CPU.

@@ -587,6 +587,7 @@ TORCH_META_FUNC2(normal, float_Tensor) (
   const Tensor& std,
   c10::optional<Generator> gen
 ) {
+  CHECK_NORMAL_TENSOR_STD(std);
   set_output(std.sizes(), std.options());
 }
 
@@ -595,6 +596,7 @@ TORCH_META_FUNC2(normal, Tensor_float) (
   double std,
   c10::optional<Generator> gen
 ) {
+  CHECK_NORMAL_STD(std);
   set_output(mean.sizes(), mean.options());
 }
 
@@ -603,6 +605,7 @@ TORCH_META_FUNC2(normal, Tensor_Tensor) (
   Tensor const& std,
   c10::optional<Generator> gen
 ) {
+  CHECK_NORMAL_TENSOR_STD(std);
   auto shape = at::infer_size(mean.sizes(), std.sizes());
   set_output(shape, mean.options());
 }
