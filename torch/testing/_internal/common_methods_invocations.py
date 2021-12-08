@@ -12269,6 +12269,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
                    decorators=(precisionOverride({torch.complex64: 3e-4, torch.bfloat16: 3e-1}),),
                    supports_forward_ad=True,
+                   supports_sparse_csr=True,
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/52549
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
