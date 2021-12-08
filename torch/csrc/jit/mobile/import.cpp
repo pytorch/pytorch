@@ -220,7 +220,7 @@ class BytecodeDeserializer final {
   c10::optional<at::Device> device_;
   uint64_t module_load_options_;
   // From `version` or `.data/version` in model.ptl and it's compute
-  // dynamically. It's used for finding the minimum requried runtime to run all
+  // dynamically. It's used for finding the minimum required runtime to run all
   // operators from the given model. If it's less than the current runtime,
   // upgrader will be applied at loading stage.
   uint64_t operator_version_;
