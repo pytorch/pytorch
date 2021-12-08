@@ -306,9 +306,9 @@ def compiled_function(
             flattened_args = tree.flatten((args, kwargs))
         else:
             flattened_args, _ = pytree.tree_flatten((args, kwargs))
-
+        num_args = len(flattened_args)
         # Check if the fn is already compiled
-        cached_fn = compile_cache.at(fn_id, len(flattened_args), *flattened_args)
+        cached_fn = compile_cache.at(fn_id, num_args, hasher_type, *flattened_args)
 
         # Compile the function and save it in the cache
         if cached_fn is None:
@@ -323,13 +323,8 @@ def compiled_function(
             ).apply
 
             # Save the compiled_fn in the cache
-            name = "fn_" + str(fn_id)
-            st_args = [
-                f"Tensor inp_{idx}" for idx, _ in enumerate(flattened_args)
-            ]
-            signature = f"{name}({', '.join(st_args)}, *)"
             compile_cache.insert(
-                fn_id, [signature], len(flattened_args), hasher_type, cached_fn, *flattened_args
+                fn_id, num_args, hasher_type, cached_fn, *flattened_args
             )
 
         return cached_fn(*flattened_args)
