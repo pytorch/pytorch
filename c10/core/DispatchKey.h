@@ -147,7 +147,6 @@ enum class DispatchKey : uint8_t {
   BackendSelect,
 
   Python,
-  FuncTorchPython, // See Note [Out-of-tree vmap+grad prototype]
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -172,6 +171,8 @@ enum class DispatchKey : uint8_t {
   // negation
   // This is implemented at a dispatch level right before any backends run
   Negative,
+
+  ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
 
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
@@ -529,12 +530,12 @@ constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
 
 // note that this includes Undefined in the total count.
 constexpr uint8_t num_functionality_keys =
-	static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)
+    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)
   - static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)
   - 1;
 
 constexpr uint8_t num_backends =
-	static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1;
+    static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1;
 
 // it would be nice if we could cast EndOfBackendKeys to a 4-bit unsigned integer.
 // That way we'd automatically get warnings if EndOfBackendKeys happened to grow > 16.

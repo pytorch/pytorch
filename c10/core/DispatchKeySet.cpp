@@ -165,7 +165,7 @@ C10_API uint64_t keyset_ctr(DispatchKey k) {
       uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(k) - 1);
       repr_ = functionality_val;
     } else {
-	  // Case 4: "runtime" keys that have a functionality bit.
+      // Case 4: "runtime" keys that have a functionality bit.
       // First compute which bit to flip for the functionality.
       auto functionality_k = toFunctionalityKey(k);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functionality_k > DispatchKey::EndOfBackendKeys);
@@ -174,20 +174,20 @@ C10_API uint64_t keyset_ctr(DispatchKey k) {
       // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
       uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(functionality_k) - 1);
 
-	  // then compute which bit to flip for the backend
+      // then compute which bit to flip for the backend
       if (k > DispatchKey::EndOfFunctionalityKeys) {
-		// Case 4a: handle the runtime instances of "per-backend functionality" keys
-		// For example, given DispatchKey::CPU, we should set:
-		// - the Dense functionality bit
-		// - the CPUBit backend bit
-		// first compute which bit to flip for the backend
+        // Case 4a: handle the runtime instances of "per-backend functionality" keys
+        // For example, given DispatchKey::CPU, we should set:
+        // - the Dense functionality bit
+        // - the CPUBit backend bit
+        // first compute which bit to flip for the backend
         auto backend_k = toBackendKey(k);
         uint64_t backend_val = 1ULL << static_cast<uint8_t>(backend_k);
         repr_ = functionality_val + backend_val;
       } else {
-		// Case 4b handle the runtime functionality keys that are not per-backend.
-		// In this case, the functionality key is not per-backend, so we don't set any backend bits.
-		// e.g. DispatchKey::FuncTorchBatched.
+        // Case 4b handle the runtime functionality keys that are not per-backend.
+        // In this case, the functionality key is not per-backend, so we don't set any backend bits.
+        // e.g. DispatchKey::FuncTorchBatched.
         repr_ = functionality_val;
       }
     }
