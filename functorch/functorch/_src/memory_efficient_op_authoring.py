@@ -124,8 +124,8 @@ def tensorexpr_operator_authoring(fn, partition_fn, hasher_type):
     )
 
 
-def memory_efficient_operator_authoring(
-    fn, compiler_name="torchscript_nnc", hasher_type="StaticShapeHasher"
+def memory_efficient_pointwise_fusion(
+    fn, compiler_name="torchscript_nvfuser", hasher_type="StaticShapeHasher"
 ):
     if compiler_name == "torchscript_nnc":
         return torchscript_nnc_operator_authoring(

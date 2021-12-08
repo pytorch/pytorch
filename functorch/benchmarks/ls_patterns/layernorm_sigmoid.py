@@ -1,6 +1,6 @@
 import torch
 import time
-from functorch.compile import memory_efficient_operator_authoring, clear_compile_cache
+from functorch.compile import memory_efficient_pointwise_fusion, clear_compile_cache
 import benchmark_helper
 
 
@@ -28,7 +28,7 @@ inp = torch.randn(
 
 
 # Get the optimized function
-opt_fn = memory_efficient_operator_authoring(fn, compiler_name="torchscript_nvfuser")
+opt_fn = memory_efficient_pointwise_fusion(fn, compiler_name="torchscript_nvfuser")
 
 # Use this to print the graphs for NVFuser
 with torch.jit.fuser("fuser2"):
