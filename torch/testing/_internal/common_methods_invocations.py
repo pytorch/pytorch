@@ -11022,6 +11022,7 @@ op_db: List[OpInfo] = [
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half),
            sample_inputs_func=sample_inputs_pow,
            supports_inplace_autograd=False,
+           supports_sparse_csr=True,
            supports_forward_ad=True,
            assert_autodiffed=True,
            ),

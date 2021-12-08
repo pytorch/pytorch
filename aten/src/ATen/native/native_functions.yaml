@@ -7793,6 +7793,7 @@
   dispatch:
     CPU, CUDA: pow_Tensor_Scalar_out
     SparseCPU, SparseCUDA: pow_out_sparse_scalar
+    SparseCsrCPU, SparseCsrCUDA: pow_sparse_csr_out
 
 - func: pow.Tensor_Scalar(Tensor self, Scalar exponent) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -7800,11 +7801,14 @@
   variants: function, method
   dispatch:
     SparseCPU, SparseCUDA: pow_sparse_scalar
+    SparseCsrCPU, SparseCsrCUDA: pow_sparse_csr
 
 - func: pow_.Scalar(Tensor(a!) self, Scalar exponent) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: pow.Tensor_Scalar_out
   variants: method
+  dispatch:
+    SparseCsrCPU, SparseCsrCUDA: pow_sparse_csr_
 
 - func: pow_.Tensor(Tensor(a!) self, Tensor exponent) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
