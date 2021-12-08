@@ -2213,6 +2213,8 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib = nullptr;
+
 } // namespace c10d
 
 #endif // USE_C10D_NCCL
