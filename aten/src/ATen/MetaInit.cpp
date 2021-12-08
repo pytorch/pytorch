@@ -156,7 +156,7 @@ IValue replaceTensors(const IValue& value, const TensorReplacer& fn) {
     }
 
     if (v.isTensor()) {
-      Tensor inp = v.toTensor();
+      const Tensor& inp = v.toTensor();
 
       Tensor out = fn(inp);
       // If not replaced, we need to put the original value into `memo` so that
@@ -215,7 +215,7 @@ void replaceForeignTensorArguments(const OperatorHandle& op, Stack& s) {
 // arguments of `schema`.
 bool hasTensorOptions(const FunctionSchema& schema) noexcept {
   std::array<c10::string_view, 4> tensor_opts = {{
-      "dtype", "layout", "device", "pin_memory" 
+      "dtype", "layout", "device", "pin_memory"
   }};
 
   const std::vector<Argument>& args = schema.arguments();
