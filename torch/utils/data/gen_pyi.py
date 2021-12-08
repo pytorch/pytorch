@@ -134,6 +134,30 @@ def process_signature(line: str) -> str:
     return line
 
 
+def get_method_definitions(files_to_exclude,
+                           deprecated_files,
+                           default_output_type: str,
+                           method_to_special_output_type,
+                           file_path) -> List[str]:
+
+    os.chdir(str(pathlib.Path(__file__).parent.resolve()))
+    file_paths = find_file_paths([file_path],
+                                 files_to_exclude=files_to_exclude.union(deprecated_files))
+    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = parse_datapipe_files(file_paths)
+
+    method_definitions = []
+    for method_name, arguments in methods_and_signatures.items():
+        class_name = methods_and_class_names[method_name]
+        if method_name in methods_w_special_output_types:
+            output_type = method_to_special_output_type[method_name]
+        else:
+            output_type = default_output_type
+        method_definitions.append(f"# Functional form of '{class_name}'\n"
+                                  f"def {method_name}({arguments}) -> {output_type}: ...")
+    method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
+    return method_definitions
+
+
 def main() -> None:
     """
     .pyi generation for functional DataPipes Process
@@ -145,31 +169,27 @@ def main() -> None:
           interface for user-defined DataPipes, consider changing `IterDataPipe.register_datapipe_as_function`.
     """
 
-    files_to_exclude = {"__init__.py", "utils.py"}
-    deprecated_files = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
+    iterDP_files_to_exclude = {"__init__.py", "utils.py"}
+    iterDP_deprecated_files = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
+    iterDP_method_to_special_output_type = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
+    iterDP_file_path = "datapipes/iter"
 
-    method_to_special_output_type = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
+    iter_method_definitions = get_method_definitions(iterDP_files_to_exclude, iterDP_deprecated_files, "IterDataPipe",
+                                                     iterDP_method_to_special_output_type, iterDP_file_path)
 
-    os.chdir(str(pathlib.Path(__file__).parent.resolve()))
-    iter_datapipes_file_path = "datapipes/iter"
-    file_paths = find_file_paths([iter_datapipes_file_path], files_to_exclude=files_to_exclude.union(deprecated_files))
-    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = parse_datapipe_files(file_paths)
+    mapDP_files_to_exclude = {"__init__.py", "utils.py"}
+    mapDP_deprecated_files = {}
+    mapDP_method_to_special_output_type = {}
+    mapDP_file_path = "datapipes/map"
 
-    method_definitions = []
-    for method_name, arguments in methods_and_signatures.items():
-        class_name = methods_and_class_names[method_name]
-        if method_name in methods_w_special_output_types:
-            output_type = method_to_special_output_type[method_name]
-        else:
-            output_type = "IterDataPipe"
-        method_definitions.append(f"# Functional form of '{class_name}'\n"
-                                  f"def {method_name}({arguments}) -> {output_type}: ...")
-    method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
+    map_method_definitions = get_method_definitions(mapDP_files_to_exclude, mapDP_deprecated_files, "MapDataPipe",
+                                                    mapDP_method_to_special_output_type, mapDP_file_path)
 
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
     fm.write_with_template(filename="dataset.pyi",
                            template_fn="dataset.pyi.in",
-                           env_callable=lambda: {'IterableDataPipeMethods': method_definitions})
+                           env_callable=lambda: {'IterableDataPipeMethods': iter_method_definitions,
+                                                 'MapDataPipeMethods': map_method_definitions})
 
 
 if __name__ == '__main__':
