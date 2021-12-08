@@ -1310,6 +1310,28 @@ class NoopObserver(ObserverBase):
     def calculate_qparams(self):
         raise Exception("calculate_qparams should not be called for NoopObserver")
 
+class ReuseInputObserver(ObserverBase):
+    r""" This observer is used when we want to reuse the observer from the operator
+    that produces the input Tensor, typically used for operators like reshape, e.g.
+    ```
+    x0 = ...
+    x1 = x0.reshape()
+    ```
+    if we configure x0 to be observed by some observer, let's say MinMaxObserver,
+    and reshape is configured with ReuseInputObserver, we'll reuse the observer instance
+    for x0 for x1 (output of reshape). If x0 is not observed, we also won't observe x1.
+
+    Note: this is only enabled in FX Graph Mode Quantization
+    """
+    def __init__(self):
+        super().__init__(torch.quint8)
+
+    def forward(self, x):
+        return x
+
+    @torch.jit.export
+    def calculate_qparams(self):
+        raise Exception("calculate_qparams should not be called for ReuseInputObserver")
 
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
@@ -1452,4 +1474,10 @@ default_affine_fixed_qparams_observer = FixedQParamsObserver.with_args(
     scale=1.0 / 256.0, zero_point=0, dtype=torch.quint8, quant_min=0, quant_max=255)
 """
 Default observers for fixed qparams operations.
+"""
+
+default_reuse_input_observer = ReuseInputObserver
+"""
+Default observer for operators like reshape that reuses the observer of input to
+the operator
 """
