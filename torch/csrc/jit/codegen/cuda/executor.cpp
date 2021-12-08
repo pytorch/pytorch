@@ -681,7 +681,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
         computeLaunchParams(launch_constraints, expr_eval, warp_size_);
 
     // Recompile the kernel if the number of threads in the block has increased
-    if(launch_params.nThreads() > block_size_high_water_mark){
+    if (launch_params.nThreads() > block_size_high_water_mark) {
       const auto kernel = lowered_.kernel();
       const auto kernel_code =
           codegen::generateCudaKernel(kernel, kernelName());
