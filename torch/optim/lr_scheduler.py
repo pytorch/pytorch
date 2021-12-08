@@ -765,6 +765,7 @@ class ChainedScheduler(_LRScheduler):
                     "got schedulers at index {} and {} to be different".format(0, scheduler_idx)
                 )
         self._schedulers = list(schedulers)
+        self.optimizer = schedulers[0].optimizer
 
     def step(self):
         for scheduler in self._schedulers:

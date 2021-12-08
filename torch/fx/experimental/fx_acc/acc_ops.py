@@ -195,6 +195,7 @@ def unsqueeze(*, input, dim):
 
 
 @register_acc_op_properties(AccOpProperty.unary)
+@register_acc_op_mapping(op_and_target=("call_method", "tile"))
 @register_acc_op_mapping(op_and_target=("call_function", torch.tile))
 @register_acc_op
 def tile(*, input, dims):
@@ -441,15 +442,10 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op_mapping(
     op_and_target=("call_function", nn.functional.hardtanh),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("min_val", "left"),
-        ("max_val", "right"),
-    ],
 )
 @register_acc_op
-def hardtanh(*, input, left=-1.0, right=1.0):
-    return nn.functional.hardtanh(input, min_val=left, max_val=right)
+def hardtanh(*, input, min_val=-1.0, max_val=1.0):
+    return nn.functional.hardtanh(**locals())
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)

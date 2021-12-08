@@ -2,7 +2,6 @@ from typing import Dict, List, Optional
 from torch._mock_dispatcher.operator_entry import OperatorEntry
 from torch._mock_dispatcher.dispatch_key import DispatchKey
 from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, getDispatchTableIndexForDispatchKey
-from torch._mock_dispatcher.dispatch_key_extractor import DispatchKeyExtractor
 from torch._mock_dispatcher.kernel_function import KernelFunction
 
 class Dispatcher:

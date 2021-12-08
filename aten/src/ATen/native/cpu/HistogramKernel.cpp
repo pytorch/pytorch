@@ -120,10 +120,15 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
     at::parallel_for(0, N, GRAIN_SIZE, [&](int64_t start, int64_t end) {
         // Allocates a tensor for the thread's local results
         Tensor hist_local = at::zeros(hist.sizes(), hist.dtype());
+        TORCH_INTERNAL_ASSERT(hist_local.is_contiguous());
 
-        std::vector<at::indexing::TensorIndex> indices(D, 0);
+        input_t *hist_local_data = hist_local.data_ptr<input_t>();
+
+        const auto hist_strides = hist_local.strides();
+
         for (const auto i : c10::irange(start, end)) {
             bool skip_elt = false;
+            int64_t hist_index = 0;
 
             for (int64_t dim = 0; dim < D; dim++) {
                 const input_t elt = accessor_in[i][dim];
@@ -168,15 +173,14 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
                     pos -= 1;
                 }
 
-                indices[dim] = pos;
+                hist_index += hist_strides[dim] * pos;
             }
 
             if (!skip_elt) {
                 // In the unweighted case, the default weight is 1
                 input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
 
-                input_t cur = hist_local.index(indices).item<input_t>();
-                hist_local.index_put_(indices, cur + wt);
+                hist_local_data[hist_index] += wt;
             }
         }
 

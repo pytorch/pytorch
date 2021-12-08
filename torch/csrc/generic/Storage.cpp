@@ -162,7 +162,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
       return nullptr;
     }
 
-    scalar_t *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
+    scalar_t *data = self->cdata->data<scalar_t>();
 
     at::StorageImpl* old_storage = self->cdata;
     c10::raw::intrusive_ptr::incref(old_storage);
@@ -312,29 +312,6 @@ static struct PyGetSetDef THPStorage_(properties)[] = {
   {nullptr}
 };
 
-extern THPCopyList THWStorage_(copy_functions);
-THPCopyList THWStorage_(copy_functions);
-
-void THPStorage_(initCopyMethods)()
-{
-  auto& h = THWStorage_(copy_functions);
-  // copy from CPU types
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THPByteStorageType, h, &THWStorage_(copyByte));
-
-#ifdef THC_GENERIC_FILE
-  // copy from GPU types
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, h, &THWStorage_(copyCudaByte));
-  // add CPU <- GPU copies to base type
-  /// #define THPCpuStorage TH_CONCAT_3(THP, Real, Storage)
-  #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
-  extern THPCopyList THCpuStorage_(copy_functions);
-  auto& b = THCpuStorage_(copy_functions);
-    THPInsertStorageCopyFunction<THPStorage, THPStorage>(&THCPByteStorageType, b, &THCpuStorage_(copyCudaByte));
-  #undef THCpuStorage
-  #undef THCpuStorage_
-#endif
-}
-
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/StorageMethods.cpp>
 // NOLINTNEXTLINE(bugprone-suspicious-include)
@@ -353,7 +330,6 @@ bool THPStorage_(init)(PyObject *module)
     return false;
   Py_INCREF(&THPStorageType);
   PyModule_AddObject(module, THPStorageBaseStr, (PyObject *)&THPStorageType);
-  THPStorage_(initCopyMethods)();
   return true;
 }
 

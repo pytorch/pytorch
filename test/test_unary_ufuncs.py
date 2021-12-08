@@ -201,17 +201,6 @@ def generate_numeric_tensors_extremal(device, dtype, *,
 class TestUnaryUfuncs(TestCase):
     exact_dtype = True
 
-    # Tests bool tensor negation raises the correct error
-    def test_neg_error_message(self, device):
-        msg = ("Negation, the `\\-` operator, on a bool tensor is not supported."
-               " If you are trying to invert a mask, use the `\\~` or"
-               " `logical_not\\(\\)` operator instead.")
-
-        t = torch.tensor((False, True), device=device)
-
-        with self.assertRaisesRegex(RuntimeError, msg):
-            torch.neg(t)
-
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @ops((_fn for _fn in unary_ufuncs if _fn.domain != (None, None)))
     def test_float_domains(self, device, dtype, op):

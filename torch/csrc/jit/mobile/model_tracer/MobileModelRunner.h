@@ -34,6 +34,11 @@ class MobileModelRunner {
             module_load_options));
   }
 
+  MobileModelRunner(std::stringstream oss) {
+    module_ = std::make_shared<torch::jit::mobile::Module>(
+        torch::jit::_load_for_mobile(oss, at::Device(at::DeviceType::CPU, 0)));
+  }
+
   /**
    * Returns true if the list of operators passed in has a Metal GPU operator,
    * and false otherwise.

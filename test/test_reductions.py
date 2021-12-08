@@ -1290,25 +1290,13 @@ class TestReductions(TestCase):
         values_1d = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8, 9], device=device)
         values_3d = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
 
-        # regular case 3d boundary and 3d input value
-        boundaries = torch.tensor([[[1, 2, 3, 4], [3, 4, 5, 6]], [[1, 3, 5, 7], [2, 4, 6, 8]]], device=device)
-        expected_result = torch.tensor([[[0, 2, 4], [0, 1, 3]], [[0, 1, 1], [1, 2, 2]]], device=device)
-        output = torch.empty(2, 2, 3, device=device, dtype=torch.int64)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d), expected_result)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d, out=output), expected_result)
-        expected_result = torch.tensor([[[1, 3, 4], [0, 2, 4]], [[1, 1, 2], [2, 2, 3]]], device=device)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True), expected_result)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True, out=output), expected_result)
-
         # simple 1d boundary and 3d input value
         boundaries = torch.tensor([1, 2, 3, 4, 5, 6], device=device)
         expected_result = torch.tensor([[[0, 2, 4], [1, 3, 5]], [[0, 1, 2], [3, 4, 5]]], device=device)
         output = torch.empty(2, 2, 3, device=device, dtype=torch.int64)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d), expected_result)
         self.assertEqual(torch.bucketize(values_3d, boundaries), expected_result)
         self.assertEqual(torch.bucketize(values_3d, boundaries, out=output), expected_result)
         expected_result = torch.tensor([[[1, 3, 5], [2, 4, 6]], [[1, 2, 3], [4, 5, 6]]], device=device)
-        self.assertEqual(torch.searchsorted(boundaries, values_3d, right=True), expected_result)
         self.assertEqual(torch.bucketize(values_3d, boundaries, right=True), expected_result)
         self.assertEqual(torch.bucketize(values_3d, boundaries, out=output, right=True), expected_result)
 
@@ -1334,6 +1322,7 @@ class TestReductions(TestCase):
         self.assertEqual(torch.searchsorted(boundaries, values_nan), expected_result)
         expected_result = torch.tensor([2, 4, 3, 4], device=device)
         self.assertEqual(torch.searchsorted(boundaries, values_nan, right=True), expected_result)
+        self.assertEqual(torch.searchsorted(boundaries, values_nan, side='right'), expected_result)
 
         # type promotion and non contiguous tensors
         values_3d_permute = values_3d.permute(2, 1, 0).to(torch.int32)
@@ -1380,6 +1369,22 @@ class TestReductions(TestCase):
         test_output_dtype(torch.int32, False)
         test_output_dtype(torch.int64, True)
 
+        # invalid side argument
+        with self.assertRaisesRegex(RuntimeError, "side can only be 'left' or 'right'"):
+            torch.searchsorted(values_1d, values_1d, side='bad')
+
+        # invalid sorter argument, wrong size
+        with self.assertRaisesRegex(RuntimeError, "boundary and sorter must have the same size"):
+            sequence = torch.rand_like(values_1d, dtype=torch.float)
+            _, sorted_idx = torch.sort(sequence)
+            torch.searchsorted(sequence, values_1d, sorter=sorted_idx[:-1])
+
+        # invalid sorter argument, is not dtype long
+        with self.assertRaisesRegex(RuntimeError, "sorter must be a tensor of long dtype"):
+            sequence = torch.rand_like(values_1d, dtype=torch.float)
+            _, sorted_idx = torch.sort(sequence)
+            torch.searchsorted(sequence, values_1d, sorter=sorted_idx.to(torch.float32))
+
         # scalar type bfloat16
         if self.device_type == 'cpu':
             def test_dtype_bfloat16(values_bf16=False, boundaries_bf16=False):
@@ -1390,7 +1395,6 @@ class TestReductions(TestCase):
                 if boundaries_bf16:
                     boundaries = boundaries.to(torch.bfloat16)
                 expected_result = torch.tensor([1, 2, 4, 6, 8, 8, 8, 8, 8], device=device, dtype=torch.int32)
-                self.assertEqual(torch.searchsorted(boundaries, values_1d_float, out_int32=True), expected_result)
                 self.assertEqual(torch.bucketize(values_1d_float, boundaries, out_int32=True), expected_result)
 
             test_dtype_bfloat16(True, False)

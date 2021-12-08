@@ -1,6 +1,8 @@
 from typing import Optional, List, Dict
 from torch._mock_dispatcher.dispatch_key import DispatchKey, getAutogradKeyFromBackend, isAliasDispatchKey, isRuntimeDispatchKey
-from torch._mock_dispatcher.dispatch_key_set import DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd, autogradother_backends, getRuntimeDispatchKeySet, isBackendDispatchKey, getDispatchTableIndexForDispatchKeySet, getDispatchTableIndexForDispatchKey
+from torch._mock_dispatcher.dispatch_key_set import (
+    DispatchKeySet, num_entries, isIncludedInAlias, getBackendKeySetFromAutograd, autogradother_backends, getRuntimeDispatchKeySet,
+    isBackendDispatchKey, getDispatchTableIndexForDispatchKeySet, getDispatchTableIndexForDispatchKey)
 from torch._mock_dispatcher.dispatch_key_extractor import DispatchKeyExtractor
 from torch._mock_dispatcher.kernel_function import KernelFunction
 
@@ -105,7 +107,8 @@ class OperatorEntry:
         has_backend_kernel = self.hasKernelForAnyDispatchKey(getBackendKeySetFromAutograd(dispatch_key)) \
             or self.hasKernelForDispatchKey(DispatchKey.CompositeExplicitAutograd)
 
-        # 2.2. Use CompositeImplicitAutograd kernel if available. For autograd keys, we only use kernel from CompositeImplicitAutograd
+        # 2.2. Use CompositeImplicitAutograd kernel if available.
+        # For autograd keys, we only use kernel from CompositeImplicitAutograd
         #      when there's no direct registration to its corresponding backend key or CompositeExplicitAutograd.
         #      For AutogradOther, we return ambiguousAutogradOtherKernel() if there's registration
         #      to any of its backends.

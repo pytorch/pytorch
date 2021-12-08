@@ -1,5 +1,4 @@
 from enum import Enum, auto
-from typing import List, Iterator
 
 class DispatchKey(Enum):
     # "Dense" backends

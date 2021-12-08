@@ -1,6 +1,8 @@
 from typing import List, Optional, Dict, Tuple, Iterator
 from functools import reduce
-from torch._mock_dispatcher.dispatch_key import DispatchKey, isAliasDispatchKey, toBackendKey, toFunctionalityKey, isPerBackendFunctionalityKey, isRuntimeDispatchKey, NUM_BACKENDS
+from torch._mock_dispatcher.dispatch_key import (
+    DispatchKey, isAliasDispatchKey, toBackendKey, toFunctionalityKey, isPerBackendFunctionalityKey,
+    isRuntimeDispatchKey, NUM_BACKENDS)
 
 class DispatchKeySet:
     # This class represents a 64-bitset
