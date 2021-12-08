@@ -61,7 +61,7 @@ class TestPackageFX(PackageTestCase):
 
         model = SimpleTest()
         f = BytesIO()
-        with PackageExporter(f, do_selective_intern=False) as pe:
+        with PackageExporter(f, do_selective_intern=True) as pe:
             pe.intern("**")
             pe.save_pickle("model", "model.pkl", model)
 
@@ -75,9 +75,9 @@ class TestPackageFX(PackageTestCase):
         # This should fail, because we are referencing some globals that are
         # only in the package.
         # with self.assertRaises(ObjMismatchError):
-        # with PackageExporter(f2, do_selective_intern=False) as pe:
-        #     pe.intern("**")
-        #     pe.save_pickle("model", "model.pkl", traced)
+        with PackageExporter(f2, do_selective_intern=True) as pe:
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
         with PackageExporter(f2, importer=(pi, sys_importer), do_selective_intern=True) as pe:
