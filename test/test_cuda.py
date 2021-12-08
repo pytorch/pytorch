@@ -1643,7 +1643,7 @@ except RuntimeError as e:
             after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
 
             self.assertTrue(after_free_bytes < before_free_bytes)
-            self.assertTrue(before_available_bytes, after_available_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
 
         _test(0)
         if TEST_MULTIGPU:
