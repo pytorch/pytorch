@@ -175,8 +175,8 @@ bool mayContainAlias(
 
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
   OptimizeGraph(graph, opts);
 }
@@ -184,8 +184,8 @@ void PrepareGraphForStaticModule(
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
           << opts.enable_out_variant << ", optimize_memory "
@@ -201,16 +201,16 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  PrepareGraphForStaticModule(graph, sample_inputs, opts);
+  PrepareGraphForStaticModule(graph, opts, sample_inputs);
 
   return std::make_pair(graph, module);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts) {
-  PrepareGraphForStaticModule(graph, sample_inputs, opts);
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
+  PrepareGraphForStaticModule(graph, opts, sample_inputs);
   return std::make_pair(graph, c10::nullopt);
 }
 
@@ -431,19 +431,19 @@ std::vector<const Value*> ManagedTensorRanges::
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts)
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
     : StaticModule(
-          PrepareForStaticModule(g->copy(), sample_inputs, opts),
+          PrepareForStaticModule(g->copy(), opts, sample_inputs),
           opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts)
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs)
     : StaticModule(
-          PrepareForStaticModule(m, is_frozen, sample_inputs, opts),
+          PrepareForStaticModule(m, is_frozen, opts, sample_inputs),
           opts) {}
 
 StaticModule::StaticModule(
@@ -1588,23 +1588,21 @@ ProcessedFunction::ProcessedFunction(
   }
   {
     const Operator& op = node->getOperator();
-    f_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+    f_ = [node_op = op.getOperation(node),
+          has_var_args = hasVarArgs(node)](ProcessedNode* pnode) mutable {
       std::vector<IValue> stack;
-      Node* node = pnode->node();
-      const size_t size = node->inputs().size();
-      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+      const size_t size = pnode->num_inputs();
+      stack.reserve(size + has_var_args);
       for (const auto i : c10::irange(size)) {
         stack.emplace_back(pnode->Input(i));
       }
       // Need to store the number of inputs in stack for variadic ops.
-      if (hasVarArgs(node)) {
+      if (has_var_args) {
         stack.emplace_back(static_cast<int>(size));
       }
-
       node_op(stack);
-
-      DCHECK_EQ(stack.size(), node->outputs().size());
-      for (const auto i : c10::irange(node->outputs().size())) {
+      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      for (const auto i : c10::irange(pnode->num_outputs())) {
         pnode->Output(i) = std::move(stack[i]);
       }
     };
