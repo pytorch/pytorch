@@ -78,8 +78,8 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
-  typename ListElementConstReferenceTraits<T>::const_reference get() const& {
-    return iterator_->template to<T>();
+  const IValue& get() const& {
+    return *iterator_;
   }
 
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
