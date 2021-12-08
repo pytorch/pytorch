@@ -593,8 +593,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-  ucc_lib = loadTorchUCC();
-  if (ucc_lib) {
+  if (ucc_lib == nullptr) {
+    ucc_lib = loadTorchUCC();
+    if (ucc_lib != nullptr) {
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    } else {
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
+    }
+  }
+
+  if (ucc_lib != nullptr) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef void *fn(void *);
     auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib->sym("_Z28createProcessGroupUCCForNCCLPv"));
@@ -611,8 +619,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     auto raw_ucc_pg = static_cast<ProcessGroup *>(createProcessGroupUCCForNCCL(&args));
     ucc_pg = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
     LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
-  } else {
-    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
   }
 }
 
@@ -2226,9 +2232,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
+<<<<<<< HEAD
 bool ProcessGroupNCCL::isUCCAvailable() const {
   return ucc_pg;
 }
+=======
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib = nullptr;
+>>>>>>> load-ucc.so
 
 } // namespace c10d
 
