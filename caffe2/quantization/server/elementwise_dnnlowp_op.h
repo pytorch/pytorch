@@ -127,7 +127,7 @@ class BinaryElementwiseDNNLowPOp : public DNNLowPOp<T, FP32_OP> {
         size_t n,                                                            \
         size_t post,                                                         \
         CPUContext*) {                                                       \
-      for (const auto i : c10::irange(pre)) {                                        \
+      for (int i = 0; i < pre; ++i) {                                        \
         EigenArrayMap<R>(out + i * n * post, post, n) = eigen_op(            \
             (ConstEigenArrayMap<T>(a + i * n * post, post, n).rowwise()),    \
             (Eigen::Map<const Eigen::Array<T, 1, Eigen::Dynamic>>(b, n)));   \
