@@ -20,7 +20,7 @@ class Reduction(Enum):
 
 @register_decomposition(aten.tanh_backward)
 def tanh_backward_decomposition(out_grad: Tensor, y: Tensor):
-    return out_grad * (1 - y * y)
+    return out_grad * ( -y * y + 1)
 
 @register_decomposition(aten.sigmoid_backward)
 def sigmoid_backward_decomposition(out_grad: Tensor, y: Tensor):
