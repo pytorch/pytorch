@@ -62,7 +62,7 @@ class _KinetoProfile(object):
             with_stack: bool = False,
             with_flops: bool = False,
             with_modules: bool = False):
-        self.activities = set(activities) or supported_activities()
+        self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -379,7 +379,7 @@ class profile(_KinetoProfile):
             # deprecated:
             use_cuda: Optional[bool] = None):
 
-        activities_set = set(activities) or supported_activities()
+        activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
             if use_cuda:
