@@ -534,8 +534,6 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
-        if BACKEND == "nccl" and not torch.cuda.is_available():
-            sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
         self.rank = rank
         self.file_name = file_name
