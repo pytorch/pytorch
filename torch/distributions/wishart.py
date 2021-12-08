@@ -20,9 +20,8 @@ class Wishart(ExponentialFamily):
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
     or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
     The Wishart distribution can be parameterized either in terms of
-    an outer product of general square root matrix e,g.,
-    :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top` or
-    an outer product of cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
+    an outer product of general square root matrix
+    :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top`
     can be obtained via Cholesky decomposition of the covariance.
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
@@ -98,7 +97,7 @@ class Wishart(ExponentialFamily):
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
-        # Gamma distribution is needed for Batlett decomposition sampling
+        # Chi2 distribution is needed for Bartlett decomposition sampling
         self._dist_chi2 = torch.distributions.chi2.Chi2(
             df=(
                 self.df.unsqueeze(-1)
@@ -191,11 +190,11 @@ class Wishart(ExponentialFamily):
         if not support_check.all():
             warnings.warn("Singular sample detected.")
 
-            while not support_check.all():
-                fix_list = support_check.logical_not().nonzero(as_tuple=True)
-                fix_samples = self.rsample([len(fix_list)])
-                sample[fix_list] = fix_samples
-                support_check = self.support.check(sample)
+            sample = sample.index_put_(
+                indices=support_check,
+                values=torch.eye(p, dtype=sample.dtype, device=sample.device).mul(1e-8),
+                accumulate=True,
+            )
 
         return sample
 
