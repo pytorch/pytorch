@@ -229,6 +229,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
@@ -382,7 +383,6 @@ filegroup(
     name = "thc_srcs_cu",
     srcs = [
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
@@ -533,6 +533,7 @@ header_template_rule(
 cc_library(
     name = "aten_headers",
     hdrs = [
+        "torch/csrc/Export.h",
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
