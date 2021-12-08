@@ -1333,7 +1333,6 @@ REGISTER_OPERATOR_FUNCTOR(
       }
     });
 
-
 // out variant takes precedence over native
 // NB: This impl doesn't work for cpu->cuda copy/cast or vice versa.
 REGISTER_OPERATOR_FUNCTOR(
