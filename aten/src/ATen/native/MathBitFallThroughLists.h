@@ -68,4 +68,4 @@ namespace at {
 
 #define TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m) \
   m.impl("as_strided", torch::CppFunction::makeFallthrough()); \
-  m.impl("view", torch::CppFunction::makeFallthrough()); \
+  m.impl("view", torch::CppFunction::makeFallthrough());
