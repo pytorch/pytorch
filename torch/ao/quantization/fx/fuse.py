@@ -1,5 +1,3 @@
-from typing import Dict, Any
-
 from torch.fx import (
     GraphModule,
     Node,
@@ -19,11 +17,9 @@ from .pattern_utils import (
 
 from .fusion_patterns import *  # noqa: F401,F403
 
-from typing import Callable, Tuple
-from typing import Optional
+from typing import Callable, Tuple, Dict, Any, Optional, List
 
-from .quantization_types import Pattern
-
+from .quantization_types import Pattern, NodePattern
 
 class Fuser:
     def fuse(
@@ -50,11 +46,18 @@ class Fuser:
             return map_arg(a, lambda node: env[node.name])
 
         for node in input_graph.nodes:
-            root_node, obj = fusion_pairs.get(node.name, (None, None))
-            if root_node is node:
+            maybe_last_node, pattern, matched_node_pattern, obj = \
+                fusion_pairs.get(node.name, (None, None, None, None))
+            if maybe_last_node is node:
                 assert obj is not None
-                env[node.name] = obj.fuse(self, load_arg, fuse_custom_config_dict)
-            elif root_node is None:
+                # TODO: currently we hard code the root node, which only works for
+                # a tuple of two nodes, we want to make this more general to
+                # support more complex patterns
+                root_node = matched_node_pattern[-1]  # type: ignore[index]
+                env[node.name] = obj.fuse(
+                    self, load_arg, root_node, matched_node_pattern,  # type: ignore[arg-type]
+                    fuse_custom_config_dict)
+            elif maybe_last_node is None:
                 env[node.name] = self.fused_graph.node_copy(node, load_arg)
             # node matched in patterns and is not root is removed here
 
@@ -65,25 +68,30 @@ class Fuser:
     def _find_matches(
             self, root: GraphModule, graph: Graph,
             patterns: Dict[Pattern, Callable]
-    ) -> Dict[str, Tuple[Node, FuseHandler]]:
+    ) -> Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler]]:
         modules = dict(root.named_modules())
-        match_map : Dict[str, Tuple[Node, FuseHandler]] = {}  # node name -> (root_node, match_value)
+        match_map : Dict[str, Tuple[Node, Pattern, NodePattern, FuseHandler]] = {}  # node name -> (root_node, match_value)
 
-        def apply_match(pattern, node, match):
+        def apply_match(pattern, node, match, matched_node_pattern):
             if isinstance(pattern, tuple):
                 s, *args = pattern
-                apply_match(s, node, match)
+                current_node_pattern: List[Node] = []
+                apply_match(s, node, match, current_node_pattern)
                 for subpattern, arg in zip(args, node.args):
-                    apply_match(subpattern, arg, match)
+                    apply_match(subpattern, arg, match, current_node_pattern)
+                matched_node_pattern.append(tuple(current_node_pattern))
             else:
                 # the first pattern matches will take precedence
                 if node.name not in match_map:
-                    match_map[node.name] = match
+                    matched_node_pattern.append(node)
+                    root_node, pattern, handler = match
+                    match_map[node.name] = (root_node, pattern, matched_node_pattern, handler)
 
         for node in reversed(graph.nodes):
             if node.name not in match_map:
                 for pattern, value in patterns.items():
+                    matched_node_pattern: List[Node] = []
                     if is_match(modules, node, pattern):
-                        apply_match(pattern, node, (node, value(self, node)))
+                        apply_match(pattern, node, (node, pattern, value(self, node)), matched_node_pattern)
 
         return match_map
