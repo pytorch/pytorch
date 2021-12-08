@@ -492,6 +492,58 @@ class TestFuseFx(QuantizationTestCase):
             expected_node_list=expected_nodes,
             expected_node_occurrence=expected_occurrence)
 
+    def test_fusion_works_for_multi_use_intermediate_relu_nodes(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv2d1 = nn.Conv2d(1, 1, 1)
+                self.bn2d1 = nn.BatchNorm2d(1)
+                self.conv2d2 = nn.Conv2d(1, 1, 1)
+                self.bn2d2 = nn.BatchNorm2d(1)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv2d1(x)
+                x = self.bn2d1(x)
+                x = self.relu(x)
+                x = self.conv2d2(x)
+                x = self.bn2d2(x)
+                x = self.relu(x)
+                return x
+
+        # test train mode
+        m = M().train()
+        m = prepare_qat_fx(m, {})
+        print(m)
+        expected_nodes = [
+            ns.call_module(nni.ConvBnReLU2d),
+            ns.call_module(nni.ConvBnReLU2d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.ConvBnReLU2d): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
+        # test eval mode
+        m = M().eval()
+        # fuse_fx is a top level api and only supports eval mode
+        m = fuse_fx(m)
+        print(m)
+        expected_nodes = [
+            ns.call_module(nni.ConvReLU2d),
+            ns.call_module(nni.ConvReLU2d),
+        ]
+        expected_occurrence = {
+            ns.call_module(nni.ConvReLU2d): 2,
+        }
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=expected_nodes,
+            expected_node_occurrence=expected_occurrence)
+
 
 @skipIfNoFBGEMM
 class TestQuantizeFx(QuantizationTestCase):
