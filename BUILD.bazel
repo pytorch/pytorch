@@ -50,6 +50,7 @@ cc_library(
         "@com_github_glog//:glog",
         "//c10/macros:Macros",
         "//c10/util:C++17",
+        "//c10/util:TypeTraits",
         "//c10/util:headers",
         ":cuda_cmake_macros_h",
     ],
@@ -72,6 +73,7 @@ cc_library(
     deps = [
         "//c10/util",
         "//c10/util:C++17",
+        "//c10/util:TypeTraits",
         "@fmt",
     ] + if_cuda(
         ["@cuda"],

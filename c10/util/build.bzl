@@ -6,6 +6,7 @@ def define_rules(rules):
         hdrs = rules.glob(["*.h"],
                      exclude=[
                          "C++17.h",
+                         "TypeTraits.h",
                      ]),
         deps = ["//c10/macros:Macros"],
         visibility = ["//:__pkg__"],
@@ -20,6 +21,7 @@ def define_rules(rules):
         srcs = rules.glob(["*.cpp"],
                      exclude=[
                          "C++17.cpp",
+                         "TypeTraits.cpp",
                      ]),
         deps = ["//c10/macros:Macros"],
         visibility = ["//:__pkg__"],
@@ -30,4 +32,11 @@ def define_rules(rules):
         hdrs = ["C++17.h"],
         srcs = ["C++17.cpp"],
         deps = ["//c10/macros:Macros"],
+    )
+
+    rules.cc_library(
+        name = "TypeTraits",
+        hdrs = ["TypeTraits.h"],
+        srcs = ["TypeTraits.cpp"],
+        deps = [":C++17"],
     )
