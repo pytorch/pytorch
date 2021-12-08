@@ -288,7 +288,7 @@ class TORCH_API TensorExprKernel {
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
   StmtPtr stmt_ = nullptr;
   bool pre_alloc_{false};
-  const std::string& kernel_func_name_;
+  std::string kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

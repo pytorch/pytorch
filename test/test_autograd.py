@@ -4285,8 +4285,7 @@ for shape in [(1,), ()]:
 
 
     @slowTest
-    @parametrize("input_requires_grad", [True, False])
-    def test_checkpointing(self, input_requires_grad):
+    def test_checkpointing(self):
         num_inp = 2000
         nz_inp = 10
         nz_out = 10
@@ -4303,7 +4302,7 @@ for shape in [(1,), ()]:
         for r in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
-            data_r.requires_grad = input_requires_grad
+            data_r.requires_grad = True
             feat_r = checkpoint(module, data_r)
             feat_combined.append(feat_r)
 
