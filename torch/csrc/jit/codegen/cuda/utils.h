@@ -2,6 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -115,6 +116,8 @@ constexpr unsigned int switch_pair(T t1, T t2) {
   constexpr unsigned int _WORD_SHIFT = 16;
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
+
+std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
 } // namespace cuda
 } // namespace fuser

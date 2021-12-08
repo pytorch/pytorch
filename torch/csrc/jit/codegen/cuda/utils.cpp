@@ -158,6 +158,14 @@ bool disableRNGUnrolling() {
   return disable_rng_unroll ? atoi(disable_rng_unroll) : false;
 }
 
+std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
+  TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
+  auto optional_sizes = tensor_type->sizes().concrete_sizes();
+  TORCH_INTERNAL_ASSERT(
+      optional_sizes.has_value(), "Missing size information for the tensor.");
+  return optional_sizes.value();
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

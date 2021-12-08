@@ -38,17 +38,10 @@ constexpr auto kNumBatchnormFwd = 3;
 constexpr auto kNumInstancenormFwd = 1;
 constexpr auto kNumSumToSize = 2;
 constexpr auto kNumAutocastOps = 2;
-// constexpr auto kNumViewSize = 2;
+constexpr auto kNumAliasDimOps = 2;
+constexpr auto kNumViewOps = 2;
 
 namespace {
-
-std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
-  TORCH_INTERNAL_ASSERT(tensor_type != nullptr, "Input must be a Tensor.");
-  auto optional_sizes = tensor_type->sizes().concrete_sizes();
-  TORCH_INTERNAL_ASSERT(
-      optional_sizes.has_value(), "Missing size information for the tensor.");
-  return optional_sizes.value();
-}
 
 #define REGISTER_PARSE_RULE(op, func_body, ...)                                \
   registerParseRule(                                                           \
@@ -57,7 +50,8 @@ std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {
           -> void func_body,                                                   \
       __VA_ARGS__)
 
-const auto& sizeAttr = Symbol::attr("profiled_size");
+const auto& reductionSizeAttr = Symbol::attr("profiled_reduction_size");
+const auto& viewSizeAttr = Symbol::attr("profiled_view_size");
 const auto& intListAttr = Symbol::attr("profiled_int_list");
 const auto& intAttr = Symbol::attr("profiled_int");
 const auto& boolListAttr = Symbol::attr("profiled_bool_list");
@@ -502,7 +496,7 @@ class IrParser {
           "Failure when register value: ",
           *(val->node()),
           " with type: ",
-          val->type());
+          val->type()->repr_str());
       MemoryFormat format;
       Val* operand = nullptr;
       std::tie(format, operand) = value_map_[val->unique()].getEntry();
@@ -2373,37 +2367,111 @@ class IrParser {
           });
     }
 
-    /*
-    // TODO: Enable view in parser by detecting non-alias view operation
     {
-      std::array<const char*, kNumViewSize> View = {
-          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)",
-          "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)"};
-      for (auto signature : View) {
+      std::array<const char*, kNumViewOps> ViewOps = {
+          "prim::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)",
+          "prim::view_copy(Tensor(a) self, int[] size) -> Tensor(a)"};
+      for (auto signature : ViewOps) {
         auto ptr_op = getOperatorForLiteral(signature);
         REGISTER_PARSE_RULE(
             ptr_op,
             {
               auto self_value = node->inputs()[0];
-              auto self = value_map[self_value->unique()]->as<TensorView>();
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+              auto self = list_val.front()->as<TensorView>();
+              list_val.pop_front();
 
               auto self_type = self_value->type()->cast<c10::TensorType>();
               TORCH_INTERNAL_ASSERT(self_type != nullptr);
               auto self_sizes = getTensorSizes(self_type);
 
-              auto size_optional =
-                  constant_as<c10::List<int64_t>>(node->input(1));
+              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
               TORCH_INTERNAL_ASSERT(
-                  size_optional.has_value(), "The size parameter is required.");
+                  view_sizes.has_value(), "The size parameter is required.");
 
-              auto output = view(self, self_sizes, size_optional->vec());
+              auto output = view(self, self_sizes, view_sizes->vec());
+              value_map.emplace(node->output()->unique(), output);
+            },
+            [](const Node* node) -> bool {
+              // Reject fusing node if view_sizes contains an inferred dimension
+              auto view_sizes = constant_as<c10::List<int64_t>>(node->input(1));
+              TORCH_INTERNAL_ASSERT(
+                  view_sizes.has_value(), "The size parameter is required.");
+              for (auto axis_size : view_sizes->vec()) {
+                if (axis_size == -1) {
+                  return false;
+                }
+              }
+              return true;
+            },
+            nullptr);
+      }
+    }
+
+    {
+      auto ptr_op = getOperatorForLiteral(
+          "prim::squeeze_copy(Tensor(a) self) -> Tensor(a)");
+      REGISTER_PARSE_RULE(
+          ptr_op,
+          {
+            auto self_value = node->inputs()[0];
+            MemoryFormat format;
+            std::list<Val*> list_val;
+            std::tie(format, list_val) = getConsistentValues(
+                MemoryFormat::Contiguous(), value_map[self_value->unique()]);
+            auto self = list_val.front()->as<TensorView>();
+            list_val.pop_front();
+
+            auto self_type = self_value->type()->cast<c10::TensorType>();
+            TORCH_INTERNAL_ASSERT(self_type != nullptr);
+            auto self_sizes = getTensorSizes(self_type);
+
+            auto output = squeeze(self, self_sizes);
+            value_map.emplace(node->output()->unique(), output);
+          },
+          nullptr,
+          nullptr);
+    }
+
+    {
+      std::array<const char*, kNumAliasDimOps> AliasOpWithDim = {
+          "prim::squeeze_copy.dim(Tensor(a) self, int dim) -> Tensor(a)",
+          "prim::unsqueeze_copy(Tensor(a) self, int dim) -> Tensor(a)"};
+      for (auto signature : AliasOpWithDim) {
+        auto ptr_op = getOperatorForLiteral(signature);
+        REGISTER_PARSE_RULE(
+            ptr_op,
+            {
+              auto self_value = node->inputs()[0];
+              MemoryFormat format;
+              std::list<Val*> list_val;
+              std::tie(format, list_val) = getConsistentValues(
+                  MemoryFormat::Contiguous(),
+                  value_map[node->inputs()[0]->unique()]);
+              auto self = list_val.front()->as<TensorView>();
+              list_val.pop_front();
+
+              auto dim_value = constant_as<int>(node->input(1));
+              TORCH_INTERNAL_ASSERT(dim_value.has_value(), "dim is not valid");
+
+              TensorView* output = nullptr;
+              if (node->kind() == prim::unsqueeze_copy) {
+                output = unsqueeze(self, dim_value.value());
+              } else {
+                auto self_type = self_value->type()->cast<c10::TensorType>();
+                TORCH_INTERNAL_ASSERT(self_type != nullptr);
+                auto self_sizes = getTensorSizes(self_type);
+                output = squeeze(self, self_sizes, dim_value.value());
+              }
               value_map.emplace(node->output()->unique(), output);
             },
             nullptr,
             nullptr);
       }
     }
-    */
   }
 
   void processJitNode(const JitOp* node) {
@@ -2473,7 +2541,11 @@ class IrParser {
       // TODO: we don't support list type in codegen yet;
       // This is a WAR to allow axes of reduction to be passed as constant list;
       // We simply ignore conversion if the scalar value is a constant;
-      return toIValue(val).has_value();
+      auto ivalue = toIValue(val);
+      TORCH_INTERNAL_ASSERT(
+          ivalue.has_value(),
+          "List[T] is not supported as an argument by NvFuser. Use a Constant List.");
+      return true;
     }
     return false;
   }
@@ -2588,7 +2660,7 @@ ProfileIValueOp* insertProfileIValueOp(
   return pn;
 }
 
-void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
+void profileReductionSize(ProfilingRecord* pr, Node* node, size_t offset) {
   auto pn = insertProfileIValueOp(node, offset, pr);
 
   const auto ivalue_profiler = [pr, pn](Stack& stack) {
@@ -2608,12 +2680,14 @@ void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
       size_vec.clear();
     } else {
       TORCH_INTERNAL_ASSERT(
-          false, "profileSize does not support data type: ", value.tagKind());
+          false,
+          "profileReductionSize does not support data type: ",
+          value.tagKind());
     }
-    if (!pn->hasAttribute(sizeAttr)) {
-      pn->is_(sizeAttr, size_vec);
+    if (!pn->hasAttribute(reductionSizeAttr)) {
+      pn->is_(reductionSizeAttr, size_vec);
     } else {
-      auto profiled_ints = pn->is(sizeAttr);
+      auto profiled_ints = pn->is(reductionSizeAttr);
       TORCH_INTERNAL_ASSERT(
           profiled_ints.size() == size_vec.size() &&
               std::equal(
@@ -2622,6 +2696,39 @@ void profileSize(ProfilingRecord* pr, Node* node, size_t offset) {
     }
     push(stack, value);
   };
+  pn->setCallback(ivalue_profiler);
+}
+
+void profileViewSize(ProfilingRecord* pr, Node* node, size_t offset) {
+  auto pn = insertProfileIValueOp(node, offset, pr);
+
+  const auto ivalue_profiler = [pr, pn](Stack& stack) {
+    std::lock_guard<std::mutex> lock(pr->mutex_);
+
+    // TODO: we don't care about merging multiple profiling runs as we don't
+    // support it at all;
+    int64_t frame_id = 0;
+    pop(stack, frame_id);
+    IValue value;
+    pop(stack, value);
+    TORCH_INTERNAL_ASSERT(
+        value.isIntList(), "profiling seeing the wrong data type");
+    if (!pn->hasAttribute(viewSizeAttr)) {
+      pn->is_(viewSizeAttr, value.toIntVector());
+    } else {
+      auto profiled_ints = pn->is(viewSizeAttr);
+      auto input_ints = value.toIntList();
+      TORCH_INTERNAL_ASSERT(
+          profiled_ints.size() == input_ints.size() &&
+              std::equal(
+                  profiled_ints.begin(),
+                  profiled_ints.end(),
+                  input_ints.begin()),
+          "profiling ivalue doesn't support merge");
+    }
+    push(stack, value);
+  };
+
   pn->setCallback(ivalue_profiler);
 }
 
@@ -2892,7 +2999,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
       // argument 1: reduction sizes;
       case 1:
         // TODO(profile_size): double check optional[size]?
-        profileSize(pr, node, offset);
+        profileReductionSize(pr, node, offset);
         break;
       default:
         return false;
@@ -2900,28 +3007,54 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
     return true;
   }
 
-  /*
-  // TODO: Enable view in parser by detecting non-alias view operation
-  static auto view_schema =
-      getOperatorForLiteral(
-          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
-          ->schema();
   static auto reshape_schema =
       getOperatorForLiteral(
           "aten::reshape(Tensor(a) self, int[] shape) -> Tensor(a)")
           ->schema();
-  if (node->matches(view_schema) || node->matches(reshape_schema)) {
+  static auto reshape_copy_schema =
+      getOperatorForLiteral(
+          "prim::reshape_copy(Tensor(a) self, int[] shape) -> Tensor(a)")
+          ->schema();
+  static auto view_schema =
+      getOperatorForLiteral(
+          "aten::view(Tensor(a) self, int[] size) -> Tensor(a)")
+          ->schema();
+  static auto view_copy_schema =
+      getOperatorForLiteral(
+          "prim::view_copy(Tensor(a) self, int[] size) -> Tensor(a)")
+          ->schema();
+  if (node->matches(reshape_schema) || node->matches(reshape_copy_schema) ||
+      node->matches(view_schema) || node->matches(view_copy_schema)) {
     switch (offset) {
       // argument 1: new tensor size;
       case 1:
-        profileSize(pr, node, offset);
+        profileViewSize(pr, node, offset);
         break;
       default:
         return false;
     }
     return true;
   }
-  */
+
+  static auto squeeze_dim_schema =
+      getOperatorForLiteral(
+          "prim::squeeze_copy.dim(Tensor(a) self, int dim) -> Tensor(a)")
+          ->schema();
+  static auto unsqueeze_schema =
+      getOperatorForLiteral(
+          "prim::unsqueeze_copy(Tensor(a) self, int dim) -> Tensor(a)")
+          ->schema();
+  if (node->matches(squeeze_dim_schema) || node->matches(unsqueeze_schema)) {
+    switch (offset) {
+      // argument 1: unsqueeze dim;
+      case 1:
+        profileInt(pr, node, offset);
+        break;
+      default:
+        return false;
+    }
+    return true;
+  }
 
   static auto batch_norm_impl_index_schema =
       getOperatorForLiteral(

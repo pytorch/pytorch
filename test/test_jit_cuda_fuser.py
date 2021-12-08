@@ -3,6 +3,10 @@
 import unittest
 import os
 import random
+import enum
+import copy
+from functools import reduce
+import operator
 
 import torch
 from torch.nn import functional
@@ -2285,7 +2289,7 @@ class TestCudaFuser(JitTestCase):
             o = x * 2.0
             o = torch.softmax(o, dim=-1)
             o = o * 3.0
-            o = torch.matmul(o, y)
+            o = torch._C._nn.linear(o, y)
             return o
 
         x = torch.randn(8, 4, dtype=torch.half, device='cuda', requires_grad=True)
@@ -2359,7 +2363,7 @@ class TestCudaFuser(JitTestCase):
             o = x * 2.0
             o = torch.softmax(o, dim=-1)
             o = o * 3.0
-            o = torch.matmul(o, y)
+            o = torch._C._nn.linear(o, y)
             return o
 
         x = torch.randn(8, 4, dtype=torch.bfloat16, device='cuda', requires_grad=True)
@@ -3085,6 +3089,303 @@ class TestCudaFuser(JitTestCase):
             jit_o = jitted(x, y)
         graph = jitted.graph_for(x, y)
         self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+
+    def _bias_view_relu_helper(self, shape, output_shape, dtype, device, error):
+        class BiasViewRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasViewRelu, self).__init__()
+                self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
+                with torch.no_grad():
+                    self.bias.fill_(10)
+
+            def forward(self, inputs : torch.Tensor, view_shape : List[int]):
+                o = inputs + self.bias
+                o = o.view(view_shape)
+                return torch.relu(o)
+
+        t = BiasViewRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        # profiling
+        jit_o = t_jit(x, output_shape)
+        # optimization
+        jit_o = t_jit(x, output_shape)
+        # final
+        jit_o = t_jit(x, output_shape)
+        # eager - baseline
+        o = t(x, output_shape)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x, output_shape)
+
+        has_inferred_dimension = any([dim == -1 for dim in output_shape])
+        if has_inferred_dimension:
+            # prohibit fusing when view_shape contains an inferred dimension
+            self.assertGraphContainsExactly(graph, FUSION_GROUP, 0)
+            self.assertGraphContainsExactly(graph, 'prim::view_copy', 0)
+        else:
+            self.assertGraphContains(graph, FUSION_GUARD)
+            self.assertGraphContains(graph, 'prim::view_copy', True)
+
+    def _alias_bias_view_relu_helper(self, shape, output_shape, dtype, device, error):
+        class BiasViewRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasViewRelu, self).__init__()
+                self.bias = torch.nn.Parameter(torch.randn(shape, dtype=dtype, device=device), requires_grad=False)
+                with torch.no_grad():
+                    self.bias.fill_(10)
+
+            def forward(self, inputs : torch.Tensor, view_shape : List[int]):
+                o = inputs.view(view_shape)
+                inputs = inputs * self.bias
+                return torch.relu(o)
+
+        t = BiasViewRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        # profiling
+        jit_o = t_jit(x, output_shape)
+        # optimization
+        jit_o = t_jit(x, output_shape)
+        # final
+        jit_o = t_jit(x, output_shape)
+        # eager - baseline
+        o = t(x, output_shape)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x, output_shape)
+        self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
+        self.assertGraphContainsExactly(graph, 'prim::view_copy', 0)
+
+    # generate random view given original view
+    def _random_view(self, original_view, max_len=8, max_views=10000):
+        class Moves(enum.Enum):
+            Merge = 0
+            Split = 1
+            Broadcast = 2
+            ImplicitBroadcast = 3
+            Keep = 4
+
+        def valid(old_view, new_view):
+            old_view_size = reduce(operator.mul, old_view)
+            new_view_size = reduce(operator.mul, new_view)
+            return old_view_size == new_view_size
+
+        # given a random starting number, find the nearest divisor
+        def find_nearest_divisor(N):
+            if 2 >= (N - 1):
+                return -1
+            result = random.randint(2, N - 1)
+            while (N % result) != 0:
+                result += 1
+            return result
+
+        complete_views = set([tuple(original_view)])
+
+        to_visit = []
+        # empty new view, curent originaal view, start pos=0, move count = 0, last_move
+        to_visit.append(([], original_view, 0, [], Moves.Keep))
+
+        # depth-first search of view shapes, starting from the original view
+        while len(to_visit) > 0 and len(complete_views) < max_views:
+            new_view, old_view, odx, move_list, last_move = to_visit[-1]
+            to_visit.pop()
+
+            # iterate over each move type
+            for idx in range(len(Moves)):
+                state = Moves(idx)
+                new_view_clone = copy.deepcopy(new_view)
+                old_view_clone = copy.deepcopy(old_view)
+                new_move_list = move_list + [state]
+                new_odx = odx
+
+                # Update state using Move state
+                if state == Moves.Keep:
+                    new_size = old_view_clone[odx]
+                    new_view_clone.append(new_size)
+                    new_odx += 1
+
+                elif state == Moves.Merge:
+                    if odx + 1 < len(old_view_clone):
+                        new_size = old_view_clone[odx] * old_view_clone[odx + 1]
+                        new_view_clone.append(new_size)
+                        new_odx += 2
+                    else:
+                        continue
+
+                elif state == Moves.Broadcast and last_move != Moves.Broadcast:
+                    new_view_clone.append(1)
+
+                elif state == Moves.Split:
+                    new_size = find_nearest_divisor(old_view_clone[odx])
+                    if new_size == -1:
+                        continue
+                    new_view_clone.append(new_size)
+                    old_view_clone[odx] = int(old_view[odx] / new_size)
+
+                    if old_view_clone[odx] == 1:
+                        new_odx += 1
+
+                elif state == Moves.ImplicitBroadcast:
+                    old_view_clone.insert(odx + 1, 1)
+                    new_size = old_view[odx] * 1
+                    new_view_clone.append(new_size)
+                    new_odx += 2
+
+                if new_odx < len(old_view_clone) and len(new_move_list) < max_len:
+                    to_visit.append((new_view_clone, old_view_clone, new_odx, new_move_list, state))
+                elif (valid(original_view, new_view_clone)):
+                    final_new_view = tuple(new_view_clone)
+                    complete_views.add(final_new_view)
+        return list(complete_views)
+
+    # ndims - number of dimensions
+    # test_fn - view test function
+    def _view_test_generator(self, ndims, test_fn):
+        # create random tensor
+        # max value for each dimension
+        max_size = 10e7
+        max_value = max(int(pow(max_size, 1. / ndims)), 1)
+        sizes = [random.randint(1, max_value) for idx in range(ndims)]
+        x = torch.randn(sizes)
+
+        original_sizes = list(x.size())
+        all_views = self._random_view(original_sizes)
+        random.shuffle(all_views)
+
+        max_samples = 20
+        max_views = min(len(all_views), max_samples)
+        total = 0
+        correct = 0
+        # test random combinations of compatible views
+        for idx in range(max_views):
+            for jdx in range(idx + 1, max_views):
+                total += 1
+                test_fn(all_views[idx], all_views[jdx], torch.float, 'cuda', 1e-6)
+
+    def test_view(self):
+        torch._C._jit_set_nvfuser_guard_mode(True)
+        self._bias_view_relu_helper([2, 3, 4, 5], [-1, 4, 5], torch.float, 'cuda', 1e-6)
+        for ndims in range(1, 5):
+            self._view_test_generator(ndims, self._bias_view_relu_helper)
+        self._alias_bias_view_relu_helper([2, 3, 4, 5], [1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
+
+    def _bias_squeeze_relu_helper(self, shape, dtype, device, error):
+        class BiasSqueezeRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasSqueezeRelu, self).__init__()
+
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+                o = inputs + bias
+                o = torch.squeeze(o)
+                return torch.relu(o)
+
+        t = BiasSqueezeRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        o = t(x, bias)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x)
+        self.assertGraphContains(graph, FUSION_GUARD)
+        self.assertGraphContains(graph, 'prim::squeeze_copy', True)
+
+    def _alias_bias_squeeze_relu_helper(self, shape, dtype, device, error):
+        class BiasSqueezeRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasSqueezeRelu, self).__init__()
+
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+                o = torch.squeeze(inputs)
+                inputs = inputs * bias
+                return torch.relu(o)
+
+        t = BiasSqueezeRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        o = t(x, bias)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x, bias)
+        self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
+        self.assertGraphContainsExactly(graph, 'prim::squeeze_copy', 0)
+
+    def test_squeeze(self):
+        self._bias_squeeze_relu_helper([1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
+        self._alias_bias_squeeze_relu_helper([1, 6, 1, 2, 2, 5, 1], torch.float, 'cuda', 1e-6)
+
+    def _bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
+        class BiasUnsqueezeRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasUnsqueezeRelu, self).__init__()
+
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+                o = inputs + bias
+                o = torch.unsqueeze(o, 0)
+                return torch.relu(o)
+
+        t = BiasUnsqueezeRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        o = t(x, bias)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x)
+        self.assertGraphContains(graph, FUSION_GUARD)
+        self.assertGraphContains(graph, 'prim::unsqueeze_copy', True)
+
+    def _alias_bias_unsqueeze_relu_helper(self, shape, dtype, device, error):
+        class BiasUnsqueezeRelu(torch.nn.Module):
+            def __init__(self):
+                super(BiasUnsqueezeRelu, self).__init__()
+
+            def forward(self, inputs : torch.Tensor, bias : torch.Tensor):
+                o = torch.squeeze(inputs)
+                o = torch.unsqueeze(inputs, 0)
+                inputs = inputs * bias
+                return torch.relu(o)
+
+        t = BiasUnsqueezeRelu()
+        x = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        bias = torch.randn(shape, dtype=dtype, device=device, requires_grad=False)
+        t_jit = torch.jit.script(t)
+
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        jit_o = t_jit(x, bias)
+        o = t(x, bias)
+
+        self.assertEqual(o.dtype, jit_o.dtype)
+        self.assertTrue(self._compare("comparing output failed", o, jit_o, error))
+        graph = t_jit.graph_for(x)
+        self.assertGraphContainsExactly(graph, FUSION_GUARD, 0)
+        self.assertGraphContainsExactly(graph, 'prim::unsqueeze_copy', 0)
+
+    def test_unsqueeze(self):
+        self._bias_unsqueeze_relu_helper([2, 3, 4, 5], torch.float, 'cuda', 1e-6)
+        self._alias_bias_unsqueeze_relu_helper([2, 3, 4, 5], torch.float, 'cuda', 1e-6)
 
 class TestPassManagerCudaFuser(JitTestCase):
 

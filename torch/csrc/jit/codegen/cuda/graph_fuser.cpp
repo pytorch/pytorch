@@ -5,6 +5,8 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/codegen/cuda/partition.h>
+#include <torch/csrc/jit/codegen/cuda/transform_view.h>
+#include <torch/csrc/jit/codegen/cuda/utils.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -19,6 +21,7 @@
 #include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 
 #include <queue>
@@ -66,9 +69,13 @@ Value* createConditionalConstant(Node* profile_ivalue) {
     auto int_list = profile_ivalue->is(Symbol::attr("profiled_bool_list"));
     std::vector<bool> bool_list(int_list.begin(), int_list.end());
     val = IValue(bool_list);
-  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_size"))) {
+  } else if (profile_ivalue->hasAttribute(
+                 Symbol::attr("profiled_reduction_size"))) {
     // int[]
-    val = IValue(profile_ivalue->is(Symbol::attr("profiled_size")));
+    val = IValue(profile_ivalue->is(Symbol::attr("profiled_reduction_size")));
+  } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_view_size"))) {
+    // int[]
+    val = IValue(profile_ivalue->is(Symbol::attr("profiled_view_size")));
   } else if (profile_ivalue->hasAttribute(Symbol::attr("profiled_bool"))) {
     // bool
     val = IValue(
@@ -97,6 +104,7 @@ struct CudaGraphFuser {
   std::unique_ptr<AliasDb> aliasDb_;
   std::shared_ptr<Graph> graph_;
   Symbol kind_ = prim::CudaFusionGroup;
+  std::unordered_map<Value*, Value*> fusion_value_to_runtime_shape_;
 
   // nvrtc has a limit on the number of arguments allowed in a CUDA kernel.
   // The specific limit is a function of constant memory size, amount available
@@ -835,6 +843,7 @@ struct CudaGraphFuser {
   // Builds up expressions that compute shapes of all intermediates (and
   // outputs) of the fusion group, based on the sizes of inputs. You should run
   // DCE to remove those that you end up not using.
+  // TODO: Add shape support for view, reshape, unsqueeze, and squeeze
   std::unordered_map<Value*, Value*> buildShapeExpressions(Node* fusion_group) {
     WithInsertPoint insert_guard{fusion_group->next()};
     std::unordered_map<Value*, Value*> shape_of;
@@ -847,7 +856,9 @@ struct CudaGraphFuser {
     AT_ASSERT(inputs.size() == sinputs.size());
     for (const auto i : c10::irange(inputs.size())) {
       if (inputs[i]->type()->isSubtypeOf(*TensorType::get())) {
-        shape_of[sinputs[i]] = graph->insert(aten::size, {inputs[i]});
+        auto sinput_value = graph->insert(aten::size, {inputs[i]});
+        shape_of[sinputs[i]] = sinput_value;
+        sinput_value->node()->moveBefore(fusion_group);
       }
     }
 
@@ -865,6 +876,10 @@ struct CudaGraphFuser {
         shape_of[soutputs[i]] = graph->insert(aten::size, {outputs[i]});
       }
     }
+
+    // Place all the shape expressions for intermediates in fusion
+    // before the CudaFusionGroup
+    graph->setInsertPoint(fusion_group);
 
     for (Node* n : subgraph->nodes()) {
       // XXX: Use of shape_of.emplace is crucial to the output shape
@@ -1022,8 +1037,9 @@ struct CudaGraphFuser {
     // TODO: failure in buildShapeExpressions should not break fusion execution,
     // we can add a try/catch here to bailout from removeOutputsUsedOnlyInSize.
     GRAPH_DEBUG("before build shape expression: ", *graph_);
-    auto shape_of = buildShapeExpressions(fusion_group);
+    fusion_value_to_runtime_shape_ = buildShapeExpressions(fusion_group);
     GRAPH_DEBUG("after build shape expression: ", *graph_);
+
     auto outputs = fusion_group->outputs().vec();
     auto soutputs = subgraph->outputs().vec();
     // XXX: Iterating in this order is not only good for performance reasons!
@@ -1032,12 +1048,14 @@ struct CudaGraphFuser {
     for (int64_t i = static_cast<int64_t>(outputs.size()) - 1; i >= 0; --i) {
       auto output = outputs[i];
       auto soutput = soutputs[i];
-      if (usedOnlyInDtypeAndSize(output) && shape_of.count(soutput) > 0) {
+      if (usedOnlyInDtypeAndSize(output) &&
+          fusion_value_to_runtime_shape_.count(soutput) > 0) {
         bool has_dtype = usedInDtype(output);
         auto uses = output->uses();
         for (Use u : uses) {
           if (u.user->matches("aten::size(Tensor self) -> int[]")) {
-            u.user->output()->replaceAllUsesWith(shape_of.at(soutput));
+            u.user->output()->replaceAllUsesWith(
+                fusion_value_to_runtime_shape_.at(soutput));
             u.user->destroy();
           } else if (u.user->matches("prim::dtype(Tensor a) -> int")) {
             continue;
@@ -1283,6 +1301,55 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
   }
 }
 
+// view_sizes_runtime is the profiled-ivalue argument for view-size.
+// view_sizes_constant_list is the constant list recorded during profiling runs.
+Value* guardView(
+    Node* fusion,
+    std::unordered_map<Value*, Value*>& fusion_value_to_runtime_size,
+    Node* versioning_if,
+    Node* view,
+    Value* view_sizes_runtime) {
+  // 1. Get self tensor sizes and view_sizes
+  auto self_value = view->inputs().front();
+  auto self_type = self_value->type()->cast<TensorType>();
+  auto self_sizes_constant_list = getTensorSizes(self_type);
+
+  auto view_sizes_constant_list =
+      constant_as<c10::List<int64_t>>(view->inputs().back());
+  TORCH_INTERNAL_ASSERT(view_sizes_constant_list.has_value());
+
+  // 2. Get constraints for self tensor and view_sizes
+  auto constraints = analyzeViewConstraint(
+      self_sizes_constant_list, view_sizes_constant_list->vec());
+
+  // 3. Add constraints as constant to graph
+  auto self_tensor_constraint = fusion->owningGraph()->insertConstant(
+      IValue(constraints.original_constraint));
+  self_tensor_constraint->node()->moveBefore(versioning_if);
+  auto view_sizes_constraint =
+      fusion->owningGraph()->insertConstant(IValue(constraints.new_constraint));
+  view_sizes_constraint->node()->moveBefore(versioning_if);
+
+  // 4. Create CudaFusionViewGuard using input tensor, profile_ivalue
+  // for view_sizes list, and constraints
+  TORCH_INTERNAL_ASSERT(
+      fusion_value_to_runtime_size.find(self_value) !=
+      fusion_value_to_runtime_size.end(),
+      "Failed to find runtime size for fusion value:\t",
+      self_value->node()->kind().toDisplayString());
+  Node* viewcheck_node =
+      fusion->owningGraph()
+          ->create(
+              c10::Symbol::fromQualString("prim::CudaFusionViewGuard"),
+              {fusion_value_to_runtime_size.at(self_value),
+               view_sizes_runtime,
+               self_tensor_constraint,
+               view_sizes_constraint},
+              1)
+          ->insertBefore(versioning_if);
+  return viewcheck_node->output();
+}
+
 //! [ Note -- CudaFusionGuard implementation ]
 //!
 //! shamelessly copying code from NNC (tensorexpr_fuser)  with very little
@@ -1321,7 +1388,9 @@ void PeepholeOptimizeShapeExpressions(Block* block) {
 //!
 //! TODO: we also need to assert/check reduction axes and replace it with
 //! constants in `CudaFusionGroup`
-void guardFusionGroup(Node* fusion) {
+void guardFusionGroup(
+    Node* fusion,
+    std::unordered_map<Value*, Value*>& fusion_value_to_runtime_size) {
   // Fixup types of the subgraph inputs
   std::vector<TypePtr> guard_types;
   std::vector<Value*> tensor_inputs_to_check;
@@ -1372,10 +1441,12 @@ void guardFusionGroup(Node* fusion) {
 
   versioning_if->insertAfter(typecheck_node);
 
+  auto fusion_graph = fusion->g(attr::Subgraph);
+  std::vector<Value*> check_flags = {};
+
   // Fill in the false block. It should contain the unoptimized
   // copy of the fused subgraph, unless we have conditional constants from
   // profiled_ivalue;
-  auto fusion_graph = fusion->g(attr::Subgraph);
   std::shared_ptr<Graph> fb_graph; // resource holder;
   // Restore the dependency for constant introduced by profiled_ivalue within
   // the graph.
@@ -1422,11 +1493,10 @@ void guardFusionGroup(Node* fusion) {
     // 2. REMOVE conditional constant dependency in fusion group
     size_t compensation = 0;
 
-    // get a constant false, which is used by `and` pattern later
+    // get a constant true, which is used by `and` pattern later
     auto const_true = fusion->owningGraph()->insertConstant(IValue(true));
     const_true->node()->moveBefore(versioning_if);
 
-    std::vector<Value*> check_flags = {};
     for (const auto& original_offset : profiled_ivalue_indices) {
       size_t offset = original_offset - compensation;
 
@@ -1454,7 +1524,7 @@ void guardFusionGroup(Node* fusion) {
                 ->insertBefore(versioning_if)
                 ->output();
       } else if (fusion->input(offset)->node()->hasAttribute(
-                     Symbol::attr("profiled_size"))) {
+                     Symbol::attr("profiled_reduction_size"))) {
         // TODO(profile_size): check sizes here with special size comparison op
         // TORCH_INTERNAL_ASSERT(false, "not implemented yet");
         ivalue_check =
@@ -1465,6 +1535,28 @@ void guardFusionGroup(Node* fusion) {
                     1)
                 ->insertBefore(versioning_if)
                 ->output();
+      } else if (fusion->input(offset)->node()->hasAttribute(
+                     Symbol::attr("profiled_view_size"))) {
+        // TODO: Add support for dynamic split to view guard
+
+        // Path from profile-ivalue to prim::view_copy operation
+        // profile-ivalue -> Uses: [Constant, CudaFusionGroup]
+        // Get argument position in CudaFusionGroup
+        // Get argument in subgraph for CudaFusionGroup
+        // CudaFusionGroup argument -> Constant List -> prim::view_copy
+        auto cuda_fusion_group_arg = profiled_ival->uses().back().offset;
+        auto subgraph_arg = fusion_graph->inputs()[cuda_fusion_group_arg];
+        auto constant = subgraph_arg->uses().front().user->output();
+        auto view = constant->uses().front().user;
+        TORCH_INTERNAL_ASSERT(
+            view->kind() == prim::view_copy ||
+            view->kind() == prim::reshape_copy);
+        ivalue_check = guardView(
+            fusion,
+            fusion_value_to_runtime_size,
+            versioning_if,
+            view,
+            profiled_ival);
       } else {
         ivalue_check = fusion->owningGraph()
                            ->create(aten::eq, {profiled_ival, const_o}, 1)
@@ -1492,22 +1584,24 @@ void guardFusionGroup(Node* fusion) {
       fusion_graph->eraseInput(offset);
       compensation++;
     }
-
-    if (!check_flags.empty()) {
-      // attaching output from CudaFusionGuard to profile ivalue checks
-      check_flags.emplace_back(typecheck_result);
-      auto graph = fusion->owningGraph();
-      auto bool_list_node =
-          graph->insertNode(graph->createList(BoolType::get(), check_flags));
-      bool_list_node->moveBefore(versioning_if);
-      Value* bool_list = bool_list_node->output();
-      // new typecheck_result
-      typecheck_result = graph->insert(aten::all, {bool_list});
-      typecheck_result->node()->moveBefore(versioning_if);
-    }
     // update graph in fusion node
     fusion->g_(attr::Subgraph, fusion_graph);
-  } else {
+  }
+
+  if (!check_flags.empty()) {
+    // attaching output from CudaFusionGuard to profile ivalue checks
+    check_flags.emplace_back(typecheck_result);
+    auto graph = fusion->owningGraph();
+    auto bool_list_node =
+        graph->insertNode(graph->createList(BoolType::get(), check_flags));
+    bool_list_node->moveBefore(versioning_if);
+    Value* bool_list = bool_list_node->output();
+    // new typecheck_result
+    typecheck_result = graph->insert(aten::all, {bool_list});
+    typecheck_result->node()->moveBefore(versioning_if);
+  }
+
+  if (profiled_ivalue_indices.empty()) {
     WithInsertPoint guard(false_block->return_node());
     const auto subgraph_outputs =
         insertGraph(*fusion->owningGraph(), *fusion_graph, fusion->inputs());
@@ -1533,11 +1627,13 @@ void guardFusionGroup(Node* fusion) {
   }
 }
 
-void guardFusionGroups(Block* block) {
+void guardFusionGroups(
+    Block* block,
+    std::unordered_map<Value*, Value*>& fusion_value_to_runtime_size) {
   std::vector<Node*> fusions;
   for (Node* n : block->nodes()) {
     for (Block* b : n->blocks()) {
-      guardFusionGroups(b);
+      guardFusionGroups(b, fusion_value_to_runtime_size);
     }
     if (n->kind() == prim::CudaFusionGroup) {
       fusions.push_back(n);
@@ -1547,7 +1643,7 @@ void guardFusionGroups(Block* block) {
     // step 1: a. add prim::CudaFusionGuard and fallback logic
     //         b. insert guard logic of profile_ivalue with if block
     //         c. restore conditional constant to non-constant for fallback
-    guardFusionGroup(fusion);
+    guardFusionGroup(fusion, fusion_value_to_runtime_size);
   }
 }
 
@@ -1915,6 +2011,82 @@ void decomposeLinearOps(Block* block) {
   }
 }
 
+// Replace 'operation' with 'operation_copy' to guard alias operations.
+// Supports View, Reshape, Squeeze, and Unsqueeze
+void replaceAliasOpsWithCopy(std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_map<Symbol, Symbol> op_mapping(
+      {{aten::view, prim::view_copy},
+       {aten::reshape, prim::reshape_copy},
+       {aten::squeeze, prim::squeeze_copy},
+       {aten::unsqueeze, prim::unsqueeze_copy}});
+
+  std::vector<Node*> maybe_alias_nodes;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      replaceAliasOpsWithCopy(graph, b);
+    }
+    if (op_mapping.find(n->kind()) != op_mapping.end()) {
+      maybe_alias_nodes.push_back(n);
+    }
+  }
+
+  auto alias_db = std::make_unique<AliasDb>(graph);
+  for (Node* n : maybe_alias_nodes) {
+    if (!alias_db->safeToChangeAliasingRelationship(
+            n->input(0), n->output(0))) {
+      continue;
+    }
+
+    WithInsertPoint guard(n);
+    auto op_copy =
+        graph->insertNode(graph->create(op_mapping[n->kind()], n->inputs(), 1));
+    op_copy->output()->setType(n->output(0)->type());
+
+    n->output()->replaceAllUsesWith(op_copy->output());
+    n->destroy();
+  }
+}
+
+// Revert all 'op_copy' with 'op' except in CudaFusionGroup
+// e.g., Any non-fused alias operation including within the prim::FallbackGraph
+// Supports View, Reshape, Squeeze, and Unsqueeze
+void revertAliasCopyOps(std::shared_ptr<Graph>& graph, Block* block) {
+  static std::unordered_map<Symbol, Symbol> op_mapping(
+      {{prim::view_copy, aten::view},
+       {prim::reshape_copy, aten::reshape},
+       {prim::squeeze_copy, aten::squeeze},
+       {prim::unsqueeze_copy, aten::unsqueeze}});
+
+  std::vector<Node*> alias_copy_ops;
+  for (Node* n : block->nodes()) {
+    // Allow alias copy ops in CudaFusionGroup
+    if (n->kind() == prim::CudaFusionGroup) {
+      continue;
+    }
+    // Revert alias copy ops within FallbackGraph
+    if (n->kind() == prim::FallbackGraph) {
+      auto subgraph = n->g(attr::Subgraph);
+      revertAliasCopyOps(subgraph, subgraph->block());
+    }
+    for (Block* b : n->blocks()) {
+      revertAliasCopyOps(graph, b);
+    }
+    // Revert any non-fused alias copy ops
+    if (op_mapping.find(n->kind()) != op_mapping.end()) {
+      alias_copy_ops.push_back(n);
+    }
+  }
+
+  for (Node* n : alias_copy_ops) {
+    WithInsertPoint guard(n);
+    auto reverted_op =
+        graph->insertNode(graph->create(op_mapping[n->kind()], n->inputs(), 1));
+    reverted_op->output()->setType(n->output(0)->type());
+    n->output()->replaceAllUsesWith(reverted_op->output());
+    n->destroy();
+  }
+}
+
 // break `conv2d` layer into `conv2d` and `add_optional`. This allows us to fuse
 // the binary operation without supporting gemm.
 // Note that we are not breaking `conv2d` layer without bias.
@@ -2025,12 +2197,16 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   decomposeConvOps(graph->block());
   GRAPH_DEBUG("After decompose decompose Conv Ops by nvfuser: ", *graph);
 
-  CudaGraphFuser(graph->block(), graph).run();
+  replaceAliasOpsWithCopy(graph, graph->block());
+  GRAPH_DEBUG("replace alias_op with alias_copy by nvfuser: ", *graph);
+
+  CudaGraphFuser cgf(graph->block(), graph);
+  cgf.run();
   GRAPH_DEBUG("After Fusion: ", *graph);
 
   // guard input types as well as conditional constants from
   // aten::profile_ivalue
-  guardFusionGroups(graph->block());
+  guardFusionGroups(graph->block(), cgf.fusion_value_to_runtime_shape_);
   GRAPH_DEBUG("After Guard Fusion: ", *graph);
 
   // mutate `aten::_batch_norm_impl_index` and
@@ -2048,6 +2224,10 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // optimization targeting AMP
   removeOutputUsedOnlyInDtype(graph->block());
   GRAPH_DEBUG("After removeOutputUsedOnlyInDtype: ", *graph);
+
+  revertAliasCopyOps(graph, graph->block());
+  GRAPH_DEBUG("revert alias_copy ops by nvfuser: ", *graph);
+
   // After FuseGraph some common subexpressions may come back
   EliminateCommonSubexpression(graph);
   // We might have emitted a fair amount of useless shape propagating code, so
