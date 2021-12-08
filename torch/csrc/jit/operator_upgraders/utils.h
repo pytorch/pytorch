@@ -9,7 +9,7 @@
 namespace torch {
 namespace jit {
 
-static c10::optional<UpgraderEntry> findUpgrader(
+inline c10::optional<UpgraderEntry> findUpgrader(
     std::vector<UpgraderEntry> upgraders_for_schema,
     size_t current_version) {
   // we want to find the entry which satisfies following two conditions:
@@ -30,7 +30,7 @@ static c10::optional<UpgraderEntry> findUpgrader(
   return c10::nullopt;
 }
 
-static bool isOpEntryCurrent(
+inline bool isOpEntryCurrent(
     std::vector<UpgraderEntry> upgraders_for_schema,
     size_t current_version) {
 
@@ -43,7 +43,7 @@ static bool isOpEntryCurrent(
   return true;
 }
 
-static bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
+inline bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
   auto it = operator_version_map.find(name);
   if (it != operator_version_map.end()) {
     return isOpEntryCurrent(it->second, current_version);
