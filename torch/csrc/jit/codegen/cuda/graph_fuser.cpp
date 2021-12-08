@@ -751,6 +751,10 @@ struct CudaGraphFuser {
           // we scan this consumer again to perform the fusion
           return std::make_pair(consumer->reverseIterator(), true);
         }
+        const char* allow_single_node = getenv("PYTORCH_NVFUSER_ONE_OP_FUSION");
+        if (allow_single_node && atoi(allow_single_node) &&consumer->kind() != kind_) {
+          consumer = createSingletonFusionGroup(consumer);
+        }
         auto fusion_group = tryFuse(consumer, producer);
         if (fusion_group) {
           // after fusion, consumer moves into a FusionGroup, so inputs is no
