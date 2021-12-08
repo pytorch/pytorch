@@ -178,8 +178,9 @@ private:
     std::vector<std::string> attrs;
     for(size_t i = 0; i < operator_def.arg_size(); i++) {
       auto & attr = operator_def.arg(i);
-      if(attr.name() == "operator" || attr.name() == "type" )
+      if(attr.name() == "operator" || attr.name() == "type" || attr.name() == "overload_name" ) {
         continue;
+      }
       attrs.push_back(attr.name());
     }
     std::sort(attrs.begin(), attrs.end());
