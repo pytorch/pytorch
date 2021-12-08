@@ -5,7 +5,6 @@
 #include <test/cpp/api/support.h>
 
 #include <c10/util/ArrayRef.h>
-#include <c10/util/irange.h>
 #include <c10/util/tempfile.h>
 
 #include <algorithm>
@@ -174,7 +173,7 @@ TEST(DataTest, InfiniteStreamDataset) {
   for (auto& batch : *data_loader) {
     ASSERT_LT(batch_index, 3);
     ASSERT_EQ(batch.size(), kBatchSize);
-    for (const auto j : c10::irange(kBatchSize)) {
+    for (size_t j = 0; j < kBatchSize; ++j) {
       ASSERT_EQ(batch.at(j), 1 + (batch_index * kBatchSize) + j);
     }
     batch_index += 1;
@@ -838,7 +837,7 @@ TEST(DataTest, CanUseCustomTypeAsIndexType) {
 
   size_t i = 0;
   for (auto batch : *data_loader) {
-    for (const auto j : c10::irange(kBatchSize)) {
+    for (int j = 0; j < kBatchSize; ++j) {
       ASSERT_EQ(batch.at(j), 10 + j);
     }
     i += 1;
@@ -858,7 +857,7 @@ TEST(DataTest, DistributedRandomSamplerSingleReplicaProduceCorrectSamples) {
   ASSERT_EQ(res.size(), sample_count);
 
   std::sort(res.begin(), res.end());
-  for (const auto i : c10::irange(res.size())) {
+  for (size_t i = 0; i < res.size(); ++i) {
     ASSERT_EQ(res[i], i);
   }
 }
@@ -873,14 +872,14 @@ TEST(DataTest, DistributedRandomSamplerMultiReplicaProduceCorrectSamples) {
                            size_t batch_size) {
     std::vector<std::unique_ptr<samplers::DistributedRandomSampler>> samplers;
 
-    for (const auto i : c10::irange(num_replicas)) {
+    for (size_t i = 0; i < num_replicas; ++i) {
       samplers.emplace_back(
           torch::make_unique<samplers::DistributedRandomSampler>(
               sample_count, num_replicas, i, allow_duplicates));
     }
 
     std::vector<size_t> res;
-    for (const auto i : c10::irange(num_replicas)) {
+    for (size_t i = 0; i < num_replicas; ++i) {
       (*samplers[i]).reset();
       torch::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
@@ -954,7 +953,7 @@ TEST(DataTest, DistributedSequentialSamplerSingleReplicaProduceCorrectSamples) {
   ASSERT_EQ(res.size(), sample_count);
 
   std::sort(res.begin(), res.end());
-  for (const auto i : c10::irange(res.size())) {
+  for (size_t i = 0; i < res.size(); ++i) {
     ASSERT_EQ(res[i], i);
   }
 }
@@ -970,14 +969,14 @@ TEST(DataTest, DistributedSequentialSamplerMultiReplicaProduceCorrectSamples) {
     std::vector<std::unique_ptr<samplers::DistributedSequentialSampler>>
         samplers;
 
-    for (const auto i : c10::irange(num_replicas)) {
+    for (size_t i = 0; i < num_replicas; ++i) {
       samplers.emplace_back(
           torch::make_unique<samplers::DistributedSequentialSampler>(
               sample_count, num_replicas, i, allow_duplicates));
     }
 
     std::vector<size_t> res;
-    for (const auto i : c10::irange(num_replicas)) {
+    for (size_t i = 0; i < num_replicas; ++i) {
       (*samplers[i]).reset();
       torch::optional<std::vector<size_t>> idx;
       while ((idx = (*samplers[i]).next(batch_size)).has_value()) {
@@ -1491,7 +1490,7 @@ TEST(DataLoaderTest, StatefulDatasetWithNoWorkers) {
 
   auto data_loader = torch::data::make_data_loader(D{});
 
-  for (const auto i : c10::irange(10)) {
+  for (size_t i = 0; i < 10; ++i) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1532,7 +1531,7 @@ TEST(DataLoaderTest, StatefulDatasetWithManyWorkers) {
       torch::data::datasets::make_shared_dataset<D>(),
       DataLoaderOptions().workers(kNumberOfWorkers));
 
-  for (const auto i : c10::irange(10)) {
+  for (size_t i = 0; i < 10; ++i) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1575,7 +1574,7 @@ TEST(DataLoaderTest, StatefulDatasetWithMap) {
               })),
       DataLoaderOptions{});
 
-  for (const auto i : c10::irange(10)) {
+  for (size_t i = 0; i < 10; ++i) {
     const auto number_of_iterations =
         std::distance(data_loader->begin(), data_loader->end());
     ASSERT_EQ(
@@ -1676,8 +1675,7 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
             dataset,
             DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-        for (const auto epoch_index : c10::irange(epoch_count)) {
-          (void)epoch_index; // Suppress unused variable warning
+        for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
           std::vector<bool> result(total_example_count, false);
           int iteration_count = 0;
           for (auto iterator = data_loader->begin();
@@ -1689,11 +1687,11 @@ TEST(DataLoaderTest, ChunkDataSetGetBatch) {
             // When prefetch_count is equal to 1 and no worker thread, the batch
             // order is deterministic. So we can verify elements in each batch.
             if (prefetch_count == 1 && dataloader_worker_count == 0) {
-              for (const auto j : c10::irange(batch_size)) {
+              for (size_t j = 0; j < batch_size; ++j) {
                 ASSERT_EQ(batch[j], iteration_count * batch_size + j);
               }
             }
-            for (const auto j : c10::irange(batch_size)) {
+            for (size_t j = 0; j < batch_size; ++j) {
               result[batch[j]] = true;
             }
           }
@@ -1980,8 +1978,7 @@ TEST(DataLoaderTest, ChunkDatasetSave) {
         dataset,
         DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-    for (const auto epoch_index : c10::irange(epoch_count)) {
-      (void)epoch_index; // Suppress unused variable warning
+    for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
       int iteration_count = 0;
       for (auto iterator = data_loader->begin(); iterator != data_loader->end();
            ++iterator, ++iteration_count) {
@@ -2082,7 +2079,7 @@ TEST(DataLoaderTest, ChunkDatasetLoad) {
   auto data_loader = torch::data::make_data_loader(
       dataset, DataLoaderOptions(batch_size).workers(dataloader_worker_count));
 
-  for (const auto epoch_index : c10::irange(epoch_count)) {
+  for (int epoch_index = 0; epoch_index < epoch_count; ++epoch_index) {
     int iteration_count = 0;
 
     // For the first epoch, the returned batch should be returned from the
@@ -2131,7 +2128,7 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
       size_t index = 0;
 
       // Repeatly sample every 5 indices.
-      for (const auto i : c10::irange(batch_size)) {
+      for (size_t i = 0; i < batch_size; ++i) {
         for (size_t j = 0; j < size_ / batch_size; ++j) {
           indices_[index++] = i + batch_size * j;
         }
@@ -2225,11 +2222,11 @@ TEST(DataLoaderTest, ChunkDatasetCrossChunkShuffle) {
         // construct expected result
         int offset = 0;
 
-        for (const auto i : c10::irange((chunk_count + cross_chunk_shuffle_count - 1) /
-                 cross_chunk_shuffle_count)) {
-          for (const auto j : c10::irange(chunk_size)) {
-            (void)j; // Suppress unused variable warning
-            for (const auto k : c10::irange(cross_chunk_shuffle_count)) {
+        for (int i = 0; i < (chunk_count + cross_chunk_shuffle_count - 1) /
+                 cross_chunk_shuffle_count;
+             i++) {
+          for (int j = 0; j < chunk_size; ++j) {
+            for (int k = 0; k < cross_chunk_shuffle_count; ++k) {
               if (i * cross_chunk_shuffle_count + k < chunk_count) {
                 expected_result.push_back(i * cross_chunk_shuffle_count + k);
               }
