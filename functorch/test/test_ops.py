@@ -654,7 +654,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout'),
         xfail('nn.functional.batch_norm'),
         xfail('_masked.prod'),
-        xfail('cholesky_solve'),
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('fft.rfft2'),

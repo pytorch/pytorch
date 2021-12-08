@@ -3172,7 +3172,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('view_as_complex'),
         xfail('matrix_exp'),
         xfail('bucketize'),
-        xfail('cholesky_solve'),
         xfail('fft.fft2'),
         xfail('fft.hfft2'),
         xfail('fft.hfftn'),
