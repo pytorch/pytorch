@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
+#include <ATen/core/type_ptr.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeTraits.h>
 #include <c10/util/TypeList.h>
@@ -17,7 +18,6 @@ namespace c10 {
 struct IValue;
 template<class T> class List;
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 
 namespace detail {
 

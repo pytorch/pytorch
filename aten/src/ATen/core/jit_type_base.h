@@ -3,6 +3,7 @@
 #include <functional>
 #include <string>
 #include <memory>
+#include <ATen/core/type_ptr.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 #include <c10/util/Exception.h>
@@ -56,14 +57,67 @@ enum class TypeKind {
 TORCH_API const char* typeKindToString(TypeKind kind);
 
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
-using ConstTypePtr = std::shared_ptr<const Type>;
 
 // Use this to customize how a Type is printed using `annotation_str()`. If
 // c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
 using TypePrinter =
     std::function<c10::optional<std::string>(const Type&)>;
+
+namespace detail {
+template <typename T>
+struct IsSingletonType : public std::integral_constant<bool, false> {};
+} // namespace detail
+#define TORCH_DECLARE_SINGLETON(Type) \
+  struct Type;                                                          \
+  namespace detail { \
+  template <> struct IsSingletonType<Type> : public std::integral_constant<bool, true> {}; \
+  }
+
+TORCH_DECLARE_SINGLETON(AnyType);
+TORCH_DECLARE_SINGLETON(AnyEnumType);
+TORCH_DECLARE_SINGLETON(NumberType);
+TORCH_DECLARE_SINGLETON(FloatType);
+TORCH_DECLARE_SINGLETON(ComplexType);
+TORCH_DECLARE_SINGLETON(IntType);
+TORCH_DECLARE_SINGLETON(BoolType);
+TORCH_DECLARE_SINGLETON(StringType);
+TORCH_DECLARE_SINGLETON(StorageType);
+TORCH_DECLARE_SINGLETON(NoneType);
+TORCH_DECLARE_SINGLETON(GeneratorType);
+TORCH_DECLARE_SINGLETON(QuantizerType);
+TORCH_DECLARE_SINGLETON(QSchemeType);
+TORCH_DECLARE_SINGLETON(DeviceObjType);
+TORCH_DECLARE_SINGLETON(StreamObjType);
+TORCH_DECLARE_SINGLETON(CapsuleType);
+TORCH_DECLARE_SINGLETON(PyObjectType);
+TORCH_DECLARE_SINGLETON(LayoutType);
+TORCH_DECLARE_SINGLETON(ScalarTypeType);
+TORCH_DECLARE_SINGLETON(AnyListType);
+TORCH_DECLARE_SINGLETON(AnyTupleType);
+TORCH_DECLARE_SINGLETON(AnyClassType);
+
+namespace detail {
+template <typename T, typename Enable = void>
+struct CastReturnType {
+  using type = std::shared_ptr<T>;
+};
+
+template <typename T>
+struct CastReturnType<T, typename std::enable_if<IsSingletonType<T>::value>::type> {
+  using type = SingletonTypePtr<T>;
+};
+
+template <typename T, typename Enable = void>
+struct CastConstReturnType {
+  using type = std::shared_ptr<const T>;
+};
+
+template <typename T>
+struct CastConstReturnType<T, typename std::enable_if<IsSingletonType<T>::value>::type> {
+  using type = SingletonTypePtr<const T>;
+};
+} // namespace detail
 
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
  private:
@@ -102,7 +156,31 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   template <typename T>
   typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
-  isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
+  isSubtypeOf(const SingletonOrSharedTypePtr<T>& rhs) const {
+    return isSubtypeOf(*rhs);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOf(SingletonTypePtr<T> rhs) const {
+    return isSubtypeOf(*rhs);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  isSubtypeOfExt(const SingletonOrSharedTypePtr<T>& rhs, std::ostream* why_not) const {
+    return isSubtypeOfExt(*rhs, why_not);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+    isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
+    return isSubtypeOfExt(*rhs, why_not);
+  }
+
+  template <typename T>
+  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+    isSubtypeOfExt(SingletonTypePtr<T> rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
 
@@ -156,17 +234,33 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid.
-  template <typename T>
-  std::shared_ptr<T> cast() {
+  template <typename T, std::enable_if_t<!detail::IsSingletonType<T>::value, bool> = true>
+  typename detail::CastReturnType<T>::type cast() {
     if (T::Kind == kind()) {
       return std::static_pointer_cast<T>(shared_from_this());
     }
     return nullptr;
   }
-  template <typename T>
-  std::shared_ptr<const T> cast() const {
+  template <typename T, std::enable_if_t<detail::IsSingletonType<T>::value, bool> = true>
+  typename detail::CastReturnType<T>::type cast() {
+    if (T::Kind == kind()) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(this == T::get().get());
+      return typename detail::CastReturnType<T>::type(static_cast<T*>(this));
+    }
+    return nullptr;
+  }
+  template <typename T, std::enable_if_t<!detail::IsSingletonType<T>::value, bool> = true>
+  typename detail::CastConstReturnType<T>::type cast() const {
     if (T::Kind == kind()) {
       return std::static_pointer_cast<const T>(shared_from_this());
+    }
+    return nullptr;
+  }
+  template <typename T, std::enable_if_t<detail::IsSingletonType<T>::value, bool> = true>
+  typename detail::CastConstReturnType<T>::type cast() const {
+    if (T::Kind == kind()) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(this == T::get().get());
+      return typename detail::CastConstReturnType<T>::type(static_cast<const T*>(this));
     }
     return nullptr;
   }
@@ -185,13 +279,13 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
     return nullptr;
   }
   template <typename T>
-  std::shared_ptr<T> expect() {
+  auto expect() {
     auto r = cast<T>();
     AT_ASSERT(r);
     return r;
   }
   template <typename T>
-  std::shared_ptr<const T> expect() const {
+  auto expect() const {
     auto r = cast<const T>();
     AT_ASSERT(r);
     return r;
@@ -221,7 +315,13 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types) {
     auto current_contained = containedTypes();
-    TORCH_INTERNAL_ASSERT(current_contained.size() == contained_types.size());
+    // Types with no contained_types don't need this call. Check before calling!
+    //
+    // (We can't support this efficiently because types without
+    // contained types may be singletons, in which case
+    // shared_from_this will crash; we would have to provide a virtual
+    // typeptr_from_this or isSingleton.)
+    TORCH_INTERNAL_ASSERT(!current_contained.empty() && current_contained.size() == contained_types.size());
     if (current_contained.equals(contained_types)) {
       return shared_from_this();
     }

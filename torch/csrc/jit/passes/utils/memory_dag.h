@@ -23,7 +23,6 @@ struct Element;
 struct Value;
 class MemoryDAG;
 
-using TypePtr = std::shared_ptr<c10::Type>;
 using AliasTypeSet = std::vector<TypePtr>;
 
 /**

@@ -4,13 +4,9 @@
 #include <vector>
 
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/type_ptr.h>
 
 #include <torch/csrc/WindowsTorchApiMacro.h>
-
-namespace c10 {
-struct Type;
-using TypePtr = std::shared_ptr<Type>;
-} // namespace c10
 
 namespace torch {
 namespace jit {

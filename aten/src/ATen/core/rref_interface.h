@@ -1,11 +1,11 @@
 #pragma once
 
 #include <c10/util/intrusive_ptr.h>
+#include <ATen/core/type_ptr.h>
 
 namespace c10 {
 
 struct Type;
-using TypePtr = std::shared_ptr<Type>;
 using worker_id_t = int16_t;
 
 // This abstract class contains only user-facing APIs, and will be shared

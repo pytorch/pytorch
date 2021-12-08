@@ -187,7 +187,7 @@ c10::optional<IValue> toIValue(const Value* v) {
     const auto& tup = node->ival(attr::value);
     TORCH_INTERNAL_ASSERT(tup.isTuple());
     return tup;
-  } else if (type == StringType::get()) {
+  } else if (type->kind() == StringType::Kind) {
     const auto& s = node->s(attr::value);
     return s;
   } else if (type == DeviceObjType::get()) {
