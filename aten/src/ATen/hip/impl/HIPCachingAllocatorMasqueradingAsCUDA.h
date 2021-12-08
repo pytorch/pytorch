@@ -10,7 +10,7 @@ class DataPtr;
 namespace hip {
 namespace HIPCachingAllocatorMasqueradingAsCUDA {
 
-Allocator* get();
+C10_HIP_API Allocator* get();
 C10_HIP_API void recordStreamMasqueradingAsCUDA(const DataPtr& ptr, HIPStreamMasqueradingAsCUDA stream);
 
 } // namespace HIPCachingAllocatorMasqueradingAsCUDA
