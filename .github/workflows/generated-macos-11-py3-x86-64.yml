@@ -132,9 +132,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      # For sccache / S3 access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
     steps:
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -180,6 +177,23 @@ jobs:
           PYTHONIOENCODING: "utf-8"
         run: |
           python3 tools/render_junit.py test/
+      - name: Zip JSONs for upload
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
+        run: |
+          # Remove any previous test jsons if they exist
+          rm -f test-jsons-*.zip
+          zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
+      - uses: actions/upload-artifact@v2
+        name: Store Test Downloaded JSONs on Github
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          name: test-jsons
+          retention-days: 14
+          if-no-files-found: warn
+          path:
+            test-jsons-*.zip
       - name: Zip test reports for upload
         if: always()
         env:
