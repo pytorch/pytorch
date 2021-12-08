@@ -1,27 +1,24 @@
 def define_rules(rules):
     rules.package(default_visibility = ["//:__subpackages__"])
 
-    rules.cc_library(
+    rules.filegroup(
         name = "headers",
-        hdrs = rules.glob(["*.h"],
-                     exclude=[
-                         "C++17.h",
-                     ]),
-        deps = ["//c10/macros:Macros"],
+        srcs = rules.glob(
+            ["*.h"],
+            exclude=[
+                "C++17.h",
+            ]),
         visibility = ["//:__pkg__"],
     )
 
-    rules.cc_library(
-        name = "util",
-        hdrs = rules.glob(["*.h"],
-                     exclude=[
-                         "C++17.h",
-                     ]),
-        srcs = rules.glob(["*.cpp"],
-                     exclude=[
-                         "C++17.cpp",
-                     ]),
-        deps = ["//c10/macros:Macros"],
+    rules.filegroup(
+        name = "sources",
+        srcs = rules.glob(
+            ["*.cpp"],
+            exclude=[
+                "C++17.cpp",
+            ],
+        ),
         visibility = ["//:__pkg__"],
     )
 
