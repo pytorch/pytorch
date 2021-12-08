@@ -1876,6 +1876,7 @@ class TestNN(NNTestCase):
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
         self.assertTrue(parameter_dict.setdefault('p26') is None)
         check()
+        parameter_dict.pop('p26')
 
         parameters2 = OrderedDict([
             ('p13', Parameter(torch.randn(10, 10))),
