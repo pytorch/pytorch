@@ -2250,7 +2250,7 @@ class TestDistributions(TestCase):
         ref_dist = scipy.stats.wishart(df.item(), cov.detach().numpy())
 
         x = dist1.sample((10,))
-        expected = ref_dist.logpdf(x.numpy())
+        expected = ref_dist.logpdf(x.transpose(0, 2).numpy())
 
         self.assertEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
         self.assertEqual(0.0, np.mean((dist2.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
