@@ -207,16 +207,12 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    Tensor self_and_norm_isnan;
     const auto self_isnan = self.isnan();
     const auto norm_isnan = norm.isnan();
-    if (!areAnyTensorSubclassLike({self, norm})) {
-      // optimization
-      self_and_norm_isnan = self_isnan.logical_and_(norm_isnan);
-    } else {
-      self_and_norm_isnan = self_isnan.logical_and(norm_isnan);
-    }
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan);
+    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
+      self_isnan.logical_and(norm_isnan) :
+      self_isnan.logical_and_(norm_isnan);
+    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
     Tensor nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
@@ -667,15 +663,11 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    Tensor pred;
     const auto self_ge_min = self >= min;
-    const auto self_le_max = self <= min;
-    if (!areAnyTensorSubclassLike({self, min, max})) {
-      // fastpath
-      pred = self_ge_min.logical_and_(self_le_max);
-    } else {
-      pred = self_ge_min.logical_and(self_le_max);
-    }
+    const auto self_le_max = self <= max;
+    const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+      self_ge_min.logical_and(self_le_max) :
+      self_ge_min.logical_and_(self_le_max);
     return where(pred, grad, zero);
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
@@ -700,27 +692,19 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   auto zero = at::scalar_tensor(0., grad.options());
   if (max.defined() && min.defined()) {
     if (grad_input_mask[0]) {
-      Tensor pred;
       const auto self_lt_min = self < min;
       const auto min_lt_max = min < max;
-      if (!areAnyTensorSubclassLike({self, min, max})) {
-        // fastpath
-        pred = self_lt_min.logical_and_(min_lt_max);
-      } else {
-        pred = self_lt_min.logical_and(min_lt_max);
-      }
+      const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+        self_lt_min.logical_and(min_lt_max) :
+        self_lt_min.logical_and_(min_lt_max);
       std::get<0>(ret) = where(pred, grad, zero);
     }
     if (grad_input_mask[1]) {
-      Tensor pred;
       const auto self_gt_max = self > max;
       const auto max_lt_min = max < min;
-      if (!areAnyTensorSubclassLike({self, min, max})) {
-        // fastpath
-        pred = self_gt_max.logical_or_(max_lt_min);
-      } else {
-        pred = self_gt_max.logical_or(max_lt_min);
-      }
+      const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+        self_gt_max.logical_or(max_lt_min) :
+        self_gt_max.logical_or_(max_lt_min);
       std::get<1>(ret) = where(pred, grad, zero);
     }
   } else if (min.defined() && grad_input_mask[0]) {
@@ -985,13 +969,19 @@ Tensor native_dropout_double_backward(const Tensor& ggI, const Tensor& grad, con
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  if (!areAnyTensorSubclassLike({grad, input, value}) && input.is_cpu()) {
-    // fast-path on CPU
+  bool any_tensor_subclass_like = areAnyTensorSubclassLike({grad, input, value});
+  if (any_tensor_subclass_like || input.is_cuda()) {
+    const auto input_isnan = input.isnan();
+    const auto value_isnan = value.isnan();
+    const auto& input_and_value_isnan = any_tensor_subclass_like ?
+      input_isnan.logical_and(value_isnan) :
+      input_isnan.logical_and_(value_isnan);
+    const auto mask = (input == value).logical_or_(input_and_value_isnan);
+    return mask * (grad / mask.sum());
+  } else {
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
     return grad.new_zeros(input.sizes(), input.options()).masked_fill_(mask, grad / mask.sum());
   }
-  auto mask = (input == value).logical_or_(input.isnan().logical_and(value.isnan()));
-  return mask * (grad / mask.sum());
 }
 
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value) {
