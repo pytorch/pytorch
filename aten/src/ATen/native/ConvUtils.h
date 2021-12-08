@@ -2,6 +2,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
+#include <c10/util/variant.h>
 
 namespace at { namespace native {
 
@@ -65,7 +66,7 @@ enum class ConvBackend {
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const c10::variant<Tensor, bool> bias_or_bias_defined,
     const ConvParams& params);
 
 // Overload for selecting the convolution backend from the full set of convolution inputs.

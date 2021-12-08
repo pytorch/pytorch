@@ -13427,12 +13427,15 @@ class TestNNDeviceType(NNTestCase):
         # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
         # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
     ])
+    # Test with both bias and no bias.
+    @parametrize_test("has_bias", [False, True])
     # Test with both stride=1 and stride>1 cases.
     @parametrize_test("strided", [False, True])
     # Test with both contiguous and non-contiguous inputs.
     @parametrize_test("contiguous", [False, True])
     def test_conv_backend(
-            self, device, input_shape, strided, contiguous, transposed, dilated, groups, layout, backend_expected):
+            self, device, input_shape, has_bias, strided, contiguous, transposed, dilated, groups,
+            layout, backend_expected):
         # Build up inputs.
         dtype = torch.float32
         C_in, C_out, dim, kernel_size = input_shape[1], 12, len(input_shape) - 2, 3
@@ -13441,9 +13444,11 @@ class TestNNDeviceType(NNTestCase):
                              C_out // groups if transposed else C_in // groups,
                              *[kernel_size for _ in range(dim)],
                              device=device, dtype=dtype, requires_grad=True)
-        bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True)
+        bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True) if has_bias else None
 
         def _make_noncontiguous(inp):
+            if inp is None:
+                return None
             old_requires_grad = inp.requires_grad
             inp = torch.repeat_interleave(inp, 2, dim=-1)
             inp = inp[..., ::2].detach().requires_grad_(old_requires_grad)
@@ -13484,9 +13489,11 @@ class TestNNDeviceType(NNTestCase):
                 input, weight, bias = ctx.saved_tensors
                 stride, padding, dilation, transposed, output_padding, groups = ctx.stuff
                 grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
-                    grad_output, input, weight, bias, stride, padding, dilation, transposed,
-                    output_padding, groups, ctx.needs_input_grad[:3])
-                return grad_input, grad_weight, grad_bias, None, None, None, None, None, None
+                    grad_output, input, weight, None if bias is None else bias.shape, stride, padding, dilation,
+                    transposed, output_padding, groups,
+                    list(ctx.needs_input_grad[:2]) + [False if bias is None else True])
+                return grad_input, grad_weight, None if bias is None else grad_bias, None, \
+                    None, None, None, None, None
 
         convolution = MyConv.apply
 
@@ -13506,7 +13513,8 @@ class TestNNDeviceType(NNTestCase):
         # Convert to float64 for gradcheck.
         x = x.to(torch.float64).detach().requires_grad_(True)
         weight = weight.to(torch.float64).detach().requires_grad_(True)
-        bias = bias.to(torch.float64).detach().requires_grad_(True)
+        if bias is not None:
+            bias = bias.to(torch.float64).detach().requires_grad_(True)
         inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
 
         # Set some backend-specific validation settings.
@@ -13518,7 +13526,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(gradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
         # double backward doesn't support bias gradients
-        bias.requires_grad_(False)
+        if bias is not None:
+            bias.requires_grad_(False)
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
     def test_Dropout(self, device):
