@@ -58,9 +58,8 @@ Tensor quantized_pixel_shuffle_impl(
   int64_t stride_s1 = S;
   int64_t stride_s2 = 1;
 
-  using scalar_t = c10::quint8;
-  scalar_t* qx_data = self_nhwc.data_ptr<scalar_t>();
-  scalar_t* qy_data = qy.data_ptr<scalar_t>();
+  auto qx_data = self_nhwc.data_ptr<c10::quint8>();
+  auto qy_data = qy.data_ptr<c10::quint8>();
 
   // input tensor shape: [n, h, w, oc * S * S], channels = oc * S * S;
   // output tensor shape: [n, h * S, w * S, oc]
@@ -68,13 +67,13 @@ Tensor quantized_pixel_shuffle_impl(
   // parallel on both n and h dimension, use two steps to do the transformation
   at::parallel_for(0, nbatch * height, 0, [&](int64_t begin, int64_t end) {
     // thread local temp buffer
-    std::unique_ptr<scalar_t []> buffer(new scalar_t[channels]);
+    std::unique_ptr<c10::quint8 []> buffer(new c10::quint8[channels]);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t n = i / height;
       int64_t h = i % height;
       for (const auto w : c10::irange(width)) {
-        scalar_t* qx_ptr = qx_data + n * stride_n + h * stride_h + w * stride_w;
+        auto qx_ptr = qx_data + n * stride_n + h * stride_h + w * stride_w;
 
         // step 1: transpose each channel lane
         //   src: input channel view as [oc, s1*s2]
@@ -95,7 +94,7 @@ Tensor quantized_pixel_shuffle_impl(
           std::memcpy(
               qy_data + i * width * channels + s1 * width * S * out_channels + w * S * out_channels,
               buffer.get() + s1 * S * out_channels,
-              S * out_channels * sizeof(typename scalar_t::underlying));
+              S * out_channels * sizeof(typename c10::quint8::underlying));
         }
       }
     }
