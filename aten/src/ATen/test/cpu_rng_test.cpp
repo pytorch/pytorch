@@ -73,18 +73,6 @@ Tensor& normal_Tensor_Tensor_out(const Tensor& mean, const Tensor& std, c10::opt
   return at::native::templates::normal_out_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(output, mean, std, gen);
 }
 
-Tensor normal_Tensor_float(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
-}
-
-Tensor normal_float_Tensor(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
-}
-
-Tensor normal_Tensor_Tensor(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<native::templates::cpu::NormalKernel, TestCPUGenerator>(mean, std, gen);
-}
-
 // ==================================================== Uniform =======================================================
 
 Tensor& uniform_(Tensor& self, double from, double to, c10::optional<Generator> generator) {
@@ -139,9 +127,7 @@ TORCH_LIBRARY_IMPL(aten, CustomRNGKeyId, m) {
   m.impl("normal.Tensor_float_out",  normal_Tensor_float_out);
   m.impl("normal.float_Tensor_out",  normal_float_Tensor_out);
   m.impl("normal.Tensor_Tensor_out", normal_Tensor_Tensor_out);
-  m.impl("normal.Tensor_float",      normal_Tensor_float);
-  m.impl("normal.float_Tensor",      normal_float_Tensor);
-  m.impl("normal.Tensor_Tensor",     normal_Tensor_Tensor);
+  // Uniform
   m.impl("uniform_",                 uniform_);
   // Cauchy
   m.impl("cauchy_",                  cauchy_);

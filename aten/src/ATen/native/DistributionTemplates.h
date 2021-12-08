@@ -258,27 +258,6 @@ Tensor& normal_out_impl(Tensor& output, const Tensor& mean, const Tensor& std, c
   return output;
 }
 
-template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty_like(mean, MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
-  return ret;
-}
-
-template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty_like(std, MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
-  return ret;
-}
-
-template<template<typename> class normal_kernel, typename RNG>
-Tensor normal_impl(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  Tensor ret = at::empty({0}, mean.options(), MemoryFormat::Contiguous);
-  normal_out_impl<normal_kernel, RNG>(ret, mean, std, gen);
-  return ret;
-}
-
 // ==================================================== Uniform =======================================================
 
 template<template<typename> class uniform_kernel, typename RNG>

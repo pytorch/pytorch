@@ -266,30 +266,6 @@ Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Genera
   return self;
 }
 
-Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
-}
-
-Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
-}
-
-Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
-  return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
-}
-
-Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
-}
-
-Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
-}
-
-Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
-  return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
-}
-
 // ==================================================== Random ========================================================
 
 template<typename RNG>
@@ -600,4 +576,72 @@ Tensor multinomial(
   return result;
 }
 
-}} // namespace at::native
+} // namespace at::native
+
+namespace meta {
+
+// ==================================================== Normal ========================================================
+
+TORCH_META_FUNC2(normal, float_Tensor) (
+  double mean,
+  const Tensor& std,
+  c10::optional<Generator> gen
+) {
+  set_output(std.sizes(), std.options());
+}
+
+TORCH_META_FUNC2(normal, Tensor_float) (
+  const Tensor& mean,
+  double std,
+  c10::optional<Generator> gen
+) {
+  set_output(mean.sizes(), mean.options());
+}
+
+TORCH_META_FUNC2(normal, Tensor_Tensor) (
+  Tensor const& mean,
+  Tensor const& std,
+  c10::optional<Generator> gen
+) {
+  auto shape = at::infer_size(mean.sizes(), std.sizes());
+  set_output(shape, mean.options());
+}
+
+} // namespace at::meta
+
+namespace native {
+
+// ==================================================== Normal ========================================================
+
+TORCH_IMPL_FUNC(normal_float_Tensor_out) (
+  double mean,
+  const Tensor& std,
+  c10::optional<Generator> gen,
+  const Tensor& out
+) {
+  at::native::templates::normal_out_impl<NormalStub, Generator>(
+    const_cast<Tensor&>(out), mean, std, gen);
+}
+
+TORCH_IMPL_FUNC(normal_Tensor_float_out) (
+  const Tensor& mean,
+  double std,
+  c10::optional<Generator> gen,
+  const Tensor& out
+) {
+  at::native::templates::normal_out_impl<NormalStub, Generator>(
+    const_cast<Tensor&>(out), mean, std, gen);
+}
+
+TORCH_IMPL_FUNC(normal_Tensor_Tensor_out) (
+  const Tensor& mean,
+  const Tensor& std,
+  c10::optional<Generator> gen,
+  const Tensor& out
+) {
+  at::native::templates::normal_out_impl<NormalStub, Generator>(
+    const_cast<Tensor&>(out), mean, std, gen);
+}
+
+} // namespace at::native
+} // namespace at
