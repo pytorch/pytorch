@@ -48,7 +48,8 @@ class ModuleStaticRuntimeTestContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return torch::jit::StaticModule(module_, /* is_frozen */ false, {}, opt);
+    return torch::jit::StaticModule(
+        module_, /* is_frozen */ false, opt, /* sample_inputs */ {});
   }
 
  private:
@@ -76,7 +77,7 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
-    return StaticModule(graph_, {}, opt);
+    return StaticModule(graph_, opt, /* sample_inputs */ {});
   }
 
  private:
