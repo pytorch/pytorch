@@ -634,9 +634,10 @@ void ReplaceWithCopy(
       OP_PAIR("aten::reshape", "static_runtime::reshape_copy"),
       OP_PAIR("aten::flatten", "static_runtime::flatten_copy")};
 
-  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 1> supported_schema = {
-      {torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
-       fromQualString("static_runtime::dequantize_copy")}};
+  static const std::array<std::pair<c10::FunctionSchema, c10::Symbol>, 1>
+      supported_schema = {
+          {torch::schema("aten::dequantize.self(Tensor self) -> Tensor"),
+           fromQualString("static_runtime::dequantize_copy")}};
 
   auto match_schema = [](const Node* node, c10::Symbol& out_matched_symbol) {
     for (auto& schema : supported_schema) {
