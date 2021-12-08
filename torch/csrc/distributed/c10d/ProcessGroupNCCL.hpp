@@ -625,9 +625,9 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
 
-  // ProcessGroupUCC shared library handle
-  std::shared_ptr<at::DynamicLibrary> ucc_lib;
-  c10::intrusive_ptr<ProcessGroup> ucc_pg;
+  // ProcessGroupUCC shared library handle and ProcessGroup pointer
+  static std::shared_ptr<at::DynamicLibrary> ucc_lib_;
+  c10::intrusive_ptr<ProcessGroup> ucc_pg_;
 };
 
 } // namespace c10d

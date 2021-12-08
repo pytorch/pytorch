@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
+#include <mutex>
 
 #include <THC/THC.h>
 
@@ -593,11 +594,21 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-  ucc_lib = loadTorchUCC();
-  if (ucc_lib) {
+
+  static std::once_flag initialize_ucc_lib_flag;
+  std::call_once(initialize_ucc_lib_flag, [&]{
+    ucc_lib_ = loadTorchUCC();
+    if (ucc_lib_ != nullptr) {
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
+    } else {
+      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
+    }
+  });
+
+  if (ucc_lib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef void *fn(void *);
-    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib->sym("_Z28createProcessGroupUCCForNCCLPv"));
+    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib_->sym("_Z28createProcessGroupUCCForNCCLPv"));
     struct args_t {
       const c10::intrusive_ptr<Store>& store;
       int rank = -1;
@@ -609,10 +620,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       .size = size
     };
     auto raw_ucc_pg = static_cast<ProcessGroup *>(createProcessGroupUCCForNCCL(&args));
-    ucc_pg = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
+    ucc_pg_ = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
     LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
-  } else {
-    LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
   }
 }
 
@@ -2236,8 +2245,10 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 }
 
 bool ProcessGroupNCCL::isUCCAvailable() const {
-  return ucc_pg;
+  return (ucc_pg_ != nullptr);
 }
+
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib_ = nullptr;
 
 } // namespace c10d
 
