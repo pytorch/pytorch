@@ -7289,17 +7289,26 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
             ErrorInput(SampleInput(torch.tensor(2, device=device), args=(3,)),
                        error_type=RuntimeError, error_regex=k_out_of_range_err),)
 
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
+                          train=None, min_input_dim=None, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
+    if min_input_dim:
+        # Create cases with dim ranging from min_input_dim to min_input_dim + 2 (inclusive)
+        cases = [(S,) * i for i in range(min_input_dim, min_input_dim + 3)]
+    else:
+        cases = [(S, S), (S,), ()]
+    p_vals = [0.0, 0.5, 1.0]
+    # This is to handle special case for feature_alpha_dropout which has different
+    # supported dtypes depending on `train` parameter
+    training_vals = [train] if train is not None else [True, False]
 
-    return [
-        SampleInput(make_arg()),
-        SampleInput(make_arg(), kwargs=dict(p=0.0)),
-        SampleInput(make_arg(), kwargs=dict(p=1.0)),
-        SampleInput(make_arg(), kwargs=dict(training=False)),
-    ]
+    def generator():
+        for case, p, training in product(cases, p_vals, training_vals):
+            yield SampleInput(make_arg(case), kwargs=dict(p=p, training=training))
+        yield SampleInput(make_arg(case), kwargs=dict())
 
+    return list(generator())
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -13991,9 +14000,57 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
+        "nn.functional.dropout2d",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, min_input_dim=2),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
+    # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
+    # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
+    OpInfo(
         "nn.functional.feature_alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
+        variant_test_name="with_train",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, train=True, min_input_dim=2),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "nn.functional.feature_alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
+        variant_test_name="without_train",
         ref=_NOTHING,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -14003,7 +14060,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_out=False,
-        sample_inputs_func=sample_inputs_dropout,
+        sample_inputs_func=partial(sample_inputs_dropout, train=False),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
