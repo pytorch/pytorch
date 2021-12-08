@@ -292,11 +292,10 @@ std::string MetricFnValue(double value) {
 }
 
 std::string MetricFnBytes(double value) {
-  const int kNumSuffixes = 6;
-  static const char* const kSizeSuffixes[kNumSuffixes] = {
+  static const std::array<const char*, 6> kSizeSuffixes{
       "B", "KB", "MB", "GB", "TB", "PB"};
   int sfix = 0;
-  for (; (sfix + 1) < kNumSuffixes && value >= 1024.0; ++sfix) {
+  for (; (sfix + 1) < kSizeSuffixes.size() && value >= 1024.0; ++sfix) {
     value /= 1024.0;
   }
   std::stringstream ss;
@@ -306,27 +305,26 @@ std::string MetricFnBytes(double value) {
 }
 
 std::string MetricFnTime(double value) {
-  const int kNumUnits = 6;
-  static struct TimePart {
+  struct TimePart {
     const char* suffix;
     double scaler;
     int width;
     int precision;
     char fill;
-  } const time_parts[kNumUnits] = {
-      {"d", 86400.0 * 1e9, 2, 0, '0'},
-      {"h", 3600.0 * 1e9, 2, 0, '0'},
-      {"m", 60.0 * 1e9, 2, 0, '0'},
-      {"s", 1e9, 2, 0, '0'},
-      {"ms", 1e6, 3, 0, '0'},
-      {"us", 1e3, 7, 3, '0'},
   };
+  static const std::array<TimePart, 6> time_parts{
+      {{"d", 86400.0 * 1e9, 2, 0, '0'},
+       {"h", 3600.0 * 1e9, 2, 0, '0'},
+       {"m", 60.0 * 1e9, 2, 0, '0'},
+       {"s", 1e9, 2, 0, '0'},
+       {"ms", 1e6, 3, 0, '0'},
+       {"us", 1e3, 7, 3, '0'}}};
   int count = 0;
   std::stringstream ss;
-  for (size_t i = 0; i < kNumUnits; ++i) {
+  for (size_t i = 0; i < time_parts.size(); ++i) {
     const TimePart& part = time_parts[i];
     double ctime = value / part.scaler;
-    if (ctime >= 1.0 || count > 0 || i + 1 == kNumUnits) {
+    if (ctime >= 1.0 || count > 0 || i + 1 == time_parts.size()) {
       ss.precision(part.precision);
       ss.width(part.width);
       ss.fill(part.fill);
