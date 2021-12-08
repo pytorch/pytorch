@@ -2210,7 +2210,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = a @ a.mT + 1e-3 # make symmetric positive-definite
-    >>> l = torch.linalg.cholesky(a)
+    >>> l = torch.cholesky(a)
     >>> a
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
