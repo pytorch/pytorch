@@ -511,7 +511,9 @@ class TestDependencyAPI(PackageTestCase):
         foo = hi.import_module("foo")
         self.assertIsNot(torch, foo.torch)
         self.assertIsNot(hi.import_module("torch.fx"),torch.fx)
+        self.assertIsNot(hi.import_module("torch.fx").symbolic_trace,torch.fx)
         self.assertIsNot(torch.fx, foo.torch.fx)
+        self.assertIsNot(torch.fx.symbolic_trace, foo.torch.fx.symbolic_trace)
         self.assertIs(torch.nn, foo.torch.nn)
 
     def test_selective_intern_torch_fx(self):
