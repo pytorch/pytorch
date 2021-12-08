@@ -15144,7 +15144,6 @@ class TestNNDeviceType(NNTestCase):
 
                                 self.assertEqual(a_cuda.grad, a_cpu.grad)
 
-    @onlyCPU  # temporarily disabled on CUDA
     def test_upsamplingBilinear2d_aa_correctness(self, device):
         t_in = torch.arange(30, dtype=torch.float, device=device).reshape(1, 1, 1, -1)
         # This expected result is obtain using PIL.Image.resize

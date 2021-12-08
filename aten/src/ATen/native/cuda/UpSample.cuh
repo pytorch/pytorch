@@ -255,5 +255,95 @@ __device__ __forceinline__ static accscalar_t cubic_interp1d(
   return x0 * coeffs[0] + x1 * coeffs[1] + x2 * coeffs[2] + x3 * coeffs[3];
 }
 
+namespace upsample_antialias {
+
+// taken from
+// https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+// src/libImaging/Resample.c#L20-L29
+template <typename accscalar_t>
+__device__ __forceinline__ static accscalar_t bilinear_filter(accscalar_t x) {
+  if (x < 0.0) {
+    x = -x;
+  }
+  if (x < 1.0) {
+    return static_cast<accscalar_t>(1.0) - x;
+  }
+  return static_cast<accscalar_t>(0.0);
+}
+
+// taken from
+// https://github.com/python-pillow/Pillow/blob/6812205f18ca4ef54372e87e1a13ce4a859434df/
+// src/libImaging/Resample.c#L46-L62
+template <typename accscalar_t>
+__device__ __forceinline__ static accscalar_t bicubic_filter(accscalar_t x) {
+  // https://en.wikipedia.org/wiki/Bicubic_interpolation#Bicubic_convolution_algorithm
+#define a -0.5
+  if (x < 0.0) {
+    x = -x;
+  }
+  if (x < 1.0) {
+    return ((a + 2.0) * x - (a + 3.0)) * x * x + static_cast<accscalar_t>(1.0);
+  }
+  if (x < 2.0) {
+    return (((x - 5) * x + 8) * x - 4) * a;
+  }
+  return static_cast<accscalar_t>(0.0);
+#undef a
+}
+
+template <typename scalar_t, typename accscalar_t, typename filter_fn_t>
+__device__ __forceinline__ static void _compute_weights(
+    const int64_t i,
+    const int64_t input_size,
+    const accscalar_t scale,
+    const accscalar_t support,
+    scalar_t* wt_ptr,
+    int64_t interp_size,
+    filter_fn_t filter_fn,
+    int64_t& xmin,
+    int64_t& xmax) {
+  accscalar_t invscale = (scale >= 1.0) ? 1.0 / scale : 1.0;
+  accscalar_t center = scale * (i + 0.5);
+  xmin = max(
+      static_cast<int64_t>(center - support + 0.5), static_cast<int64_t>(0));
+  xmax = min(static_cast<int64_t>(center + support + 0.5), input_size) - xmin;
+
+  accscalar_t total_w = 0.0;
+  int64_t j = 0;
+  for (j = 0; j < xmax; j++) {
+    accscalar_t w = filter_fn((j + xmin - center + 0.5) * invscale);
+    wt_ptr[j] = static_cast<scalar_t>(w);
+    total_w += w;
+  }
+  for (j = 0; j < xmax; j++) {
+    if (total_w != 0.0) {
+      wt_ptr[j] /= total_w;
+    }
+  }
+  for (; j < interp_size; j++) {
+    wt_ptr[j] = static_cast<scalar_t>(0.0);
+  }
+}
+
+template <typename scalar_t, typename accscalar_t>
+__device__ __forceinline__ static accscalar_t interpolate_aa_single_dim(
+    scalar_t* src,
+    scalar_t* weights,
+    int64_t size) {
+  scalar_t t = static_cast<accscalar_t>(*src);
+  scalar_t wts = static_cast<accscalar_t>(weights[0]);
+  accscalar_t output = t * wts;
+
+  int64_t j = 1;
+  for (; j < size; j++) {
+    wts = static_cast<accscalar_t>(weights[j]);
+    t = static_cast<accscalar_t>(*(src + j));
+    output += t * wts;
+  }
+  return output;
+}
+
+}
+
 } // namespace native
 } // namespace at
