@@ -82,6 +82,16 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     }
   }
 
+  torch::lazy::BackendDataPtr MakeComputationDataFromScalar(
+      const at::Scalar& scalar,
+      const torch::lazy::BackendDevice& device) const override {
+    auto options = at::TensorOptions(scalar.type());
+    auto tensor = at::full({}, scalar, options);
+    // TODO(whc) device here really doesn't apply; this scalar data is supposed to be on CPU
+    // attached to the device we care about, but it's not clear how to specify that
+    return std::make_shared<TSData>(tensor, torch::lazy::Shape(scalar.type(), {}), device);
+  }
+
   std::string GetComputationBackendText(
       const torch::lazy::ComputationPtr computation) const override {
     auto ts_computation =
@@ -192,8 +202,8 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
   for (auto argument : arguments) {
     const auto ts_data =
         std::static_pointer_cast<TSBackendImpl::TSData>(argument);
-    CHECK((c10::DeviceType)default_device_type_.type != at::kCUDA ||
-          ts_data->data().device().type() == at::kCUDA);
+    // CHECK((c10::DeviceType)default_device_type_.type != at::kCUDA ||
+          // ts_data->data().device().type() == at::kCUDA);
     stack.emplace_back(ts_data->data());
   }
   graph_executor.run(stack);

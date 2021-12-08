@@ -178,12 +178,24 @@ class DataCacheArena {
       const at::Scalar& value, at::ScalarType scalar_type,
       const torch::lazy::BackendDevice& device) {
     // Workaround since at::scalar_tensor doesn't support bfloat16 yet.
-    at::Tensor t = at::scalar_tensor(
+    at::Tensor tensor = at::scalar_tensor(
         value, at::TensorOptions(scalar_type == at::ScalarType::BFloat16
                                      ? at::ScalarType::Float
                                      : scalar_type));
-    if (scalar_type == at::ScalarType::BFloat16) t = t.to(scalar_type);
-    return GetDeviceData(t, device);
+    if (scalar_type == at::ScalarType::BFloat16) tensor = tensor.to(scalar_type);
+      
+    // DataCacheArena::DataCache* cache = Get()->GetDataCache(device);
+
+    torch::lazy::BackendDataPtr device_data;
+    // torch::lazy::BackendDataPtr device_data = cache->Get(tensor);
+    // if (device_data == nullptr) {
+      // at::Tensor tensor_copy = torch::lazy::CopyTensor(tensor);
+      // device_data = TensorToDataHandle(tensor, device);
+      device_data = torch::lazy::getBackend()->MakeComputationDataFromScalar(value, device);
+      // cache->Add(std::move(tensor), device_data);
+      LTC_COUNTER("DeviceDataCacheMiss", 1);
+    // }
+    return device_data;;
   }
 
  private:
@@ -511,7 +523,7 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
   if (torch::lazy::IsSpecialScalar(value)) {
     return torch::lazy::MakeNode<ir::ops::Scalar>(value, type);
   }
-  return GetDeviceDataIrValue(value, type, device);
+  return GetDeviceDataIrValue(value, type, torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
