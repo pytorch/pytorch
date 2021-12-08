@@ -13,7 +13,7 @@ inline Tensor view_tensor(
     const Tensor &tensor, ScalarType dtype,
     int64_t offset, IntArrayRef sizes, IntArrayRef strides) {
   Storage storage = tensor.storage();
-  auto key_set = tensor.key_set().remove(DispatchKey::Conjugate);
+  auto key_set = tensor.key_set().removeFunctionalityKey(DispatchKey::Conjugate);
   auto new_tensor = detail::make_tensor<TensorImpl>(
       c10::TensorImpl::VIEW, std::move(storage), key_set, scalarTypeToTypeMeta(dtype));
   auto * impl = new_tensor.unsafeGetTensorImpl();

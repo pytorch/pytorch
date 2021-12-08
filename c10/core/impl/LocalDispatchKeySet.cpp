@@ -89,7 +89,7 @@ void tls_set_dispatch_key_excluded(DispatchKey x, bool desired_state) {
     if (desired_state) {
       tls->set_excluded(tls->excluded().add(x));
     } else {
-      tls->set_excluded(tls->excluded().remove(x));
+      tls->set_excluded(tls->excluded().removeFunctionalityKey(x));
     }
   }
 }
@@ -105,7 +105,7 @@ void tls_set_dispatch_key_included(DispatchKey x, bool desired_state) {
     if (desired_state) {
       tls->set_included(tls->included().add(x));
     } else {
-      tls->set_included(tls->included().remove(x));
+      tls->set_included(tls->included().removeFunctionalityKey(x));
     }
   }
 }

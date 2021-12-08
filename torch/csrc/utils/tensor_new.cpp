@@ -348,7 +348,7 @@ Tensor legacy_new_from_sequence(
 // TODO: Rewrite this using dispatchKeyToTensorOptions
 void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_layout) {
   if (expected_layout == c10::kStrided) {
-    constexpr c10::DispatchKeySet expected_key_set({
+    c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::CPU,
         c10::DispatchKey::CUDA,
         c10::DispatchKey::HIP,
@@ -364,7 +364,7 @@ void check_base_legacy_new(c10::DispatchKey dispatch_key, at::Layout expected_la
         dispatch_key);
   } else if(expected_layout == c10::kSparse) {
     // NOTE: no sparse XLA or Lazy
-    constexpr c10::DispatchKeySet expected_key_set({
+    c10::DispatchKeySet expected_key_set({
         c10::DispatchKey::SparseCPU,
         c10::DispatchKey::SparseCUDA,
         c10::DispatchKey::SparseHIP,

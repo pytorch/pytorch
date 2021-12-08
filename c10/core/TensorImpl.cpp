@@ -144,7 +144,7 @@ TensorImpl::TensorImpl(
       numel_(0),
       data_type_(data_type),
       device_opt_(storage_.device()),
-      key_set_(key_set.remove(
+      key_set_(key_set.removeFunctionalityKey(
           DispatchKey::Python)) { // See [Note: Python key removal]
   init_bitfields();
   // Inference tensor doesn't have version counter.
@@ -186,12 +186,12 @@ TensorImpl::TensorImpl(
 
   // TODO: be more explicit about the full key set at call sites so we
   // don't have to keep recomputing it here
-  DispatchKey k = key_set.highestPriorityBackendTypeId();
+  DispatchKey k = key_set.highestBackendKey();
 
   key_set = key_set | getAutocastRelatedKeySetFromBackend(k);
 
   key_set =
-      key_set.remove(DispatchKey::Python); // See [Note: Python key removal]
+      key_set.removeFunctionalityKey(DispatchKey::Python); // See [Note: Python key removal]
 
   // Inference tensor doesn't have autograd related keys.
   if (inference_mode) {
@@ -563,7 +563,7 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  dest_impl->key_set_ = src_impl->key_set_.remove(DispatchKey::Python);
+  dest_impl->key_set_ = src_impl->key_set_.removeFunctionalityKey(DispatchKey::Python);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
   dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =

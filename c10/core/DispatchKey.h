@@ -21,6 +21,46 @@ namespace c10 {
 //
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
+
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // A "backend" is colloquially used to refer to handlers for dispatch
+  // which actually implement the numerics of an operation in question.
+  //
+  // Due to the nature of the enum, these backends are specified in
+  // an ordered way, but for most backends this order is not semantically
+  // meaningful (e.g., it's valid to reorder these backends without changing
+  // semantics).  The only situation when backend ordering is meaningful
+  // is when the backend participates in multiple dispatch with another
+  // backend; e.g., CPU and CUDA (cuda must have higher priority).
+
+  // These keys don't correspond to individual kernels.
+  // Instead, they represent the backends that are allowed to override specific pieces of functionality:
+  // - dense kernels (e.g. DispatchKey::CPU)
+  // - sparse kernels (e.g. DispatchKey::SparseCPU)
+  // - quantized kernels (e.g. DispatchKey::QuantizedCPU)
+  // - autograd kernels (e.g. DispatchKey::AutogradCPU)
+  // We reserve space in the runtime operator table for this full cross product of [backends] x [functionality]
+  // [For backends in this list] x [keys below that are explicitly marked as having per-backend functionality]
+
+  CPUBit = 0,
+  CUDABit,
+  HIPBit,
+  XLABit,
+  MLCBit,
+  XPUBit,
+  HPUBit,
+  VEBit,
+  LazyBit,
+  NestedTensorBit,
+  PrivateUse1Bit,
+  PrivateUse2Bit,
+  PrivateUse3Bit,
+  // Define an alias key to represent end of backend dispatch keys.
+  // If you add new backend keys after PrivateUse3, please also update it here.
+  // (But you shouldn't: private use keys should have higher precedence than
+  // all built-in keys)
+  EndOfBackendKeys = PrivateUse3Bit,
+
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // This is not a "real" tensor id, but it exists to give us a "nullopt"
   // element we can return for cases when a DispatchKeySet contains no elements.
@@ -32,30 +72,25 @@ enum class DispatchKey : uint8_t {
   // it this way because optional<RealDispatchKey> would take two
   // words, when DispatchKey fits in eight bits.
 
-  Undefined = 0,
+  Undefined,
 
   // Define an alias for Undefined to represent CatchAll (long term
   // this will get eliminated, but for now it's convenient)
   CatchAll = Undefined,
 
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~ BACKENDS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-  // A "backend" is colloquially used to refer to handlers for dispatch
-  // which actually implement the numerics of an operation in question.
-  //
-  // Due to the nature of the enum, these backends are specified in
-  // an ordered way, but for most backends this order is not semantically
-  // meaningful (e.g., it's valid to reorder these backends without changing
-  // semantics).  The only situation when backend ordering is meaningful
-  // is when the backend participates in multiple dispatch with another
-  // backend; e.g., CPU and SparseCPU (sparse must have
-  // higher priority).
+  // ~~~~~~~~~~~~~~~~~~~~~~~~~~ Functionality Keys ~~~~~~~~~~~~~~~~~~~~~~ //
+  // [Note: Functionality Dispatch Keys]
+  // TODO: fill this in.
+  // See [Note: Per-Backend Functionality Dispatch Keys]
 
-  // Here are backends which you think of as traditionally specifying
-  // how to implement operations on some device.
-  CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
-  CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
-  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
-  // CUDA]
+  // See [Note: Per-Backend Functionality Dispatch Keys]
+  Dense,
+
+  // Below are non-extensible backends.
+  // These are backends that currently don't have their own overrides for Autograd/Sparse/Quantized kernels,
+  // and we therefore don't waste space in the runtime operator table allocating space for them.
+  // If any of these backends ever need to customize, e.g., Autograd, then we'll need to add a DispatchKey::*Bit for them.
+
   FPGA, // Xilinx support lives out of tree at
   // https://gitlab.com/pytorch-complex/vitis_kernels
 
@@ -67,14 +102,8 @@ enum class DispatchKey : uint8_t {
   // - aten/src/ATen/test/extension_backend_test.cpp
   ORT,
 
-  XLA, // lives out of tree at https://github.com/pytorch/xla
-  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
   Vulkan,
   Metal,
-  XPU, // For out of tree Intel's heterogeneous computing plug-in
-  HPU, // For out of tree & closed source integration of HPU / Habana
-  VE, // For out of tree & closed source integration of SX-Aurora / NEC
-  Lazy, // For lazy tensor backends
 
   // A meta tensor is a tensor without any data associated with it.  (They
   // have also colloquially been referred to as tensors on the "null" device).
@@ -83,11 +112,8 @@ enum class DispatchKey : uint8_t {
   // tensor with the output shape and dtype, but wouldn't actually add anything.
   Meta,
 
-  // Here are backends which specify more specialized operators
-  // based on the dtype of the tensor.
-  QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
-  QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
-  QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
+  // See [Note: Per-Backend Functionality Dispatch Keys]
+  Quantized,
 
   // This backend is to support custom RNGs; it lets you go
   // to a different kernel if you pass in a generator that is not a
@@ -106,30 +132,12 @@ enum class DispatchKey : uint8_t {
   // the corresponding dense tensors, and must be handled before them.
   MkldnnCPU, // registered at build/aten/src/ATen/RegisterMkldnnCPU.cpp
   // NB: not to be confused with MKLDNN, which is Caffe2 only
-  SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
-  SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
-  SparseHIP, // TODO: I think this is not actually used, due to Note
-  // [Masquerading as CUDA]
-  SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
-  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
+
+  // See [Note: Per-Backend Functionality Dispatch Keys]
+  Sparse,
 
   SparseCsrCPU,
   SparseCsrCUDA,
-
-  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
-
-  // Here are reserved backends for user-defined backends, see Note [Private use
-  // DispatchKey]
-  // To see some example about how to use this, check out ORT
-  PrivateUse1,
-  PrivateUse2,
-  PrivateUse3,
-
-  // Define an alias key to represent end of backend dispatch keys.
-  // If you add new backend keys after PrivateUse3, please also update it here.
-  // (But you shouldn't: private use keys should have higher precedence than
-  // all built-in keys)
-  EndOfBackendKeys = PrivateUse3,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -232,20 +240,9 @@ enum class DispatchKey : uint8_t {
   // AutogradOther key. We can add specific autograd key for those backends
   // upon request.
   AutogradOther,
-  AutogradCPU,
-  AutogradCUDA,
-  AutogradXLA,
-  AutogradLazy,
-  AutogradXPU,
-  AutogradMLC,
-  AutogradHPU,
-  AutogradNestedTensor, // lives out of tree at
-  // https://github.com/pytorch/nestedtensor
-  // Here are some reserved pre-autograd keys for user-defined backends, see
-  // Note [Private use DispatchKey]
-  AutogradPrivateUse1,
-  AutogradPrivateUse2,
-  AutogradPrivateUse3,
+
+  // See [Note: Per-Backend Functionality Dispatch Keys]
+  AutogradFunctionality,
 
   Tracer,
 
@@ -298,7 +295,97 @@ enum class DispatchKey : uint8_t {
   TESTING_ONLY_GenericMode,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ FIN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-  NumDispatchKeys, // Sentinel, end of runtime keys.
+  EndOfFunctionalityKeys, // End of functionality keys.
+  // TODO: remove
+  NumDispatchKeys = EndOfFunctionalityKeys, // End of functionality keys.
+
+  // ~~~~~~~~~~~~~~ "Dense" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~~ //
+  // Here are backends which you think of as traditionally specifying
+  // how to implement operations on some device.
+
+  CPU, // registered at build/aten/src/ATen/RegisterCPU.cpp
+  CUDA, // registered at build/aten/src/ATen/RegisterCUDA.cpp
+  HIP, // NB: I think this is not actually used, due to Note [Masquerading as
+  // CUDA]
+  XLA, // lives out of tree at https://github.com/pytorch/xla
+  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  XPU, // For out of tree Intel's heterogeneous computing plug-in
+  HPU, // For out of tree & closed source integration of HPU / Habana
+  VE, // For out of tree & closed source integration of SX-Aurora / NEC
+  Lazy, // For lazy tensor backends
+  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+  // Here are reserved backends for user-defined backends, see Note [Private use
+  // DispatchKey]
+  // To see some example about how to use this, check out ORT
+  PrivateUse1,
+  PrivateUse2,
+  PrivateUse3,
+  StartOfDenseBackends = CPU,
+  EndOfDenseBackends = PrivateUse3,
+
+  // ~~~~~~~~~~~~~~ "Quantized" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~ //
+  // keys starting with an _ are not currently used,
+  // but are needed to ensure that every backend is indexed correctly.
+
+  QuantizedCPU, // registered at build/aten/src/ATen/RegisterQuantizedCPU.cpp
+  QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
+  _QuantizedHIP,
+  _QuantizedXLA,
+  _QuantizedMLC,
+  QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
+  _QuantizedHPU,
+  _QuantizedVE,
+  _QuantizedLazy,
+  _QuantizedNestedTensor,
+  _QuantizedPrivateUse1,
+  _QuantizedPrivateUse2,
+  _QuantizedPrivateUse3,
+  StartOfQuantizedBackends = QuantizedCPU,
+  EndOfQuantizedBackends = _QuantizedPrivateUse3,
+
+  // ~~~~~~~~~~~~~~ "Sparse" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~ //
+  // keys starting with an _ are not currently used,
+  // but are needed to ensure that every backend is indexed correctly.
+
+  SparseCPU, // registered at build/aten/src/ATen/RegisterSparseCPU.cpp
+  SparseCUDA, // registered at build/aten/src/ATen/RegisterSparseCUDA.cpp
+  SparseHIP, // TODO: I think this is not actually used, due to Note
+  // [Masquerading as CUDA]
+  _SparseXLA,
+  _SparseMLC,
+  SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
+  _SparseHPU,
+  SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
+  _SparseLazy,
+  _SparseNestedTensor,
+  _SparsePrivateUse1,
+  _SparsePrivateUse2,
+  _SparsePrivateUse3,
+  StartOfSparseBackends = SparseCPU,
+  EndOfSparseBackends = _SparsePrivateUse3,
+
+  // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
+  // keys starting with an _ are not currently used,
+  // but are needed to ensure that every backend is indexed correctly.
+
+  AutogradCPU,
+  AutogradCUDA,
+  _AutogradHIP,
+  AutogradXLA,
+  AutogradMLC,
+  AutogradXPU,
+  AutogradHPU,
+  _AutogradVE,
+  AutogradLazy,
+  AutogradNestedTensor, // lives out of tree at
+  // https://github.com/pytorch/nestedtensor
+  // Here are some reserved pre-autograd keys for user-defined backends, see
+  // Note [Private use DispatchKey]
+  AutogradPrivateUse1,
+  AutogradPrivateUse2,
+  AutogradPrivateUse3,
+  StartOfAutogradBackends = AutogradCPU,
+  EndOfAutogradBackends = AutogradPrivateUse3,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // Alias dispatch keys are synthetic dispatch keys which map to multiple
@@ -320,6 +407,7 @@ enum class DispatchKey : uint8_t {
 
   // Define an alias key to represent end of alias dispatch keys.
   // If you add new alias keys after Autograd, please also update it here.
+  StartOfAliasKeys = Autograd,
   EndOfAliasKeys = CompositeExplicitAutograd, //
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~ BC ALIASES ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -359,7 +447,7 @@ enum class DispatchKey : uint8_t {
 // built-in autograd formulas for operators are not appropriate.
 
 static_assert(
-    static_cast<uint8_t>(DispatchKey::NumDispatchKeys) < 64,
+    static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys) <= 64,
     "DispatchKey is used as index into 64-bit bitmask; you must have less than 64 entries");
 
 #if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
@@ -420,9 +508,118 @@ C10_API c10::DispatchKey parseDispatchKey(const std::string& k);
 constexpr DispatchKey kAutograd = DispatchKey::Autograd;
 
 // Check if a DispatchKey is an alias mapping to other runtime keys.
-inline bool isAliasDispatchKey(DispatchKey k) {
-  return k > DispatchKey::NumDispatchKeys && k <= DispatchKey::EndOfAliasKeys;
+constexpr bool isAliasDispatchKey(DispatchKey k) {
+  return k >= DispatchKey::StartOfAliasKeys && k <= DispatchKey::EndOfAliasKeys;
 }
+
+// Check if a DispatchKey is a per-backend functionality key
+// [Note: Per-Backend Functionality Dispatch Keys]
+// TODO: fill this in.
+constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
+  switch (k) {
+    case DispatchKey::Dense:
+    case DispatchKey::Quantized:
+    case DispatchKey::Sparse:
+    case DispatchKey::AutogradFunctionality:
+      return true;
+    default:
+      return false;
+  }
+}
+
+// note that this includes Undefined in the total count.
+constexpr uint8_t num_functionality_keys =
+	static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys)
+  - static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)
+  - 1;
+
+constexpr uint8_t num_backends =
+	static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1;
+
+// it would be nice if we could cast EndOfBackendKeys to a 4-bit unsigned integer.
+// That way we'd automatically get warnings if EndOfBackendKeys happened to grow > 16.
+// Sadly, uint4_t is not a C++ type.
+constexpr uint16_t full_backend_mask = (static_cast<uint16_t>(1) << (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1)) - 1;
+
+constexpr uint8_t numPerBackendFunctionalityKeys() {
+  uint8_t count = 0;
+  for (uint8_t k = 0; k < static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys); ++k) {
+    if (isPerBackendFunctionalityKey(static_cast<DispatchKey>(k))) ++count;
+  }
+  return count;
+}
+
+constexpr uint16_t num_runtime_entries =
+    num_functionality_keys
+  + (numPerBackendFunctionalityKeys() * (num_backends - 1));
+
+// Runtime DispatchKeys correspond to keys that map directly to a slot
+// in the runtime operator table.
+inline bool isRuntimeDispatchKey(DispatchKey k) {
+  // Undefined is special because it can't be added to a DispatchKeySet, but is still considered a runtime key.
+  if (k == DispatchKey::Undefined) {
+    return true;
+  }
+  // None of the "backend bit" keys are real runtime keys
+  if (k <= DispatchKey::EndOfBackendKeys) {
+    return false;
+  }
+  if (isPerBackendFunctionalityKey(k)) {
+    return false;
+  }
+  if (isAliasDispatchKey(k)) {
+    return false;
+  }
+  return true;
+}
+
+inline DispatchKey toBackendKey(DispatchKey k) {
+  if (k >= DispatchKey::StartOfDenseBackends && k <= DispatchKey::EndOfDenseBackends) {
+    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfDenseBackends));
+  } else if (k >= DispatchKey::StartOfQuantizedBackends && k <= DispatchKey::EndOfQuantizedBackends) {
+    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends));
+  } else if (k >= DispatchKey::StartOfSparseBackends && k <= DispatchKey::EndOfSparseBackends) {
+    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
+  } else if (k >= DispatchKey::StartOfAutogradBackends && k <= DispatchKey::EndOfAutogradBackends) {
+    return static_cast<DispatchKey>(static_cast<uint8_t>(k) - static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends));
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid dispatch key: " , toString(k));
+}
+
+inline DispatchKey toFunctionalityKey(DispatchKey k) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(isRuntimeDispatchKey(k));
+  if (k <= DispatchKey::EndOfFunctionalityKeys) {
+    return k;
+  } else if (k <= DispatchKey::EndOfDenseBackends) {
+    return DispatchKey::Dense;
+  } else if (k <= DispatchKey::EndOfQuantizedBackends) {
+    return DispatchKey::Quantized;
+  } else if (k <= DispatchKey::EndOfSparseBackends) {
+    return DispatchKey::Sparse;
+  } else if (k <= DispatchKey::EndOfAutogradBackends) {
+    return DispatchKey::AutogradFunctionality;
+  }
+  TORCH_INTERNAL_ASSERT(false, "Invalid dispatch key: ", toString(k));
+}
+
+// Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
+inline DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
+  auto backend_idx = static_cast<uint8_t>(backend_k);
+  TORCH_INTERNAL_ASSERT(backend_idx <= static_cast<uint8_t>(DispatchKey::EndOfBackendKeys));
+  switch (functionality_k) {
+    case DispatchKey::Dense:
+      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) + backend_idx);
+    case DispatchKey::Quantized:
+      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) + backend_idx);
+    case DispatchKey::Sparse:
+      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfSparseBackends) + backend_idx);
+    case DispatchKey::AutogradFunctionality:
+      return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfAutogradBackends) + backend_idx);
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Expected a per-backend functionality key. Found: ", toString(functionality_k));
+  }
+}
+
 } // namespace c10
 
 namespace torch {

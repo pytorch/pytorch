@@ -8,7 +8,6 @@ const char* toString(DispatchKey t) {
   switch (t) {
     case DispatchKey::Undefined:
       return "Undefined";
-
     case DispatchKey::CPU:
       return "CPU";
     case DispatchKey::CUDA:
@@ -162,6 +161,41 @@ const char* toString(DispatchKey t) {
     case DispatchKey::FuncTorchBatched:
       return "FuncTorchBatched";
 
+    case DispatchKey::CPUBit:
+      return "CPUBit";
+    case DispatchKey::CUDABit:
+      return "CUDABit";
+    case DispatchKey::HIPBit:
+      return "HIPBit";
+    case DispatchKey::XLABit:
+      return "XLABit";
+    case DispatchKey::LazyBit:
+      return "LazyBit";
+    case DispatchKey::XPUBit:
+      return "XPUBit";
+    case DispatchKey::NestedTensorBit:
+      return "NestedTensorBit";
+    case DispatchKey::MLCBit:
+      return "MLCBit";
+    case DispatchKey::HPUBit:
+      return "HPUBit";
+    case DispatchKey::VEBit:
+      return "VEBit";
+    case DispatchKey::PrivateUse1Bit:
+      return "PrivateUse1Bit";
+    case DispatchKey::PrivateUse2Bit:
+      return "PrivateUse2Bit";
+    case DispatchKey::PrivateUse3Bit:
+      return "PrivateUse3Bit";
+    case DispatchKey::Dense:
+      return "Dense";
+    case DispatchKey::Quantized:
+      return "Quantized";
+    case DispatchKey::Sparse:
+      return "Sparse";
+    case DispatchKey::AutogradFunctionality:
+      return "AutogradFunctionality";
+
     default:
       return "UNKNOWN_TENSOR_TYPE_ID";
   }
@@ -180,27 +214,27 @@ std::ostream& operator<<(std::ostream& str, DispatchKey rhs) {
 //
 DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
   switch (t) {
-    case DispatchKey::CPU:
+    case DispatchKey::CPUBit:
       return DispatchKey::AutogradCPU;
-    case DispatchKey::XPU:
+    case DispatchKey::XPUBit:
       return DispatchKey::AutogradXPU;
-    case DispatchKey::CUDA:
+    case DispatchKey::CUDABit:
       return DispatchKey::AutogradCUDA;
-    case DispatchKey::XLA:
+    case DispatchKey::XLABit:
       return DispatchKey::AutogradXLA;
-    case DispatchKey::Lazy:
+    case DispatchKey::LazyBit:
       return DispatchKey::AutogradLazy;
-    case DispatchKey::MLC:
+    case DispatchKey::MLCBit:
       return DispatchKey::AutogradMLC;
-    case DispatchKey::HPU:
+    case DispatchKey::HPUBit:
       return DispatchKey::AutogradHPU;
-    case DispatchKey::NestedTensor:
+    case DispatchKey::NestedTensorBit:
       return DispatchKey::AutogradNestedTensor;
-    case DispatchKey::PrivateUse1:
+    case DispatchKey::PrivateUse1Bit:
       return DispatchKey::AutogradPrivateUse1;
-    case DispatchKey::PrivateUse2:
+    case DispatchKey::PrivateUse2Bit:
       return DispatchKey::AutogradPrivateUse2;
-    case DispatchKey::PrivateUse3:
+    case DispatchKey::PrivateUse3Bit:
       return DispatchKey::AutogradPrivateUse3;
     default:
       return DispatchKey::AutogradOther;
@@ -209,37 +243,33 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
 
 c10::DispatchKey parseDispatchKey(const std::string& k) {
   static std::unordered_map<std::string, c10::DispatchKey> key_map = {
+      {"CPUBit", c10::DispatchKey::CPU},
+      {"CUDABit", c10::DispatchKey::CUDA},
+      {"HIPBit", c10::DispatchKey::HIP},
+      {"XLABit", c10::DispatchKey::XLA},
+      {"MLCBit", c10::DispatchKey::MLC},
+      {"XPU", c10::DispatchKey::XPU},
+      {"HPUBit", c10::DispatchKey::HPU},
+      {"LazyBit", c10::DispatchKey::Lazy},
+      {"NestedTensorBit", c10::DispatchKey::NestedTensor},
+      {"VEBit", c10::DispatchKey::VEBit},
+      {"PrivateUse1Bit", c10::DispatchKey::PrivateUse1},
+      {"PrivateUse2Bit", c10::DispatchKey::PrivateUse2},
+      {"PrivateUse3Bit", c10::DispatchKey::PrivateUse3},
       {"Undefined", c10::DispatchKey::Undefined},
-      {"CPU", c10::DispatchKey::CPU},
-      {"CUDA", c10::DispatchKey::CUDA},
-      {"HIP", c10::DispatchKey::HIP},
+      {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
       {"ORT", c10::DispatchKey::ORT},
-      {"XLA", c10::DispatchKey::XLA},
-      {"MLC", c10::DispatchKey::MLC},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
-      {"XPU", c10::DispatchKey::XPU},
-      {"HPU", c10::DispatchKey::HPU},
       {"VE", c10::DispatchKey::VE},
-      {"Lazy", c10::DispatchKey::Lazy},
       {"Meta", c10::DispatchKey::Meta},
-      {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
-      {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
-      {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
+      {"Quantized", c10::DispatchKey::Quantized},
       {"CustomRNGKeyId", c10::DispatchKey::CustomRNGKeyId},
       {"MkldnnCPU", c10::DispatchKey::MkldnnCPU},
-      {"SparseCPU", c10::DispatchKey::SparseCPU},
-      {"SparseCUDA", c10::DispatchKey::SparseCUDA},
-      {"SparseHIP", c10::DispatchKey::SparseHIP},
-      {"SparseXPU", c10::DispatchKey::SparseXPU},
-      {"SparseVE", c10::DispatchKey::SparseVE},
+      {"Sparse", c10::DispatchKey::Sparse},
       {"SparseCsrCPU", c10::DispatchKey::SparseCsrCPU},
       {"SparseCsrCUDA", c10::DispatchKey::SparseCsrCUDA},
-      {"NestedTensor", c10::DispatchKey::NestedTensor},
-      {"PrivateUse1", c10::DispatchKey::PrivateUse1},
-      {"PrivateUse2", c10::DispatchKey::PrivateUse2},
-      {"PrivateUse3", c10::DispatchKey::PrivateUse3},
       {"BackendSelect", c10::DispatchKey::BackendSelect},
       {"Python", c10::DispatchKey::Python},
       {"FuncTorchPython", c10::DispatchKey::FuncTorchPython},
@@ -250,17 +280,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
        c10::DispatchKey::FuncTorchDynamicLayerBackMode},
       {"ADInplaceOrView", c10::DispatchKey::ADInplaceOrView},
       {"AutogradOther", c10::DispatchKey::AutogradOther},
-      {"AutogradCPU", c10::DispatchKey::AutogradCPU},
-      {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
-      {"AutogradXLA", c10::DispatchKey::AutogradXLA},
-      {"AutogradLazy", c10::DispatchKey::AutogradLazy},
-      {"AutogradXPU", c10::DispatchKey::AutogradXPU},
-      {"AutogradMLC", c10::DispatchKey::AutogradMLC},
-      {"AutogradHPU", c10::DispatchKey::AutogradHPU},
-      {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
-      {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
-      {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
-      {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+      {"AutogradFunctionality", c10::DispatchKey::AutogradFunctionality},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
@@ -274,6 +294,42 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"TESTING_ONLY_GenericWrapper",
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},
+
+      {"CPU", c10::DispatchKey::CPU},
+      {"CUDA", c10::DispatchKey::CUDA},
+      {"HIP", c10::DispatchKey::HIP},
+      {"XLA", c10::DispatchKey::XLA},
+      {"MLC", c10::DispatchKey::MLC},
+      {"XPU", c10::DispatchKey::XPU},
+      {"HPU", c10::DispatchKey::HPU},
+      {"Lazy", c10::DispatchKey::Lazy},
+      {"NestedTensor", c10::DispatchKey::NestedTensor},
+      {"PrivateUse1", c10::DispatchKey::PrivateUse1},
+      {"PrivateUse2", c10::DispatchKey::PrivateUse2},
+      {"PrivateUse3", c10::DispatchKey::PrivateUse3},
+
+      {"QuantizedCPU", c10::DispatchKey::QuantizedCPU},
+      {"QuantizedCUDA", c10::DispatchKey::QuantizedCUDA},
+      {"QuantizedXPU", c10::DispatchKey::QuantizedXPU},
+
+      {"SparseCPU", c10::DispatchKey::SparseCPU},
+      {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseHIP", c10::DispatchKey::SparseHIP},
+      {"SparseXPU", c10::DispatchKey::SparseXPU},
+      {"SparseVE", c10::DispatchKey::SparseVE},
+
+      {"AutogradCPU", c10::DispatchKey::AutogradCPU},
+      {"AutogradCUDA", c10::DispatchKey::AutogradCUDA},
+      {"AutogradXLA", c10::DispatchKey::AutogradXLA},
+      {"AutogradLazy", c10::DispatchKey::AutogradLazy},
+      {"AutogradXPU", c10::DispatchKey::AutogradXPU},
+      {"AutogradMLC", c10::DispatchKey::AutogradMLC},
+      {"AutogradHPU", c10::DispatchKey::AutogradHPU},
+      {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
+      {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
+      {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
+      {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+
       {"Autograd", c10::DispatchKey::Autograd},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},
