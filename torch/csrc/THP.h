@@ -5,7 +5,7 @@
 #include <TH/TH.h>
 #include <TH/THTensor.hpp>
 
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
 // define PyInt_* macros for Python 3.x.  NB: We must include Python.h first,
@@ -23,8 +23,6 @@
 #define LIBRARY_STATE_TYPE
 #define LIBRARY_STATE_TYPE_NOARGS
 
-#define THWStorage THStorage
-#define THWStorage_(NAME) THStorage_(NAME)
 #define THWTensor THTensor
 #define THWTensor_(NAME) THTensor_(NAME)
 
