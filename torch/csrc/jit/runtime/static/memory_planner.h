@@ -39,6 +39,12 @@ class StorageGroup {
   std::vector<at::Tensor*> group_{};
 };
 
+TORCH_API void assignStorageToManagedTensors(
+    graph_node_list nodes,
+    const ManagedTensorRanges& ranges,
+    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor,
+    std::vector<StorageGroup>& managed_tensor_groups);
+
 /// There are three types of ops in a processed graph in Static Runtime:
 ///   1. op with _out variant
 ///   2. view producing op
@@ -69,13 +75,14 @@ class MemoryPlanner {
  public:
   explicit MemoryPlanner(
       StaticRuntime* runtime,
-      const FastMap<const Value*, std::vector<const Value*>>&,
       const ValueGroup& value_group,
       const FastSet<const Value*>& managed_tensor_values,
       const FastSet<const Value*>& managed_output_tensor_values,
       const FastSet<const Value*>& leaked_values,
+      const ManagedTensorRanges& ranges,
       bool enable_out_variant,
-      bool manage_output_tensors);
+      bool manage_output_tensors,
+      bool optimize_memory);
   // disable copying and moving
   MemoryPlanner(const MemoryPlanner&) = delete;
   MemoryPlanner& operator=(const MemoryPlanner&) = delete;

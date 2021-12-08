@@ -114,9 +114,6 @@ jobs:
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
-      # For sccache / S3 access (only on non-forked PRs)
-      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
     steps:
       !{{ common.checkout_pytorch("false") }}
       - uses: actions/download-artifact@v2
@@ -138,6 +135,7 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
+      !{{ common.upload_downloaded_files(name='macos', use_s3=False, artifact_name="test-jsons", when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
       !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
       !{{ common.upload_test_statistics(build_environment, when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
 {% endblock +%}
