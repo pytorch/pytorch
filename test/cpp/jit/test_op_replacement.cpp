@@ -56,5 +56,25 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
       ->run(*g);
 }
 
+TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
+  const auto graph_string = R"IR(
+        graph(%0 : Tensor,
+              %1 : Tensor):
+            %3 : int = prim::Constant[value=1]()
+            %2 : Tensor = aten::_test_serialization_subcmul(%0, %1, %3)
+            return (%2))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get());
+  g->set_op_version(2);
+  ApplyOldOpsUpgraders(g);
+  testing::FileCheck()
+      .check_count("aten::mul", 1, false)
+      ->run(*g);
+
+  testing::FileCheck()
+      .check_count("aten::sub", 1, false)
+      ->run(*g);
+}
+
 } // namespace jit
 } // namespace torch
