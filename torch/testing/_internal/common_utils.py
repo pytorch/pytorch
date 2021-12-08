@@ -1285,11 +1285,11 @@ class CudaMemoryLeakCheck():
                 # Just raises a warning if the leak is not validated by the
                 #   driver API
                 # NOTE: this suggests a problem with the caching allocator
-                msg = """CUDA caching allocator reports a memory leak not
-                        verified by the driver API in {}!
-                        Caching allocator allocated memory was {} and is now reported as {}
-                        on device {}.
-                        CUDA driver allocated memory was {}, and is now {}.""".format(
+                msg = ("CUDA caching allocator reports a memory leak not "
+                       "verified by the driver API in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
                     self.name,
                     self.caching_allocator_befores[i],
                     caching_allocator_mem_allocated,
@@ -1300,10 +1300,10 @@ class CudaMemoryLeakCheck():
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = """CUDA driver API confirmed a leak in {}!
-                         Caching allocator allocated memory was {} and is now reported as {}
-                         on device {}.
-                         CUDA driver allocated memory was {} and is now {}.""".format(
+                msg = ("CUDA driver API confirmed a leak in {}! "
+                       "Caching allocator allocated memory was {} and is now reported as {} "
+                       "on device {}. "
+                       "CUDA driver allocated memory was {} and is now {}.").format(
                     self.name,
                     self.caching_allocator_befores[i],
                     caching_allocator_mem_allocated,
@@ -1316,7 +1316,7 @@ class CudaMemoryLeakCheck():
                 if TEST_WITH_ROCM:
                     warnings.warn(msg)
                 else:
-                    self.testcase.fail(msg)
+                    raise RuntimeError(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
