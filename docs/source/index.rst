@@ -97,6 +97,7 @@ Features described in this documentation are classified by release status:
    type_info
    named_tensor
    name_inference
+   meta_init
    torch.__config__ <__config__>
 
 .. toctree::

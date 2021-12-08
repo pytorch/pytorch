@@ -437,6 +437,15 @@ Utility functions in other modules
     nn.Flatten
     nn.Unflatten
 
+Large Module Materialization
+---------------------------
+
+Large Model Materialization API enables constructing ``torch.nn.Module``
+instances on the meta device for inspection purposes. It is meant to be used if
+the size of a model is too big to fit on a single machine and you want to
+inspect it without instantiating. To learn more, please refer to the :ref:`meta_init-doc`
+documentation.
+
 Quantized Functions
 --------------------
 
