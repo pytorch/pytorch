@@ -109,6 +109,70 @@ void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
       input.sizes());
 }
 
+void block_sparse_mv(
+    const at::sparse_csr::SparseCsrTensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.is_sparse_csr());
+  // values is expected to be a blocks of sparse matrix
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat.values().dim() == 3);
+  // blocks are expected to be square
+  TORCH_INTERNAL_ASSERT(mat.values().size(2) == mat.values().size(1));
+  // only block of size > 1 is supported in cuSPARSE
+  TORCH_INTERNAL_ASSERT(mat.values().size(-1) > 1);
+  // blocks are expected to be in row- or column-major order
+  TORCH_INTERNAL_ASSERT(
+      mat.values().is_contiguous() ||
+      mat.values().transpose(-2, -1).is_contiguous());
+
+  const cusparseDirection_t block_layout = mat.values().is_contiguous()
+      ? CUSPARSE_DIRECTION_ROW
+      : CUSPARSE_DIRECTION_COLUMN;
+
+  c10::MaybeOwned<Tensor> result_ = prepare_dense_vector_for_cusparse(result);
+  c10::MaybeOwned<Tensor> vec_ = prepare_dense_vector_for_cusparse(vec);
+
+  auto block_size = cuda_int_cast(mat.values().size(2), "block_size");
+  auto nnzb = cuda_int_cast(mat._nnz(), "nnzb");
+  auto mb = cuda_int_cast(mat.size(0), "mb") / block_size;
+  auto nb = cuda_int_cast(mat.size(1), "nb") / block_size;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(), "block_sparse_mv", [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        auto desc = at::cuda::sparse::CuSparseMatDescriptor();
+        auto values = mat.values();
+        auto values_data_ptr = values.data_ptr<scalar_t>();
+        auto crow_indices = mat.crow_indices().to(kInt);
+        auto crow_indices_data_ptr = crow_indices.data_ptr<int>();
+        auto col_indices = mat.col_indices().to(kInt);
+        auto col_indices_data_ptr = col_indices.data_ptr<int>();
+        at::cuda::sparse::bsrmv(
+            handle,
+            block_layout,
+            CUSPARSE_OPERATION_NON_TRANSPOSE,
+            mb,
+            nb,
+            nnzb,
+            &alpha_,
+            desc.descriptor(),
+            values_data_ptr,
+            crow_indices_data_ptr,
+            col_indices_data_ptr,
+            block_size,
+            vec_->data_ptr<scalar_t>(),
+            &beta_,
+            result_->data_ptr<scalar_t>());
+      });
+  if (!result.is_same(*result_)) {
+    result.copy_(*result_);
+  }
+}
+
 void block_sparse_mm(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
@@ -500,6 +564,9 @@ void addmv_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
+  if (mat.values().dim() == 3 && mat.values().size(-1) > 1) {
+    return block_sparse_mv(mat, vec, beta, alpha, result);
+  }
 #if !AT_USE_CUSPARSE_GENERIC_API()
   TORCH_CHECK(
       false,
@@ -891,6 +958,85 @@ void triangular_solve_out_sparse_csr(
     X.copy_(*X_);
   }
 #endif // !AT_USE_CUSPARSE_GENERIC_SPSV()
+}
+
+void sampled_addmm_out_sparse_csr(
+    const Tensor& A,
+    const Tensor& B,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const at::sparse_csr::SparseCsrTensor& C) {
+#if !AT_USE_CUSPARSE_GENERIC_SDDMM()
+  TORCH_CHECK(
+      false,
+      "Calling sampled_addmm with sparse GPU tensors requires compiling ",
+      "PyTorch with CUDA 11.2.1+. ",
+      "Please use PyTorch built with newer CUDA version.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(B.layout() == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(C.is_sparse_csr());
+
+  auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(A);
+  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(B);
+  auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C);
+
+  cusparseOperation_t opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      C.scalar_type(),
+      "sampled_addmm_out_sparse_csr",
+      [&] {
+        auto beta_ = beta.to<scalar_t>();
+        auto alpha_ = alpha.to<scalar_t>();
+        auto compute_type = at::cuda::getCudaDataType<scalar_t>();
+        auto handle = at::cuda::getCurrentCUDASparseHandle();
+        size_t buffer_size = 0;
+        TORCH_CUDASPARSE_CHECK(cusparseSDDMM_bufferSize(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SDDMM_ALG_DEFAULT,
+            &buffer_size // output
+            ));
+
+        auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+        auto buffer = allocator.allocate(buffer_size);
+
+        TORCH_CUDASPARSE_CHECK(cusparseSDDMM_preprocess(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SDDMM_ALG_DEFAULT,
+            buffer.get()));
+
+        TORCH_CUDASPARSE_CHECK(cusparseSDDMM(
+            handle,
+            opA,
+            opB,
+            &alpha_,
+            descA.descriptor(),
+            descB.descriptor(),
+            &beta_,
+            descC.descriptor(),
+            compute_type,
+            CUSPARSE_SDDMM_ALG_DEFAULT,
+            buffer.get()));
+      });
+#endif
 }
 
 } // namespace cuda
