@@ -1894,6 +1894,15 @@
   self: max_unpool3d_backward(grad, self, indices, output_size, stride, padding)
   indices: non_differentiable
 
+- name: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
+  input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
+# TorchScript serializes calls to _convolution so this entry is present until that is changed to use convolution.
+# Note that the benchmark, deterministic, cudnn_enabled, and allow_tf32 flags are queried from the global context
+# by convolution_backward instead of being passed along from the forward pass.
+- name: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
+  input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+
 - name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, at::globalContext().benchmarkCuDNN(), at::globalContext().deterministicCuDNN() || at::globalContext().deterministicAlgorithms(), at::globalContext().userEnabledCuDNN(), at::globalContext().allowTF32CuDNN(), grad_input_mask)
 
