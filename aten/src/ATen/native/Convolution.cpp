@@ -1251,12 +1251,13 @@ std::tuple<Tensor,Tensor,Tensor> _convolution_double_backward( const c10::option
   auto gO = gO_r;
   auto weight = weight_r;
 
+  int64_t dim = weight.ndimension() - 2;
   ConvParams params;
-  params.stride = stride_.vec();
-  params.padding = padding_.vec();
-  params.dilation = dilation_.vec();
+  params.stride = expand_param_if_needed(stride_, "stride", dim);
+  params.padding = expand_param_if_needed(padding_, "padding", dim);
+  params.dilation = expand_param_if_needed(dilation_, "dilation", dim);
   params.transposed = transposed_;
-  params.output_padding = output_padding_.vec();
+  params.output_padding = expand_param_if_needed(output_padding_, "output_padding", dim);
   // TODO: hacky way of inferring the groups number for grouped Conv3D
   // See: https://github.com/pytorch/pytorch/pull/36355
   if (!params.transposed && input.dim() > 4) {
