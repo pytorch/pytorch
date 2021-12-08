@@ -9,7 +9,7 @@ from tools.codegen.code_template import CodeTemplate
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
-DEFAULT_ENV = {"precision": "highp"}
+DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
 
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
