@@ -7,6 +7,7 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/ir/graph_node_list.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -103,16 +104,12 @@ class TORCH_API ManagedTensorRanges {
       const FastSet<const Value*>& managed_tensor_values);
 
   // If true, then this node is the last use of at least one
-  // managed tensor. availableTensorsAfterNode(node) will return a vector
+  // managed tensor. availableTensorValuesAfterNode(node) will return a vector
   // of the managed tensors that are available for re-use
   // in the nodes following this one.
   bool nodeFreesManagedTensors(Node* node) const;
-  const std::vector<const Value*>& availableTensorsAfterNode(Node* node) const;
-
-  // True if the value has a tracked lifetime and lifetime.start ==
-  // lifetime.end. "Unused" does not imply "unmanaged" -
-  // managed tensors can be unused if they're not passed to any ops!
-  bool isUnusedValue(const Value* value) const;
+  const std::vector<const Value*>& availableTensorValuesAfterNode(
+      Node* node) const;
 
   // For testing. True if v1 and v2 are both mutable types and have lifetimes
   // that overlap.
@@ -155,8 +152,8 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
-  // enable fusion of ops at model loading time
-  bool enable_te_fusion{false};
+  // enable TensorExpr fusion of ops at model loading time
+  bool enable_tensorexpr_fusion{false};
 };
 
 /// The static runime supports two execution modes.
@@ -289,6 +286,10 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
+  graph_node_list node_ptrs() const {
+    return graph_->nodes();
+  }
+
   bool is_optimizable_container_type(const Node* n) const {
     auto it = node_is_optimizable_container_type_.find(n);
     return it != node_is_optimizable_container_type_.end();
@@ -296,11 +297,6 @@ class TORCH_API StaticModule {
 
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
-  }
-
-  const FastMap<const Value*, std::vector<const Value*>>&
-  values_share_same_storage() const {
-    return value_to_same_storage_values_;
   }
 
   const ValueGroup& value_group() const {
@@ -317,6 +313,10 @@ class TORCH_API StaticModule {
 
   const FastSet<const Value*>& leaked_values() const {
     return leaked_values_;
+  }
+
+  const ManagedTensorRanges& managed_tensor_ranges() const {
+    return managed_tensor_ranges_;
   }
 
   bool first_input_is_self() const {
@@ -348,15 +348,12 @@ class TORCH_API StaticModule {
 
   ValueGroup value_group_;
 
-  // map a value to the set of values that may share the same storage with it
-  FastMap<const Value*, std::vector<const Value*>>
-      value_to_same_storage_values_;
-
   FastSet<const Node*> node_is_optimizable_container_type_;
 
   FastSet<const Value*> managed_tensor_values_{};
   FastSet<const Value*> managed_output_tensor_values_{};
   FastSet<const Value*> leaked_values_{};
+  ManagedTensorRanges managed_tensor_ranges_{};
 };
 
 class TORCH_API StaticRuntime {
@@ -430,6 +427,10 @@ class TORCH_API StaticRuntime {
 
   std::vector<ProcessedNode>& nodes() {
     return nodes_;
+  }
+
+  graph_node_list node_ptrs() const {
+    return static_module_.node_ptrs();
   }
 
   const Graph& graph() const {
