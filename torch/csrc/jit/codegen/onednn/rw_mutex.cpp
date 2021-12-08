@@ -45,22 +45,6 @@ void rw_mutex_t::unlock_write() {
 
 rw_mutex_t::~rw_mutex_t() {}
 
-lock_read_t::lock_read_t(rw_mutex_t &rw_mutex) : rw_mutex_(rw_mutex) {
-    rw_mutex_.lock_read();
-}
-
-lock_write_t::lock_write_t(rw_mutex_t &rw_mutex) : rw_mutex_(rw_mutex) {
-    rw_mutex_.lock_write();
-}
-
-lock_read_t::~lock_read_t() {
-    rw_mutex_.unlock_read();
-}
-
-lock_write_t::~lock_write_t() {
-    rw_mutex_.unlock_write();
-}
-
 } // namespace onednn
 } // namespace fuser
 } // namespace jit

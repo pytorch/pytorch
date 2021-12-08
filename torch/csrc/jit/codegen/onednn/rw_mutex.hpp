@@ -26,28 +26,6 @@ private:
     std::unique_ptr<rw_mutex_impl_t> rw_mutex_impl_;
 };
 
-struct lock_read_t {
-    explicit lock_read_t(rw_mutex_t &rw_mutex);
-    ~lock_read_t();
-
-    lock_read_t(const lock_read_t &) = delete;
-    lock_read_t &operator=(const lock_read_t &) = delete;
-
-private:
-    rw_mutex_t &rw_mutex_;
-};
-
-struct lock_write_t {
-    explicit lock_write_t(rw_mutex_t &rw_mutex_t);
-    ~lock_write_t();
-
-    lock_write_t(const lock_write_t &) = delete;
-    lock_write_t &operator=(const lock_write_t &) = delete;
-
-private:
-    rw_mutex_t &rw_mutex_;
-};
-
 } // namespace onednn
 } // namespace fuser
 } // namespace jit
