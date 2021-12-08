@@ -20,8 +20,6 @@ import subprocess
 
 from typing import List
 
-CUDA_VERSION = "cu102"
-PYTHON_VERSION = "3.7"
 TORCHBENCH_CONFIG_NAME = "config.yaml"
 MAGIC_PREFIX = "RUN_TORCHBENCH:"
 MAGIC_TORCHBENCH_PREFIX = "TORCHBENCH_BRANCH:"

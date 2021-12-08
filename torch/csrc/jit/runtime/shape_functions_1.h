@@ -37,6 +37,11 @@ def broadcast(a: List[int], b: List[int]):
 
     return expandedSizes
 
+def broadcast_three(a: List[int], b: List[int], c: List[int]):
+    return broadcast(broadcast(a, b), c)
+
+def broadcast_one_three(a: List[int], b: Any, c: List[int]):
+    return broadcast(a, c)
 
 def adaptive_avg_pool2d(self: List[int], out: List[int]):
     assert len(out) == 2
@@ -162,6 +167,9 @@ def mean_dim(self: List[int], dims: List[int], keep_dim: bool, dt: Any):
             out.append(self[idx])
     return out
 
+def max_dim(self: List[int], dim: int, keep_dim: bool):
+    out = mean_dim(self, [dim], keep_dim, None)
+    return out, out
 
 # note: python already rounds down towards negative infinity on integer division, special arithmetic not needed
 def div_rtn(x: int, y: int):
