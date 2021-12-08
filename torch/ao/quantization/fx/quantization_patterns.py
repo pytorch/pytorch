@@ -1487,7 +1487,30 @@ class CopyNodeQuantizeHandler(QuantizeHandler):
                 is_reference: bool = False,
                 convert_custom_config_dict: Dict[str, Any] = None) -> Node:
         # always produce reference pattern for relu
-        is_relu = node.op == "call_function" and node.target == torch.nn.functional.relu
+        func_list = [
+            torch.adaptive_avg_pool1d,
+            torch.nn.functional.adaptive_avg_pool2d,
+            torch.nn.functional.adaptive_avg_pool3d,
+            torch.nn.functional.dropout,
+            torch.nn.functional.hardtanh,
+            torch.nn.functional.hardtanh_,
+            torch.nn.functional.interpolate,
+            torch.nn.functional.max_pool1d,
+            torch.nn.functional.max_pool2d,
+            torch.nn.functional.max_pool3d,
+            torch.nn.functional.relu,
+            torch.nn.functional.relu6,
+            torch.avg_pool1d,
+            torch._C._nn.avg_pool2d,
+            torch._C._nn.avg_pool3d,
+            torch.clamp,
+            torch.flatten,
+            torch.max,
+            torch.mean,
+            torch.min,
+            operator.floordiv,
+        ]
+        is_relu = node.op == "call_function" and node.target in func_list
         if is_reference or is_relu:
             # when activation dtype is torch.float, the node does not require
             # observation
