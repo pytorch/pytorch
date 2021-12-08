@@ -1869,6 +1869,7 @@ class TestNN(NNTestCase):
         self.assertIs(p_popitem[1], p)
 
         parameters['p11'] = Parameter(torch.randn(10, 10))
+        parameters['p26'] = None
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
 
@@ -1876,7 +1877,6 @@ class TestNN(NNTestCase):
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
         self.assertTrue(parameter_dict.setdefault('p26') is None)
         check()
-        parameter_dict.pop('p26')
 
         parameters2 = OrderedDict([
             ('p13', Parameter(torch.randn(10, 10))),
