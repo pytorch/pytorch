@@ -5,7 +5,10 @@
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/multi_wait.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/thread_pool.h>
 #include <torch/csrc/lazy/core/util.h>
 
 #include <cstring>
@@ -22,12 +25,9 @@
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
-#include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
 #include "lazy_tensors/computation_client/metrics_reader.h"
-#include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/thread_pool.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
@@ -327,8 +327,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
 }
 
 py::object GetMetricData(const std::string& name) {
-  lazy_tensors::metrics::MetricData* data =
-      lazy_tensors::metrics::GetMetric(name);
+  torch::lazy::MetricData* data = torch::lazy::GetMetric(name);
   if (data == nullptr) {
     return py::none();
   }
@@ -660,16 +659,13 @@ void InitLtcModuleBindings(py::module m) {
       },
       py::arg("devices"));
   m.def("_ltc_reset_metrics",
-        []() { lazy_tensors::metrics::MetricsArena::Get()->Reset(); });
-  m.def("_ltc_counter_names",
-        []() { return lazy_tensors::metrics::GetCounterNames(); });
+        []() { torch::lazy::MetricsArena::Get()->Reset(); });
+  m.def("_ltc_counter_names", []() { return torch::lazy::GetCounterNames(); });
   m.def("_ltc_counter_value", [](const std::string& name) -> py::object {
-    lazy_tensors::metrics::CounterData* data =
-        lazy_tensors::metrics::GetCounter(name);
+    torch::lazy::CounterData* data = torch::lazy::GetCounter(name);
     return data != nullptr ? py::cast<int64_t>(data->Value()) : py::none();
   });
-  m.def("_ltc_metric_names",
-        []() { return lazy_tensors::metrics::GetMetricNames(); });
+  m.def("_ltc_metric_names", []() { return torch::lazy::GetMetricNames(); });
   m.def("_ltc_metric_data", [](const std::string& name) -> py::object {
     return GetMetricData(name);
   });

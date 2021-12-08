@@ -2,16 +2,15 @@
 
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
+#include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
-#include "lazy_tensor_core/csrc/debug_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensors/computation_client/metrics.h"
+#include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -211,7 +210,7 @@ void LazyTensor::TryLimitGraphSize() {
     size_t graph_size =
         torch::lazy::Util::GetGraphSize({data()->ir_value.node.get()});
     if (graph_size > kMaxPendingGraphSize) {
-      LTC_COUNTER("TrimIrGraph", 1);
+      TORCH_LAZY_COUNTER("TrimIrGraph", 1);
       ApplyPendingGraph();
     }
   }
@@ -270,7 +269,7 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;
   } else {
-    LTC_TIMED("IrValueTensorToDataHandle");
+    TORCH_LAZY_TIMED("IrValueTensorToDataHandle");
     data = TensorToDataHandle(tensor, device);
   }
   return CreateTensorNode(std::move(data), read_only);

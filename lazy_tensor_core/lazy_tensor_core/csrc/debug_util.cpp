@@ -5,6 +5,7 @@
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/unique.h>
 
 #include <fstream>
 #include <mutex>
@@ -13,7 +14,6 @@
 
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/unique.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -57,7 +57,7 @@ std::string DebugUtil::GetTensorsGraphInfo(c10::ArrayRef<LazyTensor> tensors,
   std::vector<torch::lazy::Node*> root_nodes;
   std::vector<torch::lazy::Value> root_values;
   std::vector<torch::lazy::hash_t> root_hashes;
-  lazy_tensors::util::Unique<torch::lazy::BackendDevice> unique_device;
+  torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;
   if (indices != nullptr) {
     for (auto index : *indices) {
       const LazyTensor& tensor = tensors[index];

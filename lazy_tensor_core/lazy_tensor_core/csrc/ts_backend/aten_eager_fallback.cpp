@@ -1,16 +1,16 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/metrics.h>
 
 #include <unordered_map>
 
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
-#include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
 
-static std::unordered_map<std::string, ::lazy_tensors::metrics::Counter*>
+static std::unordered_map<std::string, ::torch::lazy::Counter*>
     _eager_fallback_counters;
 
 void ltc_eager_fallback(const c10::OperatorHandle& op,
@@ -18,13 +18,13 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   LTC_FN_TRACK(3);
   const auto name = c10::toString(op.operator_name());
 
-  // Manually applying the LTC_COUNTER macro.
+  // Manually applying the TORCH_LAZY_COUNTER macro.
   // We need to do it ourselves and explicitly keep a mapping of counters
   // because this boxed fallback kernel is used by multiple operators,
   // and the macro stamps out a static Counter object with a fixed name
   // at the code location that it was called.
   if (_eager_fallback_counters.find(name) == _eager_fallback_counters.end()) {
-    _eager_fallback_counters[name] = new ::lazy_tensors::metrics::Counter(name);
+    _eager_fallback_counters[name] = new ::torch::lazy::Counter(name);
   }
   _eager_fallback_counters[name]->AddValue(1);
 

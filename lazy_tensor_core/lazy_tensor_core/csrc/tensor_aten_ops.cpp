@@ -3,6 +3,7 @@
 #include <ATen/InferSize.h>
 #include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/permute.h>
@@ -33,7 +34,6 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 #include "lazy_tensor_core/csrc/tensor_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
-#include "lazy_tensors/computation_client/metrics.h"
 #include "torch/csrc/autograd/variable.h"
 
 namespace torch_lazy_tensors {
