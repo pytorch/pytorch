@@ -9956,6 +9956,19 @@ the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
 
+.. warning::
+
+    :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.solve_triangular`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve_triangular` has its arguments reversed and does not return a
+    copy of one of the inputs.
+
+    ``X = torch.triangular_solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve_triangular(A, B)
+
 Args:
     b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
                 :math:`*` is zero of more batch dimensions
