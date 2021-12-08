@@ -1486,6 +1486,7 @@ class TestNormalizeOperators(JitTestCase):
             "nn.functional.embedding",  # Implemented with a lambda
             "nn.functional.embedding_bag",  # Implemented with a lambda
             "nn.functional.rrelu",  # Implemented with a lambda
+            "nn.functional.feature_alpha_dropout",  # Implemented with a lambda
             "nonzero",
             "polygamma",
             "special.polygamma",
@@ -1538,6 +1539,8 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_1d",
             "atleast_2d",
             "atleast_3d",
+            "svd_lowrank",  # implemented with a lambda
+            "pca_lowrank",  # implemented with a lambda
         }
 
         # Unsupported input types
