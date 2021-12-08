@@ -321,10 +321,10 @@ void createFusionGroups(Block* block, AliasDb* aliasDb, size_t min_size) {
   inlineSmallFusionGroups(block, min_size);
 }
 
-void performTEFusion(
+void performTensorExprFusion(
     std::shared_ptr<Graph> graph,
     std::vector<IValue> sample_inputs) {
-  // Enable fusion with dynamic shapes
+  // Enable TensorExpr fusion with dynamic shapes
   setTensorExprDynamicShapeFusionEnabled(true);
   GRAPH_DEBUG("Graph before tracing: ", graph);
   auto traced_graph = TraceGraph(graph, sample_inputs);
