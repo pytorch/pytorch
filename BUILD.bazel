@@ -28,16 +28,6 @@ COMMON_COPTS = [
 
 # c10
 header_template_rule(
-    name = "cmake_macros_h",
-    src = "c10/macros/cmake_macros.h.in",
-    out = "c10/macros/cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
-    },
-)
-
-header_template_rule(
     name = "cuda_cmake_macros_h",
     src = "c10/cuda/impl/cuda_cmake_macros.h.in",
     out = "c10/cuda/impl/cuda_cmake_macros.h",
@@ -53,15 +43,14 @@ cc_library(
         "c10/core/impl/*.h",
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
-        "c10/macros/*.h",
         "c10/mobile/*.h",
-        "c10/util/*.h",
-        "c10/util/*.hpp",
     ]),
     deps = [
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
-        ":cmake_macros_h",
+        "//c10/macros:Macros",
+        "//c10/util:C++17",
+        "//c10/util:headers",
         ":cuda_cmake_macros_h",
     ],
 )
@@ -72,7 +61,6 @@ cc_library(
         "c10/core/*.cpp",
         "c10/core/impl/*.cpp",
         "c10/mobile/*.cpp",
-        "c10/util/*.cpp",
     ]) + if_cuda(
         glob([
             "c10/cuda/*.cpp",
@@ -82,7 +70,8 @@ cc_library(
     ),
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
-        ":c10_headers",
+        "//c10/util",
+        "//c10/util:C++17",
         "@fmt",
     ] + if_cuda(
         ["@cuda"],

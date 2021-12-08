@@ -1,0 +1,4 @@
+load("//:bazel.bzl", "rules")
+load(":build.bzl", "define_rules")
+
+define_rules(rules)
