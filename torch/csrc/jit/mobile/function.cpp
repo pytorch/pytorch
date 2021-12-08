@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
-#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
@@ -220,11 +219,11 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
 }
 
 Function& Function::registerFunc(
-    const std::string qualified_name,
+    const std::string& qualified_name,
     const std::vector<Instruction>& instructions,
-    const std::vector<c10::IValue> constants,
-    const std::vector<c10::TypePtr> types,
-    const google::int64 register_size) {
+    const std::vector<c10::IValue>& constants,
+    const std::vector<c10::TypePtr>& types,
+    const size_t register_size) {
   static std::unordered_map<c10::QualifiedName, Function>
       upgrader_function_holder;
   c10::QualifiedName name = c10::QualifiedName(qualified_name);

@@ -70,6 +70,7 @@ class OpCodeCache {
 
 void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
   std::shared_ptr<Code> code = function->get_code();
+  auto& operator_version_map = getOperatorVersionMapForMobile();
   for (size_t i = 0; i < function->get_code()->instructions_.size(); i++) {
     Instruction& inst = function->get_code()->instructions_[i];
     if (inst.op == OpCode::OP) {
@@ -78,9 +79,10 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
           (function->get_code()->op_names_[inst.X].overload_name.empty()
                ? ""
                : "." + function->get_code()->op_names_[inst.X].overload_name);
-      auto it = kOperatorVersionMap.find(operator_name);
+
+      auto it = operator_version_map.find(operator_name);
       // Find out if there is an upgrader for this operator
-      if (it != kOperatorVersionMap.end()) {
+      if (it != operator_version_map.end()) {
         auto upgrader_list = it->second;
         // Loop all upgraders for this operator, and find out if there exists a
         // valid upgrader. Use iteration here instead of other faster search

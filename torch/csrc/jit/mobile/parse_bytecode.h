@@ -1,6 +1,5 @@
 #pragma once
 #include <torch/csrc/jit/mobile/function.h>
-#include "caffe2/serialize/versions.h"
 
 namespace torch {
 namespace jit {
