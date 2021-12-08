@@ -155,6 +155,14 @@ std::tuple<Tensor,optional<int64_t>> masked_select_batch_rule(
   return std::make_tuple(result, 0);
 }
 
+Tensor addr_decomposition(
+    const Tensor& self, const Tensor& vec1, const Tensor& vec2,
+    const Scalar& beta, const Scalar& alpha) {
+
+  auto outer = alpha * vec1.unsqueeze(-1) * vec2.unsqueeze(-2);
+  return self * beta + outer;
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 #define BINARY_POINTWISE2(op, overload) \
   VMAP_SUPPORT(#op"."#overload, BINARY_POINTWISE_BATCH_RULE(ATEN_FN2(op, overload)));
@@ -193,6 +201,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   BINARY_SCALAR_2(add, Tensor, Scalar);
   POINTWISE_BOXED(addcdiv);
   POINTWISE_BOXED(addcmul);
+  m.impl("addr", addr_decomposition);
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_or, Tensor);
