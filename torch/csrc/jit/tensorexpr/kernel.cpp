@@ -1512,7 +1512,7 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) {
       auto& out = stack_outputs[i].toTensor();
       // This has only been tested on CPUs.
       // TODO: Test on GPUs.
-      at::native::resize_(out, tensorOutputSizes_[i], c10::nullopt);
+      out.resize_(tensorOutputSizes_[i]);
       args.emplace_back(out.data_ptr());
     }
   } else {
