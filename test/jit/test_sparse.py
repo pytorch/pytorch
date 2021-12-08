@@ -2,8 +2,6 @@
 
 import io
 import torch
-from torch.testing import FileCheck
-from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 class TestSparse(JitTestCase):
