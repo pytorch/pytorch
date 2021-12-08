@@ -677,14 +677,52 @@ TEST(IValueTest, IdentityAndHashing_SparseCOO) {
 
   at::Tensor t1 = at::rand({3, 4}).to_sparse();
   at::Tensor t2 = at::rand({3, 4}).to_sparse();
+  at::Tensor t3 = at::rand({3, 4});
 
-  IValue tv1(t1), tv1b(t1), tv2(t2);
+  IValue tv1(t1), tv1b(t1), tv2(t2), tv3(t3);
 
   EXPECT_EQ(tv1.hash(), tv1b.hash());
   EXPECT_NE(tv1.hash(), tv2.hash());
 
   EXPECT_TRUE(tv1.is(tv1b));
   EXPECT_FALSE(tv1.is(tv2));
+
+  EXPECT_TRUE(tv1.isAliasOf(tv1b));
+  EXPECT_FALSE(tv1.isAliasOf(tv2));
+  EXPECT_FALSE(tv1.isAliasOf(tv3));
+
+  long idx_array1[6] = {0, 1, 1, 0, 0, 1};
+  at::Tensor idx1 = torch::from_blob(
+      idx_array1,
+      {2, 3},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  long idx_array2[6] = {1, 1, 2, 0, 1, 2};
+  at::Tensor idx2 = torch::from_blob(
+      idx_array2,
+      {2, 3},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  int val_array[3] = {3, -5, 7};
+  at::Tensor val = torch::from_blob(
+      val_array,
+      {3},
+      torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
+  at::Tensor sparse1 = torch::sparse_coo_tensor(
+      idx1, val, {3, 3}, torch::TensorOptions().dtype(torch::kInt32));
+  at::Tensor sparse2 = torch::sparse_coo_tensor(
+      idx2, val, {3, 3}, torch::TensorOptions().dtype(torch::kInt32));
+
+  IValue idx1_v(idx1), idx2_v(idx2);
+  IValue val_v(val);
+  IValue sparse1_v(sparse1), sparse2_v(sparse2);
+
+  EXPECT_TRUE(sparse1_v.isAliasOf(sparse2_v));
+  EXPECT_TRUE(sparse1_v.isAliasOf(idx1_v));
+  EXPECT_TRUE(sparse1_v.isAliasOf(val_v));
+  EXPECT_TRUE(sparse2_v.isAliasOf(idx2_v));
+  EXPECT_TRUE(sparse2_v.isAliasOf(val_v));
+  EXPECT_FALSE(idx1_v.isAliasOf(idx2_v));
+  EXPECT_FALSE(idx1_v.isAliasOf(val_v));
+  EXPECT_FALSE(sparse1_v.isAliasOf(idx2_v));
 }
 
 TEST(IValueTest, getSubValues) {

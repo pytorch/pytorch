@@ -282,6 +282,24 @@ struct TORCH_API IValue final {
       const IValue& lhs,
       const IValue& rhs);
 
+private:
+  static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
+    // mkldnn tensors dont have views or storage, so we compare
+    // based on tensor impl. //TODO: find a way to use mkldnn storage
+    if (a.is_mkldnn() || b.is_mkldnn()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
+    } else if (a.is_sparse() || b.is_sparse()) {
+      if (a.is_sparse()) {
+        return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+      } else {
+        return isAliasOf(b._values(), a) || isAliasOf(b._indices(), a);
+      }
+    }
+
+    return a.is_alias_of(b);
+  }
+
+public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -291,19 +309,7 @@ struct TORCH_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto& thisTensor = this->toTensor();
-      const auto& rhsTensor = rhs.toTensor();
-      // mkldnn tensors dont have views or storage, so we compare
-      // based on tensor impl. //TODO: find a way to use mkldnn storage
-      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
-        return thisTensor.unsafeGetTensorImpl() ==
-            rhsTensor.unsafeGetTensorImpl();
-      } else if (thisTensor.is_sparse()) {
-        return thisTensor._values().unsafeGetTensorImpl() ==
-            rhsTensor._values().unsafeGetTensorImpl();
-      }
-
-      return thisTensor.is_alias_of(rhsTensor);
+      return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
     if (!this->is_intrusive_ptr) {

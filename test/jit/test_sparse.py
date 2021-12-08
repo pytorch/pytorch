@@ -2,6 +2,7 @@
 
 import io
 import torch
+from torch.testing._internal.jit_utils import JitTestCase
 
 
 class TestSparse(JitTestCase):
