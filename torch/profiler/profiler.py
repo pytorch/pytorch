@@ -26,7 +26,7 @@ def supported_activities():
     return torch.autograd._supported_activities()
 
 
-class kineto_profile(object):
+class _KinetoProfile(object):
     """Low-level profiler wrap the autograd profile
 
     Args:
@@ -46,6 +46,8 @@ class kineto_profile(object):
             and not eager mode models.
 
     .. note::
+        This API is an experimental and subject to change in future.
+
         Enabling shape and stack tracing results in additional overhead.
         When record_shapes=True is specified, profiler will temporarily hold references to the tensors;
         that may further prevent certain optimizations that depend on the reference count and introduce
@@ -60,10 +62,7 @@ class kineto_profile(object):
             with_stack: bool = False,
             with_flops: bool = False,
             with_modules: bool = False):
-        if activities:
-            self.activities = set(activities)
-        else:
-            self.activities = supported_activities()
+        self.activities = set(activities) or supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
@@ -260,7 +259,7 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
     return handler_fn
 
 
-class profile(kineto_profile):
+class profile(_KinetoProfile):
     """Profiler context manager.
 
     Args:
@@ -380,18 +379,14 @@ class profile(kineto_profile):
             # deprecated:
             use_cuda: Optional[bool] = None):
 
-        if activities:
-            activities_set = set(activities)
-        else:
-            activities_set = supported_activities()
-        assert len(activities_set) > 0, "No valid profiler activities found"
-
+        activities_set = set(activities) or supported_activities()
         if use_cuda is not None:
             warn("use_cuda is deprecated, use activities argument instead")
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
                 activities_set.remove(ProfilerActivity.CUDA)
+        assert len(activities_set) > 0, "No valid profiler activities found"
 
         super().__init__(
             activities=activities,
