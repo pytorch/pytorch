@@ -105,7 +105,7 @@ def adam(params: List[Tensor],
 
         step_size = lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=-step_size)
+        param.addcdiv_(exp_avg, denom, value=-lr)
 
 
 def adamw(params: List[Tensor],
