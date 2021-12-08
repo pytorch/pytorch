@@ -770,9 +770,10 @@ REGISTER_OPERATOR_FUNCTOR(
         auto num_outputs = p_node->outputs().size();
         Stack stack;
         if (p_node->Output(0).isNone()) {
-          VLOG(1) << "No outputs in TensorExprDynamicGroup op" << std::endl;
+          stack.reserve(p_node->num_inputs());
         } else {
-          for (auto o : p_node->outputs()) {
+          stack.reserve(p_node->num_inputs() + num_outputs);
+          for (const auto& o : p_node->outputs()) {
             stack.push_back(o);
           }
         }
@@ -785,7 +786,7 @@ REGISTER_OPERATOR_FUNCTOR(
               stack.size() == num_outputs,
               "Unexpected # of outputs on stack after executing TensorExprDynamicGroup");
           for (auto i : c10::irange(num_outputs)) {
-            p_node->Output(i) = stack[i];
+            p_node->Output(i) = std::move(stack[i]);
           }
         }
       };
