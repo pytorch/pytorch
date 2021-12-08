@@ -164,9 +164,9 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             'includes': [f'#include <{path}>' for path in [
                 tensor_class_hdr,
                 "ATen/MetaFunctions.h",
+                "torch/csrc/lazy/core/metrics.h",
                 "torch/csrc/lazy/core/shape.h",
                 "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-                "lazy_tensors/computation_client/metrics.h",
                 f"{output_dir}/{backend_key}NativeFunctions.h",
                 f"{output_dir}/{backend_key}LazyIr.h",
                 f"{output_dir}/{backend_key}ShapeInference.h",
