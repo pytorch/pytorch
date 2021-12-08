@@ -1,4 +1,5 @@
 import math
+import warnings
 
 import torch
 from torch.distributions import constraints
@@ -6,7 +7,9 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import lazy_property
 from torch.distributions.multivariate_normal import _precision_to_scale_tril
 
+
 _log_2 = math.log(2)
+
 
 def _mvdigamma(x: torch.Tensor, p: int) -> torch.Tensor:
     assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
@@ -83,6 +86,8 @@ class Wishart(ExponentialFamily):
 
         self.df = df.expand(batch_shape)
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
+        if self.df.lt(event_shape[-1]).any():
+            warnings.warn("Low df values detected. Singular samples are highly likely occured for df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
@@ -181,14 +186,17 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         sample = chol @ chol.transpose(-2, -1)
 
-        # Below part is to improve numerical stability temporally and should be removed in the future.
-        support_check = self.support.check(sample)
-        while not support_check.all():
+        # Below part is to improve numerical stability temporally and should be removed in the future
+        support_check = self.support.check(sample).all()
+        if not support_check:
+            warnings.warn("Singular sample detected.")
+
+        while not support_check:
             fix_list = support_check.logical_not().nonzero(as_tuple=True)
             fix_samples = self.rsample([len(fix_list)])
             for ind, sample_index in enumerate(fix_list):
                 sample[sample_index] = fix_samples[ind]
-            support_check = self.support.check(sample)
+            support_check = self.support.check(sample).all()
 
         return sample
 
