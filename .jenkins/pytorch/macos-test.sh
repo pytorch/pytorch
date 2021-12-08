@@ -45,20 +45,10 @@ test_python_all() {
   export GLOO_SOCKET_IFNAME=lo0
   echo "Ninja version: $(ninja --version)"
 
-  # Try to pull value from CIRCLE_PULL_REQUEST first then GITHUB_HEAD_REF second
-  # CIRCLE_PULL_REQUEST comes from CircleCI
-  # NOTE: file_diff_from_base is currently bugged for GHA due to an issue finding a merge base for ghstack PRs
-  #       see https://github.com/pytorch/pytorch/issues/60111
-  IN_PULL_REQUEST=${CIRCLE_PULL_REQUEST:-${GITHUB_HEAD_REF:-}}
-  if [ -n "$IN_PULL_REQUEST" ]; then
-    DETERMINE_FROM=$(mktemp)
-    file_diff_from_base "$DETERMINE_FROM"
-  fi
-
   # Increase default limit on open file handles from 256 to 1024
   ulimit -n 1024
 
-  python test/run_test.py --verbose --exclude-jit-executor --determine-from="$DETERMINE_FROM"
+  python test/run_test.py --verbose --exclude-jit-executor
 
   assert_git_not_dirty
 }
@@ -153,19 +143,8 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
-if [ -z "${BUILD_ENVIRONMENT}" ] || [[ "${BUILD_ENVIRONMENT}" == *-test ]]; then
-  test_python_all
-  test_libtorch
-  test_custom_script_ops
-  test_jit_hooks
-  test_custom_backend
-else
-  if [[ "${BUILD_ENVIRONMENT}" == *-test1 ]]; then
-    test_python_all
-  elif [[ "${BUILD_ENVIRONMENT}" == *-test2 ]]; then
-    test_libtorch
-    test_custom_script_ops
-    test_jit_hooks
-    test_custom_backend
-  fi
-fi
+test_python_all
+test_libtorch
+test_custom_script_ops
+test_jit_hooks
+test_custom_backend

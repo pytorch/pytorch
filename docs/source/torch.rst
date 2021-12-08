@@ -88,6 +88,7 @@ Indexing, Slicing, Joining, Mutating Ops
     :toctree: generated
     :nosignatures:
 
+    adjoint
     argwhere
     cat
     concat
@@ -293,6 +294,7 @@ Pointwise Ops
     atanh
     arctanh
     atan2
+    arctan2
     bitwise_not
     bitwise_and
     bitwise_or
@@ -512,6 +514,7 @@ Other Operations
     gcd
     histc
     histogram
+    histogramdd
     meshgrid
     lcm
     logcumsumexp
@@ -597,6 +600,9 @@ Utilities
     promote_types
     use_deterministic_algorithms
     are_deterministic_algorithms_enabled
+    is_deterministic_algorithms_warn_only_enabled
+    set_deterministic_debug_mode
+    get_deterministic_debug_mode
     set_warn_always
     is_warn_always_enabled
     vmap

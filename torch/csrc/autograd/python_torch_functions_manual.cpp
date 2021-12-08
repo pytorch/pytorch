@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/cuda_lazy_init.h>
 
 #include <ATen/ATen.h>
+#include <ATen/FunctionalTensorWrapper.h>
 
 #include <fmt/format.h>
 #include <Python.h>
@@ -601,6 +602,80 @@ static PyObject * THPVariable_logspace(PyObject* self_, PyObject* args, PyObject
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__to_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_to_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto wrapped = at::functionalization::impl::to_functional_tensor(self_);
+  return wrap(wrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__from_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_from_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  auto unwrapped = at::functionalization::impl::from_functional_tensor(self_);
+  return wrap(unwrapped);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__is_functional_tensor(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_is_functional_tensor(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  if (at::functionalization::impl::isFunctionalTensor(self_)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__sync(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({"_sync(Tensor t)"}, /*traceable=*/true);
+
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto self_ = r.tensor(0);
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
+  auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
+  wrapped_impl->apply_updates();
+  wrapped_impl->regenerate_from_base();
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__enable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, true);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable__disable_functionalization(PyObject *self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Functionalize, false);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // XXX: ops that are bound here are not exposed to the C++ api nor the JIT.
 // Any new ops added here should be accompanied with a comment why they are not
 // being registered through native_functions.yaml, and be tagged cpp / JIT
@@ -617,6 +692,12 @@ static PyMethodDef torch_functions_manual[] = {
   {"full", castPyCFunctionWithKeywords(THPVariable_full), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"linspace", castPyCFunctionWithKeywords(THPVariable_linspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"logspace", castPyCFunctionWithKeywords(THPVariable_logspace), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_is_functional_tensor", castPyCFunctionWithKeywords(THPVariable__is_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_to_functional_tensor", castPyCFunctionWithKeywords(THPVariable__to_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_from_functional_tensor", castPyCFunctionWithKeywords(THPVariable__from_functional_tensor), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_sync", castPyCFunctionWithKeywords(THPVariable__sync), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_enable_functionalization", castPyCFunctionWithKeywords(THPVariable__enable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
+  {"_disable_functionalization", castPyCFunctionWithKeywords(THPVariable__disable_functionalization), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"nonzero", castPyCFunctionWithKeywords(THPVariable_nonzero), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"randint", castPyCFunctionWithKeywords(THPVariable_randint), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},
   {"range", castPyCFunctionWithKeywords(THPVariable_range), METH_VARARGS | METH_KEYWORDS | METH_STATIC, nullptr},

@@ -459,9 +459,17 @@ PickleOpCode Unpickler::readInstruction() {
         // for torch.package logic where storage may be loaded already
         storage = storage_context_->getStorage(key);
       } else {
-        at::DataPtr storage_ptr = read_record_(key);
         int64_t numel = args.at(4).toInt();
         caffe2::TypeMeta dtype = at::CPU(type).typeMeta();
+
+        at::DataPtr storage_ptr;
+        if (numel > 0) {
+          // If there are no elements in the tensor, there's no point in
+          // reading a zero (0) byte file from the input stream and paying
+          // that cost.
+          storage_ptr = read_record_(key);
+        }
+
         storage = at::Storage(
             c10::Storage::use_byte_size_t(),
             numel * dtype.itemsize(),

@@ -239,23 +239,122 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
+// Computes the strides for view_dtype output when the view dtype is
+// smaller than the original dtype
+inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+  const int64_t ndim = old_strides.size();
+
+  TORCH_CHECK(
+    old_strides[ndim - 1] == 1,
+    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
+    " (different element sizes), but got ", old_strides[ndim - 1]);
+
+  DimVector new_strides(ndim);
+  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+    new_strides[dim_idx] = old_strides[dim_idx] * size_ratio;
+  }
+  new_strides[ndim - 1] = 1;
+  return new_strides;
+}
+
+// Computes the strides for view_dtype output when the view dtype is
+// larger than the original dtype
+inline DimVector compute_strides_for_view_dtype_upsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+  const int64_t ndim = old_strides.size();
+  TORCH_CHECK(
+    old_strides[ndim - 1] == 1,
+    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
+    " (different element sizes), but got ", old_strides[ndim - 1]);
+
+  DimVector new_strides(ndim);
+  for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
+    TORCH_CHECK(
+      (old_strides[dim_idx] % size_ratio) == 0,
+      "self.stride(", dim_idx, ") must be divisible by ", size_ratio,
+      " to view ", old_dtype, " as ", new_dtype, " (different element sizes), ",
+      "but got ", old_strides[dim_idx]);
+
+    new_strides[dim_idx] = old_strides[dim_idx] / size_ratio;
+  }
+  new_strides[ndim - 1] = 1;
+  return new_strides;
+}
+
 Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   if (self.scalar_type() == dtype) {
     return self;
   }
   const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
-  TORCH_CHECK(self.element_size() == static_cast<int64_t>(type_meta.itemsize()),
-    "Viewing a tensor as a new dtype with a different number of bytes per element is not supported.");
   TORCH_CHECK(!self.is_conj(),
     "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");
   TORCH_CHECK(!self.is_neg(),
     "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
+
+  int64_t self_element_size = self.element_size();
+  int64_t new_element_size = static_cast<int64_t>(type_meta.itemsize());
+
   Storage storage = self.storage();
   auto new_tensor = detail::make_tensor<TensorImpl>(
       std::move(storage), self.key_set(), type_meta);
   auto* impl = new_tensor.unsafeGetTensorImpl();
-  impl->set_storage_offset(self.storage_offset());
-  impl->set_sizes_and_strides(self.sizes(), self.strides());
+
+  if (self_element_size == new_element_size) {
+    impl->set_storage_offset(self.storage_offset());
+    impl->set_sizes_and_strides(self.sizes(), self.strides());
+
+  } else if (self.dim() == 0) {
+    TORCH_CHECK(false,
+      "self.dim() cannot be 0 to view ", self.scalar_type(), " as ",
+      dtype, " (different element sizes)");
+
+  } else if (self_element_size > new_element_size) {
+    // Downsizing element size
+
+    int64_t size_ratio = self_element_size / new_element_size;
+    auto new_strides = compute_strides_for_view_dtype_downsize(
+      self.strides(), size_ratio, self.scalar_type(), dtype);
+
+    auto old_sizes = self.sizes();
+    DimVector new_sizes(self.dim());
+    std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
+    new_sizes[self.dim() - 1] *= size_ratio;
+
+    auto new_storage_offset = size_ratio * self.storage_offset();
+
+    impl->set_storage_offset(new_storage_offset);
+    impl->set_sizes_and_strides(new_sizes, new_strides);
+
+  } else {
+    // Upsizing element size
+
+    int64_t size_ratio = new_element_size / self_element_size;
+
+    TORCH_CHECK(
+      (self.size(-1) % size_ratio) == 0,
+      "self.size(-1) must be divisible by ", size_ratio, " to view ",
+      self.scalar_type(), " as ", dtype, " (different element sizes), ",
+      "but got ", self.size(-1));
+
+    TORCH_CHECK(
+      (self.storage_offset() % size_ratio) == 0,
+      "self.storage_offset() must be divisible by ", size_ratio, " to view ",
+      self.scalar_type(), " as ", dtype, " (different element sizes), but got ",
+      self.storage_offset());
+
+    auto new_strides = compute_strides_for_view_dtype_upsize(
+      self.strides(), size_ratio, self.scalar_type(), dtype);
+
+    auto old_sizes = self.sizes();
+    DimVector new_sizes(self.dim());
+    std::copy(old_sizes.begin(), old_sizes.end(), new_sizes.begin());
+    new_sizes[self.dim() - 1] /= size_ratio;
+
+    auto new_storage_offset = self.storage_offset() / size_ratio;
+
+    impl->set_storage_offset(new_storage_offset);
+    impl->set_sizes_and_strides(new_sizes, new_strides);
+  }
+
   return new_tensor;
 }
 

@@ -77,7 +77,11 @@ static PyObject * THPStorage_(shareFilename)(PyObject *_self, PyObject *noargs)
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
     THWStoragePtr new_storage(
         THPStorage_(newFilenameStorage)(storage->nbytes() / sizeof(scalar_t)));
-    THWStorage_(copy)(new_storage, storage);
+
+    at::Storage new_storage_aten = at::unsafeStorageFromTH(new_storage.get(), /*retain=*/true);
+    at::Storage _self_aten = torch::createStorage(_self);
+    storage_copy(new_storage_aten, _self_aten);
+
     THWStorage_(swap)(storage, new_storage);
     ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
     AT_ASSERT(ctx);
@@ -160,7 +164,11 @@ static PyObject * THPStorage_(shareFd)(PyObject *_self, PyObject *noargs)
   } else {
     THWStoragePtr new_storage(
         THPStorage_(newFdStorage)(storage->nbytes() / sizeof(scalar_t)));
-    THWStorage_(copy)(new_storage, storage);
+
+    at::Storage new_storage_aten = at::unsafeStorageFromTH(new_storage.get(), /*retain=*/true);
+    at::Storage _self_aten = torch::createStorage(_self);
+    storage_copy(new_storage_aten, _self_aten);
+
     THWStorage_(swap)(storage, new_storage);
     ctx = at::MapAllocator::fromDataPtr(storage->data_ptr());
     AT_ASSERT(ctx);
@@ -238,10 +246,10 @@ static PyObject * THPStorage_(shareCuda)(PyObject *_self, PyObject *noargs)
   Py_INCREF(Py_None);
   THPObjectPtr _event_sync_required(Py_None);
   Py_INCREF(Py_None);
-  if (THWStorage_(data)(LIBRARY_STATE storage)) {
+  if (storage->data<scalar_t>()) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t base_size;
-    void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
+    void *base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(storage->data<scalar_t>(), &base_size);
     ptrdiff_t offset_bytes = (char*)storage->data<scalar_t>() - (char*)base_ptr;
 
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
