@@ -82,8 +82,8 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
     auto* grad_buffer_data =
         is_mean ? grad_buffer_.template mutable_data<T>() : NULL;
     if (is_mean) {
-      for (const auto rangeIndex : c10::irange(numSegments)) {
-        for (const auto tmpIndex : c10::irange(block_size)) {
+      for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
+        for (auto tmpIndex = 0; tmpIndex < block_size; ++tmpIndex) {
           auto offsetI = rangeIndex * block_size;
           grad_buffer_data[offsetI + tmpIndex] = lengths[rangeIndex] > 0
               ? gradIn[offsetI + tmpIndex] / lengths[rangeIndex]
@@ -92,7 +92,7 @@ class SparseAdagradFusedWithSparseLengthsSumGradientOp final
       }
     }
 
-    for (const auto rangeIndex : c10::irange(numSegments)) {
+    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -243,7 +243,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     // ignores this dependency and fuses these two loops.
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (const auto rangeIndex : c10::irange(numSegments)) {
+    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -277,7 +277,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
     CAFFE_ENFORCE_EQ(dataIndex, n);
 
     dataIndex = 0;
-    for (const auto rangeIndex : c10::irange(numSegments)) {
+    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -285,7 +285,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientOp final
         auto offsetIdx = idx * block_size;
         auto localOffset = dataIndex - start;
 
-        for (const auto i : c10::irange(block_size)) {
+        for (int i = 0; i < block_size; ++i) {
           temp_grad[i] = auxParamIn[localOffset] * gradIn[offsetI + i];
         }
 
@@ -409,7 +409,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
 
     std::vector<T> temp_grad(block_size);
     int dataIndex = 0;
-    for (const auto rangeIndex : c10::irange(numSegments)) {
+    for (auto rangeIndex = 0; rangeIndex < numSegments; ++rangeIndex) {
       for (auto start = dataIndex; dataIndex < start + lengths[rangeIndex];
            ++dataIndex) {
         std::size_t idx = indices[dataIndex];
@@ -440,7 +440,7 @@ class SparseAdagradFusedWithSparseLengthsWeightedSumGradientApproxOp final
             auxGrad + dataIndex,
             &context_);
 
-        for (const auto i : c10::irange(block_size)) {
+        for (int i = 0; i < block_size; ++i) {
           temp_grad[i] = auxParamIn[localOffset] * gradIn[offsetI + i];
         }
 

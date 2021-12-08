@@ -95,7 +95,7 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 }
 
 // This algorithm takes the list of intermediate buffers and their liveness
-// ragnes, and returns the allocations of these buffers. A buffer 'A' can be
+// ranges, and returns the allocations of these buffers. A buffer 'A' can be
 // allocated in the memory (appears as a pair of 'A's in the allocation results)
 // or reuse another buffer such as 'B' (appears as ('A', 'B')). Specifically, we
 // linearly scan the intermediate buffers by the time they appear, and try to
@@ -103,7 +103,7 @@ c10::optional<size_t> bufSize(BufPtr buf) {
 // allocations available, we'll create memory for it. Once we are beyond the
 // liveness range of this buffer, we'll mark its corresponding memory allocation
 // as "up for grabs" for future reuse.
-std::vector<std::pair<BufPtr, BufPtr>> linearScan(
+std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     const std::unordered_set<BufPtr>& bufs,
     const std::unordered_map<BufPtr, std::tuple<int32_t, int32_t>>&
         buf_ranges) {
@@ -149,7 +149,7 @@ std::vector<std::pair<BufPtr, BufPtr>> linearScan(
         buf_to_release.end(),
         sorting_function_by_end_time);
     for (auto& buf_rl : buf_to_release) {
-      mem_up_for_grabs.push_front(buf_mem_map[buf_rl]);
+      mem_up_for_grabs.push_front(buf_mem_map.at(buf_rl));
       buf_mem_map.erase(buf_rl);
     }
 
@@ -240,7 +240,7 @@ void CodeGen::allocIntermediateBufs() {
   // For each intermediate buffer, we reuse the memory of an old buffer whose
   // liveness range does not overlap with the current buffer, or allocate memory
   // if reusing buffer is impossible.
-  auto buf_allocs = linearScan(interm_bufs, interm_buf_ranges);
+  auto buf_allocs = AllocBufsWithMemReuse(interm_bufs, interm_buf_ranges);
 
   // Insert memory allocation/mapping nodes.
   if (buf_allocs.size() > 0) {
