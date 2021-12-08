@@ -201,11 +201,31 @@ if(INTERN_BUILD_ATEN_OPS)
       ${GEN_VULKAN_FLAGS}
   )
 
+  file(GLOB_RECURSE headers_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
+  file(GLOB_RECURSE sources_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
+  set(declarations_yaml_templates "")
+
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
+
   foreach(gen_type "headers" "sources" "declarations_yaml")
+    # The codegen outputs may change dynamically as PyTorch is
+    # developed, but add_custom_command only supports dynamic inputs.
+    #
+    # We work around this by generating a .cmake file which is
+    # included below to set the list of output files. If that file
+    # ever changes then cmake will be re-run automatically because it
+    # was included and so we get fully dynamic outputs.
+
+    set("GEN_COMMAND_${gen_type}"
+        ${GEN_COMMAND}
+        --generate ${gen_type}
+        --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+    )
+
+    # Dry run to bootstrap the output variables
     execute_process(
-        COMMAND ${GEN_COMMAND}
-          --generate ${gen_type}
-          --output-dependencies ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt
+        COMMAND ${GEN_COMMAND_${gen_type}} --dry-run
         RESULT_VARIABLE RETURN_VALUE
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
@@ -214,43 +234,22 @@ if(INTERN_BUILD_ATEN_OPS)
       message(FATAL_ERROR "Failed to get generated_${gen_type} list")
     endif()
 
-    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt" "generated_${gen_type}")
-    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt-cuda" "cuda_generated_${gen_type}")
-    file(READ "${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.txt-core" "core_generated_${gen_type}")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake")
+    include("${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake")
+
+    add_custom_command(
+      COMMENT "Generating ATen ${gen_type}"
+      OUTPUT ${generated_${gen_type}} ${cuda_generated_${gen_type}} ${core_generated_${gen_type}}
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/core_generated_${gen_type}.cmake
+        ${CMAKE_BINARY_DIR}/aten/src/ATen/cuda_generated_${gen_type}.cmake
+      COMMAND ${GEN_COMMAND_${gen_type}}
+      DEPENDS ${all_python} ${${gen_type}_templates}
+        ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+    )
   endforeach()
-
-  file(GLOB_RECURSE header_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.h")
-  file(GLOB_RECURSE source_templates "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/templates/*\.cpp")
-
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen)
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/aten/src/ATen/core)
-
-  add_custom_command(
-    OUTPUT ${generated_headers} ${cuda_generated_headers} ${core_generated_headers}
-    COMMAND ${GEN_COMMAND} --generate headers
-    DEPENDS ${all_python} ${header_templates}
-      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    )
-
-  add_custom_command(
-    OUTPUT ${generated_sources} ${cuda_generated_sources} ${core_generated_sources}
-    COMMAND ${GEN_COMMAND} --generate sources
-    DEPENDS ${all_python} ${source_templates}
-      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    )
-
-  add_custom_command(
-    OUTPUT
-      ${generated_declarations_yaml}
-      ${cuda_generated_declarations_yaml}
-      ${core_generated_declarations_yaml}
-    COMMAND ${GEN_COMMAND} --generate declarations_yaml
-    DEPENDS ${all_python}
-      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
-    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
-    )
 
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
