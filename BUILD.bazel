@@ -44,14 +44,13 @@ cc_library(
         "c10/cuda/*.h",
         "c10/cuda/impl/*.h",
         "c10/mobile/*.h",
-    ]),
+    ]) + ["//c10/util:headers"],
     deps = [
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
         "//c10/macros:Macros",
         "//c10/util:C++17",
         "//c10/util:TypeTraits",
-        "//c10/util:headers",
         ":cuda_cmake_macros_h",
     ],
 )
@@ -68,10 +67,10 @@ cc_library(
             "c10/cuda/impl/*.cpp",
         ]),
         [],
-    ),
+    ) + ["//c10/util:sources"],
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
-        "//c10/util",
+        ":c10_headers",
         "//c10/util:C++17",
         "//c10/util:TypeTraits",
         "@fmt",
