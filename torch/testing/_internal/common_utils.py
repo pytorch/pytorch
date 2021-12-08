@@ -40,7 +40,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -83,6 +83,7 @@ SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 slow_tests_dict: Optional[Dict[str, Any]] = None
 disabled_tests_dict: Optional[Dict[str, Any]] = None
 
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 class _TestParametrizer(object):
     """
@@ -2106,6 +2107,18 @@ class TestCase(expecttest.TestCase):
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
+        # Verifies that an exception with the type expected_exception and message
+        # matching the regular expression defined by expected_regex is thrown.
+        # If the test is instantiated for a non-native device type (like XLA)
+        # then the message is not validated.
+
+        # Checks whether the test is instantiated for a device type by testing
+        # if the test class has defined the device_type attribute and,
+        # if so, tests whether the instantiated device type is native or not
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+            # empty string matches any string
+            expected_regex = ''
+
         if self._ignore_not_implemented_error:
             context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
                 expected_exception, self, expected_regex)
@@ -3105,8 +3118,14 @@ def get_cycles_per_ms() -> float:
     return mean(vals[2 : num - 2])
 
 
-def first_sample(self, samples):
+T = TypeVar('T')
+def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
+    """
+    Returns the first sample from an iterable of samples, like those returned by OpInfo.
+    The test will be skipped if no samples are available.
+    """
     try:
         return next(iter(samples))
     except StopIteration:
         self.skipTest('Skipped! Need at least 1 sample input')
+        assert False  # For mypy, since skipTest isn't marked NoReturn
