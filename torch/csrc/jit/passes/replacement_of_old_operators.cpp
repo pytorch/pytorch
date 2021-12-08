@@ -26,7 +26,7 @@ struct OldOpsReplacer {
     Node* node = graph_it.next();
     while (node) {
       if (auto schema = node->maybeSchema()) {
-        auto schema_name = schema->name() + "." + schema->overload_name();
+        auto schema_name = schema->name() + (schema->overload_name() != "" ? "." + schema->overload_name() : "");
         // this implies there was a version bump because of this operator
         auto version_entry = operator_version_map.find(schema_name);
         if (version_entry != operator_version_map.end()) {
