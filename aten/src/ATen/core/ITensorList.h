@@ -16,43 +16,6 @@ namespace c10 {
 class ITensorList;
 class ITensorListIterator;
 
-/*
- * Adding a new tag
- * ================
-
- * -> Short Version
- *
- * If you are lucky, the only necessary things for introducing
- * a new tag are:
- *
- *     - Add a line to `TORCH_ITENSORLIST_FORALL_TAGS` such as:
- *                 `_(TagName, ##__VA_ARGS__)`
- *
- *     - Specialize `ITensorListTagImpl` to your tag, implementing
- *       the required methods
- *
- *     - Implement constructors for the type corresponding to your
- *       tag on both `ITensorList(Iterator)` classes
- *
- * -> Long Version
- *
- * That may not work if your container is "more different" than
- * the ones implemented. Specifically, maybe, some of the functions
- * implemented with `TORCH_ITENSORLIST_UNWRAP` may not work for it.
- * In those cases, you should do something like `get` and
- * `iterator_get` functions.
- *
- * Say the implementation for `begin` is different. Then, you should:
- *
- *     - Do everything done in the "Short Version" for introducing
- *       the new tag
- *
- *     - Implement a new function `begin` in all implementation
- *       classes (for all tag types)
- *
- *     - Call it directly inside a `TORCH_ITENSORLIST_UNWRAP`
- */
-
 // Applies arbitrary macros to each `ITensorListTag`.
 #define TORCH_ITENSORLIST_FORALL_TAGS(_, ...) \
   _(Unboxed, ##__VA_ARGS__)                   \
@@ -100,8 +63,10 @@ using ITensorListConstRef =
  * possible `ITensorListTag` type (except `None`).
  *
  * Specializations of this class should, at least, define:
- *     - a type `self_t`
- *     - 2 functions `unwrap` (const and non-const overloads)
+ *     - a type `list_type`
+ *     - 1 function `unwrap` for getting the actual `list_type`
+ *     - 2 functions `unwrap` (const and non-const overloads) for getting
+ *       iterators of `list_type`
  *     - a function `iterator_get`
  *
  * See the examples below.
@@ -112,25 +77,28 @@ class ITensorListTagImpl {};
 template <>
 class ITensorListTagImpl<ITensorListTag::Unboxed> {
  public:
-  using self_t = at::ArrayRef<at::Tensor>;
-  // Unwraps an `ITensorList` into a const-ref of type `self_t`.
-  static const self_t& unwrap(const ITensorList& ilist);
+  using list_type = at::ArrayRef<at::Tensor>;
+
+  // Unwraps an `ITensorList` into a const-ref of type `list_type`.
+  static const list_type& unwrap(const ITensorList& ilist);
+
   // Unwraps an `ITensorListIterator` into a (const) ref of type
-  // `self_t::const_iterator`. Has overload for const.
-  static self_t::const_iterator& unwrap(ITensorListIterator& it);
-  static const self_t::const_iterator& unwrap(const ITensorListIterator& it);
+  // `list_type::const_iterator`. Has overload for const.
+  static list_type::const_iterator& unwrap(ITensorListIterator& it);
+  static const list_type::const_iterator& unwrap(const ITensorListIterator& it);
+
   // Accesses the element referenced by the unwrapped iterator `it`.
-  static ITensorListConstRef iterator_get(const self_t::const_iterator& it);
+  static ITensorListConstRef iterator_get(const list_type::const_iterator& it);
 };
 
 template <>
 class ITensorListTagImpl<ITensorListTag::Boxed> {
  public:
-  using self_t = List<at::Tensor>;
-  static const self_t& unwrap(const ITensorList& ilist);
-  static self_t::const_iterator& unwrap(ITensorListIterator& it);
-  static const self_t::const_iterator& unwrap(const ITensorListIterator& it);
-  static ITensorListConstRef iterator_get(const self_t::const_iterator& it);
+  using list_type = List<at::Tensor>;
+  static const list_type& unwrap(const ITensorList& ilist);
+  static list_type::const_iterator& unwrap(ITensorListIterator& it);
+  static const list_type::const_iterator& unwrap(const ITensorListIterator& it);
+  static ITensorListConstRef iterator_get(const list_type::const_iterator& it);
 };
 } // namespace detail
 
@@ -150,14 +118,14 @@ class ITensorListIterator
   TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
 
-  using unboxed_iterator_t =
-      TORCH_ITENSORLIST_IMPL(Unboxed)::self_t::const_iterator;
-  using boxed_iterator_t =
-      TORCH_ITENSORLIST_IMPL(Boxed)::self_t::const_iterator;
+  using unboxed_iterator_type =
+      TORCH_ITENSORLIST_IMPL(Unboxed)::list_type::const_iterator;
+  using boxed_iterator_type =
+      TORCH_ITENSORLIST_IMPL(Boxed)::list_type::const_iterator;
 
   union Payload {
-    boxed_iterator_t boxed_iterator;
-    unboxed_iterator_t unboxed_iterator;
+    boxed_iterator_type boxed_iterator;
+    unboxed_iterator_type unboxed_iterator;
     void* _init_ptr;
     Payload() : _init_ptr(nullptr) {}
     ~Payload() = default;
@@ -166,11 +134,11 @@ class ITensorListIterator
  public:
   ITensorListIterator() : tag_(ITensorListTag::None) {}
 
-  ITensorListIterator(boxed_iterator_t boxed) : tag_(ITensorListTag::Boxed) {
+  ITensorListIterator(boxed_iterator_type boxed) : tag_(ITensorListTag::Boxed) {
     payload_.boxed_iterator = boxed;
   }
 
-  ITensorListIterator(unboxed_iterator_t unboxed)
+  ITensorListIterator(unboxed_iterator_type unboxed)
       : tag_(ITensorListTag::Unboxed) {
     payload_.unboxed_iterator = unboxed;
   }
@@ -221,6 +189,7 @@ class ITensorListIterator
 };
 
 /*
+ * [Note: ITensorList]
  * Wrapper around boxed and unboxed API containers.
  *
  * Tagged union of both API containers:
@@ -238,12 +207,12 @@ class ITensorList {
   TORCH_ITENSORLIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
 
-  using unboxed_t = TORCH_ITENSORLIST_IMPL(Unboxed)::self_t;
-  using boxed_t = TORCH_ITENSORLIST_IMPL(Boxed)::self_t;
+  using unboxed_type = TORCH_ITENSORLIST_IMPL(Unboxed)::list_type;
+  using boxed_type = TORCH_ITENSORLIST_IMPL(Boxed)::list_type;
 
   union Payload {
-    const boxed_t* boxed;
-    unboxed_t unboxed;
+    const boxed_type* boxed;
+    unboxed_type unboxed;
     Payload() : boxed(nullptr) {}
     ~Payload() = default;
   };
@@ -260,21 +229,21 @@ class ITensorList {
     payload_.unboxed = at::ArrayRef<at::Tensor>(list);
   }
 
-  ITensorList(const boxed_t& boxed) : tag_(ITensorListTag::Boxed) {
+  ITensorList(const boxed_type& boxed) : tag_(ITensorListTag::Boxed) {
     payload_.boxed = &boxed;
   }
 
-  ITensorList(const unboxed_t& unboxed) : tag_(ITensorListTag::Unboxed) {
+  ITensorList(const unboxed_type& unboxed) : tag_(ITensorListTag::Unboxed) {
     payload_.unboxed = unboxed;
   }
 
   template <
       typename... UnboxedConstructorArgs,
       typename = std::enable_if_t<
-          std::is_constructible<unboxed_t, UnboxedConstructorArgs...>::value>>
+          std::is_constructible<unboxed_type, UnboxedConstructorArgs...>::value>>
   ITensorList(UnboxedConstructorArgs&&... args)
       : tag_(ITensorListTag::Unboxed) {
-    payload_.unboxed = unboxed_t(std::forward<UnboxedConstructorArgs>(args)...);
+    payload_.unboxed = unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
   }
 
   size_t size() const {
@@ -309,7 +278,7 @@ class ITensorList {
   }
 
 #define DEFINE_CASTING(TAG, ...)                                        \
-  const typename TORCH_ITENSORLIST_IMPL(TAG)::self_t& to##TAG() const { \
+  const typename TORCH_ITENSORLIST_IMPL(TAG)::list_type& to##TAG() const { \
     TORCH_INTERNAL_ASSERT(is##TAG());                                   \
     return TORCH_ITENSORLIST_IMPL(TAG)::unwrap(*this);                  \
   }
@@ -322,46 +291,66 @@ class ITensorList {
 };
 } // namespace c10
 
-inline const TORCH_ITENSORLIST_IMPL(Unboxed)::self_t& TORCH_ITENSORLIST_IMPL(
-    Unboxed)::unwrap(const c10::ITensorList& ilist) {
+inline
+const TORCH_ITENSORLIST_IMPL(Unboxed)::list_type&
+TORCH_ITENSORLIST_IMPL(Unboxed)::unwrap(
+    const c10::ITensorList& ilist
+) {
   return ilist.payload_.unboxed;
 }
 
-inline TORCH_ITENSORLIST_IMPL(Unboxed)::self_t::
-    const_iterator& TORCH_ITENSORLIST_IMPL(Unboxed)::unwrap(
-        c10::ITensorListIterator& it) {
+inline
+TORCH_ITENSORLIST_IMPL(Unboxed)::list_type::const_iterator&
+TORCH_ITENSORLIST_IMPL(Unboxed)::unwrap(
+    c10::ITensorListIterator& it
+) {
   return it.payload_.unboxed_iterator;
 }
 
-inline const TORCH_ITENSORLIST_IMPL(Unboxed)::self_t::
-    const_iterator& TORCH_ITENSORLIST_IMPL(Unboxed)::unwrap(
-        const c10::ITensorListIterator& it) {
+inline
+const TORCH_ITENSORLIST_IMPL(Unboxed)::list_type::const_iterator&
+TORCH_ITENSORLIST_IMPL(Unboxed)::unwrap(
+    const c10::ITensorListIterator& it
+) {
   return it.payload_.unboxed_iterator;
 }
 
-inline c10::detail::ITensorListConstRef TORCH_ITENSORLIST_IMPL(
-    Unboxed)::iterator_get(const self_t::const_iterator& it) {
+inline
+c10::detail::ITensorListConstRef
+TORCH_ITENSORLIST_IMPL(Unboxed)::iterator_get(
+    const list_type::const_iterator& it
+) {
   return *it;
 }
 
-inline const TORCH_ITENSORLIST_IMPL(Boxed)::self_t& TORCH_ITENSORLIST_IMPL(
-    Boxed)::unwrap(const c10::ITensorList& ilist) {
+inline
+const TORCH_ITENSORLIST_IMPL(Boxed)::list_type&
+TORCH_ITENSORLIST_IMPL(Boxed)::unwrap(
+    const c10::ITensorList& ilist
+) {
   return *ilist.payload_.boxed;
 }
 
-inline TORCH_ITENSORLIST_IMPL(Boxed)::self_t::
-    const_iterator& TORCH_ITENSORLIST_IMPL(Boxed)::unwrap(
-        c10::ITensorListIterator& it) {
+inline
+TORCH_ITENSORLIST_IMPL(Boxed)::list_type::const_iterator&
+TORCH_ITENSORLIST_IMPL(Boxed)::unwrap(
+    c10::ITensorListIterator& it
+) {
   return it.payload_.boxed_iterator;
 }
 
-inline const TORCH_ITENSORLIST_IMPL(Boxed)::self_t::
-    const_iterator& TORCH_ITENSORLIST_IMPL(Boxed)::unwrap(
-        const c10::ITensorListIterator& it) {
+inline
+const TORCH_ITENSORLIST_IMPL(Boxed)::list_type::const_iterator&
+TORCH_ITENSORLIST_IMPL(Boxed)::unwrap(
+    const c10::ITensorListIterator& it
+) {
   return it.payload_.boxed_iterator;
 }
 
-inline c10::detail::ITensorListConstRef TORCH_ITENSORLIST_IMPL(
-    Boxed)::iterator_get(const self_t::const_iterator& it) {
-  return (*it).get();
+inline
+c10::detail::ITensorListConstRef
+TORCH_ITENSORLIST_IMPL(Boxed)::iterator_get(
+    const list_type::const_iterator& it
+) {
+  return (*it).get().toTensor();
 }
