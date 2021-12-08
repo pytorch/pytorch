@@ -63,6 +63,9 @@ enum class ConvBackend {
 
 // Function to select the convolution backend based on the inputs and params.
 // This overload is used within the convolution internals but not exposed to python.
+// NB: The forward pass provides a bias tensor while the backward pass provides
+// a bool indicating whether the bias is defined. This is done to save memory by
+// avoiding saving the full bias tensor for backward.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
