@@ -187,16 +187,15 @@ class Wishart(ExponentialFamily):
         sample = chol @ chol.transpose(-2, -1)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
-        support_check = self.support.check(sample).all()
-        if not support_check:
+        support_check = self.support.check(sample)
+        if not support_check.all():
             warnings.warn("Singular sample detected.")
 
-        while not support_check:
-            fix_list = support_check.logical_not().nonzero(as_tuple=True)
-            fix_samples = self.rsample([len(fix_list)])
-            for ind, sample_index in enumerate(fix_list):
-                sample[sample_index] = fix_samples[ind]
-            support_check = self.support.check(sample).all()
+            while not support_check.all():
+                fix_list = support_check.logical_not().nonzero(as_tuple=True)
+                fix_samples = self.rsample([len(fix_list)])
+                sample[fix_list] = fix_samples
+                support_check = self.support.check(sample)
 
         return sample
 
