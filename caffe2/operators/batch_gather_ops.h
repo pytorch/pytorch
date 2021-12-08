@@ -80,7 +80,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(data.dim(), 2, "DATA should be at least 2-D");
     // Outer dimensions of input data and gradient should be the same
     // because they are preserved for gathers with axis > 0.
-    for (int acheck = 0; acheck < axis; acheck++) {
+    for (const auto acheck : c10::irange(axis)) {
       CAFFE_ENFORCE_EQ(
           data.size(acheck),
           grad.size(acheck),
@@ -105,7 +105,7 @@ class BatchGatherGradientOp final : public Operator<Context> {
     auto idx_inner_dims_product = indices.size_from_dim(axis);
     if (match_outer) {
       CAFFE_ENFORCE_GE(axis, 1, "Axis should be at least 1");
-      for (auto i = 0; i < axis; i++) {
+      for (const auto i : c10::irange(axis)) {
         CAFFE_ENFORCE_EQ(
             data.size(i),
             indices.size(i),
@@ -120,11 +120,11 @@ class BatchGatherGradientOp final : public Operator<Context> {
     gather_helper::check_indexarray_range<TInd>(
         idxs, N, src_indexing_axis_dim, false);
 
-    for (auto batch = 0; batch < outer_dims_product; ++batch) {
+    for (const auto batch : c10::irange(outer_dims_product)) {
       auto grad_batch_base = grad_data + batch * gathered_grad_batch_size;
       auto out_batch_base = out_data + batch * batch_size;
 
-      for (auto i = 0; i < N; ++i) {
+      for (const auto i : c10::irange(N)) {
         auto idx = idxs[i];
         if (match_outer) {
           idx = idxs[batch * idx_inner_dims_product + i];
