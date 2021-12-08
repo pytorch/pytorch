@@ -50,6 +50,7 @@ class ThreadPool {
     if (scheduled) {
       cv_.notify_one();
     } else {
+      // NOLINTNEXTLINE(bugprone-use-after-move)
       ScheduleOnThread(std::move(closure));
     }
   }
