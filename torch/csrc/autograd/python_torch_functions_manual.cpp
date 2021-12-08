@@ -653,9 +653,7 @@ static PyObject * THPVariable__sync(PyObject *self, PyObject* args, PyObject* kw
   auto r = parser.parse(args, kwargs, parsed_args);
   auto self_ = r.tensor(0);
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self_));
-  auto wrapped_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self_);
-  wrapped_impl->apply_updates();
-  wrapped_impl->regenerate_from_base();
+  at::functionalization::impl::sync(self_);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
