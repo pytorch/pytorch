@@ -255,21 +255,24 @@ class BufLiveRange : public IRVisitor {
  public:
   BufLiveRange(BufPtr b) : buf_(b) {}
 
-  std::tuple<int32_t, int32_t> getLiveRange() {
-    return std::make_tuple(begin_, end_);
-  }
-
   static std::tuple<int32_t, int32_t> liveRange(StmtPtr s, BufPtr b) {
     BlockPtr block = to<Block>(s);
-    TORCH_INTERNAL_ASSERT(
-        block, "Only analze buffer live range for block stmt");
+    // We Only analze buffer live ranges for block stmts.
+    if (!block) {
+      return std::make_tuple(0, 0);
+    }
+
     BufLiveRange analyzer(b);
     block->accept(&analyzer);
     return analyzer.getLiveRange();
   }
 
  private:
-  bool findBufReads(StmtPtr s) {
+  std::tuple<int32_t, int32_t> getLiveRange() {
+    return std::make_tuple(begin_, end_);
+  }
+
+  bool hasBufReads(StmtPtr s) {
     auto loads1 = NodeFinder<Load>::find(s);
     for (auto l : loads1) {
       if (l->buf() == buf_) {
@@ -287,7 +290,7 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  bool findBufWrites(StmtPtr s) {
+  bool hasBufWrites(StmtPtr s) {
     auto writes1 = NodeFinder<Store>::find(s);
     for (auto w : writes1) {
       if (w->buf() == buf_) {
@@ -303,8 +306,8 @@ class BufLiveRange : public IRVisitor {
     return false;
   }
 
-  void updateRange(StmtPtr s) {
-    bool has_reads = findBufReads(s), has_writes = findBufWrites(s);
+  void findAccAndUpdateLiveRange(StmtPtr s) {
+    bool has_reads = hasBufReads(s), has_writes = hasBufWrites(s);
     if (has_reads || has_writes) {
       if (begin_ == -1) {
         begin_ = curr_index_;
@@ -313,35 +316,10 @@ class BufLiveRange : public IRVisitor {
     }
   }
 
-  void visit(StorePtr v) {
-    updateRange(v);
-  }
-
-  void visit(LetPtr v) {
-    updateRange(v);
-  }
-
-  void visit(AtomicAddPtr v) {
-    updateRange(v);
-  }
-
-  void visit(ExternalCallPtr v) {
-    updateRange(v);
-  }
-
   void visit(BlockPtr v) {
-    // Stmt counter of the block
-    bool enable_count = false;
     for (StmtPtr s : *v) {
-      if (to_count_) {
-        curr_index_ += 1;
-        to_count_ = false;
-        enable_count = true;
-      }
-      s->accept(this);
-      if (enable_count) {
-        to_count_ = true;
-      }
+      curr_index_ += 1;
+      findAccAndUpdateLiveRange(s);
     }
   }
 
@@ -349,7 +327,6 @@ class BufLiveRange : public IRVisitor {
   int32_t begin_ = -1;
   int32_t end_ = -1;
   int32_t curr_index_ = -1;
-  bool to_count_ = true;
 };
 
 // A class that analyzes the given program relevant for Block backend
