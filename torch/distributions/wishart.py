@@ -190,10 +190,9 @@ class Wishart(ExponentialFamily):
         if not support_check.all():
             warnings.warn("Singular sample detected.")
 
-            sample = sample.index_put_(
-                indices=support_check,
-                values=torch.eye(p, dtype=sample.dtype, device=sample.device).mul(1e-8),
-                accumulate=True,
+            sample[support_check.logical_not()] = (
+                sample[support_check.logical_not()]
+                + torch.eye(p, dtype=sample.dtype, device=sample.device).mul(1e-8)
             )
 
         return sample
