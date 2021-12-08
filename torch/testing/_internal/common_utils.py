@@ -3127,5 +3127,4 @@ def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
     try:
         return next(iter(samples))
     except StopIteration:
-        self.skipTest('Skipped! Need at least 1 sample input')
-        assert False  # For mypy, since skipTest isn't marked NoReturn
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
