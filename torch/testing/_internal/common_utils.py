@@ -773,8 +773,7 @@ TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 # If this is True then CUDA memory leak checks are skipped. If this is false
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
-# TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
-TEST_SKIP_CUDA_MEM_LEAK_CHECK = False  # TODO: update me!
+TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
 
 # Disables tests for when on Github Actions
 ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
@@ -1261,11 +1260,6 @@ class CudaMemoryLeakCheck():
         if not discrepancy_detected:
             return
 
-        # See #62533
-        # ROCM: Sometimes the transient memory is reported as leaked memory
-        if TEST_WITH_ROCM:
-            return
-
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
@@ -1305,7 +1299,7 @@ class CudaMemoryLeakCheck():
                 warnings.warn(msg)
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
-                #   failure
+                #   failure (except on ROCm, see below)
                 msg = """CUDA driver API confirmed a leak in {}!
                          Caching allocator allocated memory was {} and is now reported as {}
                          on device {}.
@@ -1316,7 +1310,13 @@ class CudaMemoryLeakCheck():
                     i,
                     self.driver_befores[i],
                     driver_mem_allocated)
-                self.testcase.fail(msg)
+
+                # See #62533
+                # ROCM: Sometimes the transient memory is reported as leaked memory
+                if TEST_WITH_ROCM:
+                    warnings.warn(msg)
+                else:
+                    self.testcase.fail(msg)
 
 @contextmanager
 def skip_exception_type(exc_type):
