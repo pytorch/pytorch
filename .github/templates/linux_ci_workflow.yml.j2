@@ -240,10 +240,18 @@ jobs:
           else
             TEST_COMMAND=.jenkins/pytorch/test.sh
           fi
+          PROXY_ENV=
+          # NOTE: XLA multiprocessing tests appear to have issues with squid proxy, going to disable for now
+          #       We should investigate whether or not there's a list of hostnames we can add to no_proxy to
+          #       make it so that we shouldn't have to fully disable squid for XLA tests
+          if [[ $TEST_CONFIG != 'xla' ]]; then
+            # shellcheck disable=SC2089
+            PROXY_ENV="-e http_proxy=!{{ common.squid_proxy }} -e https_proxy=!{{ common.squid_proxy }} -e no_proxy=!{{ common.squid_no_proxy }}"
+          fi
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG since that doesn't play nice
-          # shellcheck disable=SC2086
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
@@ -265,12 +273,13 @@ jobs:
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e http_proxy="!{{ common.squid_proxy }}" -e https_proxy="!{{ common.squid_proxy }}" -e no_proxy="!{{ common.squid_no_proxy }}" \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
+            ${PROXY_ENV} \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
+            --ipc=host \
             --shm-size="${SHM_SIZE}" \
             --tty \
             --detach \
@@ -287,6 +296,7 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.render_test_results() }}
+      !{{ common.upload_downloaded_files(name='linux') }}
       !{{ common.upload_test_reports(name='linux') }}
       !{{ common.upload_test_statistics(build_environment) }}
       !{{ common.teardown_ec2_linux() }}
@@ -303,6 +313,7 @@ jobs:
     env:
       DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
+      WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
@@ -316,6 +327,17 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
+{%- if is_scheduled %}
+      - name: Generate netrc (only for docs-push)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
+          echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
+{%- endif %}
       - name: Build ${{ matrix.docs_type }} docs
         run: |
           set -ex
@@ -333,12 +355,16 @@ jobs:
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
             -e PR_LABELS \
+            -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --tty \
             --detach \
             --user jenkins \
+{%- if is_scheduled %}
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/workspace/.netrc \
+{%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
