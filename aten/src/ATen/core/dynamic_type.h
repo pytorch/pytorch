@@ -6,6 +6,8 @@
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
+namespace c10 {
+
 using DynamicTypeBits = std::uint32_t;
 #define DYNAMIC_TYPE_BIT(x) (1u << x)
 
@@ -40,8 +42,6 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(AnyTuple,                                                                \
     (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit))  \
   _(Any, 0xffffffff)
-
-namespace c10 {
 
 struct LabeledDynamicType;
 class DynamicType;
@@ -85,8 +85,9 @@ using DynamicTypePtr = std::shared_ptr<DynamicType>;
  * Special cases can be added but they generally should not take too much code
  * size.
  *
- * DynamicType doesn't necessarily inherit from c10::Type, we might want to
- * inherit from c10::Type to reduce the migration cost.
+ * DynamicType may or may not inherit from c10::Type because it's not the core
+ * requirement of DynamicType to interface with existing JIT types, but we might
+ * want to inherit from c10::Type to reduce the migration cost.
  */
 class DynamicType : public Type {
   using ClassTypePtr = std::shared_ptr<const c10::ClassType>;
@@ -139,18 +140,6 @@ class DynamicType : public Type {
     ClassTypePtr class_;
     TypeKind typeKind_;
   };
-};
-
-/**
- * A implementation detail to support NamedTuple.
- */
-struct LabeledDynamicType {
-  c10::optional<std::string> label;
-  DynamicTypePtr ty;
-  explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
-
-  bool equals(const LabeledDynamicType& other) const;
-  bool isSubtypeOf(const LabeledDynamicType& other) const;
 };
 
 } // namespace c10
