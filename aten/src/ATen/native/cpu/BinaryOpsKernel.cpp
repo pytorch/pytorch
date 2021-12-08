@@ -1125,8 +1125,9 @@ void xlog1py_kernel(TensorIteratorBase& iter) {
 
 void zeta_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cpu", [&]() {
+    using opmath_t = at::opmath_type<scalar_t>;
     cpu_kernel(iter, [](scalar_t x, scalar_t q) -> scalar_t {
-      return zeta(x, q);
+      return zeta<opmath_t>(x, q);
     });
   });
 }

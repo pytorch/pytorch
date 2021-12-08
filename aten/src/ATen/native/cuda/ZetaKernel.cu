@@ -14,8 +14,10 @@ namespace {
  */
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>; // no-op for now, but if we ever dispatch zeta to low precision type,
+      //this  will be needed
       gpu_kernel_with_scalars(iter, []GPU_LAMBDA(scalar_t x, scalar_t q) -> scalar_t {
-        return zeta<scalar_t, /*is_cuda=*/true>(x, q);
+        return zeta<opmath_t>(x, q);
       });
     });
 }

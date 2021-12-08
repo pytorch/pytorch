@@ -11,7 +11,7 @@
 #include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/math_compat.h>
-#include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
@@ -150,14 +150,14 @@ Date:  February 1996
  * This function is derived from the implementation of the zeta function in the Cephes Math Library.
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
-template <typename scalar_t, bool is_cuda=false>
+template <typename scalar_t>
 C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_ignore_float_divide_by_zero__ {
-  using acc_t = at::acc_type<scalar_t, is_cuda>;
-  const acc_t MACHEP = acc_t{1.11022302462515654042E-16};
-  constexpr acc_t zero = acc_t{0.0};
-  constexpr acc_t half = acc_t{0.5};
-  constexpr acc_t one = acc_t{1.0};
-  static const acc_t A[] = {
+  static_assert(!std::is_same<scalar_t, at::Half>() && !std::is_same<scalar_t, at::BFloat16>(), "don't instantiate with low precision type");
+  const scalar_t MACHEP = scalar_t{1.11022302462515654042E-16};
+  constexpr scalar_t zero = scalar_t{0.0};
+  constexpr scalar_t half = scalar_t{0.5};
+  constexpr scalar_t one = scalar_t{1.0};
+  static const scalar_t A[] = {
       12.0,
       -720.0,
       30240.0,
@@ -173,7 +173,7 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
   };
 
   int i = 0;
-  acc_t a, b, k, s, t, w;
+  scalar_t a, b, k, s, t, w;
   if (x == one) {
     return std::numeric_limits<scalar_t>::infinity();
   }
@@ -195,13 +195,13 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
   a = q;
   i = 0;
   b = zero;
-  while ((i < 9) || (a <= acc_t{9.0})) {
+  while ((i < 9) || (a <= scalar_t{9.0})) {
     i += 1;
     a += one;
     b = ::pow(a, -x);
     s += b;
     if ((-MACHEP * s < b) && (b < MACHEP * s)) {
-      return static_cast<scalar_t>(s);
+      return s;
     }
   };
 
@@ -217,14 +217,14 @@ C10_HOST_DEVICE static inline scalar_t zeta(scalar_t x, scalar_t q) __ubsan_igno
     s = s + t;
     t = ::fabs(t / s);
     if (t < MACHEP) {
-      return static_cast<scalar_t>(s);
+      return s;
     }
     k += one;
     a *= x + k;
     b /= w;
     k += one;
   }
-  return static_cast<scalar_t>(s);
+  return s;
 }
 
 /*
@@ -404,12 +404,13 @@ static inline float calc_digamma(float x) {
   return result + logf(x) - (0.5f / x) - y;
 }
 
-template <typename scalar_t, bool is_cuda=false>
+template <typename scalar_t>
 static inline C10_HOST_DEVICE scalar_t calc_polygamma(int n, scalar_t x) {
+  using opmath_t = at::opmath_type<scalar_t>;
   // already blocked if n <= 1
   return ((n % 2) ? 1.0 : -1.0) *
       ::exp(::lgamma(static_cast<scalar_t>(n) + 1.0)) *
-      zeta<scalar_t, is_cuda>(static_cast<scalar_t>(n + 1), x);
+      zeta<opmath_t>(static_cast<opmath_t>(n + 1), x); // x will be implicitly converted to opmath_t
 }
 
 // regularized lower incomplete gamma
