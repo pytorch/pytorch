@@ -748,9 +748,11 @@ class TestGradients(TestCase):
     def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
         def call_grad_test_helper():
+            check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
+                                          (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
                                    check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=op.check_batched_forward_grad and not is_inplace)
+                                   check_batched_forward_grad=check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
