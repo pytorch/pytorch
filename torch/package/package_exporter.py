@@ -44,7 +44,6 @@ ActionHook = Callable[["PackageExporter", str], None]
 
 DEFAULT_SELECTIVE_INTERN_LIST = {
     "torch": [
-        "torch.fb",
         "torch.quantization",
         "torch.fx",
         "torch.testing._internal.quantization_torch_package_models",
@@ -503,6 +502,9 @@ class PackageExporter:
                         provided=True,
                         is_package=is_package,
                     )
+                    for submodule_name in self._selective_interns[module_name]:
+                        if submodule_name not in self.dependency_graph:
+                            self.add_dependency(submodule_name)
                 return
 
         # No patterns have matched. Explicitly add this as an error.

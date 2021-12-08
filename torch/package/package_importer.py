@@ -202,8 +202,6 @@ class PackageImporter(Importer):
             assert isinstance(saved_id, tuple)
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
-            # print(saved_id)
-            # print('\n\n')
             if typename == "storage":
                 storage_type, key, location, size = data
                 dtype = storage_type.dtype
