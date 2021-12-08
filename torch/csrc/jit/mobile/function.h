@@ -59,11 +59,11 @@ class TORCH_API Function : public torch::jit::Function {
   // If no corresponding debug handle is found then -1 is returned.
   const std::vector<int64_t>& getExceptionDebugHandles() const;
   static Function& registerFunc(
-      const std::string qualified_name,
+      const std::string& qualified_name,
       const std::vector<Instruction>& instructions,
-      const std::vector<c10::IValue> constants,
-      const std::vector<c10::TypePtr> types,
-      const google::int64 register_size);
+      const std::vector<c10::IValue>& constants,
+      const std::vector<c10::TypePtr>& types,
+      const size_t register_size);
 
  private:
   c10::QualifiedName name_;
