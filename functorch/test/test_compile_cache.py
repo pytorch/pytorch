@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
 import unittest
 
-from functorch.compile import memory_efficient_operator_authoring
+from functorch.compile import memory_efficient_pointwise_fusion
 from functorch.compile import compiled_function
 
 from torch.testing._internal.common_utils import TestCase, run_tests
@@ -36,7 +36,7 @@ class TestCompileCache(TestCase):
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
             start_num_recomps = functorch.compile.num_of_recompilations()
-            mem_optimized_fn = memory_efficient_operator_authoring(
+            mem_optimized_fn = memory_efficient_pointwise_fusion(
                 fn,
                 compiler_name="torchscript_nnc",
                 hasher_type=hasher_type,
@@ -74,7 +74,7 @@ class TestCompileCache(TestCase):
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
             start_num_recomps = functorch.compile.num_of_recompilations()
-            mem_optimized_fn = memory_efficient_operator_authoring(
+            mem_optimized_fn = memory_efficient_pointwise_fusion(
                 fn, compiler_name="torchscript_nnc", hasher_type=hasher_type
             )
 
@@ -164,10 +164,10 @@ class TestCompileCache(TestCase):
 
         for hasher_type in ["DynamicShapeHasher", "StaticShapeHasher"]:
             functorch.compile.clear_compile_cache()
-            mem_optimized_f = memory_efficient_operator_authoring(
+            mem_optimized_f = memory_efficient_pointwise_fusion(
                 f, compiler_name="torchscript_nnc", hasher_type=hasher_type
             )
-            mem_optimized_g = memory_efficient_operator_authoring(
+            mem_optimized_g = memory_efficient_pointwise_fusion(
                 g, compiler_name="torchscript_nnc", hasher_type=hasher_type
             )
 
