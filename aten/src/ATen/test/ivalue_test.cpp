@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/core/Dict.h>
+#include <c10/util/intrusive_ptr.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
-#include <c10/util/intrusive_ptr.h>
-#include <ATen/core/Dict.h>
 
 // Snippets for checking assembly.
 c10::IValue inspectTupleConstruction() {
@@ -670,6 +670,21 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
         << " at index " << ii;
     }
   }
+}
+
+TEST(IValueTest, IdentityAndHashing_SparseCOO) {
+  using namespace torch::indexing;
+
+  at::Tensor t1 = at::rand({3, 4}).to_sparse();
+  at::Tensor t2 = at::rand({3, 4}).to_sparse();
+
+  IValue tv1(t1), tv1b(t1), tv2(t2);
+
+  EXPECT_EQ(tv1.hash(), tv1b.hash());
+  EXPECT_NE(tv1.hash(), tv2.hash());
+
+  EXPECT_TRUE(tv1.is(tv1b));
+  EXPECT_FALSE(tv1.is(tv2));
 }
 
 TEST(IValueTest, getSubValues) {

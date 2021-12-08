@@ -298,6 +298,9 @@ struct TORCH_API IValue final {
       if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
         return thisTensor.unsafeGetTensorImpl() ==
             rhsTensor.unsafeGetTensorImpl();
+      } else if (thisTensor.is_sparse()) {
+        return thisTensor._values().unsafeGetTensorImpl() ==
+            rhsTensor._values().unsafeGetTensorImpl();
       }
 
       return thisTensor.is_alias_of(rhsTensor);
@@ -872,17 +875,22 @@ struct TORCH_API IValue final {
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
+    size_t hashTensor(const at::Tensor& ten) const {
+      if (ten.is_mkldnn()) {
+        // MKLDNN tensors dont have storage and dont create views
+        // or aliasing so we can just use Tensor pointer, TODO: find way
+        // to use mkldnn storage
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+      } else if (ten.is_sparse()) {
+        return hashTensor(ten._values());
+      } else {
+        return reinterpret_cast<size_t>(
+            ten.storage().unsafeGetStorageImpl());
+      }
+    }
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
-          // MKLDNN tensors dont have storage and dont create views
-          // or aliasing so we can just use Tensor pointer, TODO: find way
-          // to use mkldnn storage
-          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
-        } else {
-          return reinterpret_cast<size_t>(
-              val.toTensor().storage().unsafeGetStorageImpl());
-        }
+        return hashTensor(val.toTensor());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
