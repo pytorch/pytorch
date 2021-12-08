@@ -7,7 +7,6 @@ load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sou
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
-load("@com_github_google_flatbuffers//:build_defs.bzl", "flatbuffer_cc_library")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -239,6 +238,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
@@ -392,7 +392,6 @@ filegroup(
     name = "thc_srcs_cu",
     srcs = [
         "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
         "aten/src/THC/THCSortUtils.cu.cc",
         "aten/src/THC/THCTensor.cu.cc",
         "aten/src/THC/THCTensorCopy.cu.cc",
@@ -543,6 +542,7 @@ header_template_rule(
 cc_library(
     name = "aten_headers",
     hdrs = [
+        "torch/csrc/Export.h",
         "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
@@ -1834,14 +1834,6 @@ genrule(
     tools = [':gen_version_header']
 )
 
-flatbuffer_cc_library(
-    name = "mobile_bytecode_header",
-    srcs = ["torch/csrc/jit/serialization/mobile_bytecode.fbs"],
-    out_prefix = "torch/csrc/jit/serialization/",
-    flatc_args=["--gen-mutable", "--scoped-enums",],
-)
-
-
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1873,7 +1865,6 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
-        ":mobile_bytecode_header",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1914,32 +1905,6 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
-)
-
-cc_library(
-    name = "flatbuffer_loader",
-    srcs = [
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
-    ],
-    hdrs = [
-        "torch/csrc/jit/mobile/flatbuffer_loader.h"
-    ],
-    deps = [
-        ":torch"
-    ]
-)
-
-cc_library(
-    name = "flatbuffer_serializer",
-    srcs = [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp"
-    ],
-    hdrs = [
-        "torch/csrc/jit/serialization/flatbuffer_serializer.h"
-    ],
-    deps = [
-        ":torch"
-    ]
 )
 
 cc_library(
@@ -2092,8 +2057,6 @@ cc_test(
     ],
     deps = [
         ":torch",
-        ":flatbuffer_serializer",
-        ":flatbuffer_loader",
         "@com_google_googletest//:gtest_main",
     ],
 )
