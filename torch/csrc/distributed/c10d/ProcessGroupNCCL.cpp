@@ -593,9 +593,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-  if (!ucc_lib) {
+  if (ucc_lib == nullptr) {
     ucc_lib = loadTorchUCC();
-    if (ucc_lib) {
+    if (ucc_lib != nullptr) {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     } else {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
