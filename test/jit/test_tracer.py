@@ -1001,7 +1001,18 @@ class TestTracer(JitTestCase):
         traced_model.to('cpu')
         cpu_out = traced_model(x.float())
         self.assertEqual(cpu_out, cuda_out)
-        traced_model.double()
+        traced_model.double().cuda()
+        cuda_out = traced_model(x.double().cuda())
+        traced_model.cpu()
+        cpu_out = traced_model(x.double())
+        self.assertEqual(cpu_out, cuda_out)
+        traced_model.to('cuda')
+        cuda_out = traced_model(x.double().cuda())
+        traced_model.to('cpu')
+        cpu_out = traced_model(x.double())
+        self.assertEqual(cpu_out, cuda_out)
+
+        traced_model.float()
 
         # state_dict + load_state_dict
         state = {k: v.clone() for k, v in traced_model.state_dict().items()}

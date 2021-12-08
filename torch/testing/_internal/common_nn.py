@@ -421,7 +421,7 @@ def bceloss_weights_no_reduce_test():
         cpp_function_call='F::binary_cross_entropy('
                           'i, t.to(i.options()), '
                           'F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))',
-        input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
+        input_fn=lambda: torch.rand(15, 10, dtype=torch.double).clamp_(2.8e-2, 1 - 2.8e-2),
         cpp_var_map={'i': '_get_input()', 't': t, 'weights': weights},
         reference_fn=lambda i, p, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         pickle=False,
@@ -441,7 +441,7 @@ def bceloss_weights_no_reduce_scalar_test():
             i, t.to(i.options()),
             F::BinaryCrossEntropyFuncOptions().weight(weights.to(i.options())).reduction(torch::kNone))''',
         cpp_var_map={'i': '_get_input()', 't': t, 'weights': weights},
-        input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        input_fn=lambda: torch.rand((), dtype=torch.double).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, *_: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         pickle=False
     )
@@ -1209,7 +1209,7 @@ def multimarginloss_weights_no_reduce_test():
 
 
 def fractional_max_pool2d_test(test_case, return_indices=False):
-    random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
+    random_samples = torch.empty((1, 3, 2)).uniform_()
     if test_case == 'ratio':
         out = dict(
             constructor=lambda: nn.FractionalMaxPool2d(
@@ -1241,7 +1241,7 @@ def fractional_max_pool2d_test(test_case, return_indices=False):
 def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
     if use_random_samples:
         # random_samples enables CPU and GPU checks to be consistent
-        random_samples = torch.empty((1, 3, 2), dtype=torch.double).uniform_()
+        random_samples = torch.empty((1, 3, 2)).uniform_()
         if test_case == 'ratio':
             return dict(
                 constructor=lambda: nn.FractionalMaxPool2d(
@@ -1289,7 +1289,7 @@ def fractional_max_pool2d_no_batch_dim_test(test_case, use_random_samples):
 
 
 def fractional_max_pool3d_test(test_case, return_indices=False):
-    random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
+    random_samples = torch.empty((2, 4, 3)).uniform_()
     if test_case == 'ratio':
         out = dict(
             constructor=lambda: nn.FractionalMaxPool3d(
@@ -1332,7 +1332,7 @@ def fractional_max_pool3d_test(test_case, return_indices=False):
 def fractional_max_pool3d_no_batch_dim_test(test_case, use_random_samples):
     if use_random_samples:
         # random_samples enables CPU and GPU checks to be consistent
-        random_samples = torch.empty((2, 4, 3), dtype=torch.double).uniform_()
+        random_samples = torch.empty((2, 4, 3)).uniform_()
         if test_case == 'ratio':
             return dict(
                 constructor=lambda: nn.FractionalMaxPool3d(
@@ -3781,7 +3781,7 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
-        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.float64),
+        constructor=wrap_functional(F.softmax, dim=1, dtype=torch.get_default_dtype()),
         cpp_options_args='F::SoftmaxFuncOptions(1).dtype(torch::kFloat64)',
         input_size=(2, 2, 4, 4),  # regular spatial algorithm
         fullname='softmax_spatial_dtype',
@@ -4685,9 +4685,9 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         losses.append(-alpha[-2:].sum().log()[None])
     output = torch.cat(losses, 0)
     if reduction == 'mean':
-        return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
+        return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean().to(dt)
     elif reduction == 'sum':
-        return output.sum()
+        return output.sum().to(dt)
     output = output.to(dt)
     return output
 
@@ -4873,7 +4873,7 @@ criterion_tests = [
     dict(
         module_name='BCELoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
             (i.numel() if get_reduction(m) else 1),
         check_bfloat16=True,
@@ -4883,7 +4883,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(10),),
         cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) else 1),
         desc='weights',
@@ -4995,9 +4995,9 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiMarginLoss',
-        constructor_args=(1, 1., torch.rand(10).double()),
+        constructor_args=(1, 1., torch.rand(10)),
         cpp_constructor_args='torch::nn::MultiMarginLossOptions().p(1).margin(1.).weight(torch::rand(10))',
-        legacy_constructor_args=(1, torch.rand(10).double()),
+        legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
@@ -5073,14 +5073,14 @@ criterion_tests = [
     dict(
         module_name='BCEWithLogitsLoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
     ),
     dict(
         module_name='BCEWithLogitsLoss',
         constructor_args=(torch.rand(10),),
         cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand(10))',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(15, 10).gt(0).double(),
+        target_fn=lambda: torch.randn(15, 10).gt(0).to(torch.get_default_dtype()),
         desc='weights',
     ),
     dict(
@@ -5088,7 +5088,7 @@ criterion_tests = [
         constructor_args=(torch.rand(()),),
         cpp_constructor_args='torch::nn::BCEWithLogitsLossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.randn(()).gt(0).double(),
+        target_fn=lambda: torch.randn(()).gt(0).to(torch.get_default_dtype()),
         desc='scalar_weights'
     ),
     dict(
@@ -5486,7 +5486,7 @@ criterion_tests = [
         constructor_args_fn=lambda: (torch.rand(()),),
         cpp_constructor_args='torch::nn::BCELossOptions().weight(torch::rand({}))',
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch.rand(()).gt(0).double(),
+        target_fn=lambda: torch.rand(()).gt(0).to(torch.get_default_dtype()),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_reduction(m) == 'mean' else 1),
         desc='scalar_weights',

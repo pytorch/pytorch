@@ -109,7 +109,9 @@ class TestModels(JitTestCase):
         bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
         self.checkTrace(DCGANGenerator(nz, ngf, nc).to(device),
                         (torch.rand(bs, nz, 1, 1, device=device),),
-                        export_import=check_export_import)
+                        export_import=check_export_import,
+                        grad_atol=1e-4,
+                        grad_rtol=1.3e-06)
         example_input = DCGANGenerator(nz, ngf, nc).to(device)(torch.rand(bs, nz, 1, 1, device=device))
         self.checkTrace(DCGANDiscriminator(nc, ndf).to(device), (example_input,),
                         export_import=check_export_import)

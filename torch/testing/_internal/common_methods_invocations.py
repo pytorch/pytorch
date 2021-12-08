@@ -32,7 +32,8 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW
+    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
+    IS_SANDCASTLE, IS_FBCODE,
 )
 
 import torch._refs as refs  # noqa: F401
@@ -129,6 +130,10 @@ from torch.testing._internal.opinfo.definitions.special import (
 from torch.testing._internal.opinfo.definitions._masked import (
     sample_inputs_softmax_variant,
 )
+
+# This assertion fails when run in internal CI
+if not IS_SANDCASTLE and not IS_FBCODE:
+    assert torch.get_default_dtype() == torch.float32
 
 if TEST_SCIPY:
     from scipy import stats
@@ -7576,6 +7581,12 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
             need_attn_weights=need_attn_weights,
             dropout_p=dropout_p
         )
+
+def pairwise_distance_ref(a, b, p=2.0, eps=1e-6, keepdim=False):
+    res = np.sum(np.abs(a - b + eps) ** p, axis=-1, keepdims=keepdim) ** (1 / p)
+    if np.issubdtype(a.dtype, np.integer):
+        res = res.astype(np.float32)
+    return res
 
 def sample_inputs_pairwise_distance(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -17272,9 +17283,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.pairwise_distance",
-        ref=lambda a, b, p=2.0, eps=1e-6, keepdim=False: (
-            np.sum(np.abs(a - b + eps) ** p, axis=-1, keepdims=keepdim) ** (1 / p)
-        ),
+        ref=pairwise_distance_ref,
         sample_inputs_func=sample_inputs_pairwise_distance,
         dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
         supports_out=False,

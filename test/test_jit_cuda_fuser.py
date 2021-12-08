@@ -765,7 +765,7 @@ class TestCudaFuser(JitTestCase):
 
         # n-dim with scalar (type-promote)
         x = torch.randn(4, 8, 32, 32, device="cuda").to(dtype=torch.long)
-        z = torch.tensor(3., dtype=torch.double)
+        z = torch.tensor(3., dtype=torch.float)
         run_scalar(x, z)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")

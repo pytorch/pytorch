@@ -11,6 +11,7 @@ from typing import List
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, freeze_rng_state
+from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
@@ -157,8 +158,12 @@ class TestRemoveMutation(JitTestCase):
         self.run_pass('remove_mutation', graph)
         FileCheck().check_not('aten::fill_').run(graph)
 
-        def normal():
-            return torch.rand(2, 1, 3, 4).normal_()
+        if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
+            def normal():
+                return torch.rand(2, 1, 3, 4, dtype=torch.float).normal_()
+        else:
+            def normal():
+                return torch.rand(2, 1, 3, 4).normal_()
 
         fn = torch.jit.script(normal)
         graph = fn.graph
