@@ -833,6 +833,17 @@ TupleTypePtr TupleType::createNamed(const c10::optional<c10::QualifiedName>& qua
       field_types, qualName, schema)); // NOLINT(modernize-make-shared)
 }
 
+c10::optional<std::vector<c10::string_view>> TupleType::names() const {
+  if (!schema_) {
+    return {};
+  }
+  std::vector<c10::string_view> ret;
+  for (const auto& arg : schema_->arguments()) {
+    ret.emplace_back(arg.name());
+  }
+  return ret;
+}
+
 bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
   if (rhs.kind() == OptionalType::Kind) {
     return true;
@@ -946,7 +957,8 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
   *to_flatten = to_fill;
 }
 
-std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
+std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
+    const {
   std::stringstream ss;
 
   bool can_hold_numbertype = this->canHoldType(*NumberType::get());
@@ -962,7 +974,10 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
     return false;
   };
 
-  ss << "Union[";
+  std::string open_delimeter = is_annotation_str ? "[" : "(";
+  std::string close_delimeter = is_annotation_str ? "]" : ")";
+
+  ss << "Union" + open_delimeter;
   bool printed = false;
   for (size_t i = 0; i < types_.size(); ++i) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
@@ -987,7 +1002,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
       ss << NumberType::get()->str();
     }
   }
-  ss << "]";
+  ss << close_delimeter;
   return ss.str();
 }
 
