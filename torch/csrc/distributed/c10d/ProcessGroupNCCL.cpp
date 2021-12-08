@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
+#include <mutex>
 
 #include <THC/THC.h>
 
@@ -593,14 +594,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-  if (ucc_lib_ == nullptr) {
+
+  static std::once_flag initialize_ucc_lib_flag;
+  std::call_once(initialize_ucc_lib_flag, [&]{
     ucc_lib_ = loadTorchUCC();
     if (ucc_lib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     } else {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
     }
-  }
+  });
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2213,7 +2216,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib = nullptr;
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib_ = nullptr;
 
 } // namespace c10d
 
