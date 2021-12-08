@@ -107,8 +107,8 @@ const char* toString(DispatchKey t) {
       return "AutogradPrivateUse1";
     case DispatchKey::AutogradPrivateUse2:
       return "AutogradPrivateUse2";
-    case DispatchKey::AutogradPrivateUse3:
-      return "AutogradPrivateUse3";
+//    case DispatchKey::AutogradPrivateUse3:
+//      return "AutogradPrivateUse3";
     case DispatchKey::AutogradOther:
       return "AutogradOther";
     case DispatchKey::BackendSelect:
@@ -136,6 +136,9 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::CompositeExplicitAutograd:
       return "CompositeExplicitAutograd";
+
+    case DispatchKey::MetaInit:
+      return "MetaInit";
 
     case DispatchKey::TESTING_ONLY_GenericWrapper:
       return "TESTING_ONLY_GenericWrapper";
@@ -200,8 +203,8 @@ DispatchKey getAutogradKeyFromBackend(DispatchKey t) {
       return DispatchKey::AutogradPrivateUse1;
     case DispatchKey::PrivateUse2:
       return DispatchKey::AutogradPrivateUse2;
-    case DispatchKey::PrivateUse3:
-      return DispatchKey::AutogradPrivateUse3;
+//    case DispatchKey::PrivateUse3:
+//      return DispatchKey::AutogradPrivateUse3;
     default:
       return DispatchKey::AutogradOther;
   }
@@ -260,7 +263,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradNestedTensor", c10::DispatchKey::AutogradNestedTensor},
       {"AutogradPrivateUse1", c10::DispatchKey::AutogradPrivateUse1},
       {"AutogradPrivateUse2", c10::DispatchKey::AutogradPrivateUse2},
-      {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
+      //{"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
       {"Tracer", c10::DispatchKey::Tracer},
       {"AutocastCPU", c10::DispatchKey::AutocastCPU},
       {"AutocastCUDA", c10::DispatchKey::AutocastCUDA},
@@ -271,6 +274,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"FuncTorchGradWrapper", c10::DispatchKey::FuncTorchGradWrapper},
       {"FuncTorchDynamicLayerFrontMode",
        c10::DispatchKey::FuncTorchDynamicLayerFrontMode},
+      {"MetaInit", c10::DispatchKey::MetaInit},
       {"TESTING_ONLY_GenericWrapper",
        c10::DispatchKey::TESTING_ONLY_GenericWrapper},
       {"TESTING_ONLY_GenericMode", c10::DispatchKey::TESTING_ONLY_GenericMode},

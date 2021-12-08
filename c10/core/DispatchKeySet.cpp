@@ -87,8 +87,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
       return DispatchKeySet(DispatchKey::PrivateUse1);
     case DispatchKey::AutogradPrivateUse2:
       return DispatchKeySet(DispatchKey::PrivateUse2);
-    case DispatchKey::AutogradPrivateUse3:
-      return DispatchKeySet(DispatchKey::PrivateUse3);
+//    case DispatchKey::AutogradPrivateUse3:
+//      return DispatchKeySet(DispatchKey::PrivateUse3);
     case DispatchKey::AutogradOther:
       return autogradother_backends;
     default:

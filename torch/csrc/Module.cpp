@@ -33,6 +33,7 @@
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
+#include <torch/csrc/MetaInit.h>
 #include <torch/csrc/QScheme.h>
 #include <torch/csrc/TypeInfo.h>
 #include <torch/csrc/autograd/python_nn_functions.h>
@@ -1009,6 +1010,8 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def("_get_linalg_preferred_backend", []() {
     return at::globalContext().linalgPreferredBackend();
   });
+
+  torch::initMetaInitFunctions(py_module);
 
 #ifdef USE_CUDA
   PyObject *has_cuda = Py_True;

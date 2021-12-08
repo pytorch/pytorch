@@ -19,6 +19,7 @@
 #include <ATen/DLConvertor.h>
 #include <ATen/dlpack.h>
 #include <ATen/InitialTensorOptions.h>
+#include <ATen/MetaInit.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TracerMode.h>
 #include <c10/core/Backend.h>
@@ -227,6 +228,12 @@ Tensor internal_new_from_data(
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
+
+  // We skip the meta-init backend for external tensors and always initialize
+  // them. Since the data is already in memory, in most cases this won't pose
+  // a problem unless the caller asks for a copy of the data. We might try to
+  // improve how we handle this logic in the future though.
+  at::DisableMetaInitGuard meta_init_guard{};
 
   if (THPVariable_Check(data)) {
     TORCH_CHECK(!pin_memory, "Can't pin tensor constructed from a variable");

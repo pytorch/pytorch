@@ -750,6 +750,7 @@ libtorch_python_core_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/MemoryFormat.cpp",
+    "torch/csrc/MetaInit.cpp",
     "torch/csrc/QScheme.cpp",
     "torch/csrc/Module.cpp",
     "torch/csrc/python_dimname.cpp",

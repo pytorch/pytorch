@@ -245,7 +245,7 @@ enum class DispatchKey : uint8_t {
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
   AutogradPrivateUse2,
-  AutogradPrivateUse3,
+  //AutogradPrivateUse3,
 
   Tracer,
 
@@ -280,6 +280,10 @@ enum class DispatchKey : uint8_t {
   // See Note [Functionalization Pass In Core] for details.
   Functionalize,
   FuncTorchDynamicLayerFrontMode, // See Note [Out-of-tree vmap+grad prototype]
+
+  // The dispatch key for the meta-init backend which forces all tensors to use
+  // the meta device regardless of their real device.
+  MetaInit,
 
   // TESTING: This is intended to be a generic testing tensor type id.
   // Don't use it for anything real; its only acceptable use is within a single
@@ -330,7 +334,7 @@ enum class DispatchKey : uint8_t {
   DefaultBackend = CompositeExplicitAutograd,
   PrivateUse1_PreAutograd = AutogradPrivateUse1,
   PrivateUse2_PreAutograd = AutogradPrivateUse2,
-  PrivateUse3_PreAutograd = AutogradPrivateUse3,
+  //PrivateUse3_PreAutograd = AutogradPrivateUse3,
   Autocast = AutocastCUDA,
 };
 
