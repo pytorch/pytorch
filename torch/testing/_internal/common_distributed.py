@@ -139,7 +139,13 @@ def verify_ddp_error_logged(model_DDP, err_substr):
     assert "iteration" in ddp_logging_data
     assert "has_error" in ddp_logging_data
     assert "error" in ddp_logging_data
-    assert err_substr in ddp_logging_data["error"]
+    logging_err = ddp_logging_data["error"]
+    # Remove C++ stacktrace if needed.
+    actual = (
+        err_substr if err_substr.find("\nException raised from ") == -1
+        else err_substr.split("\nException raised from ")[0]
+    )
+    assert actual in logging_err, f"Did not find expected {actual} in ddp logging data error: {logging_err}"
 
 
 def with_nccl_blocking_wait(func):
@@ -569,6 +575,8 @@ class MultiProcessTestCase(TestCase):
             # Register signal handler to dump stack traces on FATALs.
             # Windows and MacOS do not support the signal handlers.
             torch._C._set_print_stack_traces_on_fatal_signal(True)
+        # Show full C++ stacktraces when a Python error originating from C++ is raised.
+        os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
 
         # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
         # We're retrieving a corresponding test and executing it.
