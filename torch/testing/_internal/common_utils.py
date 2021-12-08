@@ -615,7 +615,7 @@ def run_tests(argv=UNITTEST_ARGS):
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
             other_args = list(('--import-disabled-tests',) if IMPORT_DISABLED_TESTS else () +
-                          ('--import-slow-tests',) if IMPORT_SLOW_TESTS else ())
+                              ('--import-slow-tests',) if IMPORT_SLOW_TESTS else ())
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
