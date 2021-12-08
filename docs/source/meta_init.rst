@@ -227,7 +227,7 @@ way that conflicts with the meta device (e.g. if it uses an operator that does
 not support the meta backend).
 
 Relationship to ``torch.nn.utils.skip_init()``
---------------------------------------------------
+----------------------------------------------
 Although they sound similar :func:`meta_init()` and :func:`torch.nn.utils.skip_init()`
 serve different purposes. ``meta_init()`` is meant for large module
 materialization and targets model users, while ``skip_init()`` is meant for

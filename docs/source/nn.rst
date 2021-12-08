@@ -438,7 +438,7 @@ Utility functions in other modules
     nn.Unflatten
 
 Large Module Materialization
----------------------------
+----------------------------
 
 Large Model Materialization API enables constructing ``torch.nn.Module``
 instances on the meta device for inspection purposes. It is meant to be used if
