@@ -333,9 +333,14 @@ static DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 static DispatchKeySet autogradother_backends = DispatchKeySet(
-    {DispatchKey::HIP,
-     DispatchKey::VE,
-     DispatchKey::FPGA,
+    // TODO: delete commented code before landing.
+    // HIP and VE now have their own backend bits, which means that
+    // they can now have their own Autograd keys.
+    // Technically, HIP will now redispatch to its own custom AutogradHIP slot
+    // in the runtime table.
+    //{DispatchKey::HIP,
+     //DispatchKey::VE,
+     {DispatchKey::FPGA,
      DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,

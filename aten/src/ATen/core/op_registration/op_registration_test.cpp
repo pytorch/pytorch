@@ -1880,6 +1880,27 @@ TEST(NewOperatorRegistrationTest, dispatchMultipleTensors) {
   }
 }
 
+TEST(NewOperatorRegistrationTest, registerCompositeImplicitAutogradWithCPUKernel_andCallAutogradOtherKernel_callsComposite) {
+  bool math_called = false;
+  bool cpu_called = false;
+  auto m = MAKE_TORCH_LIBRARY(test);
+  m.def("fn(Tensor dummy) -> Tensor");
+  m.impl("fn", c10::DispatchKey::CPU, [&](const Tensor& x) { cpu_called = true; return x; });
+  m.impl("fn", c10::DispatchKey::CompositeImplicitAutograd, [&](const Tensor& x) { math_called = true; return x; });
+
+  auto op = Dispatcher::singleton().findSchema({"test::fn", ""});
+  ASSERT_TRUE(op.has_value());
+
+  {
+    math_called = cpu_called = false;
+    // Meta should redispatch to the AutogradOther backend,
+    // which the composite kernel should be registered to.
+    callOp(*op, dummyTensor(c10::DispatchKey::Meta, /*requires_grad=*/true));
+    ASSERT_TRUE(math_called);
+    ASSERT_FALSE(cpu_called);
+  }
+}
+
 TEST(NewOperatorRegistrationTest, dispatchMultiple) {
   bool cpu_called = false;
   bool cuda_called = false;

@@ -1072,7 +1072,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (value) {
       TORCH_INTERNAL_ASSERT(false, "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
     } else {
-      key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
+      key_set_ = key_set_.removeFunctionalityKey(DispatchKey::ZeroTensor);
     }
   }
 
