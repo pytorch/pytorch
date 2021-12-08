@@ -1575,7 +1575,7 @@ TEST(LiteInterpreterUpgraderTest, DivTensorV2) {
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
-  for (auto& byteCodeFunctionWithOperator : kUpgraderByteCode) {
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
     ASSERT_EQ(
         byteCodeFunctionWithOperator.function.get_code()->operators_.size(),
         byteCodeFunctionWithOperator.function.get_code()->op_names_.size());
@@ -1591,7 +1591,7 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
   }
 
-  ASSERT_EQ(kUpgraderByteCode.size(), upgrader_functions.size());
+  ASSERT_EQ(getUpgraderBytecodeList().size(), upgrader_functions.size());
 }
 
 } // namespace jit
