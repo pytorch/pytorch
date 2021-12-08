@@ -1106,8 +1106,8 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   });
 }
 
-
-std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
+std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
+    const {
   std::stringstream ss;
 
   bool can_hold_numbertype = this->canHoldType(*NumberType::get());
@@ -1123,7 +1123,10 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
     return false;
   };
 
-  ss << "Union[";
+  std::string open_delimeter = is_annotation_str ? "[" : "(";
+  std::string close_delimeter = is_annotation_str ? "]" : ")";
+
+  ss << "Union" + open_delimeter;
   bool printed = false;
   for (size_t i = 0; i < types_.size(); ++i) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
@@ -1148,7 +1151,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
       ss << NumberType::get()->str();
     }
   }
-  ss << "]";
+  ss << close_delimeter;
   return ss.str();
 }
 
