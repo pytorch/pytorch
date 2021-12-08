@@ -2,7 +2,6 @@
 
 #include <string>
 
-#include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <c10/util/Exception.h>
@@ -18,6 +17,18 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
   return contains(lhs, static_cast<DynamicTypeBits>(rhs));
 }
 } // namespace
+
+/**
+ * A implementation detail to support NamedTuple.
+ */
+struct LabeledDynamicType {
+  c10::optional<std::string> label;
+  DynamicTypePtr ty;
+  explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
+
+  bool equals(const LabeledDynamicType& other) const;
+  bool isSubtypeOf(const LabeledDynamicType& other) const;
+};
 
 std::string DynamicType::str() const {
   std::string ret = "Dynamic<";
@@ -121,12 +132,8 @@ DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
   }
 
   if (auto tup = other.castRaw<TupleType>()) {
-    if (auto schema = tup->schema()) {
-      std::vector<c10::string_view> names;
-      for (const auto& args : schema->arguments()) {
-        names.push_back(args.name());
-      }
-      new (&arguments_) Arguments(names, args);
+    if (auto names = tup->names()) {
+      new (&arguments_) Arguments(*names, args);
       return;
     }
   }
