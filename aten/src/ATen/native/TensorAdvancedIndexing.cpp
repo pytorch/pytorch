@@ -55,6 +55,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/core/IList.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Copy.h>
@@ -71,6 +72,54 @@
 #include <vector>
 
 namespace at {
+namespace native {
+
+static std::string shapes_as_str(TensorList tensors) {
+  std::ostringstream os;
+  bool first = true;
+  for (auto& tensor : tensors) {
+    if (tensor.defined()) {
+      if (!first) {
+        os << ", ";
+      }
+      os << tensor.sizes();
+      first = false;
+    }
+  }
+  return os.str();
+}
+
+static AdvancedIndex make_info(Tensor self, IOptTensorRefList orig) {
+  checkIndexTensorTypes(orig);
+  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
+  auto indices = expandTensors(self, orig);
+  // next broadcast all index tensors together
+  try {
+    indices = expand_outplace(indices);
+  } catch (std::exception& e) {
+    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
+                      " with shapes ", shapes_as_str(indices));
+  }
+  // add missing null Tensors so that it matches self.dim()
+  while (indices.size() < (size_t)self.dim()) {
+    indices.emplace_back();
+  }
+  // if the non-null indices are not all adjacent, transpose self and indices
+  // together so that they're adjacent at the front
+  if (!hasContiguousSubspace(indices)) {
+    std::tie(self, indices) = transposeToFront(self, indices);
+  }
+  // Ensure indices are on the same device as self
+  for (auto & indice : indices) {
+    if (indice.defined() && indice.device() != self.device()) {
+      indice = indice.to(self.device());
+    }
+  }
+  return AdvancedIndex(self, indices);
+}
+
+} // namespace native
+
 namespace meta {
 
 native::SCATTER_GATHER_OP get_operator_enum(const c10::string_view reduce) {
@@ -195,6 +244,52 @@ TORCH_META_FUNC(_scatter_reduce)
   set_output(sizes, self.options());
 }
 
+static void build_index_op(
+    TensorIteratorBase& iter,
+    const at::native::AdvancedIndex& info,
+    const Tensor& result) {
+  TensorIteratorConfig config;
+  // info.src is a restrided view of result
+  config.set_check_mem_overlap(false)
+      .check_all_same_dtype(false)
+      .add_output(result)
+      .add_input(info.src);
+  for (auto& index : info.indices) {
+    config.add_owned_input(index);
+  }
+  if (!result.defined()) {
+    config.declare_static_dtype_and_device(info.src.scalar_type(), info.src.device());
+  }
+  iter.build(config);
+}
+
+TORCH_PRECOMPUTE_META_FUNC2(index, Tensor)
+(const Tensor& self, at::IOptTensorRefList indices) {
+  TORCH_CHECK_INDEX(
+      indices.size() <= (size_t)self.dim(),
+      "too many indices for tensor of dimension ",
+      self.dim(), " (got ", indices.size(), ")");
+
+  const auto& result = maybe_get_output();
+
+  if (result.defined()) {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+    // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
+    for (const auto& index: indices) {
+      if (index.has_value()) {
+        at::assert_no_overlap(result, *index);
+      }
+    }
+  }
+
+  auto info = at::native::make_info(self, indices);
+  build_index_op(*this, info, result);
+  return TORCH_PRECOMPUTE_STRUCT2(index, Tensor)()
+      .set_sizes(std::move(info.indexed_sizes))
+      .set_strides(std::move(info.indexed_strides));
+}
+
 } // namespace meta
 
 namespace native {
@@ -228,21 +323,6 @@ static bool all_strides_match(TensorList tensors) {
     }
   }
   return true;
-}
-
-static std::string shapes_as_str(TensorList tensors) {
-  std::ostringstream os;
-  bool first = true;
-  for (auto& tensor : tensors) {
-    if (tensor.defined()) {
-      if (!first) {
-        os << ", ";
-      }
-      os << tensor.sizes();
-      first = false;
-    }
-  }
-  return os.str();
 }
 
 // Replace indexed dimensions in src with stride 0 and the size of the result tensor.
@@ -357,34 +437,7 @@ const Tensor& value){
   return std::make_tuple(true, mask);
 }
 
-static AdvancedIndex make_info(Tensor self, const torch::List<c10::optional<at::Tensor>>& orig) {
-  checkIndexTensorTypes(orig);
-  // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
-  auto indices = expandTensors(self, orig);
-  // next broadcast all index tensors together
-  try {
-    indices = expand_outplace(indices);
-  } catch (std::exception& e) {
-    TORCH_CHECK_INDEX(false, "shape mismatch: indexing tensors could not be broadcast together"
-                   " with shapes ", shapes_as_str(indices));
-  }
-  // add missing null Tensors so that it matches self.dim()
-  while (indices.size() < (size_t)self.dim()) {
-    indices.emplace_back();
-  }
-  // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the front
-  if (!hasContiguousSubspace(indices)) {
-    std::tie(self, indices) = transposeToFront(self, indices);
-  }
-  // Ensure indices are on the same device as self
-  for (auto & indice : indices) {
-    if (indice.defined() && indice.device() != self.device()) {
-      indice = indice.to(self.device());
-    }
-  }
-  return AdvancedIndex(self, indices);
-}
+
 
 static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const Tensor& value) {
   TORCH_CHECK(is_expandable_to(value.sizes(), info.src.sizes()), "shape mismatch: value tensor of shape ", value.sizes(),
@@ -406,39 +459,12 @@ static TensorIterator make_index_put_iterator(const AdvancedIndex& info, const T
   return config.build();
 }
 
-static TensorIterator make_index_iterator(const AdvancedIndex& info) {
-  TensorIteratorConfig config;
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .declare_static_dtype_and_device(info.src.scalar_type(), info.src.device())
-        .add_owned_output(Tensor())
-        .add_input(info.src);
-  for (auto& index : info.indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
-static TensorIterator make_index_out_iterator(const AdvancedIndex& info, Tensor& result) {
-  TensorIteratorConfig config;
-  // info.src is a restrided view of result
-  config.set_check_mem_overlap(false)
-        .check_all_same_dtype(false)
-        .add_output(result)
-        .add_input(info.src);
-  for (auto& index : info.indices) {
-    config.add_input(index);
-  }
-  return config.build();
-}
-
-Tensor index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-
-  auto info = make_info(self, indices);
-  auto iter = make_index_iterator(info);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  return iter.output();
+TORCH_IMPL_FUNC(index_out)
+(const Tensor& self,
+ DimVector sizes,
+ DimVector strides,
+ const Tensor& result) {
+  index_stub(device_type(), *this, sizes, strides);
 }
 
 Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
@@ -450,33 +476,9 @@ Tensor quantized_index(const Tensor & self, const torch::List<c10::optional<Tens
   // For now, this is a naive implementation which does dq -> index -> q.
   // TODO(future PR): improve performance by removing the copies.
   const auto& self_dq = self.dequantize();
-
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-
-  auto info = make_info(self_dq, indices);
-  auto iter = make_index_iterator(info);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  at::Tensor res = iter.output();
-
+  auto result = at::index(self_dq, indices);
   return at::quantize_per_tensor(
-      res, self.q_scale(), self.q_zero_point(), self.scalar_type());
-}
-
-Tensor& index_out(Tensor& result, const Tensor & self, const torch::List<c10::optional<Tensor>>& indices) {
-  TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
-  at::assert_no_internal_overlap(result);
-  at::assert_no_overlap(result, self);
-  // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
-    if (index.has_value()) {
-      at::assert_no_overlap(result, *index);
-    }
-  }
-
-  auto info = make_info(self, indices);
-  auto iter = make_index_out_iterator(info, result);
-  index_stub(iter.device_type(), iter, info.indexed_sizes, info.indexed_strides);
-  return result;
+      result, self.q_scale(), self.q_zero_point(), self.scalar_type());
 }
 
 Tensor & put_(Tensor & self, const Tensor& index, const Tensor & source, const bool accumulate) {

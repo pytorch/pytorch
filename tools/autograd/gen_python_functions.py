@@ -76,7 +76,7 @@ _SKIP_PYTHON_BINDINGS = [
     '_?sparse_csr_tensor.*',
     '_arange.*', '_range.*', 'linspace.*', 'logspace.*',
     '_sparse_add_out', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*', '_sparse_dense_add_out',
-    'index', 'unique_dim_consecutive',
+    'index', 'index_out', 'unique_dim_consecutive',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*',
     '_th_.*', '_thnn_.*',
     'arange.*', 'range.*', '_solve.*', '_inverse.*',

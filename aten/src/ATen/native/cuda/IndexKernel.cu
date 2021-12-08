@@ -12,6 +12,7 @@
 #include <ATen/cuda/cub.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/CUDAFunctions.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/native/cuda/Loops.cuh>
@@ -53,7 +54,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 }
 
 template <typename func_t>
-void gpu_index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
+void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
   AT_ASSERT(num_indices == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
@@ -181,7 +182,7 @@ void index_copy_kernel_impl(
 }
 
 template <typename scalar_t>
-void index_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+void index_kernel_impl(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   gpu_index_kernel(iter, index_size, index_stride, []C10_DEVICE(char* out_data, char* in_data, int64_t offset) {
     *(scalar_t*)out_data = *(scalar_t*)(in_data + offset);
   });
@@ -194,7 +195,7 @@ void index_put_kernel_impl(TensorIterator& iter, IntArrayRef index_size, IntArra
   });
 }
 
-static void index_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride) {
+static void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::Bool, at::ScalarType::BFloat16, iter.dtype(), "index_cuda", [&] {
     using dtype = OpaqueType<sizeof(scalar_t)>;
     index_kernel_impl<dtype>(iter, index_size, index_stride);
@@ -261,7 +262,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   // owning and expand_outplace returns a borrow, the returned borrow
   // would dangle.
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
-  at::native::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
+  at::cuda::index_out(result, *std::get<1>(mask_self_expanded), c10::List<c10::optional<at::Tensor>>({*std::get<0>(std::move(mask_self_expanded))}));
 
   return result;
 }

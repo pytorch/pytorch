@@ -992,6 +992,7 @@ BaseTy = Enum('BaseTy', (
     'Tensor',
     'int',
     'Dimname',
+    'DimVector',
     'float',
     'str',
     'bool',
