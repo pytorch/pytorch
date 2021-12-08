@@ -1,9 +1,10 @@
 #include "lazy_tensors/computation_client/metrics_reader.h"
 
-#include <sstream>
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/util.h>
 
-#include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/computation_client/util.h"
+#include <cmath>
+#include <sstream>
 
 namespace lazy_tensors {
 namespace metrics_reader {
@@ -39,7 +40,7 @@ struct Metric {
 };
 
 struct MetricFnInfo {
-  metrics::MetricReprFn repr_fn;
+  torch::lazy::MetricReprFn repr_fn;
   double scale;
 };
 
@@ -47,11 +48,11 @@ MetricFnInfo GetMetricRenderInfo(const Percentile& percentile) {
   switch (percentile.unit_of_measure) {
     default:
     case Percentile::UnitOfMeaure::kNumber:
-      return {metrics::MetricFnValue, 1.0};
+      return {torch::lazy::MetricFnValue, 1.0};
     case Percentile::UnitOfMeaure::kTime:
-      return {metrics::MetricFnTime, 1e6};
+      return {torch::lazy::MetricFnTime, 1e6};
     case Percentile::UnitOfMeaure::kBytes:
-      return {metrics::MetricFnBytes, 1.0};
+      return {torch::lazy::MetricFnBytes, 1.0};
   }
 }
 
@@ -103,7 +104,7 @@ std::string CreateXrtMetricReport() {
 }  // namespace
 
 std::string CreateMetricReport() {
-  return metrics::CreateMetricReport() + CreateXrtMetricReport();
+  return torch::lazy::CreateMetricReport() + CreateXrtMetricReport();
 }
 
 }  // namespace metrics_reader

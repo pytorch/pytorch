@@ -17,17 +17,15 @@ typename T::mapped_type FindOr(const T& cont, const typename T::key_type& key,
 }  // namespace
 
 MetricsSnapshot::MetricsSnapshot() {
-  for (auto& name : lazy_tensors::metrics::GetMetricNames()) {
-    lazy_tensors::metrics::MetricData* metric =
-        lazy_tensors::metrics::GetMetric(name);
+  for (auto& name : torch::lazy::GetMetricNames()) {
+    torch::lazy::MetricData* metric = torch::lazy::GetMetric(name);
     MetricSamples msamples;
     msamples.samples =
         metric->Samples(&msamples.accumulator, &msamples.total_samples);
     metrics_map_.emplace(name, std::move(msamples));
   }
-  for (auto& name : lazy_tensors::metrics::GetCounterNames()) {
-    lazy_tensors::metrics::CounterData* counter =
-        lazy_tensors::metrics::GetCounter(name);
+  for (auto& name : torch::lazy::GetCounterNames()) {
+    torch::lazy::CounterData* counter = torch::lazy::GetCounter(name);
     counters_map_.emplace(name, counter->Value());
   }
 }

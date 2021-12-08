@@ -5,14 +5,18 @@
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/unique.h>
 
-#include "lazy_tensor_core/csrc/debug_util.h"
+// TODO: DebugUtil will be upstreamed after LazyTensor is in.
+//#include "lazy_tensor_core/csrc/debug_util.h"
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/thread_pool.h>
+
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/computation_client/unique.h"
+#include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -169,7 +173,7 @@ class DataCacheArena {
       at::Tensor tensor_copy = torch::lazy::CopyTensor(tensor);
       device_data = TensorToDataHandle(tensor_copy, device);
       cache->Add(std::move(tensor_copy), device_data);
-      LTC_COUNTER("DeviceDataCacheMiss", 1);
+      TORCH_LAZY_COUNTER("DeviceDataCacheMiss", 1);
     }
     return device_data;
   }
@@ -242,14 +246,14 @@ class DeviceContextArena {
     DeviceContext* devctx = GetDeviceContext(data->device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->tensors_data.emplace(data->unique_id, data);
-    LTC_COUNTER("CreateLtcTensor", 1);
+    TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
   }
 
   void UnregisterTensor(LazyTensor::Data* data) {
     DeviceContext* devctx = GetDeviceContext(data->device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->tensors_data.erase(data->unique_id);
-    LTC_COUNTER("DestroyLtcTensor", 1);
+    TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
   }
 
   std::vector<LazyTensor> GetLiveTensors(const torch::lazy::BackendDevice* device) {
@@ -452,7 +456,7 @@ void LazyGraphExecutor::SyncTensorsGraph(std::vector<LazyTensor>* tensors,
 }
 
 void LazyGraphExecutor::MarkStep(const torch::lazy::BackendDevice& device) {
-  LTC_COUNTER("MarkStep", 1);
+  TORCH_LAZY_COUNTER("MarkStep", 1);
   DeviceContextArena::Get()->MarkStep(device);
   torch::lazy::ScopePusher::ResetScopes();
   g_tls_data.Reset();
@@ -575,7 +579,7 @@ void LazyGraphExecutor::Async::Wait() {
 
 LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensor>& tensors, const SyncTensorsConfig& config) {
-  lazy_tensors::util::Unique<torch::lazy::BackendDevice> unique_device;
+  torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;
   for (size_t i = 0; i < tensors.size(); ++i) {
     unique_device.set(tensors[i].GetDevice());
   }
@@ -599,7 +603,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   coll.indices.reserve(tensors.size());
   VLOG(4) << "Waiting on device barrier for device " << coll.device << " ...";
   {
-    LTC_TIMED("DeviceLockWait");
+    TORCH_LAZY_TIMED("DeviceLockWait");
     coll.unlocker =
         DeviceLockerArena::Get()->LockDevices(unique_device.AsSet());
   }
@@ -626,7 +630,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     }
   }
   if (!at_tensors.empty()) {
-    LTC_COUNTER("SyncTensorsToData", at_tensors.size());
+    TORCH_LAZY_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<torch::lazy::BackendDataPtr> handles =
         torch::lazy::CreateTensorsData(at_tensors, devices);
     for (size_t i = 0; i < handles.size(); ++i) {
@@ -718,7 +722,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   if (cached_computation == nullptr) {
     return nullptr;
   }
-  LTC_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
+  TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
   return ScheduleSyncTensorsGraph(
@@ -798,10 +802,10 @@ LazyGraphExecutor::LookupCachedCompile(const std::vector<LazyTensor>& tensors,
   ComputationCache::TypePtr cached_computation =
       GetComputationCache()->Get(hash);
   if (cached_computation == nullptr) {
-    LTC_COUNTER("UncachedCompile", 1);
+    TORCH_LAZY_COUNTER("UncachedCompile", 1);
     return nullptr;
   }
-  LTC_COUNTER("CachedCompile", 1);
+  TORCH_LAZY_COUNTER("CachedCompile", 1);
   return cached_computation;
 }
 
@@ -839,7 +843,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
       }
     }
   }
-  LTC_VALUE_METRIC("InputOutputAliasCount", alias_map.size());
+  TORCH_LAZY_VALUE_METRIC("InputOutputAliasCount", alias_map.size());
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
@@ -850,8 +854,8 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   if (coll.indices.empty()) {
     return nullptr;
   }
-  DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
-                                  &coll.indices);
+  // DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
+  //                                &coll.indices);
 
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = torch::lazy::HashCombine(
@@ -865,7 +869,7 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
 
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
 
-  LTC_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
+  TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
   VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
 
   auto cached_computation = std::make_shared<CachedComputation>(
@@ -925,8 +929,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
     }
   };
 
-  lazy_tensors::env::ScheduleIoClosure(
-      async->mwait.Completer(std::move(syncfn)));
+  torch::lazy::ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
   return async;
 }
 

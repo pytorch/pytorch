@@ -2,6 +2,7 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUFallback.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/library.h>
@@ -16,7 +17,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/LazyNativeFunctions.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
-#include "lazy_tensors/computation_client/metrics.h"
+#include "lazy_tensors/computation_client/sys_util.h"
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
@@ -102,14 +103,14 @@ c10::optional<torch::lazy::BackendDevice> GetLtcDevice(const c10::optional<c10::
 }  // namespace
 
 at::Tensor LazyNativeFunctions::alias(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return self;
 }
 
 at::Tensor LazyNativeFunctions::as_strided(
     const at::Tensor& self, at::IntArrayRef size, at::IntArrayRef stride,
     c10::optional<int64_t> storage_offset) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   auto xsize = torch::lazy::ToI64Vector(size);
   auto xstride = torch::lazy::ToI64Vector(stride);
@@ -125,7 +126,7 @@ at::Tensor LazyNativeFunctions::as_strided(
 const at::Tensor& LazyNativeFunctions::as_strided_(
     const at::Tensor& self, at::IntArrayRef size, at::IntArrayRef stride,
     c10::optional<int64_t> storage_offset) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   auto xsize = torch::lazy::ToI64Vector(size);
   auto xstride = torch::lazy::ToI64Vector(stride);
@@ -141,7 +142,7 @@ const at::Tensor& LazyNativeFunctions::as_strided_(
 
 at::Tensor LazyNativeFunctions::bernoulli(
     const at::Tensor& self, c10::optional<at::Generator> generator) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   if (generator.has_value() && generator->defined()) {
     return at::native::call_fallback_fn<&ltc_eager_fallback,
                                         ATEN_OP(bernoulli)>::call(self,
@@ -154,7 +155,7 @@ at::Tensor LazyNativeFunctions::bernoulli(
 
 at::Tensor& LazyNativeFunctions::bernoulli_(
     at::Tensor& self, double p, c10::optional<at::Generator> generator) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   if (generator.has_value() && generator->defined()) {
     return at::native::call_fallback_fn<
         &ltc_eager_fallback, ATEN_OP2(bernoulli_, float)>::call(self, p,
@@ -166,7 +167,7 @@ at::Tensor& LazyNativeFunctions::bernoulli_(
 }
 
 at::Tensor LazyNativeFunctions::cat(at::TensorList tensors, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   auto lazy_tensors = GetLtcTensors(tensors);
   std::vector<torch::lazy::Value> values;
   values.reserve(lazy_tensors.size());
@@ -191,7 +192,7 @@ at::Tensor LazyNativeFunctions::clone(const at::Tensor & self, c10::optional<at:
 at::Tensor LazyNativeFunctions::constant_pad_nd(const at::Tensor& self,
                                                 at::IntArrayRef pad,
                                                 const at::Scalar& value) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::constant_pad_nd(
       TryGetLtcTensor(self), torch::lazy::ToI64Vector(pad), value));
 }
@@ -205,7 +206,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
   // Lower to cudnn_convolution_backward when possbile
   if (at::globalContext().userEnabledCuDNN() &&
       torch::lazy::getBackend()->EagerFallbackDeviceType() == at::kCUDA) {
-    LTC_FN_COUNTER("lazy::");
+    TORCH_LAZY_FN_COUNTER("lazy::");
     auto result = lazy_tensor_aten_ops::convolution_backward_overrideable(
         TryGetLtcTensor(grad_output), TryGetLtcTensor(input),
         TryGetLtcTensor(weight), torch::lazy::ToI64Vector(stride),
@@ -237,7 +238,7 @@ LazyNativeFunctions::convolution_backward_overrideable(
             grad_bias[0].defined() ? at::cat(grad_bias, 0) : grad_bias[0]};
   }
   LTC_FN_TRACK(3);
-  LTC_COUNTER("aten::convolution_backward_overrideable", 1);
+  TORCH_LAZY_COUNTER("aten::convolution_backward_overrideable", 1);
   VLOG(3) << "LTC-TS convolution_backward_overrideable :"
           << " grad_output=" << grad_output.toString()
           << " input=" << input.toString() << " weight=" << weight.toString();
@@ -295,7 +296,7 @@ at::Tensor LazyNativeFunctions::convolution_overrideable(
     const c10::optional<at::Tensor>& bias, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool transposed,
     at::IntArrayRef output_padding, int64_t groups) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return (bias && bias->defined())
              ? CreateAtenFromLtcTensor(
                    lazy_tensor_aten_ops::convolution_overrideable(
@@ -316,7 +317,7 @@ at::Tensor LazyNativeFunctions::convolution_overrideable(
 at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
                                            const at::Tensor& dst,
                                            bool non_blocking) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   auto dst_tensor = TryGetLtcTensor(dst);
   auto self_tensor = TryGetLtcTensor(self);
   if (!self_tensor) {
@@ -350,7 +351,7 @@ at::Tensor LazyNativeFunctions::_copy_from(const at::Tensor& self,
 
 at::Tensor LazyNativeFunctions::_copy_from_and_resize(const at::Tensor& self,
                                                       const at::Tensor& dst) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   auto dst_tensor = TryGetLtcTensor(dst);
   auto self_tensor = TryGetLtcTensor(self);
   if (!self_tensor) {
@@ -390,7 +391,7 @@ at::Tensor LazyNativeFunctions::empty_strided(
     at::IntArrayRef size, at::IntArrayRef stride,
     c10::optional<at::ScalarType> dtype, c10::optional<at::Layout> layout,
     c10::optional<at::Device> device, c10::optional<bool> pin_memory) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   at::Tensor t = empty(size, dtype, layout, device, pin_memory, c10::nullopt);
   return torch_lazy_tensors::LazyNativeFunctions::as_strided(
       t, size, stride, /*storage_offset=*/0);
@@ -398,14 +399,14 @@ at::Tensor LazyNativeFunctions::empty_strided(
 
 at::Tensor LazyNativeFunctions::expand(const at::Tensor& self,
                                        at::IntArrayRef size, bool implicit) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::expand(
       TryGetLtcTensor(self), size.vec()));
 }
 
 at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,
                                        const at::Scalar& value) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::fill_(self_tensor, value);
   return self;
@@ -427,7 +428,7 @@ at::Tensor LazyNativeFunctions::max_pool3d(
 
 at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                                     const at::Tensor& other) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return DoBinaryOp(self, other,
                     [&](const LazyTensor& xself, const LazyTensor& xother) {
                       return lazy_tensor_aten_ops::mul(xself, xother);
@@ -436,7 +437,7 @@ at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
 
 at::Tensor LazyNativeFunctions::mul(const at::Tensor& self,
                                     const at::Scalar& other) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return DoBinaryOp(self, other,
                     [&](const LazyTensor& xself, const at::Scalar& other) {
                       return lazy_tensor_aten_ops::mul(xself, other);
@@ -450,7 +451,7 @@ LazyNativeFunctions::native_batch_norm(
     const c10::optional<at::Tensor>& running_mean,
     const c10::optional<at::Tensor>& running_var, bool training,
     double momentum, double eps) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor input_tensor = TryGetLtcTensor(input);
   const torch::lazy::BackendDevice& device = input_tensor.GetDevice();
   LazyTensor running_mean_tensor =
@@ -475,7 +476,7 @@ LazyNativeFunctions::native_batch_norm_backward(
     const c10::optional<at::Tensor>& save_mean,
     const c10::optional<at::Tensor>& save_invstd, bool train, double eps,
     std::array<bool, 3> output_mask) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor grad_out_tensor = TryGetLtcTensor(grad_out);
   const torch::lazy::BackendDevice& device = grad_out_tensor.GetDevice();
   LazyTensor null_tensor;
@@ -557,7 +558,7 @@ at::Tensor LazyNativeFunctions::max_pool3d_with_indices_backward(
 
 at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
                                         at::IntArrayRef dims) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::permute(
       self_tensor, torch::lazy::ToI64Vector(dims)));
@@ -566,7 +567,7 @@ at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
 at::Tensor& LazyNativeFunctions::random_(
     at::Tensor& self, int64_t from, c10::optional<int64_t> to,
     c10::optional<at::Generator> generator) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
     return at::native::call_fallback_fn<
@@ -582,7 +583,7 @@ at::Tensor& LazyNativeFunctions::random_(
 
 at::Tensor& LazyNativeFunctions::random_(
     at::Tensor& self, int64_t to, c10::optional<at::Generator> generator) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
     return at::native::call_fallback_fn<&ltc_eager_fallback,
@@ -598,7 +599,7 @@ at::Tensor& LazyNativeFunctions::random_(
 
 at::Tensor& LazyNativeFunctions::random_(
     at::Tensor& self, c10::optional<at::Generator> generator) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
 
   if (generator && generator->defined()) {
     return at::native::call_fallback_fn<&ltc_eager_fallback,
@@ -614,14 +615,14 @@ at::Tensor& LazyNativeFunctions::random_(
 
 at::Tensor LazyNativeFunctions::repeat(const at::Tensor& self,
                                        at::IntArrayRef repeats) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::repeat(
       TryGetLtcTensor(self), torch::lazy::ToI64Vector(repeats)));
 }
 
 at::Tensor LazyNativeFunctions::select(const at::Tensor& self, int64_t dim,
                                        int64_t index) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::select(TryGetLtcTensor(self), dim, index));
 }
@@ -632,38 +633,38 @@ at::Tensor LazyNativeFunctions::slice(const at::Tensor& self, int64_t dim,
                                       int64_t step) {
   int64_t start_val = start.has_value() ? start.value() : 0;
   int64_t end_val = end.has_value() ? end.value() : INT64_MAX;
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::slice(
       TryGetLtcTensor(self), dim, start_val, end_val, step));
 }
 
 at::Tensor LazyNativeFunctions::stack(at::TensorList tensors, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::stack(GetLtcTensors(tensors), dim));
 }
 
 at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::squeeze(TryGetLtcTensor(self)));
 }
 
 at::Tensor LazyNativeFunctions::squeeze(const at::Tensor& self, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::squeeze(TryGetLtcTensor(self), dim));
 }
 
 at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::squeeze_(self_tensor);
   return self;
 }
 
 at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::squeeze_(self_tensor, dim);
   return self;
@@ -672,7 +673,7 @@ at::Tensor& LazyNativeFunctions::squeeze_(at::Tensor& self, int64_t dim) {
 at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
                                     const at::Tensor& other,
                                     const at::Scalar& alpha) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   CheckSubOperandTypes(self.scalar_type(), other.scalar_type());
   at::native::alpha_check(at::result_type(self, other), alpha);
   return DoBinaryOp(self, other,
@@ -684,7 +685,7 @@ at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
 at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
                                     const at::Scalar& other,
                                     const at::Scalar& alpha) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   CheckSubOperandTypes(self.scalar_type(), other.type());
   return DoBinaryOp(self, other,
                     [&](const LazyTensor& xself, const at::Scalar& other) {
@@ -693,13 +694,13 @@ at::Tensor LazyNativeFunctions::sub(const at::Tensor& self,
 }
 
 at::Tensor LazyNativeFunctions::t(const at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::transpose(TryGetLtcTensor(self), 0, 1));
 }
 
 at::Tensor& LazyNativeFunctions::t_(at::Tensor& self) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::transpose_(self_tensor, 0, 1);
   return self;
@@ -707,34 +708,34 @@ at::Tensor& LazyNativeFunctions::t_(at::Tensor& self) {
 
 at::Tensor LazyNativeFunctions::tanh_backward(const at::Tensor& grad_output,
                                               const at::Tensor& output) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::tanh_backward(
       TryGetLtcTensor(grad_output), TryGetLtcTensor(output)));
 }
 
 at::Tensor LazyNativeFunctions::transpose(const at::Tensor& self, int64_t dim0,
                                           int64_t dim1) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::transpose(TryGetLtcTensor(self), dim0, dim1));
 }
 
 at::Tensor& LazyNativeFunctions::transpose_(at::Tensor& self, int64_t dim0,
                                             int64_t dim1) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::transpose_(self_tensor, dim0, dim1);
   return self;
 }
 
 at::Tensor LazyNativeFunctions::unsqueeze(const at::Tensor& self, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::unsqueeze(TryGetLtcTensor(self), dim));
 }
 
 at::Tensor& LazyNativeFunctions::unsqueeze_(at::Tensor& self, int64_t dim) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   lazy_tensor_aten_ops::unsqueeze_(self_tensor, dim);
   return self;
@@ -742,7 +743,7 @@ at::Tensor& LazyNativeFunctions::unsqueeze_(at::Tensor& self, int64_t dim) {
 
 at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
                                      at::IntArrayRef size) {
-  LTC_FN_COUNTER("lazy::");
+  TORCH_LAZY_FN_COUNTER("lazy::");
   LazyTensor self_tensor = TryGetLtcTensor(self);
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
