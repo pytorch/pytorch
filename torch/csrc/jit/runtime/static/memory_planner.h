@@ -45,31 +45,6 @@ TORCH_API void assignStorageToManagedTensors(
     const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor,
     std::vector<StorageGroup>& managed_tensor_groups);
 
-/// There are three types of ops in a processed graph in Static Runtime:
-///   1. op with _out variant
-///   2. view producing op
-///   3. tensor producing op (could be replaced with type 1 by adding the _out
-///      variant to Static Runtime)
-/// In Static Runtime, type 2 ops are replaced with their corespoinding copy
-/// versions when enable_out_variant is enabled and become type 1 ops.The memory
-/// planner only manages tensors that are outputs of type 1 ops. For type 3, the
-/// output tensors are allocated inside the operator and can't be directly
-/// managed by memory planner.
-///
-/// Memory planner tries to minimize the number of memory allocations by
-/// tracking the output tensors of ops with _out variants with unique DataPtr
-/// (part of StorageImpl). It tries to do this in several steps:
-///   1. record the max memory usage for each Tensor with unique DataPtr at the
-///      end of each iteration
-///   2. in the next iteration, allocate the buffer for the max total usage and
-///      compute the offset of each allocation with regard to the single memory
-///      buffer, optionally reusing memory. In the first iteration, we rely on
-///      the default allocator for memory allocation.
-///   3. free the buffer at the end of each iteration
-/// Steps 1 and 3 are handled by `deallocate()`, and step 2 by `allocate()`.
-/// Only models with simple output types are supported, i.e. None, Tensor or
-/// List/Tuple/Dict of Tensors. Complex output types such as List of Lists are
-/// not supported.
 // There are three types of ops in a processed graph in Static Runtime:
 //   1. op with _out variant
 //   2. view-producing op
