@@ -161,6 +161,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("mm", mm_batch_rule);
   m.impl("linear", linear_decomp);
 
+  VARIADIC_BDIMS_BOXED(cholesky_solve);
   VARIADIC_BDIMS_BOXED(linalg_cholesky_ex);
   VARIADIC_BDIMS_BOXED(linalg_eig);
   VARIADIC_BDIMS_BOXED(linalg_eigh);
