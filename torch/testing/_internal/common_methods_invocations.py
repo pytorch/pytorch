@@ -10425,6 +10425,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
            skips=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
