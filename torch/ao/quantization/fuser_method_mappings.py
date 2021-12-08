@@ -159,7 +159,9 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, nn.BatchNorm3d): reverse2(nni.BNReLU3d),
 }
 
-def get_fuser_method_new(op_pattern, fuser_method_mapping=None):
+def get_fuser_method_new(
+        op_pattern: Pattern,
+        fuser_method_mapping: Optional[Dict[Pattern, Union[nn.Sequential, Callable]]] = None):
     """ This will be made defult after we deparate the get_fuser_method
     Would like to implement this first and have a separate PR for deprecation
     """
