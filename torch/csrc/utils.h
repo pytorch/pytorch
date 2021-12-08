@@ -126,8 +126,8 @@
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
-THP_API void THPUtils_setError(const char *format, ...);
-THP_API void THPUtils_invalidArguments(
+TORCH_PYTHON_API void THPUtils_setError(const char *format, ...);
+TORCH_PYTHON_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
