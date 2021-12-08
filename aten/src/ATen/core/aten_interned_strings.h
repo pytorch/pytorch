@@ -42,7 +42,6 @@ _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
 _(aten, convolution_backward_overrideable) \
-_(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
 _(aten, _cosh) \
@@ -522,6 +521,8 @@ _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_dropout) \
+_(aten, native_dropout_backward) \
 _(aten, native_layer_norm) \
 _(aten, native_layer_norm_backward) \
 _(aten, native_clone) \
