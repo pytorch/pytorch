@@ -1868,14 +1868,21 @@ class TestNN(NNTestCase):
         self.assertEqual(p_popitem[0], 'p12')
         self.assertIs(p_popitem[1], p)
 
+        # Unit test for set_default
+        # 1. Ensure parameter is correctly inserted when
+        #    the key is not present in `ParameterDict`
+        assert 'p11' not in parameter_dict
         parameters['p11'] = Parameter(torch.randn(10, 10))
-        parameters['p26'] = None
         p_setdefault = parameter_dict.setdefault('p11', parameters['p11'])
         self.assertIs(p_setdefault, parameters['p11'])
-
+        # 2. Ensure parameter is NOT inserted when the
+        #    key is already present in `ParameterDict`
         p = Parameter(torch.randn(10, 10))
         self.assertFalse(parameter_dict.setdefault('p11', p) is p)
-        self.assertTrue(parameter_dict.setdefault('p26') is None)
+        # 3. Ensure `None` is inserted when the key is not
+        #    present in `Parameter` and parameter is not specified
+        self.assertIs(parameter_dict.setdefault('p26'), None)
+        del parameter_dict['p26']
         check()
 
         parameters2 = OrderedDict([
