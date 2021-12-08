@@ -1,4 +1,4 @@
-ubuntu|pytorch|apex|master|1e0f9bc6720ba718679d9912813b40a8b9af4b5f|https://github.com/ROCmSoftwarePlatform/apex
-centos|pytorch|apex|master|1e0f9bc6720ba718679d9912813b40a8b9af4b5f|https://github.com/ROCmSoftwarePlatform/apex
+ubuntu|pytorch|apex|master|cc92a4b47dc45a6badb384ce2c68e43940e380fa|https://github.com/ROCmSoftwarePlatform/apex
+centos|pytorch|apex|master|cc92a4b47dc45a6badb384ce2c68e43940e380fa|https://github.com/ROCmSoftwarePlatform/apex
 ubuntu|pytorch|torchvision|master|ba299e8f52737448f1cbb9fffd25bf3d6e7ceef7|https://github.com/pytorch/vision
 centos|pytorch|torchvision|master|ba299e8f52737448f1cbb9fffd25bf3d6e7ceef7|https://github.com/pytorch/vision
