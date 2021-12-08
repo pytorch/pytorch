@@ -14,7 +14,7 @@ struct THPVoidTensor {
 
 struct THPVoidStorage {
   PyObject_HEAD
-  THVoidStorage *cdata;
+  c10::StorageImpl *cdata;
 };
 
 } // namespace torch
