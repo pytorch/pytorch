@@ -4,16 +4,9 @@ description: Submit a proposal/request for a new pytorch feature
 body:
 - type: textarea
   attributes:
-    label: 🚀 The feature
+    label: 🚀 The feature, motivation and pitch
     description: >
-      A clear and concise description of the feature proposal
-  validations:
-    required: true
-- type: textarea
-  attributes:
-    label: Motivation, pitch
-    description: >
-      Please outline the motivation for the proposal. Is your feature request related to a specific problem? e.g., *"I'm working on X and would like Y to be possible"*. If this is related to another GitHub issue, please link here too.
+      A clear and concise description of the feature proposal. Please outline the motivation for the proposal. Is your feature request related to a specific problem? e.g., *"I'm working on X and would like Y to be possible"*. If this is related to another GitHub issue, please link here too.
   validations:
     required: true
 - type: textarea

@@ -30,12 +30,12 @@ body:
       A clear and concise description of what the bug is.
 
       ```python
-      Sample code to reproduce the problem
+      # Sample code to reproduce the problem
       ```
 
       ```
       The error message you got, with the full traceback.
-      ````
+      ```
   validations:
     required: true
 - type: textarea
