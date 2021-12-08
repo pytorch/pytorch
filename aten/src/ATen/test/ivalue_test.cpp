@@ -691,12 +691,12 @@ TEST(IValueTest, IdentityAndHashing_SparseCOO) {
   EXPECT_FALSE(tv1.isAliasOf(tv2));
   EXPECT_FALSE(tv1.isAliasOf(tv3));
 
-  long idx_array1[6] = {0, 1, 1, 0, 0, 1};
+  int64_t idx_array1[6] = {0, 1, 1, 0, 0, 1};
   at::Tensor idx1 = torch::from_blob(
       idx_array1,
       {2, 3},
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
-  long idx_array2[6] = {1, 1, 2, 0, 1, 2};
+  int64_t idx_array2[6] = {1, 1, 2, 0, 1, 2};
   at::Tensor idx2 = torch::from_blob(
       idx_array2,
       {2, 3},
