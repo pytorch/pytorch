@@ -662,6 +662,12 @@ def parse_args():
         help="run all distributed tests",
     )
     parser.add_argument(
+        "--nccl",
+        "--nccl",
+        action="store_true",
+        help="only use nccl process group when running distributed tests",
+    )
+    parser.add_argument(
         "-core",
         "--core",
         action="store_true",
@@ -958,6 +964,13 @@ def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
 
 def main():
     options = parse_args()
+
+    if options.nccl:
+        if 'nccl' not in DISTRIBUTED_TESTS_CONFIG:
+            raise ValueError("--nccl is specified, but nccl backend is not available")
+        keys = set(DISTRIBUTED_TESTS_CONFIG.keys()) - {'nccl'}
+        for k in keys:
+            del DISTRIBUTED_TESTS_CONFIG[k]
 
     # TODO: move this export & download function in tools/ folder
     test_times_filename = options.export_past_test_times

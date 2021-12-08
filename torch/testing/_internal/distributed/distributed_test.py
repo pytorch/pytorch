@@ -11,6 +11,7 @@ from contextlib import contextmanager, suppress
 from datetime import timedelta
 from functools import reduce
 from typing import Union, NamedTuple, Callable, Any
+import unittest
 
 import torch
 import torch.cuda
@@ -373,6 +374,23 @@ def require_backend(backends):
     if BACKEND not in backends:
         return sandcastle_skip("Test requires backend to be one of %s" % backends)
     return lambda func: func
+
+
+def require_ucc_for_nccl():
+    def do_skip():
+        def is_ucc_available():
+            return dist.distributed_c10d._get_default_group().is_ucc_available
+
+        if BACKEND == dist.Backend.NCCL and not is_ucc_available():
+            raise unittest.SkipTest("Test requires UCC to be available for the NCCL backend")
+
+    def wrapper(func):
+        def wrapped_func(*args, **kwargs):
+            do_skip()
+            func(*args, **kwargs)
+        return wrapped_func
+
+    return wrapper
 
 
 def require_backends_available(backends):
@@ -1332,22 +1350,16 @@ class DistributedTest:
                             self.assertTrue(event.is_async)
                             self.assertTrue(event.input_shapes in expected_shapes)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv(self):
             self._test_send_recv(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1435,22 +1447,16 @@ class DistributedTest:
                 )
                 self._barrier()
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv_any_source(self):
             self._test_send_recv_any_source(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv_any_source_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_send_recv_any_source(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "Nccl does not support send/recv from any source"
-        )
+        @require_ucc_for_nccl()
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1495,22 +1501,16 @@ class DistributedTest:
                             self.assertEqual(event.name, event_name)
                             self.assertEqual(event.input_shapes, [[send_recv_size] * 3])
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv_with_tag(self):
             self._test_send_recv_with_tag(profiler_ctx=None)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         def test_send_recv_with_tag_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             return self._test_send_recv_with_tag(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(
-            BACKEND == "nccl", "NCCL send/recv tested by test_send_recv_nccl"
-        )
+        @require_ucc_for_nccl()
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1566,16 +1566,16 @@ class DistributedTest:
                         else:
                             self.assertEqual(event.input_shapes, expected_shapes[rank])
 
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
+        @require_ucc_for_nccl()
         def test_isend(self):
             self._test_isend(profiler_ctx=None)
 
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
+        @require_ucc_for_nccl()
         def test_isend_autograd_profiler(self):
             autograd_profiler_ctx = _create_autograd_profiler()
             self._test_isend(profiler_ctx=autograd_profiler_ctx)
 
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support isend")
+        @require_ucc_for_nccl()
         @sandcastle_skip_if(IS_FBCODE, "Kineto in fbcode code causes hang")
         @sandcastle_skip_if(
             IS_MACOS or IS_WINDOWS,
@@ -1586,7 +1586,7 @@ class DistributedTest:
             self._test_isend(profiler_ctx=torch_profiler_ctx)
 
         # IRECV
-        @sandcastle_skip_if(BACKEND == "nccl", "Nccl does not support irecv")
+        @require_ucc_for_nccl()
         def test_irecv(self):
             rank = dist.get_rank()
             world_size = dist.get_world_size()
