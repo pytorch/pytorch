@@ -10,7 +10,6 @@ from contextlib import contextmanager
 import copy
 import torch
 import keyword
-import re
 import builtins
 import math
 import warnings
@@ -91,6 +90,8 @@ def _snake_case(s: str) -> str:
 def _is_from_torch(obj: Any) -> bool:
     module_name = getattr(obj, '__module__', None)
     if module_name is not None:
+        # demangling for selective intern
+        module_name = re.sub(r"<torch_package_([0-9]*)>\.torch", "torch", module_name)
         base_module = module_name.partition('.')[0]
         return base_module == 'torch'
 
@@ -790,7 +791,7 @@ class Graph:
         symbols involving torch transform into <torch_package_XX>.torch which causes compilation errors.
         """
         code.globals["torch"] = torch
-        code.src = re.sub(r"<torch_package_([0-9]*)>\.torch","torch",code.src)
+        code.src = re.sub(r"<torch_package_([0-9]*)>\.torch", "torch", code.src)
         return code
 
 
