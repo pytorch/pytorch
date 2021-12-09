@@ -2194,6 +2194,7 @@ class TestDistributions(TestCase):
             self.assertEqual(log_prob, expected, atol=1e-3, rtol=0)
 
         self._check_log_prob(Exponential(rate), ref_log_prob)
+        self._check_forward_ad(lambda x: x.exponential_())
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_exponential_sample(self):
