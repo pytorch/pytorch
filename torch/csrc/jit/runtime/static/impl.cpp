@@ -1579,23 +1579,21 @@ ProcessedFunction::ProcessedFunction(
   }
   {
     const Operator& op = node->getOperator();
-    f_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+    f_ = [node_op = op.getOperation(node),
+          has_var_args = hasVarArgs(node)](ProcessedNode* pnode) mutable {
       std::vector<IValue> stack;
-      Node* node = pnode->node();
-      const size_t size = node->inputs().size();
-      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+      const size_t size = pnode->num_inputs();
+      stack.reserve(size + has_var_args);
       for (const auto i : c10::irange(size)) {
         stack.emplace_back(pnode->Input(i));
       }
       // Need to store the number of inputs in stack for variadic ops.
-      if (hasVarArgs(node)) {
+      if (has_var_args) {
         stack.emplace_back(static_cast<int>(size));
       }
-
       node_op(stack);
-
-      DCHECK_EQ(stack.size(), node->outputs().size());
-      for (const auto i : c10::irange(node->outputs().size())) {
+      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      for (const auto i : c10::irange(pnode->num_outputs())) {
         pnode->Output(i) = std::move(stack[i]);
       }
     };
