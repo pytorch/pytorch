@@ -2,6 +2,7 @@
 #define CAFFE2_OPERATORS_H_SOFTMAX_OP_H_
 
 #include <c10/util/Optional.h>
+#include <c10/util/irange.h>
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -51,7 +52,7 @@ class HSoftmaxOpBase : public Operator<Context> {
       int M,
       std::unordered_map<int, PathProto>& hierarchy) const {
     int size = 0;
-    for (int label = 0; label < M; ++label) {
+    for (const auto label : c10::irange(M)) {
       int word_id = labels[label];
       const auto& path = hierarchy[word_id];
       size += std::accumulate(
