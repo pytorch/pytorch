@@ -45,7 +45,7 @@ static bool BlockComparator(const BlockSize& a, const BlockSize& b)
   return (uintptr_t)a.ptr < (uintptr_t)b.ptr;
 }
 
-struct HostAllocator
+struct HostAllocator : public ICachingHostAllocator
 {
   typedef bool (*Comparison)(const BlockSize&, const BlockSize&);
 
@@ -278,26 +278,36 @@ struct HostAllocator
 
 }  // namespace
 
+static ICachingHostAllocator* custom_caching_allocator{};
 static HostAllocator allocator;
+void setICachingHostAllocator(ICachingHostAllocator* alloc) {
+  custom_caching_allocator = alloc;
+}
+
+ICachingHostAllocator* getICachingHostAllocator() {
+  static ICachingHostAllocator* kAllocator =
+  custom_caching_allocator ? custom_caching_allocator : &allocator;
+  return kAllocator;
+}
 
 cudaError_t CachingHostAllocator_recordEvent(void *ptr, at::cuda::CUDAStream stream)
 {
-  return allocator.recordEvent(ptr, stream);
+  return getICachingHostAllocator()->recordEvent(ptr, stream);
 }
 
 void CachingHostAllocator_emptyCache()
 {
-  allocator.emptyCache();
+  getICachingHostAllocator()->emptyCache();
 }
 
 static void CachingHostDeleter(void* ptr) {
-  allocator.free(ptr);
+  getICachingHostAllocator()->free(ptr);
 }
 
 struct CachingHostAllocator final : public at::Allocator {
   at::DataPtr allocate(size_t size) const override {
     void *ptr;
-    C10_CUDA_CHECK(allocator.malloc(&ptr, size));
+    C10_CUDA_CHECK(getICachingHostAllocator()->malloc(&ptr, size));
     return {ptr, ptr, &CachingHostDeleter, at::DeviceType::CPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
