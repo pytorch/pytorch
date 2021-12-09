@@ -175,7 +175,7 @@ def vjp(f: Callable, *primals):
         >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
         >>> (_, vjpfunc) = functorch.vjp(f, x)
         >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
-        >>> vjps = vjpfunc((cotangents,))
+        >>> vjps = vjpfunc(cotangents)
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
     The function returned by :func:`vjp` will compute the partials with
