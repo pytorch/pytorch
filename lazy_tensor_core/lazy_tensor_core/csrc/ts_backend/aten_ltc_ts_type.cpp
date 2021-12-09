@@ -17,6 +17,8 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensors/computation_client/metrics.h"
+#include "lazy_tensor_core/csrc/ops/addcmul.h"
+#include "lazy_tensor_core/csrc/ops/addcdiv.h"
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
@@ -747,6 +749,42 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
 }
+
+at::Tensor LazyNativeFunctions::addcmul(const at::Tensor & self, const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value) {
+    LTC_FN_COUNTER("lazy::");
+    auto device = torch_lazy_tensors::bridge::GetBackendDevice(self, tensor1, tensor2);
+    LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
+    LazyTensor lazy_tensor1 = GetLtcTensorOrCreateForWrappedNumber(tensor1, *device);
+    LazyTensor lazy_tensor2 = GetLtcTensorOrCreateForWrappedNumber(tensor2, *device);
+    auto out_meta = at::meta::addcmul(self, tensor1, tensor2, value);
+    std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+    TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+    auto node = torch::lazy::MakeNode<ir::ops::Addcmul>(lazy_self.GetIrValue(),
+                          lazy_tensor1.GetIrValue(),
+                          lazy_tensor2.GetIrValue(),
+                          value,
+                          std::move(shapes));
+    auto result = CreateAtenFromLtcTensor(LazyTensor::Create(node, lazy_self.GetDevice()));
+    return result;
+};
+
+at::Tensor LazyNativeFunctions::addcdiv(const at::Tensor & self, const at::Tensor & tensor1, const at::Tensor & tensor2, const at::Scalar & value) {
+    LTC_FN_COUNTER("lazy::");
+    auto device = torch_lazy_tensors::bridge::GetBackendDevice(self, tensor1, tensor2);
+    LazyTensor lazy_self = GetLtcTensorOrCreateForWrappedNumber(self, *device);
+    LazyTensor lazy_tensor1 = GetLtcTensorOrCreateForWrappedNumber(tensor1, *device);
+    LazyTensor lazy_tensor2 = GetLtcTensorOrCreateForWrappedNumber(tensor2, *device);
+    auto out_meta = at::meta::addcdiv(self, tensor1, tensor2, value);
+    std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+    TORCH_INTERNAL_ASSERT(shapes.size() == 1);
+    auto node = torch::lazy::MakeNode<ir::ops::Addcdiv>(lazy_self.GetIrValue(),
+                          lazy_tensor1.GetIrValue(),
+                          lazy_tensor2.GetIrValue(),
+                          value,
+                          std::move(shapes));
+    auto result = CreateAtenFromLtcTensor(LazyTensor::Create(node, lazy_self.GetDevice()));
+    return result;
+};
 
 void InitializeAtenBindings() {}
 

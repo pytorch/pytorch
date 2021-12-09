@@ -6,8 +6,6 @@ full_codegen:
   - _softmax
   - _softmax_backward_data
   - add.Tensor
-  - addcdiv
-  - addcmul
   - addmm
   - baddbmm
   - bitwise_and.Tensor
@@ -83,6 +81,8 @@ full_codegen:
   - trunc
   - zero_
 supported:
+  - addcmul
+  - addcdiv
   - as_strided
   - as_strided_
   - bernoulli
