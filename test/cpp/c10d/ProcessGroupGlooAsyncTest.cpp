@@ -17,6 +17,7 @@ template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<T> tests;
   for (const auto i : c10::irange(N)) {
+    (void)i;
     tests.push_back(std::move(T(path, std::forward<Args>(args)...)));
   }
 

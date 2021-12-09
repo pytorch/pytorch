@@ -82,13 +82,15 @@ void stressTestStore(std::string path, std::string prefix = "") {
   c10d::test::Semaphore sem1, sem2;
 
   for (const auto i : c10::irange(numThreads)) {
-    threads.push_back(std::thread([&] {
+    (void)i;
+    threads.emplace_back(std::thread([&] {
       auto fileStore =
           c10::make_intrusive<c10d::FileStore>(path, numThreads + 1);
       c10d::PrefixStore store(prefix, fileStore);
       sem1.post();
       sem2.wait();
       for (const auto j : c10::irange(numIterations)) {
+        (void)j;
         store.add("counter", 1);
       }
     }));
