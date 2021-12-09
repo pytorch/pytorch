@@ -581,7 +581,7 @@ class OpInfo(object):
                  check_batched_forward_grad=None,  # whether to check batched forward grad when doing gradcheck
                                                    # defaults to the value of `supports_forward_ad`
                  check_inplace_batched_forward_grad=None,   # whether to check batched forward grad when doing gradcheck
-                                                             # defaults to the value of `check_batched_forward_grad`
+                                                            # defaults to the value of `check_batched_forward_grad`
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
