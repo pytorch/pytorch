@@ -937,10 +937,11 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
-      ExprHandle flat_size = 0;
+      ExprHandle flat_size = 1;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
-        flat_size = flat_size + *tt->sizes()[i] * *tt->strides()[i];
+        flat_size = flat_size + (*tt->sizes()[i] - 1) * *tt->strides()[i];
       }
+      flat_size = IRSimplifier::simplify(flat_size);
       BufHandle inBuffer(
           "t" + input_name_map_[input],
           {flat_size},
