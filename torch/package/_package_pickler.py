@@ -3,7 +3,6 @@ from pickle import EXT1, EXT2, EXT4, GLOBAL, STACK_GLOBAL, Pickler, PicklingErro
 from pickle import _compat_pickle, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
 from struct import pack
 from types import FunctionType
-import pdb
 from .importer import Importer, ObjMismatchError, ObjNotFoundError, sys_importer
 
 
@@ -28,10 +27,10 @@ class PackagePickler(_Pickler):
         memo = self.memo
 
         # CHANGED: import module from module environment instead of __import__
-        # try:
-        module_name, name = self.importer.get_name(obj, name)
-        # except (ObjNotFoundError, ObjMismatchError) as err:
-        #     raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
+        try:
+            module_name, name = self.importer.get_name(obj, name)
+        except (ObjNotFoundError, ObjMismatchError) as err:
+            raise PicklingError(f"Can't pickle {obj}: {str(err)}") from None
 
         module = self.importer.import_module(module_name)
         _, parent = _getattribute(module, name)

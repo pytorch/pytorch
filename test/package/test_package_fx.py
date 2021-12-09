@@ -74,10 +74,45 @@ class TestPackageFX(PackageTestCase):
         f2 = BytesIO()
         # This should fail, because we are referencing some globals that are
         # only in the package.
-        # with self.assertRaises(ObjMismatchError):
-        # with PackageExporter(f2, do_selective_intern=False) as pe:
-        #     pe.intern("**")
-        #     pe.save_pickle("model", "model.pkl", traced)
+        with self.assertRaises(ObjMismatchError):
+            with PackageExporter(f2, do_selective_intern=False) as pe:
+                pe.intern("**")
+                pe.save_pickle("model", "model.pkl", traced)
+
+        f2.seek(0)
+        with PackageExporter(f2, importer=(pi, sys_importer), do_selective_intern=False) as pe:
+            # Make the package available to the exporter's environment.
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", traced)
+        f2.seek(0)
+        pi2 = PackageImporter(f2)
+        loaded2 = pi2.load_pickle("model", "model.pkl")
+
+        input = torch.rand(2, 3)
+        self.assertEqual(loaded(input), loaded2(input))
+
+    def test_package_fx_package_with_selective_intern(self):
+        from package_a.test_module import SimpleTest
+
+        model = SimpleTest()
+        f = BytesIO()
+        with PackageExporter(f, do_selective_intern=True) as pe:
+            pe.intern("**")
+            pe.save_pickle("model", "model.pkl", model)
+
+        f.seek(0)
+        pi = PackageImporter(f)
+        loaded = pi.load_pickle("model", "model.pkl")
+        traced = pi.import_module("torch.fx").symbolic_trace(loaded)
+
+        # re-save the package exporter
+        f2 = BytesIO()
+        # This should fail, because we are referencing some globals that are
+        # only in the package.
+        with self.assertRaises(ObjMismatchError):
+            with PackageExporter(f2, do_selective_intern=True) as pe:
+                pe.intern("**")
+                pe.save_pickle("model", "model.pkl", traced)
 
         f2.seek(0)
         with PackageExporter(f2, importer=(pi, sys_importer), do_selective_intern=True) as pe:

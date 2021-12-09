@@ -6,7 +6,6 @@ from types import ModuleType
 from typing import Any, List, Optional, Tuple, Dict
 
 from ._mangling import demangle, get_mangle_prefix, is_mangled
-import pdb
 
 class ObjNotFoundError(Exception):
     """Raised when an importer cannot find an object by searching for its name."""
@@ -86,21 +85,16 @@ class Importer(ABC):
             name = getattr(obj, "__qualname__", None)
         if name is None:
             name = obj.__name__
-        print(f'obj {obj}')
-        print(f'name - {name}')
         # if name == "reduce_package_graph_module":
         #     pdb.set_trace()
         orig_module_name = self.whichmodule(obj, name)
-        print(f"orig_module_name - {orig_module_name}")
         # Demangle the module name before importing. If this obj came out of a
         # PackageImporter, `__module__` will be mangled. See mangling.md for
         # details.
         module_name = demangle(orig_module_name)
-        print(f"module_name - {module_name}")
         # Check that this name will indeed return the correct object
         try:
             module = self.import_module(module_name)
-            print(module)
             obj2, _ = _getattribute(module, name)
         except (ImportError, KeyError, AttributeError):
             raise ObjNotFoundError(

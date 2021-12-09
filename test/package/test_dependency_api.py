@@ -434,6 +434,10 @@ class TestDependencyAPI(PackageTestCase):
             foo.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
             package_b.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
         )
+        self.assertIs(
+            foo.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
+            package_b.subpackage_0.subsubpackage_0.subsubpackage_0_li[0],
+        )
         self.assertIsNot(
             foo.subpackage_0.subpackage_0_li, package_b.subpackage_0.subpackage_0_li
         )
@@ -506,6 +510,10 @@ class TestDependencyAPI(PackageTestCase):
 
         foo = hi.import_module("foo")
         self.assertIsNot(torch, foo.torch)
+        self.assertIsNot(hi.import_module("torch.fx"),torch.fx)
+        self.assertIsNot(hi.import_module("torch.fx").symbolic_trace,torch.fx)
+        self.assertIsNot(torch.fx, foo.torch.fx)
+        self.assertIsNot(torch.fx.symbolic_trace, foo.torch.fx.symbolic_trace)
         self.assertIs(torch.nn, foo.torch.nn)
 
     def test_selective_intern_torch_fx(self):
@@ -515,7 +523,8 @@ class TestDependencyAPI(PackageTestCase):
         with PackageExporter(buffer, do_selective_intern=True) as he:
             he.save_source_string(
                 "foo",
-                "import torch.fx as fx"
+                "import torch; \
+                import torch.fx as fx"
             )
 
         buffer.seek(0)
@@ -523,7 +532,9 @@ class TestDependencyAPI(PackageTestCase):
 
         import torch.fx
         foo = hi.import_module("foo")
+        self.assertIsNot(torch.fx, foo.torch.fx)
         self.assertIsNot(torch.fx, foo.fx)
+        self.assertIsNot(hi.import_module("torch.fx"),torch.fx)
 
 
 
