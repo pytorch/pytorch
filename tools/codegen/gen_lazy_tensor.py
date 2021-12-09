@@ -137,16 +137,15 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                     yield r
 
     selector = SelectiveBuilder.get_nop_selector()
-
     # TODO: handle cases when yaml contains zero ops properly in a later PR.
-    if backend_key is not None and autograd_key is not None:
+    if backend_key is not None:
         backend_dispatch_key: DispatchKey = backend_key
-        autograd_dispatch_key: DispatchKey = autograd_key
+        autograd_dispatch_key: Optional[DispatchKey] = autograd_key
         class_name = backend_indices[backend_dispatch_key].native_function_class_name()
 
         if impl_path is not None:
             error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                     autograd_key, impl_path, full_codegen)
+                                     autograd_dispatch_key, impl_path, full_codegen)
 
         assert class_name is not None
 
@@ -155,7 +154,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                                            grouped_native_functions, backend_dispatch_key, autograd_dispatch_key)
 
         # Generate Dispatcher registrations which hook up the nativefunctions
-        for dispatch_key in [backend_dispatch_key, autograd_dispatch_key]:
+        iter_keys = [backend_dispatch_key]
+        if autograd_dispatch_key is not None:
+            iter_keys.append(autograd_dispatch_key)
+        for dispatch_key in iter_keys:
             gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
                                          backend_dispatch_key, dispatch_key, selector)
 
