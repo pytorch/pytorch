@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <c10/util/TypeTraits.h>
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -199,7 +200,7 @@ struct ConvolutionParams
 };
 // ConvolutionParams must be a POD because we read out its memory
 // contenst as char* when hashing
-static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
+static_assert(guts::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 void setConvolutionParams(
     ConvolutionParams* params, miopenHandle_t handle,

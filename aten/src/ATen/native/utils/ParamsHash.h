@@ -3,6 +3,8 @@
 #include <memory>
 #include <mutex>
 
+#include <c10/util/TypeTraits.h>
+
 namespace at { namespace native {
 
 // Hashing machinery for Params
@@ -12,7 +14,7 @@ template <typename Params>
 struct ParamsHash {
   // Params must be a POD because we read out its memory
   // contenst as char* when hashing
-  static_assert(std::is_pod<Params>::value, "Params is not POD");
+  static_assert(guts::is_pod<Params>::value, "Params is not POD");
 
   size_t operator()(const Params& params) const {
     auto ptr = reinterpret_cast<const uint8_t*>(&params);
@@ -29,7 +31,7 @@ template <typename Params>
 struct ParamsEqual {
   // Params must be a POD because we read out its memory
   // contenst as char* when comparing
-  static_assert(std::is_pod<Params>::value, "Params is not POD");
+  static_assert(guts::is_pod<Params>::value, "Params is not POD");
 
   bool operator()(const Params& a, const Params& b) const {
     auto ptr1 = reinterpret_cast<const uint8_t*>(&a);

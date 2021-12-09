@@ -2,6 +2,7 @@
 
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
+#include <c10/util/TypeTraits.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
@@ -61,7 +62,7 @@ struct ArgumentInfo {
 };
 
 static_assert(
-    std::is_pod<ArgumentInfo>::value,
+    c10::guts::is_pod<ArgumentInfo>::value,
     "ArgumentInfo is to be a POD struct");
 static_assert(
     sizeof(ArgumentInfo) == sizeof(ArgumentInfo::plain_data_type),

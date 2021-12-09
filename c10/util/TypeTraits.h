@@ -7,6 +7,13 @@ namespace c10 {
 namespace guts {
 
 /**
+ * is_pod<T> is true_type iff T is a plain old data type. It replaces
+ * std::is_pod, which got deprecated in C++-20.
+ */
+template <class T>
+using is_pod = conjunction<std::is_trivial<T>, std::is_standard_layout<T>>;
+
+/**
  * is_equality_comparable<T> is true_type iff the equality operator is defined
  * for T.
  */
