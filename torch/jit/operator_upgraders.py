@@ -81,15 +81,16 @@ def collect_available_upgraders():
     # in the torch/csrc/operator_upgraders/version_map.h
 
     entries = globals()
-    version_map = torch._C._get_operator_version_map()
+    # ignore test operators
+    version_map = {k : v for k, v in torch._C._get_operator_version_map().items()
+                   if not k.startswith("aten::_test")}
 
     # 1. Check if everything in version_map.h is defined here
     available_upgraders_in_version_map = set()
 
     for op_name in version_map:
         for upgrader_entry in version_map[op_name]:
-            # ignore test operators
-            if (not upgrader_entry.startsWith("aten::_test")) and (upgrader_entry.upgrader_name not in entries):
+            if upgrader_entry.upgrader_name not in entries:
                 raise AssertionError("Upgrader entry {} needs to be defined in python".format(upgrader_entry.upgrader_name))
             available_upgraders_in_version_map.add(upgrader_entry.upgrader_name)
 
