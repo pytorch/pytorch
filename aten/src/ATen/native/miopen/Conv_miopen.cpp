@@ -114,7 +114,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 #include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/hip/HIPCachingAllocator.h>
 
 #include <functional>
 #include <iterator>
