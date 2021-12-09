@@ -1,8 +1,9 @@
 import _compat_pickle
+import importlib
 import pickle
 
 from .importer import Importer
-import importlib
+
 
 class PackageUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     """Package-aware unpickler.
@@ -15,8 +16,11 @@ class PackageUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
         super().__init__(*args, **kwargs)
         self._importer = importer
         self.selective_extern_og_pacakges = {}
-        for package in self._importer.selective_extern_packages:
-            self.selective_extern_og_pacakges[package] = importlib.import_module(package)
+        if hasattr(self._importer, "selective_extern_packages"):
+            for package in self._importer.selective_extern_packages:  # type: ignore[attr-defined]
+                self.selective_extern_og_pacakges[package] = importlib.import_module(
+                    package
+                )
 
     def find_class(self, module, name):
         # Subclasses may override this.
@@ -26,6 +30,12 @@ class PackageUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
             elif module in _compat_pickle.IMPORT_MAPPING:
                 module = _compat_pickle.IMPORT_MAPPING[module]
         mod = self._importer.import_module(module)
-        if self._importer._is_selective_extern_node(module) and self._importer._is_package_or_module_node(f"{module}.{name}"):
-            mod = self.selective_extern_og_pacakges[package]
+
+        if hasattr(self._importer, "selective_extern_packages"):
+            if self._importer._is_selective_extern_node(  # type: ignore[attr-defined]
+                module
+            ) and self._importer._is_package_or_module_node(  # type: ignore[attr-defined]
+                f"{module}.{name}"
+            ):
+                mod = self.selective_extern_og_pacakges[module]
         return getattr(mod, name)

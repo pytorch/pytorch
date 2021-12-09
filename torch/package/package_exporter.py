@@ -243,7 +243,7 @@ class PackageExporter:
 
         self.patterns: Dict[GlobGroup, _PatternInfo] = {}
         self._unique_id = 0
-        self._selective_interns: Dict[str, [str]] = {}
+        self._selective_interns: Dict[str, Set[str]] = {}
         if self.do_selective_intern:
             for (package_name, interned_packages) in DEFAULT_SELECTIVE_INTERN_LIST.items():
                 self._selective_intern(package_name, interned_packages, allow_empty=True)
@@ -715,7 +715,7 @@ class PackageExporter:
     # so things don't have to be so explicit
 
     def _selective_intern(
-        self, package_name: str, interned_modules: [str], allow_empty: bool = True
+        self, package_name: str, interned_modules: List[str], allow_empty: bool = True
     ):
         """Specify extra modules not included in DEFAULT_SELECTIVE_INTERN_LIST that should be selectively interned
             that should be packaged.
@@ -738,7 +738,6 @@ class PackageExporter:
         if package_name not in self._selective_interns:
             self._selective_interns[package_name] = set()
         self._selective_interns[package_name].update(interned_modules)
-        included_packages_in_pattern = []
 
         self.patterns[GlobGroup(include=package_name)] = _PatternInfo(
             _ModuleProviderAction.SELECTIVE_EXTERN, allow_empty

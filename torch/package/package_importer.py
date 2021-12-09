@@ -314,11 +314,12 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         atoms = name.split(".")
         for atom in atoms:
-            cur = cur.children.get(atom, None)
             if cur is None:
                 return False
-            if isinstance(cur, _ExternNode):
+            elif isinstance(cur, _ExternNode):
                 return False
+            elif isinstance(cur, (_PackageNode, _SelectiveExternNode)):
+                cur = cur.children.get(atom, _PathNode())
         return isinstance(cur, (_PackageNode, _ModuleNode))
 
     def _make_module(
@@ -344,6 +345,7 @@ class PackageImporter(Importer):
 
         node = self._get_node_from_name(name)
         if isinstance(node, _SelectiveExternNode):
+
             ns["_extern_copy"] = importlib.import_module(name)
 
             def get_selectively_interned_module_names(cur_node, name):
@@ -366,7 +368,7 @@ class PackageImporter(Importer):
                 self.import_module(f'{name}.{name_}')
                 return globals().get(name_)
 
-            module.__getattr__ = types.MethodType(__getattr__, module)
+            module.__getattr__ = types.MethodType(__getattr__, module)  # type: ignore[attr-defined]
 
             # replace getattr function in selective extern module
 
@@ -405,13 +407,18 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         atoms = name.split(".")
         for atom in atoms[:-1]:
-            self._check_if_viable_parent(cur, atom, name)
-            cur = cur.children[atom]
             if isinstance(cur, _ExternNode):
                 return cur
+            if isinstance(cur, (_SelectiveExternNode, _PackageNode)):
+                self._check_if_viable_parent(cur, atom, name)
+                cur = cur.children[atom]
+        if isinstance(cur, (_SelectiveExternNode, _PackageNode)):
+            self._check_if_viable_parent(cur, atoms[-1], name)
+            return cur.children[atoms[-1]]
+        elif isinstance(cur, _ExternNode):
+            return cur
 
-        self._check_if_viable_parent(cur, atoms[-1], name)
-        return cur.children[atoms[-1]]
+
 
     def _load_module(self, name: str, parent: str):
         cur: _PathNode = self.root
@@ -421,16 +428,21 @@ class PackageImporter(Importer):
                 if atom not in cur.children:
                     module = self.modules[name] = importlib.import_module(name)
                     return module
-            cur = cur.children[atom]
+
+            if isinstance(cur, (_PackageNode, _SelectiveExternNode)):
+                cur = cur.children[atom]
+
             if isinstance(cur, _ExternNode):
                 module = self.modules[name] = importlib.import_module(name)
                 return module
-        return self._make_module(
-            name,
-            cur.source_file,
-            isinstance(cur, (_PackageNode, _SelectiveExternNode)),
-            parent,
-        )  # type: ignore[attr-defined]
+
+        if isinstance(cur, (_PackageNode, _SelectiveExternNode, _ModuleNode)):
+            return self._make_module(
+                name,
+                cur.source_file,
+                isinstance(cur, (_PackageNode, _SelectiveExternNode)),
+                parent,
+            )  # type: ignore[attr-defined]
 
     def _compile_source(self, fullpath: str, mangled_filename: str):
         source = self.zip_reader.get_record(fullpath)
@@ -619,20 +631,25 @@ class PackageImporter(Importer):
     def _get_or_create_package(
         self, atoms: List[str]
     ) -> "Union[_PackageNode, _ExternNode, _SelectiveExternNode]":
-        cur = self.root
+
         if len(atoms) == 0:
-            return cur
+            return self.root
+
+        cur: _PathNode = self.root
+
         if (
             atoms[0] in self.selective_extern_packages
+            and isinstance(cur, _PackageNode)
             and atoms[0] not in cur.children
         ):
             node = cur.children[atoms[0]] = _SelectiveExternNode(None)
 
             return node
         for i, atom in enumerate(atoms):
-            node = cur.children.get(atom, None)
-            if node is None:
-                node = cur.children[atom] = _PackageNode(None)
+
+            assert isinstance(cur, (_PackageNode, _SelectiveExternNode))
+            node = cur.children.get(atom, _PathNode())  # type: ignore[assignment]
+
             if isinstance(node, _ExternNode):
                 return node
             if isinstance(node, _ModuleNode):
@@ -640,9 +657,14 @@ class PackageImporter(Importer):
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
+
+            if not isinstance(node, (_PackageNode, _SelectiveExternNode)) and isinstance(node, _PathNode):
+                node = cur.children[atom] = _PackageNode(None)
             assert isinstance(node, (_PackageNode, _SelectiveExternNode))
-            cur = node
-        return cur
+            cur = node  # type: ignore
+
+        assert isinstance(node, (_PackageNode, _SelectiveExternNode))
+        return cur  # type: ignore[return-value]
 
     def _add_file(self, filename: str):
         """Assembles a Python module out of the given file. Will ignore files in the .data directory.
@@ -737,7 +759,6 @@ def patched_getfile(object):
 
 
 inspect.getfile = patched_getfile
-
 
 class _PackageResourceReader:
     """Private class used to support PackageImporter.get_resource_reader().
