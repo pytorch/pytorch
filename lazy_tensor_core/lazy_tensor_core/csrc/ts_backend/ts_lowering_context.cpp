@@ -36,6 +36,9 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =
         graph_->addInput(c10::str("p", parameters_.size()));
+    if (data->is_scalar()) {
+      param->setType(c10::FloatType::get());
+    }
     it = parameters_map_.emplace(handle, Parameter{param, parameters_.size()})
              .first;
     parameters_.push_back(data);

@@ -85,11 +85,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   torch::lazy::BackendDataPtr MakeComputationDataFromScalar(
       const at::Scalar& scalar,
       const torch::lazy::BackendDevice& device) const override {
-    auto options = at::TensorOptions(scalar.type());
-    auto tensor = at::full({}, scalar, options);
-    // TODO(whc) device here really doesn't apply; this scalar data is supposed to be on CPU
-    // attached to the device we care about, but it's not clear how to specify that
-    return std::make_shared<TSData>(tensor, torch::lazy::Shape(scalar.type(), {}), device);
+    return std::make_shared<TSData>(scalar, device);
   }
 
   std::string GetComputationBackendText(
@@ -104,6 +100,11 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
  public:
   class TSData : public torch::lazy::BackendData {
    public:
+
+    TSData(const at::Scalar& scalar, const torch::lazy::BackendDevice& device)
+        : torch::lazy::BackendData(device, torch::lazy::Shape(scalar.type(), {}), /*is_scalar=*/true),
+          scalar(scalar) {}
+
     TSData(const at::Tensor& data, const torch::lazy::Shape& shape,
            const torch::lazy::BackendDevice& device)
         : torch::lazy::BackendData(device, shape), data_(data) {}
@@ -121,6 +122,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     bool HasValue() const override { return data_.defined(); }
 
     at::Tensor data() { return data_; }
+
+    c10::optional<at::Scalar> scalar;
 
    private:
     at::Tensor data_;
@@ -202,9 +205,15 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
   for (auto argument : arguments) {
     const auto ts_data =
         std::static_pointer_cast<TSBackendImpl::TSData>(argument);
-    // CHECK((c10::DeviceType)default_device_type_.type != at::kCUDA ||
-          // ts_data->data().device().type() == at::kCUDA);
-    stack.emplace_back(ts_data->data());
+    if (ts_data->is_scalar()){
+      stack.emplace_back(ts_data->scalar.value());
+    } else {
+      // TODO(whc) should this check be made more general? it's written somewhat oddly
+      CHECK((c10::DeviceType)default_device_type_.type != at::kCUDA ||
+            ts_data->data().device().type() == at::kCUDA);
+      stack.emplace_back(ts_data->data());
+    }
+
   }
   graph_executor.run(stack);
   std::vector<torch::lazy::BackendDataPtr> results;
