@@ -13189,6 +13189,8 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
+           # https://github.com/pytorch/pytorch/issues/66357
+           check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze),
     OpInfo('fill_',
            op=lambda x, scalar: torch.fill_(x.clone(), scalar),
