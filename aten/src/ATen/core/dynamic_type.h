@@ -43,7 +43,6 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
     (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit))  \
   _(Any, 0xffffffff)
 
-struct LabeledDynamicType;
 class DynamicType;
 using DynamicTypePtr = std::shared_ptr<DynamicType>;
 
@@ -91,6 +90,18 @@ using DynamicTypePtr = std::shared_ptr<DynamicType>;
  */
 class DynamicType : public Type {
   using ClassTypePtr = std::shared_ptr<const c10::ClassType>;
+
+  /**
+   * A implementation detail to support NamedTuple.
+   */
+  struct LabeledDynamicType {
+    c10::optional<std::string> label;
+    DynamicTypePtr ty;
+    explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
+
+    bool equals(const LabeledDynamicType& other) const;
+    bool isSubtypeOf(const LabeledDynamicType& other) const;
+  };
 
  public:
   ~DynamicType() override;
