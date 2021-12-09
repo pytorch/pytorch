@@ -26,11 +26,13 @@ torch.cuda
     ipc_collect
     is_available
     is_initialized
+    memory_usage
     set_device
     set_stream
     set_sync_debug_mode
     stream
     synchronize
+    utilization
 
 Random Number Generator
 -------------------------
