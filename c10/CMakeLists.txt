@@ -26,15 +26,9 @@ configure_file(
 # check with the core PyTorch developers as the dependency will be
 # transitively passed on to all libraries dependent on PyTorch.
 file(GLOB C10_SRCS
-        *.cpp
         core/*.cpp
-        core/boxing/*.cpp
-        core/boxing/impl/*.cpp
-        core/dispatch/*.cpp
-        core/op_registration/*.cpp
         core/impl/*.cpp
         mobile/*.cpp
-        macros/*.cpp
         util/*.cpp
         )
 file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
