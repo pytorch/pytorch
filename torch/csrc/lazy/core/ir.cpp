@@ -28,8 +28,7 @@ OpKind OpKind::Get(const std::string& name) {
 }
 
 hash_t OpKind::hash() const {
-  // op contains only a `c10::unique_t value` field, and unique_t = uint32_t
-  return Hash(static_cast<uint32_t>(op));
+  return Hash(static_cast<c10::unique_t>(op));
 }
 
 Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, hash_t dag_hash)
