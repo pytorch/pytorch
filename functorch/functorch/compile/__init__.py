@@ -4,6 +4,8 @@ from .._src.python_key import nnc_jit, make_nnc, pythonkey_decompose
 from .._src.decompositions import register_decomposition, decomposition_table
 from .._src.nnc_compile import nnc_compile, get_ops
 from .._src.aot_autograd import (
+    aot_function,
+    aot_module,
     compiled_function,
     compiled_module,
     tvm_compile,
