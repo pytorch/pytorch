@@ -48,7 +48,7 @@ void initCudartBindings(PyObject* module) {
   cudart.def("cuda" "ProfilerInitialize", cudaProfilerInitialize);
 #endif
   cudart.def("cuda" "MemGetInfo", [](int device) -> std::pair<size_t, size_t> {
-    c10::cuda::CUDAGuard guard{device};
+    c10::cuda::CUDAGuard guard(device);
     size_t device_free;
     size_t device_total;
     cudaMemGetInfo(&device_free, &device_total);
