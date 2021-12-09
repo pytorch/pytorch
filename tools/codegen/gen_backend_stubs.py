@@ -135,14 +135,37 @@ autograd key. They cannot be mix and matched. If this is something you need, fee
 
     return ParsedExternalYaml(backend_key, autograd_key, cpp_namespace, backend_indices)
 
-def error_on_missing_kernels(
+def error_on_missing_or_invalid_kernels(
         native_functions: Sequence[NativeFunction],
         backend_indices: Dict[DispatchKey, BackendIndex],
         backend_key: DispatchKey,
         autograd_key: Optional[DispatchKey],
-        kernel_defn_file_path: str,
+        kernel_defn_file_path: Optional[str],
         full_codegen: Optional[List[OperatorName]] = None,
 ) -> None:
+    # Additionally, provide a nice error if a user tries to register a composite op with no derivative formula to a backend key.
+    # Otherwise, autograd will silently stop working for their op.
+    for func in native_functions:
+        if backend_indices[backend_key].has_kernel(func) and func.has_composite_implicit_autograd_kernel:
+            # At this point, we know that the vendor provided a kernel for an op that also has a CompositeImplicitAutograd kernel.
+            # What we really want to error on, though, is if that op doesn't have a derivative formula registered in-tree.
+            # We can guess that based on whether or not the op has ANY in-tree non-composite kernels.
+            # Technically this has a small chance of false negatives, but it's easier than re-parsing derivatives.yaml here.
+            has_non_composite_in_tree_backend = any(
+                idx.has_kernel(func) for idx in backend_indices.values()
+                if not idx.external and idx.dispatch_key != DispatchKey.CompositeImplicitAutograd
+                and idx.dispatch_key != DispatchKey.CompositeExplicitAutograd)
+            assert has_non_composite_in_tree_backend, \
+                f"\nFound an entry for '{func.func.name}' in the yaml. " \
+                "This operator is composite, which means that by default it will decompose into base operators. " \
+                "If decomposing is fine, then you can simply remove the entry from the yaml file. " \
+                "If you wish to provide an explicit kernel directly for this composite op, you can do so by:\n " \
+                "(a) moving the operator name under the 'autograd' entry in the yaml file\n " \
+                "(b) writing a custom Autograd Function for the operator"
+    # Only perform assertions on the backend's kernel signatures if they provide
+    # us the path to their kernels.
+    if kernel_defn_file_path is None:
+        return
     try:
         with open(kernel_defn_file_path, 'r') as f:
             backend_defns = f.read()
@@ -308,15 +331,14 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
     class_name = backend_indices[backend_key].native_function_class_name()
 
-    if impl_path is not None:
-        error_on_missing_kernels(native_functions, backend_indices, backend_key, autograd_key, impl_path)
+    error_on_missing_or_invalid_kernels(native_functions, backend_indices, backend_key, autograd_key, impl_path)
 
 
-        gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                           grouped_native_functions, backend_key, autograd_key)
+    gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
+                                       grouped_native_functions, backend_key, autograd_key)
 
-        for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
-            gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                         dispatch_key, selector)
+    for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
+        gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
+                                     dispatch_key, selector)
 if __name__ == '__main__':
     main()
