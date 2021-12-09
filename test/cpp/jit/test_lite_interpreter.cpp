@@ -20,8 +20,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
-
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
