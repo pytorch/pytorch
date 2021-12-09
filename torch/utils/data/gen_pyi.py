@@ -3,6 +3,7 @@ import pathlib
 from typing import Dict, List, Set, Tuple
 from tools.codegen.gen import FileManager
 
+
 def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str]:
     """
     When given a path to a directory, returns the paths to the relevant files within it.
@@ -29,6 +30,7 @@ def extract_method_name(line: str) -> str:
         raise RuntimeError(f"Unable to find appropriate method name within line:\n{line}")
     start, end = line.find(start_token) + len(start_token), line.find(end_token)
     return line[start:end]
+
 
 def extract_class_name(line: str) -> str:
     """
@@ -134,11 +136,11 @@ def process_signature(line: str) -> str:
     return line
 
 
-def get_method_definitions(files_to_exclude,
-                           deprecated_files,
+def get_method_definitions(file_path: str,
+                           files_to_exclude: Set[str],
+                           deprecated_files: Set[str],
                            default_output_type: str,
-                           method_to_special_output_type,
-                           file_path) -> List[str]:
+                           method_to_special_output_type: Dict[str, str]) -> List[str]:
     """
     .pyi generation for functional DataPipes Process
     # 1. Find files that we want to process (exclude the ones who don't)
@@ -170,21 +172,20 @@ def main() -> None:
           interface for user-defined DataPipes, consider changing `IterDataPipe.register_datapipe_as_function`.
     """
 
-    iterDP_files_to_exclude = {"__init__.py", "utils.py"}
-    iterDP_deprecated_files = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
-    iterDP_method_to_special_output_type = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
-    iterDP_file_path = "datapipes/iter"
+    iterDP_file_path: str = "datapipes/iter"
+    iterDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
+    iterDP_deprecated_files: Set[str] = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
+    iterDP_method_to_special_output_type: Dict[str, str] = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
 
-    iter_method_definitions = get_method_definitions(iterDP_files_to_exclude, iterDP_deprecated_files, "IterDataPipe",
-                                                     iterDP_method_to_special_output_type, iterDP_file_path)
+    iter_method_definitions = get_method_definitions(iterDP_file_path, iterDP_files_to_exclude, iterDP_deprecated_files,
+                                                     "IterDataPipe", iterDP_method_to_special_output_type)
+    mapDP_file_path: str = "datapipes/map"
+    mapDP_files_to_exclude: Set[str] = {"__init__.py", "utils.py"}
+    mapDP_deprecated_files: Set[str] = set()
+    mapDP_method_to_special_output_type: Dict[str, str] = {}
 
-    mapDP_files_to_exclude = {"__init__.py", "utils.py"}
-    mapDP_deprecated_files = {}
-    mapDP_method_to_special_output_type = {}
-    mapDP_file_path = "datapipes/map"
-
-    map_method_definitions = get_method_definitions(mapDP_files_to_exclude, mapDP_deprecated_files, "MapDataPipe",
-                                                    mapDP_method_to_special_output_type, mapDP_file_path)
+    map_method_definitions = get_method_definitions(mapDP_file_path, mapDP_files_to_exclude, mapDP_deprecated_files,
+                                                    "MapDataPipe", mapDP_method_to_special_output_type)
 
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
     fm.write_with_template(filename="dataset.pyi",
