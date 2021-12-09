@@ -2,6 +2,9 @@
 
 #include <ATen/InferSize.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/internal_ops/cast.h>
+#include <torch/csrc/lazy/core/internal_ops/expand.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/util.h>
@@ -15,13 +18,10 @@
 #include "c10/util/Optional.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
-#include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -41,14 +41,14 @@ namespace lazy_tensor_aten_ops {
 namespace {
 
 // to enable operator+-*/ for Value
-using namespace torch_lazy_tensors::ir;
+using namespace torch::lazy;
 
 torch::lazy::Value MaybeExpand(const torch::lazy::Value& input,
                                const torch::lazy::Shape& target_shape) {
   if (torch::lazy::GetShapeFromTsValue(input).sizes() == target_shape.sizes()) {
     return input;
   }
-  return torch::lazy::MakeNode<ir::ops::Expand>(
+  return torch::lazy::MakeNode<torch::lazy::Expand>(
       input, target_shape.sizes().vec(),
       /*is_scalar_expand=*/false);
 }
@@ -213,7 +213,7 @@ convolution_backward_overrideable(
 
 LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {
   auto input_shape = input.shape();
-  return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Expand>(
+  return LazyTensor::Create(torch::lazy::MakeNode<torch::lazy::Expand>(
       input.GetIrValue(),
       GetExpandDimensions(input_shape.Get(), std::move(size)),
       /*is_scalar_expand=*/false), input.GetDevice());
@@ -349,7 +349,7 @@ void copy_(LazyTensor& input, LazyTensor& src) {
     if (input.dtype() == src.dtype()) {
       copy_value = src.GetIrValue();
     } else {
-      copy_value = torch::lazy::MakeNode<ir::ops::Cast>(
+      copy_value = torch::lazy::MakeNode<torch::lazy::Cast>(
           src.GetIrValue(), input.dtype(), src.dtype());
     }
     input.SetIrValue(MaybeExpand(copy_value, input.shape()));

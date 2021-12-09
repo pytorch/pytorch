@@ -1,13 +1,13 @@
 #include "cpp_test_util.h"
 
 #include <torch/csrc/lazy/backend/lowering_context.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 
 #include <iostream>
 #include <string>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 

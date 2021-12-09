@@ -9,19 +9,20 @@
 
 // TODO: DebugUtil will be upstreamed after LazyTensor is in.
 //#include "lazy_tensor_core/csrc/debug_util.h"
+#include <torch/csrc/lazy/core/internal_ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
+#include <torch/csrc/lazy/core/internal_ops/expand.h>
+#include <torch/csrc/lazy/core/internal_ops/scalar.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/thread_pool.h>
 
-#include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
-#include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
 
-using namespace torch_lazy_tensors::ir;
+using namespace torch::lazy;
+
 struct TlsData {
   void Reset() { trim_counter = 0; }
 
@@ -286,9 +287,9 @@ class DeviceContextArena {
     devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
-    torch::lazy::Value k = torch::lazy::MakeNode<ir::ops::Scalar>(
+    torch::lazy::Value k = torch::lazy::MakeNode<torch::lazy::Scalar>(
         torch::lazy::MakeIntScalar(kSeedMul), kSeedType);
-    torch::lazy::Value b = torch::lazy::MakeNode<ir::ops::Scalar>(
+    torch::lazy::Value b = torch::lazy::MakeNode<torch::lazy::Scalar>(
         torch::lazy::MakeIntScalar(kSeedAdd), kSeedType);
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
@@ -364,7 +365,7 @@ class DeviceContextArena {
         at::scalar_tensor(value, at::TensorOptions(scalar_type));
     torch::lazy::BackendDataPtr device_data =
         TensorToDataHandle(tensor, device);
-    return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(device_data));
+    return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(device_data));
   }
 
   std::mutex lock_;
@@ -507,13 +508,13 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
   torch::lazy::BackendDataPtr data = GetDeviceData(value, type, device);
   data->SetInfo(std::make_shared<DeviceDataInfo>(
       /*tensor_id=*/-1, /*read_only=*/true));
-  return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));
+  return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(data));
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const torch::lazy::BackendDevice& device) {
   if (torch::lazy::IsSpecialScalar(value)) {
-    return torch::lazy::MakeNode<ir::ops::Scalar>(value, type);
+    return torch::lazy::MakeNode<torch::lazy::Scalar>(value, type);
   }
   return GetDeviceDataIrValue(value, type, device);
 }
@@ -528,7 +529,7 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     c10::ArrayRef<int64_t> dimensions, const torch::lazy::BackendDevice& device) {
   torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
   if (!dimensions.empty()) {
-    ir_value = torch::lazy::MakeNode<ir::ops::Expand>(
+    ir_value = torch::lazy::MakeNode<torch::lazy::Expand>(
         ir_value, dimensions.vec(),
         /*is_scalar_expand=*/true);
   }
@@ -697,7 +698,7 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
       torch::lazy::Util::ComputePostOrder(roots, &po_data.emission_map);
   std::unordered_map<torch::lazy::BackendData::Handle, size_t> data_handles;
   for (auto node : po_data.post_order) {
-    const ir::ops::DeviceData* device_data = ir::ops::DeviceData::Cast(node);
+    const torch::lazy::DeviceData* device_data = torch::lazy::DeviceData::Cast(node);
     if (device_data != nullptr) {
       torch::lazy::BackendData::Handle handle =
           device_data->data()->GetHandle();
