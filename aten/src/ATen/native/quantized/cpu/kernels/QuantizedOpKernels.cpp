@@ -105,69 +105,93 @@ Tensor qcat_nhwc_kernel(
   // which causes an internal compiler error if they're not
   AT_DISPATCH_QINT_TYPES(output.scalar_type(), "qcat_nhwc", [&, N, H, W]() {
     using Vec = Vectorized<scalar_t>;
-    for (const auto batch : c10::irange(N)) {
-      for (const auto row : c10::irange(H)) {
-        for (const auto col : c10::irange(W)) {
-          // loop over input tensors
-          for (const auto tidx : c10::irange(Cs_in.size())) {
-            scalar_t::underlying* optr =
-                reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
-                batch * H * W * C_out + row * W * C_out + col * C_out +
-                Cs_sum[tidx];
+    at::parallel_for(0, N * H * W, 0, [&](int64_t begin, int64_t end) {
+      for (const auto i : c10::irange(begin, end)) {
+        // loop over input tensors
+        for (const auto tidx : c10::irange(Cs_in.size())) {
+          scalar_t::underlying* optr =
+              reinterpret_cast<scalar_t::underlying*>(output.data_ptr()) +
+              i * C_out + Cs_sum[tidx];
 
-            auto curr_C = Cs_in[tidx];
-            float curr_scale = scales[tidx];
-            int64_t curr_zero_pt = zero_pts[tidx];
+          auto curr_C = Cs_in[tidx];
+          float curr_scale = scales[tidx];
+          int64_t curr_zero_pt = zero_pts[tidx];
 
-            scalar_t::underlying* iptr =
-                reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
-                batch * H * W * curr_C + row * W * curr_C + col * curr_C;
+          scalar_t::underlying* iptr =
+              reinterpret_cast<scalar_t::underlying*>(data_ptrs[tidx]) +
+              i * curr_C;
 
-            constexpr int64_t VLEN = Vec::size();
-            int64_t c = 0;
+          constexpr int64_t VLEN = Vec::size();
+          int64_t c = 0;
 
-            // Vectorized loop
-            if (c + VLEN <= curr_C) {
-              auto curr_scale_vec = Vectorized<float>(curr_scale);
-              auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
-              auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
-              for (; c + VLEN <= curr_C; c += VLEN) {
-                auto inp_vec = Vec::loadu(iptr + c);
-                auto float_values = inp_vec.dequantize(
-                    curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
-                Vec::float_vec_return_type retvals;
-                for (int i = 0; i < Vec::float_num_vecs(); ++i) {
-                  if (ReLUFused) {
-                    retvals[i] =
-                        vec::maximum(float_values[i], Vectorized<float>(0.0f));
-                  } else {
-                    retvals[i] = float_values[i];
-                  }
+          // Vectorized loop
+          if (c + VLEN <= curr_C) {
+            auto curr_scale_vec = Vectorized<float>(curr_scale);
+            auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
+            auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
+            for (; c + VLEN <= curr_C; c += VLEN) {
+              auto inp_vec = Vec::loadu(iptr + c);
+              auto float_values = inp_vec.dequantize(
+                  curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
+              Vec::float_vec_return_type retvals;
+              for (int i = 0; i < Vec::float_num_vecs(); ++i) {
+                if (ReLUFused) {
+                  retvals[i] =
+                      vec::maximum(float_values[i], Vectorized<float>(0.0f));
+                } else {
+                  retvals[i] = float_values[i];
                 }
-                auto quantized =
-                    Vec::quantize(retvals, scale, zero_point, inv_scale);
-                quantized.store(optr + c);
+              }
+              auto quantized =
+                  Vec::quantize(retvals, scale, zero_point, inv_scale);
+              quantized.store(optr + c);
+            }
+          }
+
+          // Vectorized loop for channel between 8 and 32 (avx2)
+          constexpr int kVLEN = Vectorized<float>::size();
+          int64_t elem_size = curr_C - c;
+          if ((VLEN == 4 * kVLEN) && elem_size >= kVLEN) {
+            auto curr_scale_vec = Vectorized<float>(curr_scale);
+            auto curr_zero_pt_vec = Vectorized<float>((float)curr_zero_pt);
+            auto scale_neg_zp_premul = curr_scale_vec * curr_zero_pt_vec.neg();
+            int64_t vec_num = elem_size / kVLEN;
+            std::array<typename scalar_t::underlying, VLEN> buf_in;
+            memcpy(buf_in.data(), iptr + c, vec_num * kVLEN);
+            auto inp_vec = Vec::loadu(buf_in.data() + c);
+            auto float_values = inp_vec.dequantize(
+                curr_scale_vec, curr_zero_pt_vec, scale_neg_zp_premul);
+            Vec::float_vec_return_type retvals;
+            for (int i = 0; i < vec_num; ++i) {
+              if (ReLUFused) {
+                retvals[i] =
+                    vec::maximum(float_values[i], Vectorized<float>(0.0f));
+              } else {
+                retvals[i] = float_values[i];
               }
             }
+            auto quantized =
+                Vec::quantize(retvals, scale, zero_point, inv_scale);
+            quantized.store(optr + c, vec_num * kVLEN);
+            c += vec_num * kVLEN;
+          }
 
-            // Scalar loop
-            for (; c < curr_C; ++c) {
-              auto float_val = at::native::dequantize_val(
-                  curr_scale,
-                  curr_zero_pt,
-                  reinterpret_cast<scalar_t*>(iptr)[c]);
-              if (ReLUFused) {
-                float_val = std::max(0.0f, float_val);
-              }
-              optr[c] = at::native::quantize_val<scalar_t>(
-                            scale, zero_point, float_val)
-                            .val_;
-            } // for c
-
-          } // for tidx
-        } // for col
-      } // for row
-    } // for b
+          // Scalar loop
+          for (; c < curr_C; ++c) {
+            auto float_val = at::native::dequantize_val(
+                curr_scale,
+                curr_zero_pt,
+                reinterpret_cast<scalar_t*>(iptr)[c]);
+            if (ReLUFused) {
+              float_val = std::max(0.0f, float_val);
+            }
+            optr[c] = at::native::quantize_val<scalar_t>(
+                          scale, zero_point, float_val)
+                          .val_;
+          } // for c
+        } // for tidx
+      } // for i
+    });
   });
 
   return output;
