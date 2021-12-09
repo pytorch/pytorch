@@ -43,7 +43,7 @@ bool available(
          (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
-         (bias_sizes_opt && bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
+         (bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
                 ((transposed ? (weight.size(Layout::Filter::input) ==
                                 ((*bias_sizes_opt)[0] / groups))
                   : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0])))))
@@ -188,7 +188,7 @@ ContextConv2D create(
   TORCH_CHECK(
       available(
           weight_nhwc,
-          bias.has_value() ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+          (bias.has_value() && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
           padding_expanded,
           stride_expanded,
           dilation_expanded,

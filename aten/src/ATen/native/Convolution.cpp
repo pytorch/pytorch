@@ -1699,7 +1699,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
     }
   }
   if (output_mask[2]) {
-    if (bias_sizes_opt.has_value() && !backend_grad_bias.defined()) {
+    if (!backend_grad_bias.defined()) {
       // Calculate bias gradients outside of the backend for those that don't support it.
       backend_grad_bias = grad_output.sum((dim == 3) ? IntArrayRef{0, 2, 3, 4} : IntArrayRef{0, 2, 3});
     }
