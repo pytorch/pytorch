@@ -230,9 +230,6 @@ TORCH_PRECOMPUTE_META_FUNC(index_add)
   if (result.device() == kMeta) {
     auto selfSlice = result.select(dim, 0);
     auto sourceSlice = source.select(dim, 0);
-    auto self_stride_bytes = result.stride(dim) * elementSize(result.scalar_type());
-    auto source_stride_bytes = source.stride(dim) * elementSize(source.scalar_type());
-    auto self_dim_size = result.size(dim);
     auto iter = TensorIterator::borrowing_binary_op(selfSlice, selfSlice, sourceSlice);
   }
 
