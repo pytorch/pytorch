@@ -35,14 +35,7 @@ def define_rules(rules):
 
     rules.filegroup(
         name = "headers",
-        srcs = rules.glob(
-            ["*.h"],
-            exclude=[
-                "Array.h",
-                "C++17.h",
-                "LeftRight.h",
-                "TypeTraits.h",
-            ]),
+        srcs = rules.glob(["*.h"]),
         visibility = ["//:__pkg__"],
     )
 
