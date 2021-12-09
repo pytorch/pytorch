@@ -937,9 +937,13 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
         bufferArgs_.emplace_back(inBuffer);
         break;
       }
+      ExprHandle flat_size = 0;
+      for (size_t i = 0; i < *tt->sizes().size(); i++) {
+        flat_size = flat_size + *tt->sizes()[i] * *tt->strides()[i];
+      }
       BufHandle inBuffer(
           "t" + input_name_map_[input],
-          {0},
+          {flat_size},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
       std::vector<DimArg> inputTensorDims;
       for (size_t i = 0; i < *tt->sizes().size(); i++) {
