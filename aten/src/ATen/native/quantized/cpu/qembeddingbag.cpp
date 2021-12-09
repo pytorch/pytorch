@@ -991,7 +991,7 @@ class QEmbedding final {
           pruned_weights,
           c10::nullopt,
           c10::nullopt,
-          false, 
+          false,
           true);
     } else {
       TORCH_INTERNAL_ASSERT(
