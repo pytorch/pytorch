@@ -16,7 +16,7 @@ class TORCH_API Cast : public TsNode {
 
   std::string ToString() const override;
 
-  const at::ScalarType dtype() const {
+  at::ScalarType dtype() const {
     return dtype_;
   };
 

@@ -16,7 +16,7 @@ Scalar::Scalar(const at::Scalar& value, Shape shape)
           std::move(shape),
           /*num_outputs=*/1,
           ScalarHash(value)),
-      value_(std::move(value)) {}
+      value_(value) {}
 
 Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
     : TsNode(
@@ -24,7 +24,7 @@ Scalar::Scalar(const at::Scalar& value, c10::ScalarType type)
           {Shape(type, {})},
           /*num_outputs=*/1,
           ScalarHash(value)),
-      value_(std::move(value)) {}
+      value_(value) {}
 
 std::string Scalar::ToString() const {
   std::stringstream ss;
