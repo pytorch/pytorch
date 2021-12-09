@@ -16,6 +16,13 @@ def define_rules(rules):
     )
 
     rules.cc_library(
+        name = "LeftRight",
+        hdrs = ["LeftRight.h"],
+        srcs = ["LeftRight.cpp"],
+        deps = ["//c10/macros:Macros"],
+    )
+
+    rules.cc_library(
         name = "TypeTraits",
         hdrs = ["TypeTraits.h"],
         srcs = ["TypeTraits.cpp"],
@@ -33,6 +40,7 @@ def define_rules(rules):
             exclude=[
                 "Array.h",
                 "C++17.h",
+                "LeftRight.h",
                 "TypeTraits.h",
             ]),
         visibility = ["//:__pkg__"],
@@ -45,6 +53,7 @@ def define_rules(rules):
             exclude=[
                 "Array.cpp",
                 "C++17.cpp",
+                "LeftRight.cpp",
                 "TypeTraits.cpp",
             ],
         ),
