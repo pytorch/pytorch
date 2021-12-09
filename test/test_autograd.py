@@ -8161,8 +8161,8 @@ class TestAutogradDeviceType(TestCase):
     def test_copy_forward_ad_broadcasting(self, device):
         # copy_ allows the src to have a different shape from self as long as src is
         # broadcastable to self. Make sure forward AD handles this case.
-        primal =  torch.rand(3, 3, device=device)
-        tangent =  torch.rand(3, 3, device=device)
+        primal = torch.rand(3, 3, device=device)
+        tangent = torch.rand(3, 3, device=device)
         non_dual = torch.rand(1, 3, 3, device=device)
 
         with fwAD.dual_level():
