@@ -180,13 +180,13 @@ def get_type_line(source):
 
     # adding an extra backslash before the space, to avoid triggering
     # one of the checks in .github/workflows/lint.yml
-    type_pattern = re.compile("# type:\\ ignore(\\[[a-zA-Z-]+\\])?$")
+    type_pattern = re.compile("# type:\\ ignore(\\[[a-zA-Z-]+\\])?")
     type_lines = list(filter(lambda line: not type_pattern.search(line[1]),
                              type_lines))
 
     if len(type_lines) == 0:
         # Catch common typo patterns like extra spaces, typo in 'ignore', etc.
-        wrong_type_pattern = re.compile("#[\t ]*type[\t ]*(?!: ignore(\\[.*\\])?$):")
+        wrong_type_pattern = re.compile("#[\t ]*type[\t ]*(?!: ignore(\\[.*\\])?):")
         wrong_type_lines = list(filter(lambda line: wrong_type_pattern.search(line[1]), lines))
         if len(wrong_type_lines) > 0:
             raise RuntimeError("The annotation prefix in line " + str(wrong_type_lines[0][0])
