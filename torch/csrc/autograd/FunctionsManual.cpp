@@ -1047,7 +1047,7 @@ Tensor cholesky_jvp(const Tensor& input_tangent, const Tensor& L, bool upper) {
   auto input_tangent_ = upper ? input_tangent.mH() : input_tangent;
   auto L_ = upper ? L.mH() : L;
 
-  auto L_inverse = std::get<0>(at::triangular_solve(at::eye(L.size(-1), L.options()), L_, /*upper=*/false));
+  auto L_inverse = at::linalg_solve_triangular(L_, at::eye(L.size(-1), L.options()), /*upper=*/false);
   auto phi = at::matmul(at::matmul(L_inverse, input_tangent_), L_inverse.mH());
   phi.tril_().diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1).mul_(0.5);
   auto L_tangent = L_.matmul(phi);
@@ -2754,12 +2754,7 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
   auto R1 = R.narrow(-1, 0, k);
 
   // dB1 = Q^H dA1 R1^{-1}
-  auto dB1 = std::get<0>(at::triangular_solve(
-    dA1.mT().matmul(Q.conj()),
-    R1,
-    /*upper=*/true,
-    /*transpose=*/true
-  )).mT();
+  auto dB1 = at::linalg_solve_triangular(R1, Q.mH().matmul(dA1), /*upper=*/true, /*left=*/false);
 
   // dC1 = (dB1 + dB1^H).triu(-1) + (dB1 + dB1^H) * 0.5 I
   auto dC1 = (dB1 + dB1.mH()).triu();
@@ -2768,12 +2763,7 @@ std::tuple<Tensor, Tensor> linalg_qr_jvp(
   auto dR1 = dC1.matmul(R1);
 
   // dQ = (dA1 - Q dR1) R1^{-1}
-  auto dQ = std::get<0>(at::triangular_solve(
-    (dA1 - Q.matmul(dR1)).mT(),
-    R1,
-    /*upper=*/true,
-    /*transpose=*/true
-  )).mT();
+  auto dQ = at::linalg_solve_triangular(R1, dA1 - Q.matmul(dR1), /*upper=*/true, /*left=*/false);
 
   Tensor dR;
   if (m >= n) {

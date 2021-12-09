@@ -1,17 +1,25 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
+#include <torch/csrc/lazy/core/view_ops/as_strided.h>
+#include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
+#include <torch/csrc/lazy/core/view_ops/narrow.h>
+#include <torch/csrc/lazy/core/view_ops/narrow_view_update.h>
+#include <torch/csrc/lazy/core/view_ops/permute.h>
+#include <torch/csrc/lazy/core/view_ops/select.h>
+#include <torch/csrc/lazy/core/view_ops/select_view_update.h>
+#include <torch/csrc/lazy/core/view_ops/view.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
@@ -19,15 +27,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided.h"
-#include "lazy_tensor_core/csrc/view_ops/as_strided_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/narrow.h"
-#include "lazy_tensor_core/csrc/view_ops/narrow_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/permute.h"
-#include "lazy_tensor_core/csrc/view_ops/select.h"
-#include "lazy_tensor_core/csrc/view_ops/select_view_update.h"
-#include "lazy_tensor_core/csrc/view_ops/view.h"
 
 namespace torch {
 namespace lazy {
@@ -70,30 +69,27 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   // classes
   TSOpVector LowerNonCodegenOps(const torch::lazy::Node* node) {
     if (node->op().op == at::aten::as_strided) {
-      return LowerAsStrided(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::AsStrided>(
-              node, torch::lazy::OpKind(at::aten::as_strided)));
+      return LowerAsStrided(torch::lazy::NodeCast<torch::lazy::AsStrided>(
+          node, torch::lazy::OpKind(at::aten::as_strided)));
     }
-    if (node->op() ==
-        *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update) {
+    if (node->op() == *torch::lazy::ltc_as_strided_view_update) {
       return LowerAsStridedViewUpdate(
-          torch::lazy::NodeCast<
-              torch_lazy_tensors::ir::ops::AsStridedViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_as_strided_view_update));
+          torch::lazy::NodeCast<torch::lazy::AsStridedViewUpdate>(
+              node, *torch::lazy::ltc_as_strided_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_cast) {
+    if (node->op() == *torch::lazy::ltc_cast) {
       return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
-          node, *torch_lazy_tensors::ir::ops::ltc_cast));
+          node, *torch::lazy::ltc_cast));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_select_view_update) {
+    if (node->op() == *torch::lazy::ltc_select_view_update) {
       return LowerSelectViewUpdate(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::SelectViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_select_view_update));
+          torch::lazy::NodeCast<torch::lazy::SelectViewUpdate>(
+              node, *torch::lazy::ltc_select_view_update));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_narrow_view_update) {
+    if (node->op() == *torch::lazy::ltc_narrow_view_update) {
       return LowerNarrowViewUpdate(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::NarrowViewUpdate>(
-              node, *torch_lazy_tensors::ir::ops::ltc_narrow_view_update));
+          torch::lazy::NodeCast<torch::lazy::NarrowViewUpdate>(
+              node, *torch::lazy::ltc_narrow_view_update));
     }
     if (node->op().op == at::prim::Constant) {
       return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
@@ -140,14 +136,12 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, torch::lazy::OpKind(at::aten::expand)));
     }
     if (node->op().op == at::aten::narrow) {
-      return LowerNarrow(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Narrow>(
-              node, torch::lazy::OpKind(at::aten::narrow)));
+      return LowerNarrow(torch::lazy::NodeCast<torch::lazy::Narrow>(
+          node, torch::lazy::OpKind(at::aten::narrow)));
     }
     if (node->op().op == at::aten::permute) {
-      return LowerPermute(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Permute>(
-              node, torch::lazy::OpKind(at::aten::permute)));
+      return LowerPermute(torch::lazy::NodeCast<torch::lazy::Permute>(
+          node, torch::lazy::OpKind(at::aten::permute)));
     }
     if (node->op().op == at::aten::repeat) {
       return LowerRepeat(
@@ -155,9 +149,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, torch::lazy::OpKind(at::aten::repeat)));
     }
     if (node->op().op == at::aten::select) {
-      return LowerSelect(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Select>(
-              node, torch::lazy::OpKind(at::aten::select)));
+      return LowerSelect(torch::lazy::NodeCast<torch::lazy::Select>(
+          node, torch::lazy::OpKind(at::aten::select)));
     }
     if (node->op().op == at::aten::squeeze) {
       return LowerSqueeze(
@@ -175,13 +168,13 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, torch::lazy::OpKind(at::aten::unsqueeze)));
     }
     if (node->op().op == at::aten::view) {
-      return LowerView(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::View>(
+      return LowerView(torch::lazy::NodeCast<torch::lazy::View>(
           node, torch::lazy::OpKind(at::aten::view)));
     }
-    if (node->op() == *torch_lazy_tensors::ir::ops::ltc_device_data) {
+    if (node->op() == *torch::lazy::ltc_device_data) {
       const torch_lazy_tensors::ir::ops::DeviceData* device_data_node =
           torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::DeviceData>(
-              node, *torch_lazy_tensors::ir::ops::ltc_device_data);
+              node, *torch::lazy::ltc_device_data);
       return {loctx()->GetParameter(device_data_node->data())};
     }
     std::vector<torch::jit::NamedValue> arguments;
@@ -203,8 +196,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerTSBuiltin(function_, sym, arguments, kwarguments);
   }
 
-  TSOpVector LowerAsStrided(
-      const torch_lazy_tensors::ir::ops::AsStrided* node) {
+  TSOpVector LowerAsStrided(const torch::lazy::AsStrided* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->size());
@@ -216,7 +208,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
   }
 
   TSOpVector LowerAsStridedViewUpdate(
-      const torch_lazy_tensors::ir::ops::AsStridedViewUpdate* node) {
+      const torch::lazy::AsStridedViewUpdate* node) {
     torch::jit::Value* destination =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const torch::lazy::Output& input_op = node->operand(1);
@@ -390,7 +382,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return expand_out;
   }
 
-  TSOpVector LowerNarrow(const torch_lazy_tensors::ir::ops::Narrow* node) {
+  TSOpVector LowerNarrow(const torch::lazy::Narrow* node) {
     const torch::lazy::Output& input = node->operand(0);
     torch::jit::Value* base = loctx()->GetOutputOp(input);
     const auto& base_indices = node->base_indices();
@@ -407,7 +399,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {base};
   }
 
-  TSOpVector LowerPermute(const torch_lazy_tensors::ir::ops::Permute* node) {
+  TSOpVector LowerPermute(const torch::lazy::Permute* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.push_back(node->dims());
@@ -432,9 +424,9 @@ class TSNodeLowering : public TSNodeLoweringInterface {
         loctx()->graph()->insertConstant(at::scalar_tensor(value, options))};
   }
 
-  TSOpVector LowerSelect(const torch_lazy_tensors::ir::ops::Select* node) {
-    int64_t step = torch_lazy_tensors::ir::ops::Select::GetStride(
-        node->start(), node->end(), node->stride());
+  TSOpVector LowerSelect(const torch::lazy::Select* node) {
+    int64_t step = torch::lazy::Select::GetStride(node->start(), node->end(),
+                                                  node->stride());
     torch::jit::Value* base = loctx()->GetOutputOp(node->operand(0));
     return {GenerateSlice(/*base=*/base, /*dim=*/node->dim(),
                           /*start=*/node->start(), /*end=*/node->end(),
@@ -467,12 +459,11 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(stack, arguments);
   }
 
-  TSOpVector LowerSelectViewUpdate(
-      const torch_lazy_tensors::ir::ops::SelectViewUpdate* node) {
+  TSOpVector LowerSelectViewUpdate(const torch::lazy::SelectViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
-    int64_t step = torch_lazy_tensors::ir::ops::Select::GetStride(
-        node->start(), node->end(), node->stride());
+    int64_t step = torch::lazy::Select::GetStride(node->start(), node->end(),
+                                                  node->stride());
     torch::jit::Value* selected = GenerateSlice(
         /*base=*/dest, /*dim=*/node->dim(), /*start=*/node->start(),
         /*end=*/node->end(), /*step=*/step);
@@ -480,8 +471,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return {dest};
   }
 
-  TSOpVector LowerNarrowViewUpdate(
-      const torch_lazy_tensors::ir::ops::NarrowViewUpdate* node) {
+  TSOpVector LowerNarrowViewUpdate(const torch::lazy::NarrowViewUpdate* node) {
     torch::jit::Value* dest =
         GenerateClone(loctx()->GetOutputOp(node->operand(0)));
     const auto& base_indices = node->base_indices();
@@ -508,7 +498,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(node, arguments);
   }
 
-  TSOpVector LowerView(const torch_lazy_tensors::ir::ops::View* node) {
+  TSOpVector LowerView(const torch::lazy::View* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.push_back(node->output_size());

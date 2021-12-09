@@ -188,11 +188,11 @@ class GenLazyNativeFuncDefinition:
 
         assert len(value_types) > 0, f"Only supporting tensor ops so far, none found in {sig}"
         first_tensor = value_types[0]
-        bridge_str = f"""auto result = CreateAtenFromLtcTensor(lazy_{first_tensor.name}.CreateFrom(node));"""
+        bridge_str = f"""auto result = CreateAtenFromLtcTensor(LazyTensor::Create(node, lazy_{first_tensor.name}.GetDevice()));"""
         if returns_length > 1:
             bridge_str = f"""std::vector<{self.tensor_class}> lazy_tensors;
         for (int i = 0; i < {returns_length}; i++) {{
-            lazy_tensors.push_back(lazy_{first_tensor.name}.CreateFrom(torch::lazy::Value(node, i)));
+            lazy_tensors.push_back(LazyTensor::Create(torch::lazy::Value(node, i), lazy_{first_tensor.name}.GetDevice()));
         }}
         auto result = TupleAtenFromLtcTensors<{returns_length}>(lazy_tensors);"""
         if schema.name.name.inplace:
@@ -205,7 +205,7 @@ class GenLazyNativeFuncDefinition:
         return [f"""\
     // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
     {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
-        LTC_FN_COUNTER("lazy::");
+        TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
         {meta_str}

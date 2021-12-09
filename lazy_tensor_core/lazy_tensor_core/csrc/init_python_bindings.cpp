@@ -2,7 +2,14 @@
 #include <c10/util/Optional.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
+#include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/multi_wait.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/thread_pool.h>
+#include <torch/csrc/lazy/core/util.h>
 
 #include <cstring>
 #include <sstream>
@@ -11,24 +18,16 @@
 #include <vector>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/helpers.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/python_util.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/tensor_distributed.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/version.h"
-#include "lazy_tensors/computation_client/metrics.h"
 #include "lazy_tensors/computation_client/metrics_analysis.h"
 #include "lazy_tensors/computation_client/metrics_reader.h"
-#include "lazy_tensors/computation_client/multi_wait.h"
 #include "lazy_tensors/computation_client/sys_util.h"
-#include "lazy_tensors/computation_client/thread_pool.h"
-#include "lazy_tensors/computation_client/util.h"
-#include "lazy_tensors/core/platform/macros.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/python/pybind.h"
@@ -47,14 +46,14 @@ c10::optional<torch::lazy::BackendDevice> GetOptionalDevice(const std::string& d
   if (device_str.empty()) {
     return c10::nullopt;
   }
-  return bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
+  return torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
 }
 
 torch::lazy::BackendDevice GetDeviceOrCurrent(const std::string& device_str) {
   if (device_str.empty()) {
     return torch::lazy::BackendDevice();
   }
-  return bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
+  return torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
 }
 
 void PrepareToExit() {
@@ -83,7 +82,7 @@ std::vector<std::string> GetLtcDeviceStrings(
   std::vector<std::string> ltc_devices;
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
-    auto device = bridge::AtenDeviceToBackendDevice(c10::Device(device_str));
+    auto device = torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str));
     ltc_devices.emplace_back(device.toString());
   }
   return ltc_devices;
@@ -94,7 +93,7 @@ std::vector<torch::lazy::BackendDevice> GetLtcDevices(const std::vector<std::str
   ltc_devices.reserve(devices.size());
   for (auto& device_str : devices) {
     ltc_devices.push_back(
-        bridge::AtenDeviceToBackendDevice(c10::Device(device_str)));
+        torch::lazy::atenDeviceToBackendDevice(c10::Device(device_str)));
   }
   return ltc_devices;
 }
@@ -230,12 +229,12 @@ void StepMarker(const std::string& device_str,
   LazyGraphExecutor::Get()->SyncLiveTensorsGraph(&device, devices, wait);
   LazyGraphExecutor::Get()->MarkStep(device);
   bool debug_mode = lazy_tensors::sys_util::GetEnvBool("PT_LTC_DEBUG", false);
-  if (TF_PREDICT_FALSE(debug_mode)) {
+  if (C10_UNLIKELY(debug_mode)) {
     std::string report = lazy_tensors::metrics::CreatePerformanceReport();
     if (!report.empty()) {
       std::string fout =
           lazy_tensors::sys_util::GetEnvString("PT_LTC_DEBUG_FILE", "");
-      if (TF_PREDICT_FALSE(!fout.empty())) {
+      if (C10_UNLIKELY(!fout.empty())) {
         std::ofstream out_file(fout, std::ios_base::app);
         out_file << report;
       } else {
@@ -273,7 +272,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
       auto post_order = torch::lazy::Util::ComputePostOrder(roots);
       if (post_order.size() > nodes_threshold) {
         ss << "Tensor: id=" << tensor.GetUniqueId()
-           << ", shape=" << tensor.shape().get()
+           << ", shape=" << tensor.shape().Get()
            << ", device=" << tensor.GetDevice()
            << ", ir_nodes=" << post_order.size() << "\n";
         for (size_t i = post_order.size(); i > 0; --i) {
@@ -282,7 +281,7 @@ std::string GetLiveTensorsReport(size_t nodes_threshold,
             break;
           }
         }
-        ss << ir::DumpUtil::PostOrderToText(post_order, roots);
+        ss << torch::lazy::DumpUtil::PostOrderToText(post_order, roots);
         ss << "\n\n";
       }
     }
@@ -303,7 +302,8 @@ std::ptrdiff_t GetTensorId(const at::Tensor& tensor) {
 std::vector<at::Tensor> GetLtcTensorsFromAten(
     const std::vector<at::Tensor>& aten_tensors,
     const std::vector<std::string>& devices) {
-  auto data_handles = CreateTensorsData(aten_tensors, GetLtcDevices(devices));
+  auto data_handles =
+      torch::lazy::CreateTensorsData(aten_tensors, GetLtcDevices(devices));
 
   std::vector<at::Tensor> lazy_tensors;
   lazy_tensors.reserve(data_handles.size());
@@ -327,8 +327,7 @@ std::shared_ptr<torch::lazy::Value> CreateToken(const std::string& device_str) {
 }
 
 py::object GetMetricData(const std::string& name) {
-  lazy_tensors::metrics::MetricData* data =
-      lazy_tensors::metrics::GetMetric(name);
+  torch::lazy::MetricData* data = torch::lazy::GetMetric(name);
   if (data == nullptr) {
     return py::none();
   }
@@ -435,14 +434,14 @@ void InitLtcModuleBindings(py::module m) {
   m.def("_get_ltc_tensors_dot",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
-            return ir::DumpUtil::ToDot(nodes);
+            return torch::lazy::DumpUtil::ToDot(nodes);
           };
           return GetTensorsDump(tensors, coverter);
         });
   m.def("_get_ltc_tensors_text",
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           auto coverter = [](c10::ArrayRef<torch::lazy::Node*> nodes) {
-            return ir::DumpUtil::ToText(nodes);
+            return torch::lazy::DumpUtil::ToText(nodes);
           };
           return GetTensorsDump(tensors, coverter);
         });
@@ -660,16 +659,13 @@ void InitLtcModuleBindings(py::module m) {
       },
       py::arg("devices"));
   m.def("_ltc_reset_metrics",
-        []() { lazy_tensors::metrics::MetricsArena::Get()->Reset(); });
-  m.def("_ltc_counter_names",
-        []() { return lazy_tensors::metrics::GetCounterNames(); });
+        []() { torch::lazy::MetricsArena::Get()->Reset(); });
+  m.def("_ltc_counter_names", []() { return torch::lazy::GetCounterNames(); });
   m.def("_ltc_counter_value", [](const std::string& name) -> py::object {
-    lazy_tensors::metrics::CounterData* data =
-        lazy_tensors::metrics::GetCounter(name);
+    torch::lazy::CounterData* data = torch::lazy::GetCounter(name);
     return data != nullptr ? py::cast<int64_t>(data->Value()) : py::none();
   });
-  m.def("_ltc_metric_names",
-        []() { return lazy_tensors::metrics::GetMetricNames(); });
+  m.def("_ltc_metric_names", []() { return torch::lazy::GetMetricNames(); });
   m.def("_ltc_metric_data", [](const std::string& name) -> py::object {
     return GetMetricData(name);
   });
@@ -685,6 +681,9 @@ void InitLtcModuleBindings(py::module m) {
   //   return GetMemoryInfo(device);
   // });
   m.def("_ltc_init_ts_backend", []() { compiler::InitTorchScriptBackend(); });
+  m.def("_ltc_set_noop_execution_mode", [](bool enable_noop) {
+    LazyGraphExecutor::Get()->SetNoOpExecutionMode(enable_noop);
+  });
 }  // namespace
 
 }  // namespace

@@ -2,19 +2,18 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
+#include <torch/csrc/lazy/core/helpers.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/jit.h>
 
-#include "lazy_tensor_core/csrc/helpers.h"
 #include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
@@ -22,7 +21,6 @@
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_forward.h"
 #include "lazy_tensor_core/csrc/ops/unsqueeze.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 
 namespace torch_lazy_tensors {
 namespace compiler {
@@ -111,10 +109,6 @@ torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
               node, torch::lazy::OpKind(at::aten::convolution_overrideable)));
     }
     // activation and unary op do not change shape
-    case at::aten::pow: {
-      const torch::lazy::Output& argument = node->operand(0);
-      return torch::lazy::GetShapeFromTsOutput(argument);
-    }
     case at::aten::repeat: {
       return InferRepeat(torch::lazy::NodeCast<ir::ops::Repeat>(
           node, torch::lazy::OpKind(at::aten::repeat)));

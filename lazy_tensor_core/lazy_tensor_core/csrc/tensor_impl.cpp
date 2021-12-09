@@ -3,10 +3,10 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
 
 #include "c10/util/Exception.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
 
 namespace torch_lazy_tensors {
 namespace {
@@ -67,7 +67,7 @@ LTCTensorImpl::LTCTensorImpl(LazyTensor&& tensor)
     : c10::TensorImpl(c10::DispatchKeySet{c10::DispatchKey::Lazy,
                                           c10::DispatchKey::AutogradLazy},
                       c10::scalarTypeToTypeMeta(tensor.dtype()),
-                      bridge::BackendDeviceToAtenDevice(tensor.GetDevice())),
+                      torch::lazy::backendDeviceToAtenDevice(tensor.GetDevice())),
       tensor_(std::move(tensor)) {
   // This is a temporary fix for a PyTorch core issue,
   // according to https://github.com/pytorch/xla/pull/2682.
@@ -154,13 +154,13 @@ void LTCTensorImpl::setup_size_properties() {
     // We can't call refresh_numel() given we override sizes() too.
     // TODO(alanwaketan): Replace the following with Shape.numel().
     numel_ = 1;
-    for (auto dim : shape.get().sizes()) {
+    for (auto dim : shape.Get().sizes()) {
       numel_ *= dim;
     }
-    sizes_and_strides_.set_sizes(shape.get().sizes());
+    sizes_and_strides_.set_sizes(shape.Get().sizes());
     // We can't call empty_tensor_restride(c10::MemoryFormat::Contiguous) given we override sizes() too.
     std::vector<int64_t> updated_strides;
-    updated_strides = ComputeArrayStrides(shape.get().sizes());
+    updated_strides = torch::lazy::ComputeArrayStrides(shape.Get().sizes());
     for (int i = 0; i < updated_strides.size(); i++) {
       sizes_and_strides_.stride_at_unchecked(i) = updated_strides[i];
     }

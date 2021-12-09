@@ -4,11 +4,10 @@
 #include <torch/csrc/lazy/backend/lowering_context.h>
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/multi_wait.h>
+#include <torch/csrc/lazy/core/util.h>
 
 #include "lazy_tensor_core/csrc/tensor.h"
-#include "lazy_tensors/computation_client/async_task.h"
-#include "lazy_tensors/computation_client/multi_wait.h"
-#include "lazy_tensors/computation_client/util.h"
 
 namespace torch_lazy_tensors {
 
@@ -96,6 +95,10 @@ class LazyGraphExecutor {
       const at::Scalar& value, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device);
 
+  // Configure the executor treat compile/execute API calls as no-ops
+  // for use when profiling lazy trace overheads
+  void SetNoOpExecutionMode(bool enable_noop) { noop_execution_mode_ = enable_noop; }
+
  private:
   struct SyncTensorsConfig {
     // Whether we want to force data on the target tensors (hence trimming
@@ -112,7 +115,7 @@ class LazyGraphExecutor {
     SyncTensorsConfig config;
     std::vector<size_t> indices;
     torch::lazy::hash_t hash;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     torch::lazy::BackendDevice device;
   };
 
@@ -149,9 +152,9 @@ class LazyGraphExecutor {
 
     void Wait();
 
-    lazy_tensors::util::MultiWait mwait;
+    torch::lazy::MultiWait mwait;
     std::vector<size_t> indices;
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     std::vector<torch::lazy::BackendDataPtr> parameters_data;
     torch::lazy::BackendDevice device;
     ComputationCache::TypePtr cached_computation;
@@ -218,6 +221,8 @@ class LazyGraphExecutor {
   std::vector<torch::lazy::BackendDataPtr> GatherTensorsData(
       const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices,
       c10::ArrayRef<torch::lazy::BackendDataPtr> tensors_data);
+
+  bool noop_execution_mode_ = false;
 };
 
 }  // namespace torch_lazy_tensors

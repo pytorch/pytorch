@@ -3,14 +3,13 @@
 
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
+#include <torch/csrc/lazy/core/thread_pool.h>
 
 #include <condition_variable>
 #include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
-
-#include "lazy_tensors/computation_client/thread_pool.h"
 
 namespace lazy_tensors {
 namespace util {
@@ -68,7 +67,7 @@ class AsyncTask {
       CHECK(!data_->scheduled);
       data_->scheduled = true;
     }
-    lazy_tensors::env::ScheduleIoClosure(std::move(completer));
+    torch::lazy::ScheduleIoClosure(std::move(completer));
     return *this;
   }
 

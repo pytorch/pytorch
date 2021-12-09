@@ -49,12 +49,16 @@ full_codegen:
   - mean.dim
   - mm
   - mv
+  - native_dropout
+  - native_dropout_backward
   - native_layer_norm
   - native_layer_norm_backward
   - ne.Scalar
   - ne.Tensor
   - nll_loss_backward
   - nll_loss_forward
+  - pow.Tensor_Scalar
+  - pow.Tensor_Tensor
   - relu
   - relu_
   - rsqrt

@@ -1,12 +1,12 @@
 #pragma once
 
+#include <torch/csrc/lazy/core/metrics.h>
+
 #include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
-
-#include "lazy_tensors/computation_client/metrics.h"
 
 namespace torch_lazy_tensors {
 namespace cpp_test {
@@ -31,7 +31,7 @@ class MetricsSnapshot {
 
  private:
   struct MetricSamples {
-    std::vector<lazy_tensors::metrics::Sample> samples;
+    std::vector<torch::lazy::Sample> samples;
     double accumulator = 0.0;
     size_t total_samples = 0;
   };

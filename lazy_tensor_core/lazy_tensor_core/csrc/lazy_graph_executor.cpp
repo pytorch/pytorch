@@ -1,19 +1,23 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 
 #include <c10/util/Logging.h>
+#include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+#include <torch/csrc/lazy/core/ir_dump_util.h>
+#include <torch/csrc/lazy/core/ir_util.h>
+#include <torch/csrc/lazy/core/tensor_util.h>
+#include <torch/csrc/lazy/core/unique.h>
 
-#include "lazy_tensor_core/csrc/debug_util.h"
-#include "lazy_tensor_core/csrc/ir_dump_util.h"
+// TODO: DebugUtil will be upstreamed after LazyTensor is in.
+//#include "lazy_tensor_core/csrc/debug_util.h"
+#include <torch/csrc/lazy/core/metrics.h>
+#include <torch/csrc/lazy/core/thread_pool.h>
+
 #include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
 #include "lazy_tensor_core/csrc/ops/device_data.h"
 #include "lazy_tensor_core/csrc/ops/expand.h"
-#include "lazy_tensor_core/csrc/ops/ltc_ops.h"
-#include "lazy_tensor_core/csrc/ops/ops.h"
 #include "lazy_tensor_core/csrc/ops/scalar.h"
-#include "lazy_tensor_core/csrc/tensor_util.h"
-#include "lazy_tensors/computation_client/metrics.h"
-#include "lazy_tensors/computation_client/unique.h"
-#include "torch/csrc/lazy/core/ir_metadata.h"
+#include "lazy_tensors/computation_client/sys_util.h"
+
 namespace torch_lazy_tensors {
 namespace {
 
@@ -123,9 +127,9 @@ class DeviceLockerArena {
 
   // Use a set to impose an order on the device locking sequence (ABBA
   // prevention).
-  std::vector<lazy_tensors::util::ExceptionCleanup> LockDevices(
+  std::vector<torch::lazy::ExceptionCleanup> LockDevices(
       const std::set<torch::lazy::BackendDevice>& devices) {
-    std::vector<lazy_tensors::util::ExceptionCleanup> unlocker;
+    std::vector<torch::lazy::ExceptionCleanup> unlocker;
     unlocker.reserve(devices.size());
     for (auto& device : devices) {
       unlocker.emplace_back(LockDevice(device));
@@ -134,12 +138,12 @@ class DeviceLockerArena {
   }
 
  private:
-  lazy_tensors::util::ExceptionCleanup LockDevice(const torch::lazy::BackendDevice& device) {
+  torch::lazy::ExceptionCleanup LockDevice(const torch::lazy::BackendDevice& device) {
     auto locker = DeviceLockerArena::Get()->GetLocker(device);
     locker->Lock();
-    return lazy_tensors::util::ExceptionCleanup(
+    return torch::lazy::ExceptionCleanup(
         [locker = std::move(locker)](
-            lazy_tensors::util::ExceptionCleanup::StatusType status) {
+            torch::lazy::ExceptionCleanup::StatusType status) {
           locker->Unlock(std::move(status));
         });
   }
@@ -166,10 +170,10 @@ class DataCacheArena {
     ;
     torch::lazy::BackendDataPtr device_data = cache->Get(tensor);
     if (device_data == nullptr) {
-      at::Tensor tensor_copy = CopyTensor(tensor);
+      at::Tensor tensor_copy = torch::lazy::CopyTensor(tensor);
       device_data = TensorToDataHandle(tensor_copy, device);
       cache->Add(std::move(tensor_copy), device_data);
-      LTC_COUNTER("DeviceDataCacheMiss", 1);
+      TORCH_LAZY_COUNTER("DeviceDataCacheMiss", 1);
     }
     return device_data;
   }
@@ -190,7 +194,7 @@ class DataCacheArena {
   struct TensorHasher {
     size_t operator()(const at::Tensor& tensor) const {
       return torch::lazy::HashReduce(torch::lazy::HashCombine(
-          lazy_tensors::util::GetEnumValue(tensor.scalar_type()),
+          torch::lazy::GetEnumValue(tensor.scalar_type()),
           torch::lazy::TensorHash(tensor)));
     };
   };
@@ -242,14 +246,14 @@ class DeviceContextArena {
     DeviceContext* devctx = GetDeviceContext(data->device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->tensors_data.emplace(data->unique_id, data);
-    LTC_COUNTER("CreateLtcTensor", 1);
+    TORCH_LAZY_COUNTER("CreateLtcTensor", 1);
   }
 
   void UnregisterTensor(LazyTensor::Data* data) {
     DeviceContext* devctx = GetDeviceContext(data->device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     devctx->tensors_data.erase(data->unique_id);
-    LTC_COUNTER("DestroyLtcTensor", 1);
+    TORCH_LAZY_COUNTER("DestroyLtcTensor", 1);
   }
 
   std::vector<LazyTensor> GetLiveTensors(const torch::lazy::BackendDevice* device) {
@@ -274,18 +278,18 @@ class DeviceContextArena {
     DeviceContext* devctx = GetDeviceContext(device);
     std::lock_guard<std::mutex> lock(devctx->lock);
     if (!devctx->seed_ir_value) {
-      devctx->seed_ir_value =
-          IrValueFromScalar(MakeIntScalar(devctx->seed), kSeedType, device);
+      devctx->seed_ir_value = IrValueFromScalar(
+          torch::lazy::MakeIntScalar(devctx->seed), kSeedType, device);
     }
     // Keep the running seed as scalar as well, so we can return it directly
     // without executing graphs.
     devctx->running_seed = kSeedAdd + kSeedMul * devctx->running_seed;
     // Compose new seeds from the root seed, to avoid creating too many
     // computation parameters which might overflow the device capacity.
-    torch::lazy::Value k =
-        ir::ops::ScalarOp(MakeIntScalar(kSeedMul), kSeedType);
-    torch::lazy::Value b =
-        ir::ops::ScalarOp(MakeIntScalar(kSeedAdd), kSeedType);
+    torch::lazy::Value k = torch::lazy::MakeNode<ir::ops::Scalar>(
+        torch::lazy::MakeIntScalar(kSeedMul), kSeedType);
+    torch::lazy::Value b = torch::lazy::MakeNode<ir::ops::Scalar>(
+        torch::lazy::MakeIntScalar(kSeedAdd), kSeedType);
     devctx->seed_ir_value = b + k * devctx->seed_ir_value;
     return devctx->seed_ir_value;
   }
@@ -368,7 +372,7 @@ class DeviceContextArena {
 };
 
 bool ShouldSyncIrValue(const torch::lazy::Value& ir_value) {
-  return ir_value->op() != ir::ops::ltc_not_supported;
+  return ir_value->op() != torch::lazy::ltc_not_supported;
 }
 
 // Return true if no tensor in the list has an underlying IR (leaf or
@@ -452,7 +456,7 @@ void LazyGraphExecutor::SyncTensorsGraph(std::vector<LazyTensor>* tensors,
 }
 
 void LazyGraphExecutor::MarkStep(const torch::lazy::BackendDevice& device) {
-  LTC_COUNTER("MarkStep", 1);
+  TORCH_LAZY_COUNTER("MarkStep", 1);
   DeviceContextArena::Get()->MarkStep(device);
   torch::lazy::ScopePusher::ResetScopes();
   g_tls_data.Reset();
@@ -471,7 +475,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<torch::lazy::BackendDevice> 
   }
   }
   // The LockDevices() API returns a vector of
-  // lazy_tensors::util::ExceptionCleanup object, which is going to be freed
+  // torch::lazy::ExceptionCleanup object, which is going to be freed
   // immediately, turning this operation into a lock barrier.
   DeviceLockerArena::Get()->LockDevices(wait_devices);
 }
@@ -493,9 +497,9 @@ std::string LazyGraphExecutor::DumpBackendComputation(
       ir_values.push_back(std::move(ir_value));
     }
   }
-  return !ir_values.empty()
-             ? ir::DumpUtil::ToBackend(ir_values, torch::lazy::BackendDevice())
-             : std::string();
+  return !ir_values.empty() ? torch::lazy::DumpUtil::ToBackend(
+                                  ir_values, torch::lazy::BackendDevice())
+                            : std::string();
 }
 
 torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
@@ -508,8 +512,8 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const torch::lazy::BackendDevice& device) {
-  if (IsSpecialScalar(value)) {
-    return ir::ops::ScalarOp(value, type);
+  if (torch::lazy::IsSpecialScalar(value)) {
+    return torch::lazy::MakeNode<ir::ops::Scalar>(value, type);
   }
   return GetDeviceDataIrValue(value, type, device);
 }
@@ -555,9 +559,9 @@ void LazyGraphExecutor::Async::Wait() {
   mwait.Wait();
   // Accessing other Async members is safe only after MultiWait::Wait()
   // completes.
-  lazy_tensors::util::ExceptionCleanup::StatusType status;
+  torch::lazy::ExceptionCleanup::StatusType status;
   for (auto& cleanup : unlocker) {
-    const lazy_tensors::util::ExceptionCleanup::StatusType& cleanup_status =
+    const torch::lazy::ExceptionCleanup::StatusType& cleanup_status =
         cleanup.GetStatus();
     if (cleanup_status != nullptr) {
       if (status == nullptr) {
@@ -575,7 +579,7 @@ void LazyGraphExecutor::Async::Wait() {
 
 LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensor>& tensors, const SyncTensorsConfig& config) {
-  lazy_tensors::util::Unique<torch::lazy::BackendDevice> unique_device;
+  torch::lazy::Unique<torch::lazy::BackendDevice> unique_device;
   for (size_t i = 0; i < tensors.size(); ++i) {
     unique_device.set(tensors[i].GetDevice());
   }
@@ -599,7 +603,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
   coll.indices.reserve(tensors.size());
   VLOG(4) << "Waiting on device barrier for device " << coll.device << " ...";
   {
-    LTC_TIMED("DeviceLockWait");
+    TORCH_LAZY_TIMED("DeviceLockWait");
     coll.unlocker =
         DeviceLockerArena::Get()->LockDevices(unique_device.AsSet());
   }
@@ -626,9 +630,9 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     }
   }
   if (!at_tensors.empty()) {
-    LTC_COUNTER("SyncTensorsToData", at_tensors.size());
+    TORCH_LAZY_COUNTER("SyncTensorsToData", at_tensors.size());
     std::vector<torch::lazy::BackendDataPtr> handles =
-        CreateTensorsData(at_tensors, devices);
+        torch::lazy::CreateTensorsData(at_tensors, devices);
     for (size_t i = 0; i < handles.size(); ++i) {
       // If we are here, it means that the IR Value for the tensor is not
       // present. Also, we uploaded the at::Tensor data to the device, but such
@@ -718,7 +722,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   if (cached_computation == nullptr) {
     return nullptr;
   }
-  LTC_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
+  TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
   return ScheduleSyncTensorsGraph(
@@ -798,10 +802,10 @@ LazyGraphExecutor::LookupCachedCompile(const std::vector<LazyTensor>& tensors,
   ComputationCache::TypePtr cached_computation =
       GetComputationCache()->Get(hash);
   if (cached_computation == nullptr) {
-    LTC_COUNTER("UncachedCompile", 1);
+    TORCH_LAZY_COUNTER("UncachedCompile", 1);
     return nullptr;
   }
-  LTC_COUNTER("CachedCompile", 1);
+  TORCH_LAZY_COUNTER("CachedCompile", 1);
   return cached_computation;
 }
 
@@ -839,7 +843,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
       }
     }
   }
-  LTC_VALUE_METRIC("InputOutputAliasCount", alias_map.size());
+  TORCH_LAZY_VALUE_METRIC("InputOutputAliasCount", alias_map.size());
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
@@ -850,8 +854,8 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
   if (coll.indices.empty()) {
     return nullptr;
   }
-  DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
-                                  &coll.indices);
+  // DebugUtil::SaveTensorsGraphInfo("ScheduleSyncTensorsGraph", *tensors,
+  //                                &coll.indices);
 
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = torch::lazy::HashCombine(
@@ -865,7 +869,7 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
 
   CompilationResult compile_result = Compile(*tensors, devices, coll, &po_data);
 
-  LTC_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
+  TORCH_LAZY_VALUE_METRIC("TensorsGraphSize", compile_result.emitted_nodes);
   VLOG(5) << "TensorsGraphSize=" << compile_result.emitted_nodes;
 
   auto cached_computation = std::make_shared<CachedComputation>(
@@ -886,7 +890,11 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       coll, std::move(parameters_data), std::move(tensors_data),
       std::move(cached_computation));
 
-  auto syncfn = [async, hash = coll->hash]() {
+  auto syncfn = [this, async, hash = coll->hash]() {
+    // For profiling lazy trace overhead
+    if (noop_execution_mode_)
+      return;
+
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
@@ -915,14 +923,13 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       // surfaced when the user tries to acquire the device locks the next time.
       std::exception_ptr exptr = std::current_exception();
       for (auto& unlocker : async->unlocker) {
-        unlocker.SetStatus(exptr);
+        unlocker.SetStatus(std::move(exptr));
       }
       throw;
     }
   };
 
-  lazy_tensors::env::ScheduleIoClosure(
-      async->mwait.Completer(std::move(syncfn)));
+  torch::lazy::ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
   return async;
 }
 

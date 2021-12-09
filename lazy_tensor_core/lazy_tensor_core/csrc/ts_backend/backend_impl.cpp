@@ -69,7 +69,17 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       const at::Tensor& tensor, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device) const override {
     at::TensorOptions options = tensor.options().device(default_device_type_.c10Type());
-    return std::make_shared<TSData>(tensor.to(options), shape, device);
+    if (tensor.device().type() == default_device_type_.c10Type() &&
+        default_device_type_.c10Type() == at::kCUDA) {
+      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/true), shape, device);
+    } else if (tensor.device().type() == at::kCPU && tensor.numel() == 1) {
+      // calling .item() on singleton cpu tensor is fast, and using fill is a safe,
+      // async way to copy cpu to cuda for a single value
+      auto device_tensor = at::full(tensor.sizes(), tensor.item(), options);
+      return std::make_shared<TSData>(device_tensor, shape, device);
+    } else {
+      return std::make_shared<TSData>(tensor.to(options, /*non_blocking=*/false), shape, device);
+    }
   }
 
   std::string GetComputationBackendText(
