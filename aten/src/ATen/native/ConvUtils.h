@@ -70,6 +70,7 @@ TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<IntArrayRef> bias_sizes_opt,
+    const bool need_backward,
     const ConvParams& params);
 
 // Overload for selecting the convolution backend from the full set of convolution inputs.

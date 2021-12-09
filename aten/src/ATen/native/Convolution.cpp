@@ -125,11 +125,6 @@ auto ConvParams::use_cpu_depthwise3x3_winograd(
          weight.is_contiguous() &&
          !is_strided() &&
          !is_dilated() &&
-         // 3x3 depthwith convolutions implementation is inference only
-         !(GradMode::is_enabled() &&
-                 (input.requires_grad() ||
-                  weight.requires_grad() ||
-                 (bias.defined() && bias.requires_grad()))) &&
          !transposed;
 #else
   return false;
@@ -845,13 +840,16 @@ ConvBackend select_conv_backend(
   }
 
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
-  return select_conv_backend(input, weight, bias_sizes_opt, params);
+  bool need_backward = GradMode::is_enabled() &&
+      (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
+  return select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
 }
 
 ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<IntArrayRef> bias_sizes_opt,
+    const bool need_backward,
     const ConvParams& params) {
 
   // don't send empty inputs through backends
@@ -893,7 +891,8 @@ ConvBackend select_conv_backend(
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
     return ConvBackend::Xnnpack2d;
-  } else if (params.use_cpu_depthwise3x3_winograd(input, weight)) {
+  // 3x3 depthwith convolutions implementation is inference only
+  } else if (!need_backward && params.use_cpu_depthwise3x3_winograd(input, weight)) {
     return ConvBackend::Winograd3x3Depthwise;
   } else if (
       !params.transposed && (input.ndimension() == 5) &&
@@ -1057,7 +1056,9 @@ at::Tensor _convolution(
 
   // Select appropriate backend to use.
   auto bias_sizes_opt = bias.defined() ? c10::optional<IntArrayRef>(bias.sizes()) : c10::nullopt;
-  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, params);
+  bool need_backward = GradMode::is_enabled() &&
+      (input.requires_grad() || weight.requires_grad() || (bias.defined() && bias.requires_grad()));
+  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, need_backward, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
 
   // Call the backend.
@@ -1531,7 +1532,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
   }
 
   // Select appropriate backend to use.
-  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, params);
+  ConvBackend backend = select_conv_backend(input, weight, bias_sizes_opt, /*need_backward=*/ true, params);
   at::MemoryFormat backend_memory_format = determine_backend_memory_format(input, weight);
 
   // Call the backend.
