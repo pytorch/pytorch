@@ -20,7 +20,7 @@ class Reduction(Enum):
 
 @register_decomposition(aten.tanh_backward)
 def tanh_backward_decomposition(out_grad: Tensor, y: Tensor):
-    return out_grad * ( -y * y + 1)
+    return out_grad * (1 - y * y)
 
 @register_decomposition(aten.sigmoid_backward)
 def sigmoid_backward_decomposition(out_grad: Tensor, y: Tensor):
@@ -150,6 +150,7 @@ def logit_backward(grad_output: Tensor, self: Tensor, eps: Optional[float] = Non
             aten.new_full(self, (), float('nan')))
 
 
+
 @register_decomposition(aten.native_dropout)
 def native_dropout_decomposition(input, p, generator=None):
     bool_mask = aten.rand_like(input) < p
@@ -162,10 +163,6 @@ def native_dropout_decomposition(input, p, generator=None):
 #     res = mask.type_as(input) * input * (1./p)
 #     return [res, mask]
 
-# This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
-@register_decomposition(aten.detach)
-def detach_decomposition(x: Tensor):
-    return x
 
 @register_decomposition(aten._s_where)
 def _s_where_canonicalization(a, b, c):
