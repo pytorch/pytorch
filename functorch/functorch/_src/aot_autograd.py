@@ -16,10 +16,13 @@ import inspect
 from functorch._C import CompileCache
 from functools import partial
 from typing import Callable
-
 from .python_key import pythonkey_decompose
+from .decompositions import register_decomposition
+
 pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (list(x), None), lambda x, c: immutable_collections.immutable_list(x))
 pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (list(x.values()), list(x.keys())), lambda x, c: immutable_collections.immutable_dict({key: value for key, value in zip(c, x)}))
+
+aten = torch.ops.aten
 
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph"):
     base, ext = os.path.splitext(fname)
@@ -226,6 +229,18 @@ def normalize_as_list(x):
     return [x]
 
 def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompose):
+
+    # putting these decompositions here since they shouldn't always be used
+    # Kinda sketchy ... we use torch.sub here to have the correct scalar => tensor promotion logic
+    @register_decomposition(aten.rsub)
+    def rsub(a, b, alpha=1):
+        return -aten.sub(a, b)
+
+    # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
+    @register_decomposition(aten.detach)
+    def detach_decomposition(x):
+        return x
+
     joint_forward_backward = create_joint_forward_backward(flat_fn)
 
     compiled_fw = None
