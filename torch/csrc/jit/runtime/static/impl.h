@@ -56,6 +56,17 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   }
 }
 
+TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
+  static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
+      c10::Symbol::fromQualString("static_runtime::dict_unpack"),
+      c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
+  };
+  return std::find(
+             symbols_with_borrowed_outputs.begin(),
+             symbols_with_borrowed_outputs.end(),
+             kind) != symbols_with_borrowed_outputs.end();
+}
+
 // Group values used by `graph` into three categories:
 //
 // - output_aliases:
@@ -456,7 +467,41 @@ class TORCH_API StaticRuntime {
 
   void disableManageOutputTensors();
 
+  // This is the fallback path taken if we can't construct the memory planner
+  // on the first iteration.
+  // IMPORTANT: Nothing here should be able to throw!!!
+  // This function can be called from the (implicitly) `noexcept` destructor
+  // of Deallocator, meaning that std::terminate will be called
+  // if any exception escapes. Even if resetMemory and ~Deallocator were
+  // `noexcept(false)`, it's possible that when ~Deallocator is called, the
+  // stack is already unwinding, so there's still danger of calling
+  // std::terminate.
+  void resetMemory() noexcept;
+
  private:
+  // A helper object that invokes memory planner deallocation code
+  // when destructed.
+  class Deallocator {
+   public:
+    explicit Deallocator(StaticRuntime& runtime) : runtime_(runtime) {}
+
+    Deallocator(Deallocator&&) = default;
+    Deallocator(const Deallocator&) = default;
+    Deallocator& operator=(const Deallocator&) = delete;
+    Deallocator& operator=(Deallocator&&) = delete;
+    ~Deallocator();
+
+    void setFinished() {
+      finished_ = true;
+    }
+
+   private:
+    void cleanupImpl();
+
+    bool finished_ = false;
+    StaticRuntime& runtime_;
+  };
+
   template <typename IValueList>
   c10::IValue run_impl(IValueList&& args, const KeywordArgs& kwargs);
 
@@ -474,11 +519,13 @@ class TORCH_API StaticRuntime {
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
   // clean up owning refs of input IValues
-  void clean_up_input_ivalues() {
+  void clean_up_input_ivalues() noexcept {
     for (const auto idx : c10::irange(static_module_.num_inputs())) {
       values_[idx] = IValue();
     }
   }
+
+  void clean_up_intermediate_ivalues() noexcept;
 
   IValue move_outputs_to_tuple(uint32_t num_outputs);
 
