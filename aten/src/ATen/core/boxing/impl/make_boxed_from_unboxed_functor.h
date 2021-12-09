@@ -2,6 +2,7 @@
 
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -79,7 +80,7 @@ class OperatorHandle;
  *
  * See below for how to register this kernel with PyTorch.
  */
-struct TORCH_API OperatorKernel {
+struct TORCH_API OperatorKernel : public c10::intrusive_ptr_target {
   virtual ~OperatorKernel() = default;
 };
 

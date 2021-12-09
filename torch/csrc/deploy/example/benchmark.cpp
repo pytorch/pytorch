@@ -199,8 +199,8 @@ struct Benchmark {
       eg = I.global("builtins", "tuple")(
                 I.self.attr("load_pickle")({"model", "example.pkl"}))
                .toIValue()
-               .toTuple()
-               ->elements();
+               .toTupleRef()
+               .elements();
     }
 
     // NOLINTNEXTLINE(bugprone-branch-clone)

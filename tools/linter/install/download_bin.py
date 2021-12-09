@@ -55,14 +55,14 @@ def download_bin(name: str, output_dir: str, platform_to_url: Dict[str, str]) ->
     Downloads the binary appropriate for the host platform and stores it in the given output directory.
     """
     if HOST_PLATFORM not in platform_to_url:
-        print(f"Unsupported platform: {HOST_PLATFORM}")
+        print(f"Unsupported platform: {HOST_PLATFORM}", file=sys.stderr)
         return False
 
     url = platform_to_url[HOST_PLATFORM]
     filename = os.path.join(output_dir, name)
 
     # Try to download binary.
-    print(f"Downloading {name} to {output_dir}")
+    print(f"Downloading {name} to {output_dir}", file=sys.stderr)
     try:
         urllib.request.urlretrieve(
             url,
@@ -70,10 +70,10 @@ def download_bin(name: str, output_dir: str, platform_to_url: Dict[str, str]) ->
             reporthook=report_download_progress if sys.stdout.isatty() else None,
         )
     except urllib.error.URLError as e:
-        print(f"Error downloading {filename}: {e}")
+        print(f"Error downloading {filename}: {e}", file=sys.stderr)
         return False
     finally:
-        print()
+        print(file=sys.stderr)
 
     return True
 
@@ -96,11 +96,11 @@ def download(
         try:
             os.mkdir(output_dir)
         except OSError as e:
-            print(f"Unable to create directory for {name} binary: {output_dir}")
+            print(f"Unable to create directory for {name} binary: {output_dir}", file=sys.stderr)
             return False
         finally:
             if verbose:
-                print(f"Created directory {output_dir} for {name} binary")
+                print(f"Created directory {output_dir} for {name} binary", file=sys.stderr)
 
         # If the directory didn't exist, neither did the binary, so download it.
         ok = download_bin(name, output_dir, platform_to_url)
@@ -116,21 +116,21 @@ def download(
                 return False
         else:
             if verbose:
-                print(f"Found pre-existing {name} binary, skipping download")
+                print(f"Found pre-existing {name} binary, skipping download", file=sys.stderr)
 
     # Now that the binary is where it should be, hash it.
     actual_bin_hash = compute_file_sha256(output_path)
 
     # If the host platform is not in platform_to_hash, it is unsupported.
     if HOST_PLATFORM not in platform_to_hash:
-        print(f"Unsupported platform: {HOST_PLATFORM}")
+        print(f"Unsupported platform: {HOST_PLATFORM}", file=sys.stderr)
         return False
 
     # This is the path to the file containing the reference hash.
     hashpath = os.path.join(PYTORCH_ROOT, platform_to_hash[HOST_PLATFORM])
 
     if not os.path.exists(hashpath):
-        print("Unable to find reference binary hash")
+        print("Unable to find reference binary hash", file=sys.stderr)
         return False
 
     # Load the reference hash and compare the actual hash to it.
@@ -138,20 +138,20 @@ def download(
         reference_bin_hash = f.readline().strip()
 
         if verbose:
-            print(f"Reference Hash: {reference_bin_hash}")
-            print(f"Actual Hash: {repr(actual_bin_hash)}")
+            print(f"Reference Hash: {reference_bin_hash}", file=sys.stderr)
+            print(f"Actual Hash: {repr(actual_bin_hash)}", file=sys.stderr)
 
         if reference_bin_hash != actual_bin_hash:
-            print("The downloaded binary is not what was expected!")
-            print(f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}")
+            print("The downloaded binary is not what was expected!", file=sys.stderr)
+            print(f"Downloaded hash: {repr(actual_bin_hash)} vs expected {reference_bin_hash}", file=sys.stderr)
 
             # Err on the side of caution and try to delete the downloaded binary.
             try:
                 os.unlink(output_path)
-                print("The binary has been deleted just to be safe")
+                print("The binary has been deleted just to be safe", file=sys.stderr)
             except OSError as e:
-                print(f"Failed to delete binary: {e}")
-                print("Delete this binary as soon as possible and do not execute it!")
+                print(f"Failed to delete binary: {e}", file=sys.stderr)
+                print("Delete this binary as soon as possible and do not execute it!", file=sys.stderr)
 
             return False
         else:
@@ -159,6 +159,6 @@ def download(
             mode = os.stat(output_path).st_mode
             mode |= stat.S_IXUSR
             os.chmod(output_path, mode)
-            print(f"Using {name} located at {output_path}")
+            print(f"Using {name} located at {output_path}", file=sys.stderr)
 
     return True

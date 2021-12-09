@@ -37,6 +37,8 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("dot.out", torch::CppFunction::makeFallthrough());
   m.impl("vdot.out", torch::CppFunction::makeFallthrough());
   m.impl("mm", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular", torch::CppFunction::makeFallthrough());
+  m.impl("linalg_solve_triangular.out", torch::CppFunction::makeFallthrough());
   m.impl("mm.out", torch::CppFunction::makeFallthrough());
   m.impl("addmm", torch::CppFunction::makeFallthrough());
   m.impl("addmm_", torch::CppFunction::makeFallthrough());
@@ -49,6 +51,7 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
 
   TORCH_VIEW_FNS(m)
   TENSOR_UTILITIES_AND_CONSTRUCTORS(m)
+  TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
 }
