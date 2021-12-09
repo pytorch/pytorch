@@ -230,6 +230,7 @@ pytorch_source_path = os.getenv('PYTORCH_SOURCE_PATH',
 include_dirs = [
     base_dir,
     pytorch_source_path,
+    os.path.join(pytorch_source_path, 'torch/include'),
     os.path.join(pytorch_source_path, 'torch/csrc'),
     os.path.join(pytorch_source_path, 'torch/lib/tmp_install/include'),
 ]
