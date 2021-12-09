@@ -239,6 +239,8 @@ tests = {
     'test_vjp',
     'test_vmapvjp',
     'test_vmapvjp_has_batch_rule',
+    'test_jvp',
+    'test_vmapjvp',
 }
 
 def get_statuses(for_subset=None, invert=False):
@@ -365,11 +367,13 @@ def print_coverage_info(th=100, nn=25):
         'torch.unique', # dynamic
         'torch.nonzero', # dynamic
         'torch.masked_select', # dynamic
+        'torch.prod', # dynamic (backward)
     }
     remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp_has_batch_rule'], vmap_exemptions)
     remove_from_set(statuses['test_op_has_batch_rule'], vmap_exemptions)
+    remove_from_set(statuses['test_vmapjvp'], vmap_exemptions)
 
     print(f"total ops in set: {th + nn}")
     print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
@@ -379,3 +383,5 @@ def print_coverage_info(th=100, nn=25):
 
 print_coverage_info(100, 25)
 # print_coverage_info(200, 50)
+
+# pprint.pprint(get_top_ops(100, 25))
