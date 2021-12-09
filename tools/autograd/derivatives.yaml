@@ -1823,19 +1823,15 @@
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor
   self: softplus_backward(grad, self, beta, threshold, result)
-  result: auto_element_wise
 
 - name: softshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: softshrink_backward(grad, self, lambd)
-  result: auto_element_wise
 
 - name: threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor
   self: threshold_backward(grad, self, threshold)
-  result: auto_element_wise
 
 - name: threshold_(Tensor(a!) self, Scalar threshold, Scalar value) -> Tensor(a!)
   self: threshold_backward(grad, result, threshold)
-  result: auto_element_wise
 
 - name: reflection_pad1d(Tensor self, int[2] padding) -> Tensor
   self: reflection_pad1d_backward(grad, self, padding)
