@@ -953,9 +953,14 @@ Tensor& minimum_out(Tensor& result, const Tensor& self, const Tensor& other) {
   return result;
 }
 
-Tensor minimum(const Tensor& self, const Tensor& other) {
+Tensor minimum(const Tensor& self, const Tensor& other, c10::optional<Scalar> other_scalar) {
   Tensor result;
-  auto iter = TensorIterator::binary_op(result, self, other);
+
+  if (other_scalar){
+    Tensor other2 = at::full({1}, other_scalar);
+    auto iter = TensorIterator::binary_op(result, self, other2);
+  }
+    auto iter = TensorIterator::binary_op(result, self, other2);
   minimum_stub(iter.device_type(), iter);
   return iter.output();
 }

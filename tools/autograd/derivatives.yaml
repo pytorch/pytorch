@@ -753,7 +753,7 @@
 - name: min(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
 
-- name: minimum(Tensor self, Tensor other) -> Tensor
+- name: minimum(Tensor self, Tensor other, Scalar other_scalar) -> Tensor
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 

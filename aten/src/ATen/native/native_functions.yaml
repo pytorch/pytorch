@@ -6358,7 +6358,7 @@
 - func: max.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   use_c10_dispatcher: hacky_wrapper_for_legacy_signatures
 
-- func: minimum(Tensor self, Tensor other) -> Tensor
+- func: minimum(Tensor self, Tensor other, Scalar? other_scalar=None) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: minimum
