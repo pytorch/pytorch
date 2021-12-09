@@ -40,7 +40,8 @@ struct CustomLibrary : public SymbolProvider {
   static std::shared_ptr<CustomLibrary> create(
       const char* filename,
       int argc = 0,
-      const char** argv = nullptr);
+      const char** argv = nullptr,
+      void* interp_handle = nullptr);
   virtual void add_search_library(std::shared_ptr<SymbolProvider> lib) = 0;
   virtual void load() = 0;
 };

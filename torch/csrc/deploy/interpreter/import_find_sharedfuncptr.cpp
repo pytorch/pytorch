@@ -27,11 +27,9 @@ extern "C" dl_funcptr _PyImport_FindSharedFuncptr(
   // when the manager unloads. Otherwise some libraries can live longer than
   // they are needed, and the process of unloading them might use functionality
   // that itself gets unloaded.
-  loaded_files_.emplace_back(CustomLibrary::create(pathname, 1, args));
+  loaded_files_.emplace_back(
+      CustomLibrary::create(pathname, 1, args, deploy_self));
   CustomLibrary& lib = *loaded_files_.back();
-  lib.add_search_library(SystemLibrary::create(deploy_self));
-  lib.add_search_library(SystemLibrary::create());
-  lib.load();
   std::stringstream ss;
   ss << prefix << "_" << shortname;
   auto r = (dl_funcptr)lib.sym(ss.str().c_str()).value();

@@ -59,6 +59,7 @@
 #include <fmt/format.h>
 #include <torch/csrc/deploy/loader.h>
 #include <torch/csrc/deploy/mem_file.h>
+#include <unordered_set>
 
 namespace torch {
 namespace deploy {
@@ -678,96 +679,19 @@ at::optional<TLSIndex> SystemLibraryImpl::tls_sym(const char* name) const {
   return at::nullopt;
 }
 
-// dlopen does not accept additional search paths as an argument.
-// however, normal DT_NEEDED library load inherits the runpath of parents.
-// So we need to pre-find all the libraries and call dlopen on them directly to
-// get the same behavior. We can find the dependencies by reading the libraries
-// dynamic section for recursive DT_NEEED entries.
-void resolve_needed_libraries(
-    std::vector<std::shared_ptr<SymbolProvider>>& libraries,
-    const std::string& origin_relative,
-    std::vector<std::string>& search_path,
-    const std::string& runpath_template,
-    const std::vector<const char*>& needed) {
-  size_t search_path_start_size = search_path.size();
-
-  std::string origin = resolve_origin(origin_relative);
-  std::vector<std::string> paths = split_path(runpath_template, ':');
-  // backwards because we want paths to be search in order but we search
-  // search_path backward
-  for (size_t i = paths.size(); i > 0; --i) {
-    search_path.emplace_back(resolve_path(origin, paths[i - 1]));
+bool should_use_custom_loader(const std::string& library_path) {
+  if (library_path == "") {
+    return false;
   }
-
-  for (const char* name : needed) {
-    // std::cout << "ATTEMPTING FIND " << name << "\n";
-    if (strcmp(name, "libtorch_python.so") == 0) {
-      // torchvision expects it...
-      continue;
-    }
-    // find the library, either (1) it is already loaded,
-    //                          (2) it is an absolute path that exists,
-    //                          (3) we find it in the search path
-    //                          (4) we can dlopen it
-
-    // (1) the library is already loaded
-    const int base_flags = RTLD_LAZY | RTLD_LOCAL;
-    void* handle = dlopen(name, base_flags | RTLD_NOLOAD);
-    if (handle) {
-      // std::cout << "ALREADY LOADED " << name << "\n";
-      libraries.emplace_back(SystemLibrary::create(handle, true));
-      continue;
-    }
-
-    std::string library_path = "";
-    // (2) it is an absolute path
-    if (strchr(name, '/') != nullptr) {
-      library_path = name;
-    } else {
-      // (3) find it in the search path
-      for (size_t i = search_path.size(); i > 0; --i) {
-        std::stringstream ss;
-        ss << search_path[i - 1] << "/" << name;
-        if (access(ss.str().c_str(), F_OK) == 0) {
-          library_path = ss.str();
-          break;
-        }
-      }
-    }
-
-    std::vector<std::shared_ptr<SymbolProvider>>
-        sublibraries; // these need to say loaded until we open library_path
-                      // otherwise we might dlclose a sublibrary
-
-    if (library_path != "") {
-      // std::cout << "LOOKING FOR SUBLIBRARIES FOR FILE AT PATH " <<
-      // library_path << "\n"; we found the actual file, recursively load its
-      // deps before opening it so we resolve their paths correctly
-      MemFile image(library_path.c_str());
-      auto search =
-          load_needed_from_elf_file(library_path.c_str(), image.data());
-      resolve_needed_libraries(
-          sublibraries, library_path, search_path, search.first, search.second);
-    } else {
-      library_path = name;
-    }
-
-    // either we didn't find the file, or we have already loaded its deps
-    // in both cases, we now try to call dlopen. In the case where we didn't
-    // find the file, we hope that something like LD_LIBRARY_PATH knows where it
-    // is. In the case where we found it, we know its deps are loaded and
-    // resolved.
-
-    // std::cout << "OPENING " << library_path << "\n";
-    handle = dlopen(library_path.c_str(), base_flags);
-    DEPLOY_CHECK(
-        handle, "{}: could not load library, dlopen says: {}", name, dlerror());
-    libraries.emplace_back(SystemLibrary::create(handle, true));
+  std::string library_name = library_path;
+  auto pos = library_name.find_last_of("/");
+  if (pos != std::string::npos) {
+    library_name = library_name.substr(pos + 1);
   }
-
-  // unwind search_path stack
-  search_path.erase(
-      search_path.begin() + search_path_start_size, search_path.end());
+  static std::unordered_set<std::string> libs_need_custom_loader = {
+      "libboost_python.so.1.69.0",
+  };
+  return libs_need_custom_loader.count(library_name) > 0;
 }
 
 // NOLINTNEXTLINE
@@ -776,12 +700,17 @@ extern "C" void* __dso_handle;
 struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     : public std::enable_shared_from_this<CustomLibraryImpl>,
       public CustomLibrary {
-  CustomLibraryImpl(const char* filename, int argc, const char** argv)
+  CustomLibraryImpl(
+      const char* filename,
+      int argc,
+      const char** argv,
+      void* interp_handle)
       : contents_(filename),
         mapped_library_(nullptr),
         name_(filename),
         argc_(argc),
-        argv_(argv) {
+        argv_(argv),
+        interp_handle_(interp_handle) {
     pthread_key_create(&tls_key_, nullptr);
     data_ = contents_.data();
     header_ = (Elf64_Ehdr*)data_;
@@ -958,13 +887,26 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
     dyninfo_.initialize_from_dynamic_section(
         name_, dynamic_, load_bias_, false);
     std::vector<std::string> empty_search_path;
+    // search torch::deploy interpreter lib before DT_NEEDED. This way,
+    // in case DT_NEEDED contains libpython, CPython symbols are still
+    // being resolved by the torch::deploy interpreter lib
+    add_search_library(SystemLibrary::create(interp_handle_));
     resolve_needed_libraries(
         symbol_search_path_,
         name_,
         empty_search_path,
         dyninfo_.runpath_,
         dyninfo_.needed_);
+    // search global scope after DT_NEEDED
+    add_search_library(SystemLibrary::create());
   }
+
+  void resolve_needed_libraries(
+      std::vector<std::shared_ptr<SymbolProvider>>& libraries,
+      const std::string& origin_relative,
+      std::vector<std::string>& search_path,
+      const std::string& runpath_template,
+      const std::vector<const char*>& needed);
 
   at::optional<Elf64_Addr> lookup_symbol(Elf64_Xword r_info) {
     const uint32_t r_type = ELF64_R_TYPE(r_info);
@@ -983,16 +925,28 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
         return (Elf64_Addr)__cxa_thread_atexit_impl;
       }
     }
+
+    // lookup in self first (DEEPBIND). libboost_python.so need this.
+    // When we use custom loader to load libboost_python.so, there are
+    // relocation entry for:
+    // boost::python::objects::function_object(boost::python::objects::py_function
+    // const&) If we search symbol_search_path_ first, the symbol potentially
+    // defined by the executable will win. This does not work since
+    // the function defined in the executable is not linked with
+    // torch::deploy interpreter. We need pick the function defined
+    // in libboost_python.so itself.
+    auto r = sym(sym_name);
+    if (r) {
+      return r;
+    }
+
     for (const auto& sys_lib : symbol_search_path_) {
       auto r = sys_lib->sym(sym_name);
       if (r) {
         return r;
       }
     }
-    auto r = sym(sym_name);
-    if (r) {
-      return r;
-    }
+
     if (ELF64_ST_BIND(sym_st.st_info) != STB_WEAK) {
       DEPLOY_ERROR(
           "{}: '{}' symbol not found in ElfFile lookup",
@@ -1223,6 +1177,7 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   std::string name_;
   int argc_ = 0;
   const char** argv_ = nullptr;
+  void* interp_handle_ = nullptr;
   bool initialized_ = false;
   bool eh_frame_registered_ = false;
 
@@ -1235,11 +1190,71 @@ struct __attribute__((visibility("hidden"))) CustomLibraryImpl
   std::vector<std::function<void(void)>> fixup_prot_;
 };
 
+void CustomLibraryImpl::resolve_needed_libraries(
+    std::vector<std::shared_ptr<SymbolProvider>>& libraries,
+    const std::string& origin_relative,
+    std::vector<std::string>& search_path,
+    const std::string& runpath_template,
+    const std::vector<const char*>& needed) {
+  size_t search_path_start_size = search_path.size();
+
+  std::string origin = resolve_origin(origin_relative);
+  std::vector<std::string> paths = split_path(runpath_template, ':');
+  // backwards because we want paths to be search in order but we search
+  // search_path backward
+  for (size_t i = paths.size(); i > 0; --i) {
+    search_path.emplace_back(resolve_path(origin, paths[i - 1]));
+  }
+
+  std::shared_ptr<SymbolProvider> lib_omnibus = nullptr;
+  for (const char* name : needed) {
+    // std::cout << "ATTEMPTING FIND " << name << "\n";
+    if (strcmp(name, "libtorch_python.so") == 0) {
+      // torchvision expects it...
+      continue;
+    }
+
+    std::shared_ptr<SymbolProvider> current_lib = nullptr;
+    if (should_use_custom_loader(name)) {
+      std::cerr << "Use the custom loader to load the needed lib " << name
+                << " for " << origin_relative << std::endl;
+
+      current_lib = CustomLibrary::create(name, argc_, argv_, interp_handle_);
+    } else {
+      auto handle = dlopen(name, RTLD_LOCAL | RTLD_LAZY);
+      DEPLOY_CHECK(
+          handle,
+          "{}: could not load library, dlopen says: {}",
+          name,
+          dlerror());
+      current_lib = SystemLibrary::create(handle, true);
+    }
+    if (strcmp(name, "libomnibus.so") == 0) {
+      lib_omnibus = current_lib;
+    } else {
+      libraries.emplace_back(current_lib);
+    }
+  }
+
+  // make sure libomnibus is added after others
+  if (lib_omnibus) {
+    libraries.emplace_back(lib_omnibus);
+  }
+
+  // unwind search_path stack
+  search_path.erase(
+      search_path.begin() + search_path_start_size, search_path.end());
+}
+
 std::shared_ptr<CustomLibrary> CustomLibrary::create(
     const char* filename,
     int argc,
-    const char** argv) {
-  return std::make_shared<CustomLibraryImpl>(filename, argc, argv);
+    const char** argv,
+    void* interp_handle) {
+  std::shared_ptr<CustomLibrary> lib =
+      std::make_shared<CustomLibraryImpl>(filename, argc, argv, interp_handle);
+  lib->load();
+  return lib;
 }
 
 static void* local__tls_get_addr(TLSIndex* idx) {

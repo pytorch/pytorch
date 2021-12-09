@@ -126,6 +126,11 @@ void XarEnvironment::setupPythonApp() {
   r = system(extractCommand.c_str());
   TORCH_CHECK(r == 0, "Fail to extract the python package");
 
+  // change current working directory to pythonAppDir_ since code like
+  // https://fburl.com/code/bd117dek makes such assumption
+  TORCH_CHECK(
+      chdir(pythonAppRoot_.c_str()) == 0,
+      "Fail to change the current working directory");
   alreadySetupPythonApp_ = true;
 }
 
