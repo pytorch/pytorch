@@ -17,21 +17,15 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     a lazy Node constructor.
     """
 
-    def is_safe_to_wrap_scalars(op: LazyIrSchema):
-        # note false and true are inverted here
-        return "false" if "addcdiv " in op.name.overload_name else "true"
-
     if isValueType(arg.type):
-
-
         if isinstance(arg.type, BaseCType):
             if arg.name in schema.wrapped_scalar_names:
-                return f"LazyGraphExecutor::Get()->GetIrValueForScalar({arg.name}, *device, {is_safe_to_wrap_scalars(schema)})"
+                return f"LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name}, *device)"
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"{arg.name} ? " \
-                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalar(*{arg.name}, *device, {is_safe_to_wrap_scalars(schema)})) : " \
+                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name}, *device)) : " \
                     "c10::nullopt"
             return f"lazy_{arg.name} ? " \
                    f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \

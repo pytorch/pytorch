@@ -81,22 +81,21 @@ class LazyGraphExecutor {
 
   torch::lazy::Value GetDeviceDataIrValue(const at::Scalar& value,
                                           c10::ScalarType type,
-                                          const torch::lazy::BackendDevice& device, 
-                                          bool expand = true);
+                                          const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          c10::ScalarType type,
-                                         const torch::lazy::BackendDevice& device,
-                                         bool expand = true);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
+                                         const torch::lazy::BackendDevice& device);
+  torch::lazy::Value GetIrValueForScalarFromCodegen(const at::Scalar& value,
                                          const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          c10::ScalarType type,
                                          c10::ArrayRef<int64_t> dimensions,
-                                         const torch::lazy::BackendDevice& device,
-                                         bool expand = true);
+                                         const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalar(
       const at::Scalar& value, const torch::lazy::Shape& shape,
-      const torch::lazy::BackendDevice& device, bool expand = true);
+      const torch::lazy::BackendDevice& device);
 
   // Configure the executor treat compile/execute API calls as no-ops
   // for use when profiling lazy trace overheads
