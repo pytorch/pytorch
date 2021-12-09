@@ -648,7 +648,6 @@ class TestOperators(TestCase):
         xfail('unfold'),
         xfail('vdot'),
         xfail('nanmean'),
-        xfail('nn.functional.layer_norm'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.batch_norm'),
