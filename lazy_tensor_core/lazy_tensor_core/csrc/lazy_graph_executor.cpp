@@ -532,22 +532,27 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, const torch::lazy::BackendDevice& device) {
-  return GetIrValueForScalar(value, value.type(), device);
+    const at::Scalar& value, const torch::lazy::BackendDevice& device, bool expand) {
+  return GetIrValueForScalar(value, value.type(), device, expand);
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type,
-    c10::ArrayRef<int64_t> dimensions, const torch::lazy::BackendDevice& device) {
+    c10::ArrayRef<int64_t> dimensions, const torch::lazy::BackendDevice& device, bool expand) {
   torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
+  if (!dimensions.empty() && expand) {
+    ir_value = torch::lazy::MakeNode<ir::ops::Expand>(
+        ir_value, dimensions.vec(),
+        /*is_scalar_expand=*/true);
+  }
   return ir_value;
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, const torch::lazy::Shape& shape,
-    const torch::lazy::BackendDevice& device) {
+    const torch::lazy::BackendDevice& device, bool expand) {
   return GetIrValueForScalar(value, shape.scalar_type(), shape.sizes(),
-                             device);
+                             device, expand);
 }
 
 LazyGraphExecutor::Async::Async(
