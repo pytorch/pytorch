@@ -179,7 +179,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 template<>
 void THPPointer<THTensor>::free() {
   if (ptr) {
-    THTensor_free(LIBRARY_STATE ptr);
+    c10::raw::intrusive_ptr::decref(ptr);
   }
 }
 
