@@ -16,7 +16,7 @@ namespace {
 
 const std::vector<double>* ReadEnvPercentiles() {
   std::vector<std::string> percentiles_list =
-      torch::lazy::StrSplit(FLAGS_torch_lazy_metrics_percentiles, ':');
+      StrSplit(FLAGS_torch_lazy_metrics_percentiles, ':');
   std::unique_ptr<std::vector<double>> metrics_percentiles =
       std::make_unique<std::vector<double>>();
   for (auto& pct_str : percentiles_list) {
