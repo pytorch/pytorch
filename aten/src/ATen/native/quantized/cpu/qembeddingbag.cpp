@@ -180,7 +180,7 @@ at::Tensor& embedding_bag_nbit_impl(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset, 
+    bool include_last_offset,
     bool is_embedding_op) {
   TORCH_CHECK(weight.dim() == 2);
   TORCH_CHECK(offsets.dim() == 1);
@@ -593,7 +593,7 @@ at::Tensor& _embedding_bag_nbit_helper(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset, 
+    bool include_last_offset,
     bool is_embedding_op) {
   c10::MaybeOwned<at::Tensor> offsets;
   TORCH_CHECK(
@@ -648,7 +648,7 @@ at::Tensor& _embedding_bag_nbit_helper(
         pruned_weights,
         per_sample_weights_,
         compressed_indices_mapping,
-        include_last_offset, 
+        include_last_offset,
         is_embedding_op);
   } else if (
       indices.scalar_type() == at::kInt && offsets->scalar_type() == at::kLong) {
@@ -686,7 +686,7 @@ at::Tensor& _embedding_bag_nbit_helper(
       pruned_weights,
       per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset, 
+      include_last_offset,
       is_embedding_op);
 }
 } // namespace
@@ -718,7 +718,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     bool pruned_weights,
     const c10::optional<at::Tensor>& per_sample_weights_,
     const c10::optional<at::Tensor>& compressed_indices_mapping,
-    bool include_last_offset, 
+    bool include_last_offset,
     bool is_embedding_op) {
   if (per_sample_weights_.has_value()) {
     TORCH_CHECK(
@@ -741,7 +741,7 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
         ? per_sample_weights_.value().to(at::kFloat)
         : per_sample_weights_,
     compressed_indices_mapping,
-    include_last_offset, 
+    include_last_offset,
     is_embedding_op);
 }
 
@@ -802,7 +802,7 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
           ? per_sample_weights_.value().to(at::kFloat)
           : per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset, 
+      include_last_offset,
       false);
 }
 
@@ -837,7 +837,7 @@ Tensor& embedding_bag_2bit_rowwise_offsets_out(
           ? per_sample_weights_.value().to(at::kFloat)
           : per_sample_weights_,
       compressed_indices_mapping,
-      include_last_offset, 
+      include_last_offset,
       false);
 }
 
@@ -955,7 +955,7 @@ class QEmbeddingBag final {
           pruned_weights,
           per_sample_weights_,
           compressed_indices_mapping,
-          include_last_offset, 
+          include_last_offset,
           false);
     } else {
       TORCH_INTERNAL_ASSERT(

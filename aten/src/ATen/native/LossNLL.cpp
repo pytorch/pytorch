@@ -539,9 +539,8 @@ Tensor cross_entropy_loss_label_smoothing(
       smooth_loss = -input.sum(1);
     }
 
-    if (ignore_index >= 0) {
-      smooth_loss.index_put_({target == ignore_index}, 0.0);
-    }
+    auto ignore_mask = target == ignore_index;
+    smooth_loss.index_put_({ignore_mask}, 0.0);
 
     Tensor ret;
     switch (reduction) {
@@ -549,9 +548,9 @@ Tensor cross_entropy_loss_label_smoothing(
         if (weight.defined()) {
           // TODO: This code can path can be removed if #61309 is resolved
           // loss is normalized by the weights to be consistent with nll_loss_nd
-          ret = smooth_loss.sum() / weight.gather(0, target.flatten()).sum();
+          ret = smooth_loss.sum() / weight.gather(0, target.masked_select(~ignore_mask).flatten()).sum();
         } else {
-          ret = smooth_loss.mean();
+          ret = smooth_loss.masked_select(~ignore_mask).mean();
         }
         break;
       case Reduction::Sum:
