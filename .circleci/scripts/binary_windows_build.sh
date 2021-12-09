@@ -19,7 +19,7 @@ if [[ "${DESIRED_CUDA}" == "cu111" ]]; then
   export BUILD_SPLIT_CUDA="ON"
 fi
 
-echo "Free Space for CUDA DEBUG BUILD"
+echo "Free Space for CUDA DEBUG BUILD "
 if [[ "$CIRCLECI" == 'true' ]]; then
     if [[ -d "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community" ]]; then
         rm -rf "C:\\Program Files (x86)\\Microsoft Visual Studio\\2019\\Community"
