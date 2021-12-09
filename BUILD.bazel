@@ -71,7 +71,6 @@ cc_library(
     copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
     deps = [
         ":c10_headers",
-        "//c10/util:C++17",
         "@fmt",
     ] + if_cuda(
         ["@cuda"],
