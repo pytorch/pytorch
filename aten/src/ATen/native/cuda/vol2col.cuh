@@ -20,7 +20,7 @@ using namespace at::cuda::detail;
 template <typename T>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(CUDA_NUM_THREADS, 1)
+  C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 #endif
 vol2col_kernel(
     const int n,
@@ -135,7 +135,7 @@ void vol2col(
 template <typename T, typename accT>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(CUDA_NUM_THREADS, 1)
+  C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 #endif
 vol2im_kernel(
     const unsigned n,

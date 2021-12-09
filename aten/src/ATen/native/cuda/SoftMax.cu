@@ -200,7 +200,7 @@ T spatialBlockReduceX(T *shared, T val) {
 template <typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(512, 1)
+  C10_LAUNCH_BOUNDS_1(1024)
 #endif
 cunn_SpatialSoftMaxForward(
     outscalar_t *output, scalar_t *input,
@@ -262,7 +262,7 @@ cunn_SpatialSoftMaxForward(
 template <typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(512, 1)
+  C10_LAUNCH_BOUNDS_1(1024)
 #endif
 cunn_SpatialSoftMaxBackward(
     scalar_t *gradInput, outscalar_t *output, outscalar_t *gradOutput,
@@ -619,6 +619,9 @@ WriteBpropResults(
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
+#if __CUDA_ARCH__ == 620
+  C10_LAUNCH_BOUNDS_1(1024)
+#endif
 cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
 {
   extern __shared__ unsigned char smem[];
@@ -659,7 +662,7 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(512, 1)
+  C10_LAUNCH_BOUNDS_1(1024)
 #endif
 cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *gradOutput, int classes)
 {

@@ -196,7 +196,7 @@ __device__ inline void bitonicSortKeys(
 template <typename T, unsigned int Power2Size>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(1024, 1)
+  C10_LAUNCH_BOUNDS_1(1024)
 #endif
 compute_mode(
     T* input,

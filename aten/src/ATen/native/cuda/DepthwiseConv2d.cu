@@ -13,6 +13,11 @@ namespace native {
 namespace {
 using at::cuda::detail::CUDA_NUM_THREADS;
 using at::cuda::detail::GET_BLOCKS;
+constexpr int GRAD_PARAMS_MAX_BLOCK_SIZE = 256;
+int getGradParamsNumThreads(int batchSize) {
+  //warp per item in a batch, up to a maximum
+  return std::min(batchSize * C10_WARP_SIZE, GRAD_PARAMS_MAX_BLOCK_SIZE);
+}
 
 template <typename scalar_t, int ndim, template <typename U> class PtrTraits = DefaultPtrTraits>
 PackedTensorAccessor32<scalar_t, ndim, PtrTraits> dummy_packed_accessor32() {
@@ -95,7 +100,7 @@ __global__ void conv_depthwise2d_forward_kernel(
 template <int kSize, int stride, typename scalar_t, typename index_t>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(CUDA_NUM_THREADS, 1)
+  C10_LAUNCH_BOUNDS_1(CUDA_NUM_THREADS)
 #endif
 conv_depthwise2d_backward_kernel(
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
@@ -170,7 +175,7 @@ conv_depthwise2d_backward_kernel(
 template <typename scalar_t, typename index_t=unsigned>
 __global__ void
 #if __CUDA_ARCH__ == 620
-  __launch_bounds__(CUDA_NUM_THREADS, 1)
+  C10_LAUNCH_BOUNDS_1(GRAD_PARAMS_MAX_BLOCK_SIZE)
 #endif
 conv_depthwise2d_grad_weight_kernel(
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
@@ -443,14 +448,6 @@ void conv_depthwise2d_backward_out(
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     }
   });
-}
-
-// Crude benchmarks suggest 256 is better than 512 and 1024
-// TODO: Autotune/use better heuristics, improve speed more.
-int getGradParamsNumThreads(int batchSize) {
-  //warp per item in a batch, up to a maximum
-  constexpr int MAX_BLOCK_SIZE = 256;
-  return std::min(batchSize * C10_WARP_SIZE, MAX_BLOCK_SIZE);
 }
 
 void conv_depthwise2d_grad_weight_out(
