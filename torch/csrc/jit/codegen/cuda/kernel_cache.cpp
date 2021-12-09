@@ -15,6 +15,28 @@ namespace cuda {
 
 namespace {
 
+// permutes tensor from [N, S0, S1, ..., C] to [N, C, S0, S1, ...]
+at::Tensor revert_channels_last(at::Tensor& v) {
+  auto n_dim = v.dim();
+  std::vector<int64_t> permutation(n_dim);
+  std::iota(permutation.begin(), permutation.end(), -1); // -1, 0, 1, ..., n-2
+  permutation[0] = 0; // 0, 0, 1, ..., n-2
+  permutation[1] = n_dim - 1; // 0, n-1, 1, ..., n-2
+  return v.permute(permutation);
+}
+
+// permutes tensor from [N, C, S0, S1, ...] to [N, S0, S1, ..., C]
+at::Tensor convert_channels_last(IValue& v) {
+  TORCH_CHECK(v.isTensor(), "permutation can only be applied at tensor");
+  auto tensor = v.toTensor();
+  auto n_dim = tensor.dim();
+  std::vector<int64_t> permutation(n_dim);
+  std::iota(permutation.begin(), permutation.end(), 1); // 1, 2, 3, ..., n
+  permutation[0] = 0; // 0, 2, 3, ..., n
+  permutation[n_dim - 1] = 1; // 0, 2, 3, ..., 1
+  return tensor.permute(permutation);
+}
+
 // Check device of TensorType in all inputs ensure all tensors are on cuda
 // devices.
 // return common device index (or -1 if device differs).
@@ -40,189 +62,10 @@ std::vector<size_t> toVector(const at::DimVector& small_vec) {
   return std::vector<size_t>(small_vec.begin(), small_vec.end());
 }
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wunused-function"
-void debugPrint(const TensorTypePtr& type) {
-  std::stringstream sizes_s;
-  if (auto sizes = type->symbolic_sizes().sizes()) {
-    for (const auto& shape_symbol : *sizes) {
-      if (shape_symbol.is_static()) {
-        sizes_s << shape_symbol.static_size() << ", ";
-      } else {
-        sizes_s << "s(" << *reinterpret_cast<const int64_t*>(&shape_symbol)
-                << "), ";
-      }
-    }
-  } else {
-    sizes_s << "no size available";
-  }
-  std::cout << "sizes:" << sizes_s.str() << std::endl;
-  if (const auto& stride_properties = type->stride_properties().sizes()) {
-    std::stringstream stride_s;
-    std::stringstream index_s;
-    std::stringstream contig_s;
-
-    for (const auto& stride_property : *stride_properties) {
-      if (stride_property.has_value() && stride_property->stride_.has_value()) {
-        stride_s << *stride_property->stride_ << ", ";
-      } else {
-        stride_s << "?, ";
-      }
-      if (stride_property.has_value() &&
-          stride_property->stride_index_.has_value()) {
-        index_s << *stride_property->stride_index_ << ", ";
-      } else {
-        index_s << "?, ";
-      }
-      if (stride_property.has_value() &&
-          stride_property->contiguous_.has_value()) {
-        contig_s << *stride_property->contiguous_ << ", ";
-      } else {
-        contig_s << "?, ";
-      }
-    }
-    std::cout << "stride: " << stride_s.str() << std::endl;
-    std::cout << "stride index: " << index_s.str() << std::endl;
-    std::cout << "contiguous: " << contig_s.str() << std::endl;
-  } else {
-    std::cout << "no stride properties available" << std::endl;
-  }
-}
-#pragma clang diagnostic pop
-
-at::DimVector graphReductionAxes(
-    const std::shared_ptr<Graph>& graph,
-    bool& simple_reduction) {
-  FUSER_PERF_SCOPE("graphReductionAxes");
-  simple_reduction = true;
-
-  at::DimVector reduction_axes;
-  // TODO: let check that we have only single reduction node in the graph.
-  int reduction_count = 0;
-  for (const auto& n : graph->nodes()) {
-    if (isReductionToSizeNode(n)) {
-      // TODO: we don't support permutation with ReductionToSize;
-      simple_reduction = false;
-      reduction_axes.clear();
-      return reduction_axes;
-    } else if (isReductionNode(n)) {
-      // TODO: we should return empty when `keepdim` is True?
-      auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
-      TORCH_INTERNAL_ASSERT(
-          dims_list.has_value(), "reduction axes should be constant");
-      for (const auto dim : dims_list->vec()) {
-        reduction_axes.emplace_back(static_cast<int>(dim));
-      }
-      ++reduction_count;
-      // we should return here, but we don't!
-      // We continue the traversal and check for other reduction node. Because
-      // our permutation doesn't really support intermediate reduction, hence we
-      // mark simple_reduction as false;
-      if (reduction_count != 1) {
-        simple_reduction = false;
-        return reduction_axes;
-      }
-    }
-    // TODO: this doesn't apply any more, clean it up
-  }
-  return reduction_axes;
-}
-
-// TODO(CONTIGUITY)
-at::DimVector getPermutationPerSortedStride(const TensorTypePtr& type) {
-  FUSER_PERF_SCOPE("getPermutationPerSortedStride");
-
-  // `permute_seq` is the returned permutation to achieve sorted stride;
-  at::DimVector permute_seq;
-
-  auto stride_properties = type->stride_properties().sizes();
-
-  // no consistent permutation available, we just don't do it;
-  if (!stride_properties.has_value()) {
-    return permute_seq;
-  }
-
-  // TODO: reuse this;
-  const int rank = static_cast<int>(stride_properties->size());
-
-  // stores axes with stride_index;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::set<int> ordered_axes;
-
-  // TODO: this does not support broadcast yet;
-  for (const auto i : c10::irange(rank)) {
-    if ((*stride_properties)[i].has_value() &&
-        (*stride_properties)[i]->stride_index_.has_value()) {
-      ordered_axes.insert((*stride_properties)[i]->stride_index_.value());
-    }
-  }
-
-  int unallocated_axis = 0;
-  // we push from slowest to fastest
-  for (int i = rank - 1; i >= 0; i--) {
-    if ((*stride_properties)[i].has_value() &&
-        (*stride_properties)[i]->stride_index_.has_value()) {
-      permute_seq.emplace_back((*stride_properties)[i]->stride_index_.value());
-    } else {
-      // no designated axis for this slot, so we push an axis w/o designated
-      // order;
-      while (ordered_axes.count(unallocated_axis) != 0) {
-        ++unallocated_axis;
-      }
-      permute_seq.emplace_back(unallocated_axis++);
-    }
-  }
-  return permute_seq;
-}
-
-at::DimVector inversePermutation(
-    const at::DimVector& permuted,
-    const std::vector<size_t>& reduction_axes) {
-  if (permuted.empty()) {
-    return permuted;
-  }
-  int rank = static_cast<int>(permuted.size());
-
-  if (!reduction_axes.empty()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    int red_rank = rank - static_cast<int>(reduction_axes.size());
-
-    // see [ NOTE - reduction in graph ] part 1.
-    // a. we skip axes that were eliminated by reduction;
-    // b. we adjust axes index that were affected by reduction;
-    at::DimVector adjusted_permutation;
-    for (const auto& dim : permuted) {
-      int adjusted_offset = 0;
-      for (const auto& red_dim : reduction_axes) {
-        if (red_dim < (unsigned long)dim) {
-          adjusted_offset++; // 1.b
-        } else if (red_dim == (unsigned long)dim) {
-          adjusted_offset = -1; // 1.a
-          break;
-        }
-      }
-      if (adjusted_offset >= 0) {
-        adjusted_permutation.emplace_back(dim - adjusted_offset);
-      }
-    }
-
-    at::DimVector permutation(red_rank, -1);
-    for (const auto i : c10::irange(red_rank)) {
-      permutation[adjusted_permutation[i]] = i;
-    }
-    return permutation;
-  } else {
-    at::DimVector permutation(rank, -1);
-    for (const auto i : c10::irange(rank)) {
-      permutation[permuted[i]] = i;
-    }
-    return permutation;
-  }
-}
-
 void encodeBuffer(size_t value, std::string& buffer) {
   const char* v = reinterpret_cast<char*>(&value);
-  for (size_t i = 0; i < sizeof(size_t); i++) {
+  for (const auto i : c10::irange(sizeof(size_t))) {
+    (void)i; // Suppress unused variable warning
     buffer.push_back(*(v++));
   }
 }
@@ -294,22 +137,71 @@ InputsIdLookup::IdLookupReturn InputsIdLookup::lookupId(
 FusionExecutorCache::FusionExecutorCache(std::unique_ptr<Fusion> fusion)
     : fusion_(std::move(fusion)) {}
 
+// Note [ Channels Last support in nvfuser ]
+//
+// Background:
+// To support channels last in nvfuser with optimal performance, we would want
+// to allow dimension collapsing in generated code on channels-last tensors,
+// which greatly simplifies indexing. Current API in codegen only allows
+// dimensional collapsing on neighboring axes. The unfortunate thing is that
+// memory format design in PyTorch is implicitly marked by strides, while the
+// semantics meaning of axes remain unchanged. i.e. A 4d tensor with axes [N, C,
+// H, W] would have the same shape in both format, while contiguous tensor
+// carries strides [C*H*W, H*W, W, 1] and channels-last tensor [H*W*C, 1, W*C,
+// C].
+//
+// Approach:
+// Part_1. To allow axes collapsing for channels-last format in codegen, we can
+// permute input tensor to have axes in decending order by their strides, so
+// they would be viewed as `contiguous` in codegen, hence collapsed to simple
+// indexing. Part_2. To ensure correct result, we need to ensure computation in
+// nvfuser carries same semantics as with TorchScript graph. We need to
+//   Part_2_1. Maintain a bookkeeping where each codegen tensor is tagged with
+//   either `contiguous` format or `channels_last` format. Part_2_2. Parsing
+//   rule should handle and propagate the tag properly, i.e. having special
+//   rules for `channels_last` input tensor and mark output in its right format.
+// Part_3. Codegen output tensor in `channels_last` format should be permuted
+// back to `contiguous` format before returning to TorchScript
+//
+// For details  on Part_2, refer to implementation Note [ Format Bookkeeping and
+// Propagation in Parser ]
 std::vector<at::Tensor> FusionExecutorCache::runFusionWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("FusionExecutorCache::runFusionWithInputs");
 
-  SchedulerRuntimeInfo runtime_info(fusion(), inputs);
+  // permute input tensor for kernel execution. See Part_1 in Note [ Channels
+  // Last support in nvfuser ]
+  at::ArrayRef<IValue> perm_inputs = inputs;
+  const auto& c_last_inputs = fusion_->getChannelsLastInputIndices();
+  std::vector<IValue> inputs_vec;
+  if (!c_last_inputs.empty()) {
+    inputs_vec = inputs.vec();
+    for (const auto i : c_last_inputs) {
+      inputs_vec[i] = convert_channels_last(inputs_vec[i]);
+    }
+    perm_inputs = inputs_vec;
+  }
 
-  auto id_lookup_ret = inputs_id_lookup_.lookupId(inputs, &runtime_info);
+  SchedulerRuntimeInfo runtime_info(fusion(), perm_inputs);
+
+  auto id_lookup_ret = inputs_id_lookup_.lookupId(perm_inputs, &runtime_info);
   if (id_lookup_ret.eviction) {
     evictCache(id_lookup_ret.evict_id);
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   const size_t unique_id = id_lookup_ret.id;
-  auto kernel_runtime = getKernelRuntimeFor(inputs, unique_id);
+  auto kernel_runtime = getKernelRuntimeFor(perm_inputs, unique_id);
   most_recent_runtime_ = kernel_runtime;
-  return kernel_runtime->runWithInput(inputs, unique_id);
+  auto outputs = kernel_runtime->runWithInput(perm_inputs, unique_id);
+
+  // permute output tensor returned by kernel execution. See Part_3 in Note [
+  // Channels Last support in nvfuser ]
+  for (const auto i : fusion_->getChannelsLastOutputIndices()) {
+    outputs[i] = revert_channels_last(outputs[i]);
+  }
+
+  return outputs;
 }
 
 void FusionExecutorCache::evictCache(size_t cache_id) {
@@ -380,6 +272,10 @@ FusionKernelRuntime::FusionKernelRuntime(
   // Run segmentation on the copied fusion
   SchedulerRuntimeInfo runtime_info(fusion_copy.get(), inputs, true);
 
+  // Initialize the evaluator simplifer
+  precomputed_integers_ =
+      std::make_unique<FusionPrecomputedIntegers>(fusion_copy.get());
+
   //! Try to schedule the complete fusion
   const auto maybe_complete_fusion_heuristic =
       SchedulerEntry::proposeHeuristics(fusion_copy.get(), runtime_info);
@@ -405,7 +301,7 @@ FusionKernelRuntime::FusionKernelRuntime(
       bool translated = SegmentCandidateFinder::TranslateWelfordInFusion(
           fusion_copy.get(), inputs);
       if (translated) {
-        complete_fusion_heuristic = ScheduleHeuristic::Normalization;
+        complete_fusion_heuristic = ScheduleHeuristic::Persistent;
       }
     }
     // Take ownership of the transformed fusion
@@ -429,6 +325,10 @@ FusionKernelRuntime::FusionKernelRuntime(
   }
 
   is_segmented_ = segmented;
+
+  if (is_segmented_) {
+    prepareRuntimeOrder();
+  }
 }
 
 std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
@@ -479,7 +379,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
     executors_[group_id].compileFusion(
         fusion_to_run.get(), options, inputs, launch_params);
   } else {
-    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::FetchFromCache");
     // Load launch params for reduction and normalization kernels
     if (scheduler_entry->hasReductionParam()) {
       launch_params = scheduler_entry->reductionParams().lparams;
@@ -489,7 +388,6 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   }
 
   if (profiling_) {
-    FUSER_PERF_SCOPE("FusionKernelRuntime::runKernelWithInput::profiling_");
     most_recent_executor_log_.fusion_executor = &executors_[group_id];
     most_recent_executor_log_.launch_constraints = launch_params;
     if (scheduler_entry->hasReductionParam()) {
@@ -504,40 +402,21 @@ std::vector<at::Tensor> FusionKernelRuntime::runKernelWithInput(
   return executors_[group_id].runFusion(inputs, launch_params, input_id);
 }
 
-std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
-    const at::ArrayRef<IValue>& inputs,
-    size_t input_id) {
-  FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+void FusionKernelRuntime::prepareRuntimeOrder() {
+  // Setup group run order:
+  std::unordered_set<Val*> available_input;
 
-  TORCH_INTERNAL_ASSERT(
-      inputs.size() == segmented_fusion_->inputs().size(),
-      "Inputs were not set up correctly, received ",
-      inputs.size(),
-      " inputs but expecting ",
-      segmented_fusion_->inputs().size());
+  // setup the order tensor dimensions are bound
+  for (const size_t i : c10::irange(segmented_fusion_->inputs().size())) {
+    auto input_val = segmented_fusion_->inputs()[i];
+    available_input.insert(input_val);
 
-  // Map to keep track of currently available tensors
-  std::unordered_map<Val*, IValue> tensor_map;
-
-  // Bind input in the tensor_map
-  for (size_t i = 0; i < inputs.size(); i++) {
-    tensor_map.emplace(segmented_fusion_->inputs()[i], inputs[i]);
-
-    // Bind tensorview inputs values in case some segmented group
-    //  needs it down the road.
-    // TODO: we probably have done this already up to this point
-    //      should consider caching the expression evaluators, both
-    //      more convenient and safer than replication
-    if (inputs[i].isTensor()) {
-      auto aten_tensor = inputs[i].toTensor();
-      TORCH_INTERNAL_ASSERT(
-          segmented_fusion_->inputs()[i]->getValType() == ValType::TensorView);
-      auto input_tv = segmented_fusion_->inputs()[i]->as<TensorView>();
+    if (auto input_tv = dynamic_cast<TensorView*>(input_val)) {
       auto root_dom = TensorDomain::noReductions(input_tv->getRootDomain());
-      for (size_t dim = 0; dim < root_dom.size(); dim++) {
+      for (const size_t dim : c10::irange(root_dom.size())) {
         const auto extent = root_dom[dim]->extent();
-        const auto value = aten_tensor.sizes()[dim];
-        tensor_map.emplace(extent, value);
+        available_input.insert(extent);
+        runtime_workspace_.group_extent_binding_order.push_back(extent);
       }
     }
   }
@@ -550,38 +429,25 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
     bool one_ran = false;
 
     // Find the first segment with all inputs available to run
-    for (size_t group_i = 0; group_i < segmented_fusion_->groups().size();
-         group_i++) {
+    for (const size_t group_i :
+         c10::irange(segmented_fusion_->groups().size())) {
       auto& group = segmented_fusion_->groups()[group_i];
       if (group_ran[group_i]) {
         continue;
       }
       const auto& group_inputs = group->inputs();
       bool ready_to_run = std::all_of(
-          group_inputs.begin(), group_inputs.end(), [&tensor_map](Val* val) {
-            return tensor_map.find(val) != tensor_map.end();
-          });
+          group_inputs.begin(),
+          group_inputs.end(),
+          [&available_input](Val* val) { return available_input.count(val); });
 
       if (ready_to_run) {
-        std::vector<IValue> group_runtime_inputs;
-        group_runtime_inputs.reserve(group_inputs.size());
-
-        // Prepare input vector
-        for (auto input : group_inputs) {
-          group_runtime_inputs.push_back(tensor_map.at(input));
-        }
-
-        // Run graph segment
-        auto group_runtime_outputs =
-            runKernelWithInput(group_runtime_inputs, input_id, group);
-
+        runtime_workspace_.group_run_order.push_back(group);
         const auto& group_outputs = group->outputs();
 
         // Insert graph segment output to tensor map
-        for (size_t group_out_i = 0; group_out_i < group_outputs.size();
-             group_out_i++) {
-          tensor_map.emplace(
-              group_outputs[group_out_i], group_runtime_outputs[group_out_i]);
+        for (const size_t group_out_i : c10::irange(group_outputs.size())) {
+          available_input.insert(group_outputs[group_out_i]);
         }
         group_ran[group_i] = true;
         one_ran = true;
@@ -591,37 +457,100 @@ std::vector<at::Tensor> FusionKernelRuntime::runMultiKernelWithInput(
         one_ran,
         "Couldn't run all groups, something must have gone wrong in segmentation.");
   }
+}
 
-  // Produce final global output
-  std::vector<IValue> fusion_outputs;
-  for (auto output : segmented_fusion_->outputs()) {
-    const auto iter = tensor_map.find(output);
-    if (iter != tensor_map.end()) {
-      fusion_outputs.push_back(iter->second);
-    } else {
-      // This is the check for an empty tensor;
-      TORCH_INTERNAL_ASSERT(
-          output->as<TensorView>()->nDims() == 0 &&
-              output->getDataType().has_value() &&
-              output->getDataType().value() == DataType::Float,
-          "Non empty tensor cannot be found at tensor_map in ",
-          __FUNCTION__);
-      fusion_outputs.emplace_back(at::Tensor());
+std::vector<at::Tensor> FusionKernelRuntime::runWithInput(
+    const at::ArrayRef<IValue>& inputs,
+    size_t input_id) {
+  if (is_segmented_) {
+    FUSER_PERF_SCOPE("FusionKernelRuntime::runMultiKernelWithInput");
+
+    TORCH_INTERNAL_ASSERT(
+        inputs.size() == segmented_fusion_->inputs().size(),
+        "Inputs were not set up correctly, recieved ",
+        inputs.size(),
+        " inputs but expecting ",
+        segmented_fusion_->inputs().size());
+
+    int extent_index_ = 0;
+    // Bind input in the tensor_map
+    for (const auto i : c10::irange(inputs.size())) {
+      runtime_workspace_.tensor_map.emplace(
+          segmented_fusion_->inputs()[i], inputs[i]);
+
+      // Bind tensorview inputs values in case some segmented group
+      //  needs it down the road.
+      // TODO: we probably have done this already up to this point
+      //      should consider caching the expression evaluators, both
+      //      more convenient and safer than replication
+      if (inputs[i].isTensor()) {
+        auto aten_tensor = inputs[i].toTensor();
+        for (auto dim_size : aten_tensor.sizes()) {
+          runtime_workspace_.tensor_map.emplace(
+              runtime_workspace_.group_extent_binding_order[extent_index_++],
+              dim_size);
+        }
+      }
     }
-  }
 
-  std::vector<at::Tensor> fusion_output_tensors;
-  std::transform(
-      fusion_outputs.begin(),
-      fusion_outputs.end(),
-      std::back_inserter(fusion_output_tensors),
-      [](IValue ival) {
+    for (auto group_to_run : runtime_workspace_.group_run_order) {
+      // Prepare input vector
+      for (auto input : group_to_run->inputs()) {
+        runtime_workspace_.group_runtime_inputs.push_back(
+            runtime_workspace_.tensor_map.at(input));
+      }
+      // Run graph segment
+      runtime_workspace_.group_runtime_outputs = runKernelWithInput(
+          runtime_workspace_.group_runtime_inputs, input_id, group_to_run);
+
+      const auto& group_outputs = group_to_run->outputs();
+
+      // Insert graph segment output to tensor map
+      for (unsigned int group_out_i = 0; group_out_i < group_outputs.size();
+           group_out_i++) {
+        runtime_workspace_.tensor_map.emplace(
+            group_outputs[group_out_i],
+            runtime_workspace_.group_runtime_outputs[group_out_i]);
+      }
+      runtime_workspace_.group_runtime_inputs.clear();
+      runtime_workspace_.group_runtime_outputs.clear();
+    }
+
+    // Produce final global output
+    std::vector<IValue> fusion_outputs;
+    for (auto output : segmented_fusion_->outputs()) {
+      const auto iter = runtime_workspace_.tensor_map.find(output);
+      if (iter != runtime_workspace_.tensor_map.end()) {
+        fusion_outputs.push_back(iter->second);
+      } else {
+        // This is the check for an empty tensor;
         TORCH_INTERNAL_ASSERT(
-            ival.isTensor(), "Cannot output non-tensor objects from a fusion.");
-        return ival.toTensor();
-      });
+            output->as<TensorView>()->nDims() == 0 &&
+                output->getDataType().has_value() &&
+                output->getDataType().value() == DataType::Float,
+            "Non empty tensor cannot be found at tensor_map in ",
+            __FUNCTION__);
+        fusion_outputs.emplace_back(at::Tensor());
+      }
+    }
 
-  return fusion_output_tensors;
+    std::vector<at::Tensor> fusion_output_tensors;
+    std::transform(
+        fusion_outputs.begin(),
+        fusion_outputs.end(),
+        std::back_inserter(fusion_output_tensors),
+        [](IValue ival) {
+          TORCH_INTERNAL_ASSERT(
+              ival.isTensor(),
+              "Cannot output non-tensor objects from a fusion.");
+          return ival.toTensor();
+        });
+
+    runtime_workspace_.tensor_map.clear();
+    return fusion_output_tensors;
+  } else {
+    return runKernelWithInput(inputs, input_id);
+  }
 }
 
 const std::vector<FusionKernelRuntime::SchedulerEntryPtr>& FusionKernelRuntime::
@@ -635,7 +564,7 @@ void FusionKernelRuntime::updateHeuristicsLaunchParams(
   auto scheduler_list_length = heuristics_->heuristicsList().size();
   TORCH_INTERNAL_ASSERT(
       update_heuristics->heuristicsList().size() == scheduler_list_length);
-  for (size_t i = 0; i < scheduler_list_length; i++) {
+  for (const auto i : c10::irange(scheduler_list_length)) {
     auto& schedulerPtr = heuristics_->heuristicsList()[i];
     if (schedulerPtr->hasReductionParam()) {
       schedulerPtr->updateLaunchConstraint(
@@ -652,14 +581,18 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   FUSER_PERF_SCOPE("FusionKernelRuntime::getMaybeHeuristicsFor");
   auto complete_fusion = is_segmented_ ? segmented_fusion_->completeFusion()
                                        : single_kernel_fusion_.get();
-  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs, true);
+  SchedulerRuntimeInfo runtime_info(complete_fusion, inputs);
+  precomputed_integers_->bindFusionInputs(inputs);
+  precomputed_integers_->evaluate();
+  runtime_info.expressionEvaluator().bindPrecomputedIntegers(
+      precomputed_integers_.get());
 
   c10::optional<FusionKernelRuntime::HeuristicsPtr> ret;
   // Segmented case, need to iterate over all segmented groups
   if (is_segmented_) {
     ret = std::make_unique<FusionHeuristics>();
     size_t total_groups = segmented_fusion_->groups().size();
-    for (size_t group_index = 0; group_index < total_groups; group_index++) {
+    for (const auto group_index : c10::irange(total_groups)) {
       auto group = segmented_fusion_->groups()[group_index];
 
       auto maybe_scheduler_entry = group->getMaybeSchedulerEntry(runtime_info);
@@ -700,126 +633,8 @@ c10::optional<FusionKernelRuntime::HeuristicsPtr> FusionKernelRuntime::
   return ret;
 }
 
-bool GraphCache::requiresPermutation() {
-  if (!support_permutation_) {
-    return false;
-  }
-
-  const size_t input_rank = input_permutation_.size();
-  for (const auto i : c10::irange(input_rank)) {
-    if (input_permutation_[i] != (long)i) {
-      return true;
-    }
-  }
-  // Check if output agrees
-  const size_t pw_output_rank = pw_output_permutation_.size();
-  for (const auto i : c10::irange(pw_output_rank)) {
-    TORCH_INTERNAL_ASSERT(
-        pw_output_permutation_[i] == (long)i,
-        "permutation of output and input is not consistent");
-  }
-  const size_t reduction_output_rank = reduction_output_permutation_.size();
-  for (const auto i : c10::irange(reduction_output_rank)) {
-    TORCH_INTERNAL_ASSERT(
-        reduction_output_permutation_[i] == (long)i,
-        "permutation of output and input is not consistent");
-  }
-  return false;
-}
-
-void GraphCache::extractPermutation(const TensorTypePtr& acc_type) {
-  input_permutation_ = getPermutationPerSortedStride(acc_type);
-  reduction_output_permutation_ =
-      inversePermutation(input_permutation_, toVector(reduction_axes_));
-  pw_output_permutation_ = inversePermutation(input_permutation_, {});
-}
-
 void GraphCache::createFusion(const std::shared_ptr<Graph>& graph) {
   FUSER_PERF_SCOPE("GraphCache::createFusion");
-
-  // permute inputs on `Graph` to sort dimensions on common stride order;
-  if (requiresPermutation()) {
-    // TODO: lambda is a bad idea, the logic in this function is too tricky and
-    //       should be properly tested to ensure correctness.
-    // lambda to permute `TensorType` axes per `input_permutation_`
-    auto type_permute_fn = [this](const TensorTypePtr& type) {
-      // std::vector<c10::ShapeSymbol> vec_shape_symbol =
-      // type->symbolic_sizes().sizes().value();
-      auto vec_shape_symbol = type->symbolic_sizes().sizes().value();
-      // std::vector<c10::optional<c10::Stride>> vec_optional_stride =
-      // type->stride_properties().sizes().value();
-      auto vec_optional_stride = type->stride_properties().sizes().value();
-
-      int rank = static_cast<int>(type->dim().value());
-
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::vector<c10::ShapeSymbol> permuted_vec_ss;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      std::vector<c10::optional<c10::Stride>> permuted_vec_optional_stride;
-      for (const auto i : c10::irange(rank)) {
-        permuted_vec_ss.emplace_back(
-            vec_shape_symbol[this->input_permutation_[i]]);
-        // permutation doesn't change contiguity info, nor does it change
-        // stride; The only thing affected is stride_index_;
-        if (vec_optional_stride[i].has_value()) {
-          c10::optional<size_t> index = vec_optional_stride[i]->stride_index_;
-          if (index.has_value()) {
-            for (const auto j : c10::irange(rank)) {
-              // follow the permutation to resolve the new stride_index;
-              if (this->input_permutation_[j] == (long)index.value()) {
-                index = j;
-                break;
-              }
-            }
-          }
-          permuted_vec_optional_stride.emplace_back(c10::Stride(
-              /*stride_index=*/index,
-              /*contiguous=*/vec_optional_stride[i]->contiguous_,
-              /*stride=*/vec_optional_stride[i]->stride_));
-        } else {
-          permuted_vec_optional_stride.emplace_back(c10::nullopt);
-        }
-      }
-
-      return TensorType::create(
-          type->scalarType(),
-          type->device(),
-          permuted_vec_ss,
-          permuted_vec_optional_stride,
-          type->requires_grad());
-    }; // closing lambda
-    for (auto input : graph->inputs()) {
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        input->setType(type_permute_fn(input_type));
-      }
-    }
-
-    if (!reduction_axes_.empty()) {
-      // see [ NOTE - reduction in graph ] part 2.
-      for (auto n : graph->nodes()) {
-        if (isReductionNode(n)) {
-          auto dims_list = constant_as<c10::List<int64_t>>(n->input(1));
-          TORCH_INTERNAL_ASSERT(
-              dims_list.has_value(), "reduction axes should be constant");
-          std::vector<int64_t> adjusted_reduction_axes;
-          for (const auto dim : dims_list->vec()) {
-            // adjust reduction axis to be the permuted axis;
-            for (const auto j : c10::irange(input_permutation_.size())) {
-              // follow the permutation to resolve the new reduction axes;
-              if (input_permutation_[j] == dim) {
-                adjusted_reduction_axes.emplace_back(j);
-                break;
-              }
-            }
-          }
-          graph->setInsertPoint(n);
-          auto const_ival_axes =
-              graph->insertConstant(IValue(adjusted_reduction_axes));
-          n->replaceInput(1, const_ival_axes);
-        }
-      }
-    }
-  }
 
   fusion_executor_cache_ =
       std::make_unique<FusionExecutorCache>(parseJitIR(graph));
@@ -831,38 +646,6 @@ GraphCache::GraphCache(const std::shared_ptr<Graph>& graph) {
   TORCH_INTERNAL_ASSERT(
       IsNewExecutorEnabled(), "legacy executor is not supported by nvfuser");
 
-  // [ NOTE - reduction in graph ]
-  //
-  // reduction complicates our permutation in integration, it addes two things:
-  // 1. we need to adjust xxx_output_permutation_;
-  //    because of dimension elimination during permutation (not necessarily,
-  //    given the `keepdim` argument.) this needs to be accommodated later when
-  //    we added the support.
-  // 2. adjust reduction axes for the permutation;
-  //    permute changes the semantics of axes, we need to update the reduction
-  //    axes in the graph in order to match the behavior;
-  reduction_axes_ = graphReductionAxes(graph, support_permutation_);
-
-  // TODO: reduction with permutation is tricky now as we might support complex
-  // topology in graph with segmented fusion.
-  if (support_permutation_) {
-    // run over inputs to extract common types;
-    TensorTypePtr acc_type = TensorType::get();
-    for (const auto& input : graph->inputs()) {
-      // only check tensor types;
-      if (auto input_type = input->type()->cast<TensorType>()) {
-        if (acc_type->dim().has_value()) {
-          // TODO: I think merge cannot handle broadcast - Go verify it later;
-          // TODO: Since we are only handling permutation here, we should just
-          //       merge the stride_index_;
-          acc_type = acc_type->merge(*input_type);
-        } else {
-          acc_type = input_type;
-        }
-      }
-    }
-    extractPermutation(acc_type);
-  }
   createFusion(graph);
 }
 
@@ -870,45 +653,7 @@ std::vector<at::Tensor> GraphCache::runGraphWithInputs(
     const at::ArrayRef<IValue>& inputs) {
   FUSER_PERF_SCOPE("GraphCache::runGraphWithInputs");
 
-  // GraphCache need to permute inputs/outputs to accommodate dimension
-  // coalescing
-  if (requiresPermutation()) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<IValue> permuted_inputs;
-    permuted_inputs.reserve(inputs.size());
-    for (const auto& input : inputs) {
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      if (input.isTensor()) {
-        permuted_inputs.emplace_back(
-            input.toTensor().permute(input_permutation_));
-      } else {
-        permuted_inputs.emplace_back(input);
-      }
-    }
-    auto outputs = fusion_executor_cache_->runFusionWithInputs(permuted_inputs);
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    std::vector<at::Tensor> permuted_outputs;
-    permuted_outputs.reserve(outputs.size());
-    for (const auto& output : outputs) {
-      // This is to address the issue that not all outputs from a reduction
-      // fusion are reduced tensor; We support intermediate tensors to be output
-      if (static_cast<size_t>(output.dim()) == pw_output_permutation_.size()) {
-        permuted_outputs.emplace_back(output.permute(pw_output_permutation_));
-      } else if (
-          static_cast<size_t>(output.dim()) ==
-          reduction_output_permutation_.size()) {
-        permuted_outputs.emplace_back(
-            output.permute(reduction_output_permutation_));
-      } else {
-        TORCH_INTERNAL_ASSERT(
-            false,
-            "Something went wrong with integration permutation, can't find a consistent permutation for output in fusion");
-      }
-    }
-    return permuted_outputs;
-  } else {
-    return fusion_executor_cache_->runFusionWithInputs(inputs);
-  }
+  return fusion_executor_cache_->runFusionWithInputs(inputs);
 }
 
 } // namespace cuda

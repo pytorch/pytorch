@@ -181,6 +181,7 @@ namespace c10 {
   _(aten, arccos_)                   \
   _(aten, acosh)                     \
   _(aten, acosh_)                    \
+  _(aten, adjoint)                   \
   _(aten, arccosh)                   \
   _(aten, arccosh_)                  \
   _(aten, asin)                      \
@@ -195,6 +196,10 @@ namespace c10 {
   _(aten, atan_)                     \
   _(aten, arctan)                    \
   _(aten, arctan_)                   \
+  _(aten, atan2)                     \
+  _(aten, atan2_)                    \
+  _(aten, arctan2)                   \
+  _(aten, arctan2_)                  \
   _(aten, atanh)                     \
   _(aten, atanh_)                    \
   _(aten, arctanh)                   \
@@ -203,9 +208,12 @@ namespace c10 {
   _(aten, clamp_)                    \
   _(aten, clip)                      \
   _(aten, clip_)                     \
+  _(aten, linalg_cross)              \
   _(aten, det)                       \
   _(aten, linalg_det)                \
   _(aten, matrix_power)              \
+  _(aten, mT)                        \
+  _(aten, mH)                        \
   _(aten, linalg_matrix_power)       \
   _(aten, chain_matmul)              \
   _(aten, linalg_multi_dot)          \
@@ -214,6 +222,7 @@ namespace c10 {
   _(aten, linalg_matrix_norm)        \
   _(aten, matmul)                    \
   _(aten, linalg_matmul)             \
+  _(aten, linalg_matrix_exp)         \
   _(aten, append)                    \
   _(aten, item)                      \
   _(aten, format)                    \
@@ -262,6 +271,8 @@ namespace c10 {
   _(aten, ne_)                       \
   _(aten, not_equal)                 \
   _(aten, not_equal_)                \
+  _(aten, nonzero)                   \
+  _(aten, argwhere)                  \
   _(aten, _ger)                      \
   _(aten, ger)                       \
   _(aten, outer)                     \
@@ -387,6 +398,7 @@ namespace c10 {
   _(aten, hardswish_)                \
   _(aten, hardsigmoid_)              \
   _(aten, hardtanh_)                 \
+  _(aten, quantize_per_tensor)       \
   _(aten, dequantize)                \
   FORALL_ATEN_BASE_SYMBOLS(_)        \
   _(onnx, Add)                       \
@@ -459,6 +471,7 @@ namespace c10 {
   _(attr, df_output_vjps)            \
   _(attr, axes)                      \
   _(attr, axis)                      \
+  _(attr, symbolic_shape_inputs)     \
   _(attr, broadcast)                 \
   _(attr, direction)                 \
   _(attr, ends)                      \

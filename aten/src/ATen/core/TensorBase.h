@@ -20,6 +20,7 @@
 
 namespace c10 {
 struct TensorOptions;
+class Scalar;
 }
 
 namespace torch { namespace autograd {
@@ -137,6 +138,9 @@ class TORCH_API TensorBase {
   // will only lead to trouble and dangling references.
   c10::MaybeOwned<TensorBase> expect_contiguous(
       MemoryFormat memory_format=MemoryFormat::Contiguous) && = delete;
+
+  const TensorBase& fill_(const c10::Scalar& scalar) const;
+  const TensorBase& zero_() const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -298,6 +302,14 @@ class TORCH_API TensorBase {
   }
   bool is_alias_of(const at::TensorBase& other) const{
     return impl_->storage().is_alias_of(other.storage());
+  }
+
+  inline bool _is_zerotensor() const {
+    return impl_->_is_zerotensor();
+  }
+
+  inline void _set_zero(bool zero) const {
+    impl_->_set_zero(zero);
   }
 
   inline bool is_conj() const {
@@ -630,6 +642,22 @@ class TORCH_API TensorBase {
   }
   bool requires_grad() const {
     return impl_->requires_grad();
+  }
+
+  // The Forward AD API functions below are low level and are not to be used by end
+  // users who should use the API provided in torch/csrc/autograd.h
+
+  /// This function returns the forward gradient for this Tensor at the given level.
+  const Tensor& _fw_grad(uint64_t level) const {
+    return impl_->_fw_grad(level, *this);
+  }
+
+  /// This function can be used to set the value of the forward grad.
+  /// Note that the given new_grad might not be used directly if it has different
+  /// metadata (size/stride/storage offset) compared to this Tensor. In that case,
+  /// new_grad content will be copied into a new Tensor
+  void _set_fw_grad(const TensorBase& new_grad, uint64_t level, bool is_inplace_op) const {
+    impl_->_set_fw_grad(new_grad, *this, level, is_inplace_op);
   }
 
   /// NOTE: This is similar to the legacy `.data()` function on `Variable`, and is intended

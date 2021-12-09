@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: package/deploy"]
+
 from typing import Iterable
 
 from torch.package import GlobGroup

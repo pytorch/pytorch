@@ -29,7 +29,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
   // n-dimensions. This advances iter_index by one row, while updating in_ptr
   // and out_ptr to point to the new row of data.
   auto advance_index = [&] () __ubsan_ignore_undefined__ {
-    for (size_t i = 1; i < iter_index.size(); ++i) {
+    for (const auto i : c10::irange(1, iter_index.size())) {
       if (iter_index[i] + 1 < signal_half_sizes[i]) {
         ++iter_index[i];
         in_ptr += in_strides[i];
@@ -93,7 +93,7 @@ void _fft_fill_with_conjugate_symmetry_slice(
     while (numel_remaining > 0) {
       auto end = std::min(signal_half_sizes[0], numel_remaining);
       out_ptr[0] = std::conj(in_ptr[0]);
-      for (int64_t i = 1; i < end; ++i) {
+      for (const auto i : c10::irange(1, end)) {
         out_ptr[(signal_half_sizes[0] - i) * out_strides[0]] = std::conj(in_ptr[i * in_strides[0]]);
       }
       numel_remaining -= end;
@@ -151,6 +151,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
@@ -210,12 +211,12 @@ inline shape_t shape_from_tensor(const Tensor& t) {
 
 template<typename T>
 inline std::complex<T> *tensor_cdata(Tensor& t) {
-  return reinterpret_cast<std::complex<T>*>(t.data<c10::complex<T>>());
+  return reinterpret_cast<std::complex<T>*>(t.data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
 inline const std::complex<T> *tensor_cdata(const Tensor& t) {
-  return reinterpret_cast<const std::complex<T>*>(t.data<c10::complex<T>>());
+  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -253,11 +254,11 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<float>(self),
-                   out.data<float>(), compute_fct<float>(out, dim, normalization));
+                   out.data_ptr<float>(), compute_fct<float>(out, dim, normalization));
   } else {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<double>(self),
-                   out.data<double>(), compute_fct<double>(out, dim, normalization));
+                   out.data_ptr<double>(), compute_fct<double>(out, dim, normalization));
     }
   return out;
 }
@@ -277,11 +278,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data<float>(),
+                   self.data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data<double>(),
+                   self.data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
@@ -448,7 +449,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
   const auto batch_size = input.sizes()[0];
   DimVector signal_size(signal_ndim + 1);
   signal_size[0] = batch_size;
-  for (int64_t i = 0; i < signal_ndim; ++i) {
+  for (const auto i : c10::irange(signal_ndim)) {
     auto in_size = input.sizes()[i + 1];
     auto out_size = out_sizes[dim[i]];
     signal_size[i + 1] = std::max(in_size, out_size);
@@ -460,7 +461,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   batched_sizes[0] = batch_size;
   DimVector batched_out_sizes(batched_sizes.begin(), batched_sizes.end());
-  for (size_t i = 0; i < dim.size(); ++i) {
+  for (const auto i : c10::irange(dim.size())) {
     batched_out_sizes[i + 1] = out_sizes[dim[i]];
   }
 
@@ -485,7 +486,7 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
     out_strides[dim_permute[i]] = batch_numel * out.strides()[0];
     batch_numel *= out_sizes[dim_permute[i]];
   }
-  for (int64_t i = batch_dims; i < ndim; ++i) {
+  for (const auto i : c10::irange(batch_dims, ndim)) {
     out_strides[dim_permute[i]] = out.strides()[1 + (i - batch_dims)];
   }
   out.as_strided_(out_sizes, out_strides, out.storage_offset());
