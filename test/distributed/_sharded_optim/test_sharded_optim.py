@@ -72,7 +72,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         local_optim.zero_grad()
         sharded_optim.zero_grad()
 
-        before_update = deepcopy(sharded_optim.params)
+        before_update = deepcopy(sharded_optim.named_params)
 
         inp = torch.rand([5, 10]).cuda(self.rank).requires_grad_()
 
@@ -88,23 +88,22 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         sharded_optim.step()
 
         # make sure the parameters (including sharded param)
-        # get updated by the optimizer
+        # get updated by the optimizer, and the updated
+        # local params are the same as the sharded params
         for key, val in before_update.items():
-            new_val = sharded_optim.params[key]
+            new_val = sharded_optim.named_params[key]
             if isinstance(val, sharded_tensor.ShardedTensor):
                 self.assertNotEqual(
                     val.local_shards()[0].tensor,
                     new_val.local_shards()[0].tensor
                 )
+                self.assertEqual(
+                    new_val.local_shards()[0].tensor,
+                    local_model.sharded_param
+                )
             else:
                 self.assertNotEqual(val, new_val)
-
-        # run second forward with updated parameters
-        inp2 = torch.rand([5, 10]).cuda(self.rank).requires_grad_()
-        local_output2 = local_model(inp2)
-        sharded_output2 = sharded_model(inp2)
-        # make sure the result the same
-        self.assertEqual(local_output2, sharded_output2)
+                self.assertEqual(new_val, local_model.param)
 
 
 if __name__ == '__main__':

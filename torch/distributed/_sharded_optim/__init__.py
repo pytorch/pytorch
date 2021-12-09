@@ -25,7 +25,7 @@ def named_params_with_sharded_tensor(
             are direct members of this module.
 
     Yields:
-        (string, Union[Parameter, ShardedTensor]): Tuple containing
+        (string, Union[Tensor, ShardedTensor]): Tuple containing
             the name and parameter (or ShardedTensor parameter)
 
     Example::
@@ -34,7 +34,7 @@ def named_params_with_sharded_tensor(
         >>> shard_parameter(model, "weight", spec)
         >>> for name, param in named_params_with_sharded_tensor(model):
         >>>    if name in ['weight']:
-        >>>        print(param.sharding_spec())
+        >>>        print(param.size())
 
     """
     modules = module.named_modules(prefix=prefix) if recurse else [(prefix, module)]
@@ -43,15 +43,11 @@ def named_params_with_sharded_tensor(
     for mod_prefix, mod in modules:
         # find all sharded tensor params
         for name, val in vars(mod).items():
-            if isinstance(val, ShardedTensor):
+            if isinstance(val, ShardedTensor) and val not in memo:
                 memo.add(val)
                 name = mod_prefix + ('.' if mod_prefix else '') + name
                 yield name, val
 
         # find all nn.Parameters
-        for name, val in mod._parameters.items():
-            if val is None or val in memo:
-                continue
-            memo.add(val)
-            name = mod_prefix + ('.' if mod_prefix else '') + name
+        for name, val in mod.named_parameters():
             yield name, val

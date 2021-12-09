@@ -8,26 +8,35 @@ from torch.distributed._sharded_tensor import ShardedTensor
 class ShardedOptimizer(optim.Optimizer):
     def __init__(
         self,
-        params: Mapping[str, Union[Tensor, ShardedTensor]],
+        named_params: Mapping[str, Union[Tensor, ShardedTensor]],
         optimizer_class,
         *optimizer_args,
         **optimizer_kwargs
     ):
         """
-        Collects all Tensors and local shards of ShardedTensor, uses these
-        Tensors as ``params`` for the optimizer while building the optimizer
-        using ``optimizer_class``, ``*optimizer_args`` and
-        ``*optimizer_kwargs``.
+        ShardedOptimizer collects all tensors and local shard tensors of
+        ShardedTensor, then use these tensors as ``params`` for optimizers
+
+        Args:
+            named_params (Dict[str, Union[Tensor, ShardedTensor]]) : a Dict
+                of parameters, where key is the parameter key, value is either
+                nn.Parameter or ShardedTensor parameter. This usually used in
+                conjunction with :meth:`named_params_with_sharded_tensor`
+            optimizer_class (torch.optim.Optimizer): the Optimizer to use
+                locally, i.e. torch.optim.SGD, torch.optim.Adagrad, etc.
+            *optimizer_args: the arguments to initialize the optimizer.
+            **optimizer_kwargs: the key-word arguments to initialize the optimizer.
+
         """
         tensors: List[Tensor] = []
-        for value in params.values():
+        for value in named_params.values():
             if isinstance(value, ShardedTensor):
                 for local_shard in value.local_shards():
                     tensors.append(local_shard.tensor)
             else:
                 tensors.append(value)
 
-        self.params = params
+        self.named_params = named_params
         self._optim = optimizer_class(tensors, *optimizer_args, **optimizer_kwargs)
         self.param_groups = self._optim.param_groups
         self.state = self._optim.state
@@ -65,7 +74,7 @@ class ShardedOptimizer(optim.Optimizer):
     def state_dict(self) -> Dict[str, Any]:
         """
         Returned state and param_groups will contain parameter keys
-        instead of parameter indices in torch.Optimizer.
+        instead of parameter indices like torch.Optimizer.
         This allows for advanced functionality like optimizer re-sharding to be implemented.
         """
         # TODO: implement state_dict
@@ -85,5 +94,5 @@ class ShardedOptimizer(optim.Optimizer):
     def add_param_group(self, param_group: Any):
         r"""Add a new param group
         """
-        # TODO: implement load_state_dict
+        # TODO: implement add_param_group
         raise NotImplementedError("ShardedOptimizer add_param_group not implemented yet!")
