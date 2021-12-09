@@ -1058,7 +1058,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Whether or not the tensor is a zerotensor
-  */
+   */
   inline bool _is_zerotensor() const {
     return key_set_.has(DispatchKey::ZeroTensor);
   }
@@ -1068,7 +1068,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   */
   void _set_zero(bool value) {
     if (value) {
-      TORCH_INTERNAL_ASSERT(false, "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Please call `torch._efficientzerotensor` if you want to create a tensor with no storage.");
     } else {
       key_set_ = key_set_.remove(DispatchKey::ZeroTensor);
     }

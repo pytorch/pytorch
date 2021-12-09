@@ -1,6 +1,6 @@
 import collections.abc
 from contextlib import contextmanager
-from typing import Optional, List, Tuple, Sequence
+from typing import Optional, List, Sequence
 
 import torch
 from torch.distributed import distributed_c10d
