@@ -3,6 +3,10 @@
 #include <c10/core/impl/SizesAndStrides.h>
 #include <c10/util/irange.h>
 
+#ifdef __clang__
+#pragma clang diagnostic ignored "-Wself-assign-overloaded"
+#endif
+
 using namespace c10;
 using namespace c10::impl;
 
