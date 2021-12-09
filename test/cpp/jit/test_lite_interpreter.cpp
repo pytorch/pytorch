@@ -20,8 +20,8 @@
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
-
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
@@ -1640,7 +1640,7 @@ TEST(LiteInterpreterTest, DynamicType) {
     enumerateTupleType(tupleSize, tmp, types, nested);
     std::move(std::begin(nested), std::end(nested), std::back_inserter(types));
   };
-  expandTypes(2);
+  expandTypes(1);
   expandTypes(1);
   for (const auto& a : types) {
     auto da = DynamicType::create(*a);
