@@ -21,8 +21,8 @@ class TORCH_API BackendData {
    * */
   using Handle = int64_t;
 
-  BackendData(BackendDevice device, Shape shape)
-      : device_(std::move(device)), shape_(std::move(shape)) {}
+  BackendData(BackendDevice device, Shape shape, bool is_scalar = false)
+      : device_(std::move(device)), shape_(std::move(shape)), is_scalar_(is_scalar) {}
 
   virtual ~BackendData() = default;
 
@@ -37,6 +37,8 @@ class TORCH_API BackendData {
   Info* info() const {
     return info_.get();
   }
+
+  bool is_scalar() const { return is_scalar_; }
 
   std::shared_ptr<Info> SetInfo(std::shared_ptr<Info> info) {
     std::swap(info, info_);
@@ -53,6 +55,7 @@ class TORCH_API BackendData {
   BackendDevice device_;
   Shape shape_;
   std::shared_ptr<Info> info_;
+  bool is_scalar_ = false;
 };
 
 using BackendDataPtr = std::shared_ptr<BackendData>;
