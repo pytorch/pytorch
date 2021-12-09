@@ -595,11 +595,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
 
   static std::once_flag initialize_ucc_lib_flag;
   std::call_once(initialize_ucc_lib_flag, [&]{
-    ucc_lib_ = loadTorchUCC();
-    if (ucc_lib_ != nullptr) {
+    uccLib_ = loadTorchUCC();
+    if (uccLib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
-    } else {
-      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
     }
   });
 }
@@ -2214,7 +2212,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib_ = nullptr;
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
 
 } // namespace c10d
 
