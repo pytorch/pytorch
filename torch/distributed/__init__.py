@@ -32,6 +32,7 @@ if is_available():
         Logger,
         BuiltinCommHookType,
         GradBucket,
+        Work as _Work,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _register_comm_hook,
         _register_builtin_comm_hook,

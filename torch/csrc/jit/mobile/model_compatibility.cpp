@@ -58,10 +58,7 @@ c10::IValue readArchive(
 }
 
 std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
-  std::vector<IValue> bytecode_values;
-  bytecode_values =
-      std::move(*readArchive("bytecode", reader).toTuple()).elements();
-  return bytecode_values;
+  return std::move(*readArchive("bytecode", reader).toTuple()).elements().vec();
 }
 
 /********************** Bytecode **********************/
@@ -103,6 +100,36 @@ uint64_t _get_model_bytecode_version(
     return static_cast<uint64_t>(model_version);
   }
   TORCH_CHECK(false, "Failed to get bytecode version.");
+}
+
+/********************** Operator Version **********************/
+
+uint64_t _get_model_operator_version(
+    PyTorchStreamReader& reader); // Forward Declare
+
+uint64_t _get_model_operator_version(std::istream& in) {
+  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(const std::string& filename) {
+  std::unique_ptr<FileAdapter> rai = std::make_unique<FileAdapter>(filename);
+  return _get_model_operator_version(std::move(rai));
+}
+
+uint64_t _get_model_operator_version(
+    std::shared_ptr<ReadAdapterInterface> rai) {
+  if (!check_zip_file(rai)) {
+    TORCH_CHECK(
+        false,
+        "Failed to open .ptl file please ensure the model was exported for mobile");
+  }
+  PyTorchStreamReader reader(std::move(rai));
+  return _get_model_operator_version(reader);
+}
+
+uint64_t _get_model_operator_version(PyTorchStreamReader& reader) {
+  return reader.version();
 }
 
 /********************** Operators and Info **********************/
@@ -162,11 +189,11 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
   // loop over all the functions in the bytecode
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
     // descend to the operators list
-    const auto& method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
-    auto operators_tuple = method_tuple.at(1).toTuple()->elements()[1];
-    auto operators = operators_tuple.toTuple()->elements()[1];
-    for (auto& op_tuple : operators.toTuple()->elements()) {
-      const auto& op = op_tuple.toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
+    auto operators_tuple = method_tuple.at(1).toTupleRef().elements()[1];
+    auto operators = operators_tuple.toTupleRef().elements()[1];
+    for (auto& op_tuple : operators.toTupleRef().elements()) {
+      const auto& op = op_tuple.toTupleRef().elements();
 
       // grab name
       std::string op_name = op.at(0).toStringRef();
@@ -229,27 +256,23 @@ std::unordered_set<std::string> _get_mobile_model_contained_types(
   // the hash to record which types are parsed.
   std::unordered_set<std::string> parsed_type_names_records;
   for (const auto i : c10::irange(1, bytecode_ivalues.size())) {
-    auto method_tuple = bytecode_ivalues.at(i).toTuple()->elements();
+    const auto& method_tuple = bytecode_ivalues.at(i).toTupleRef().elements();
     auto type_table_tuple =
-        method_tuple.at(1).toTuple()->elements()[BYTECODE_INDEX_TYPE];
-    auto type_table =
-        type_table_tuple.toTuple()->elements()[1].toTuple()->elements();
+        method_tuple.at(1).toTupleRef().elements()[BYTECODE_INDEX_TYPE];
+    const auto& type_table =
+        type_table_tuple.toTupleRef().elements()[1].toTupleRef().elements();
+
     // type_table is a list of IValue, and each IValue is a string,
     // for example: "Dict[int, Tuple[Tensor, Tensor, Tensor]]"
+    std::vector<std::string> type_name_list;
     for (const auto& type_definition : type_table) {
       std::unordered_set<std::string> type_tokens;
       std::string type_name = type_definition.toString()->string();
-
-      // parse the type only if it's new, and insert it in the record
-      if (parsed_type_names_records.find(type_name) ==
-          parsed_type_names_records.end()) {
-        parsed_type_names_records.insert(type_name);
-        at::TypeParser parser(type_name);
-        parser.parse();
-        type_tokens = parser.getContainedTypes();
-        contained_types.insert(type_tokens.begin(), type_tokens.end());
-      }
+      type_name_list.emplace_back(type_name);
     }
+    at::TypeParser parser(type_name_list);
+    parser.parseList();
+    contained_types = parser.getContainedTypes();
   }
 
   return contained_types;
@@ -281,7 +304,9 @@ ModelCompatibilityInfo ModelCompatibilityInfo::get(
   auto model_info = _get_model_ops_and_info(bytecode_values);
   std::unordered_set<std::string> type_table =
       _get_mobile_model_contained_types(bytecode_values);
-  return ModelCompatibilityInfo{model_bytecode_version, model_info, type_table};
+  uint64_t operator_version = _get_model_operator_version(reader);
+  return ModelCompatibilityInfo{
+      model_bytecode_version, model_info, type_table, operator_version};
 }
 
 ModelCompatCheckResult is_compatible(
@@ -290,11 +315,22 @@ ModelCompatCheckResult is_compatible(
   ModelCompatCheckResult result = {ModelCompatibilityStatus::OK, {}};
   // Check that the models bytecode version is less than or equal to
   // kMaxSupportedBytecodeVersion from the runtime
-  if (model_info.bytecode_version > runtime_info.bytecode_version) {
+  if (model_info.bytecode_version >
+      runtime_info.min_max_supported_bytecode_version.second) {
     result.status = ModelCompatibilityStatus::ERROR;
     std::ostringstream s;
     s << "model bytecode version " << model_info.bytecode_version
-      << "is greater than the runtimes " << runtime_info.bytecode_version;
+      << "is greater than the max supported bytecode version in runtimes "
+      << runtime_info.min_max_supported_bytecode_version.second;
+    result.errors.emplace_back(s.str());
+  } else if (
+      model_info.bytecode_version <
+      runtime_info.min_max_supported_bytecode_version.first) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "model bytecode version " << model_info.bytecode_version
+      << "is less than the minimum supported bytecode version in runtime "
+      << runtime_info.min_max_supported_bytecode_version.first;
     result.errors.emplace_back(s.str());
   }
 
@@ -345,6 +381,7 @@ ModelCompatCheckResult is_compatible(
         if (model_op_info.num_schema_args.has_value() &&
             (model_op_info.num_schema_args.value() >
              runtime_op_info.num_schema_args.value())) {
+          result.status = ModelCompatibilityStatus::ERROR;
           std::ostringstream s;
           s << "Operator schema for'" << op_name << "' has "
             << model_op_info.num_schema_args.value()
@@ -355,6 +392,21 @@ ModelCompatCheckResult is_compatible(
       }
     }
   }
+
+  // Check Operator Versions
+  if (model_info.operator_version <
+          runtime_info.min_max_supported_opperator_versions.first ||
+      model_info.operator_version >
+          runtime_info.min_max_supported_opperator_versions.second) {
+    result.status = ModelCompatibilityStatus::ERROR;
+    std::ostringstream s;
+    s << "Model Operator Version " << model_info.operator_version
+      << "is not within supported version range of the runtime "
+      << runtime_info.min_max_supported_opperator_versions.first << " to "
+      << runtime_info.min_max_supported_opperator_versions.second;
+    result.errors.push_back(s.str());
+  }
+
   return result;
 }
 

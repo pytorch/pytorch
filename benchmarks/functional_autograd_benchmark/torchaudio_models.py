@@ -513,7 +513,7 @@ class ScaledDotProduct(torch.nn.Module):
                 raise RuntimeError('Only bool tensor is supported for attn_mask')
 
         # Dot product of q, k
-        attn_output_weights = torch.matmul(query, key.transpose(-2, -1))
+        attn_output_weights = torch.matmul(query, key.mT)
         if attn_mask is not None:
             attn_output_weights.masked_fill_(attn_mask, -1e8,)
         attn_output_weights = torch.nn.functional.softmax(attn_output_weights, dim=-1)

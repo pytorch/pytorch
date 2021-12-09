@@ -4,6 +4,7 @@
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/cpu/utils.h>
+#include <c10/util/irange.h>
 
 #include <c10/util/Optional.h>
 
@@ -60,7 +61,7 @@ void cpu_max_unpool(
     int64_t ip = 0;
     data_index_init(begin, c, channels, ip, input_image_size);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* output_ptr = output_data + c * output_image_size;
 
       int64_t maxp = indices_data[i];
@@ -124,13 +125,13 @@ void cpu_max_unpool_channels_last(
     int64_t ip = 0;
     data_index_init(begin, n, nbatch, ip, input_image_size);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* input_ptr = input_data + i * channels;
       int64_t* indices_ptr = indices_data + i * channels;
       scalar_t* output_ptr = output_data + n * output_image_size * channels;
 
       // can't do scatter on avx2 (only available on avx512)
-      for (int64_t c = 0; c < channels; c++) {
+      for (const auto c : c10::irange(channels)) {
         int64_t maxp = indices_ptr[c];
         if (maxp < 0 || maxp >= output_image_size) {
           optional_error_index = maxp;
@@ -197,7 +198,7 @@ void cpu_max_unpool_backward(
     int64_t ip = 0;
     data_index_init(begin, c, channels, ip, input_image_size);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* grad_output_ptr = grad_output_data + c * output_image_size;
 
       int64_t maxp = indices_data[i];
@@ -262,12 +263,12 @@ void cpu_max_unpool_backward_channels_last(
     int64_t ip = 0;
     data_index_init(begin, n, nbatch, ip, input_image_size);
 
-    for (int64_t i = begin; i < end; i++) {
+    for (const auto i : c10::irange(begin, end)) {
       scalar_t* grad_output_ptr = grad_output_data + n * output_image_size * channels;
       scalar_t* grad_input_ptr = grad_input_data + i * channels;
       int64_t* indices_ptr = indices_data + i * channels;
 
-      for (int64_t c = 0; c < channels; c++) {
+      for (const auto c : c10::irange(channels)) {
         int64_t maxp = indices_ptr[c];
         if (maxp < 0 || maxp >= output_image_size) {
           optional_error_index = maxp;

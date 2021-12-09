@@ -42,7 +42,6 @@ _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
 _(aten, convolution_backward_overrideable) \
-_(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
 _(aten, _cosh) \
@@ -193,10 +192,11 @@ _(aten, amin) \
 _(aten, aminmax) \
 _(aten, as_strided) \
 _(aten, as_tensor) \
-_(aten, atan2) \
 _(aten, atleast_1d) \
 _(aten, atleast_2d) \
 _(aten, atleast_3d) \
+_(aten, _autocast_to_reduced_precision) \
+_(aten, _autocast_to_full_precision) \
 _(aten, avg_pool1d) \
 _(aten, avg_pool2d) \
 _(aten, avg_pool2d_backward) \
@@ -379,6 +379,7 @@ _(aten, heaviside) \
 _(aten, hinge_embedding_loss) \
 _(aten, histc) \
 _(aten, histogram) \
+_(aten, histogramdd) \
 _(aten, hspmm) \
 _(aten, hsplit) \
 _(aten, hstack) \
@@ -520,6 +521,8 @@ _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_dropout) \
+_(aten, native_dropout_backward) \
 _(aten, native_layer_norm) \
 _(aten, native_layer_norm_backward) \
 _(aten, native_clone) \
@@ -547,7 +550,6 @@ _(aten, nll_loss2d_backward) \
 _(aten, nll_loss2d_forward) \
 _(aten, nll_loss_backward) \
 _(aten, nll_loss_forward) \
-_(aten, nonzero) \
 _(aten, nonzero_numpy) \
 _(aten, norm) \
 _(aten, norm_except_dim) \
@@ -636,6 +638,7 @@ _(aten, set) \
 _(aten, sign) \
 _(aten, signbit) \
 _(aten, silu) \
+_(aten, silu_backward) \
 _(aten, sgn) \
 _(aten, sin) \
 _(aten, sinh) \
@@ -737,6 +740,9 @@ _(aten, unsqueeze) \
 _(aten, upsample_bilinear2d) \
 _(aten, upsample_bilinear2d_backward) \
 _(aten, upsample_bilinear2d_forward) \
+_(aten, _upsample_bilinear2d_aa) \
+_(aten, _upsample_bilinear2d_aa_backward) \
+_(aten, _upsample_bilinear2d_aa_forward) \
 _(aten, upsample_bicubic2d) \
 _(aten, upsample_bicubic2d_backward) \
 _(aten, upsample_bicubic2d_forward) \
@@ -744,14 +750,23 @@ _(aten, upsample_linear1d) \
 _(aten, upsample_linear1d_backward) \
 _(aten, upsample_linear1d_forward) \
 _(aten, upsample_nearest1d) \
+_(aten, _upsample_nearest_exact1d) \
 _(aten, upsample_nearest1d_backward) \
+_(aten, _upsample_nearest_exact1d_backward) \
 _(aten, upsample_nearest1d_forward) \
+_(aten, _upsample_nearest_exact1d_forward) \
 _(aten, upsample_nearest2d) \
+_(aten, _upsample_nearest_exact2d) \
 _(aten, upsample_nearest2d_backward) \
+_(aten, _upsample_nearest_exact2d_backward) \
 _(aten, upsample_nearest2d_forward) \
+_(aten, _upsample_nearest_exact2d_forward) \
 _(aten, upsample_nearest3d) \
+_(aten, _upsample_nearest_exact3d) \
 _(aten, upsample_nearest3d_backward) \
+_(aten, _upsample_nearest_exact3d_backward) \
 _(aten, upsample_nearest3d_forward) \
+_(aten, _upsample_nearest_exact3d_forward) \
 _(aten, upsample_trilinear3d) \
 _(aten, upsample_trilinear3d_backward) \
 _(aten, upsample_trilinear3d_forward) \
