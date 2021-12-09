@@ -7636,6 +7636,9 @@ class TestAutogradForwardMode(TestCase):
             # No differentiable outputs, shouldn't error
             eq = foo == bar
 
+            # Inplace
+            foo.eq_(bar)
+
     def test_create_new_zeros_with_same_meta(self):
         new_zeroes_fn = torch.ops.aten._new_zeros_with_same_feature_meta
 
