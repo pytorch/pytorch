@@ -9,7 +9,7 @@ from tools.codegen.code_template import CodeTemplate
 
 H_NAME = "spv.h"
 CPP_NAME = "spv.cpp"
-DEFAULT_ENV = {"precision": "highp"}
+DEFAULT_ENV = {"precision": "highp", "format": "rgba32f"}
 
 def getName(filePath):
     return os.path.basename(filePath).replace("/", "_").replace(".", "_")
@@ -43,7 +43,7 @@ def genCppH(hFilePath, cppFilePath, srcDirPath, glslcPath, tmpDirPath, env):
         print("spvPath {}".format(spvPath))
 
         cmd = [
-            glslcPath, "-fshader-stage=compute", "-Os",
+            glslcPath, "-fshader-stage=compute",
             srcPath, "-o", spvPath,
             "--target-env=vulkan1.0",
             "-Werror"
