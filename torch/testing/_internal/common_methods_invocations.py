@@ -14032,6 +14032,7 @@ op_db: List[OpInfo] = [
         'std',
         nan_policy='propagate',
         supports_out=False,
+        supports_forward_ad=True,
         assert_autodiffed=True,
         promotes_int_to_float=True,
         dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
