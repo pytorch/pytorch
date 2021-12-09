@@ -7,7 +7,7 @@ if(CMAKE_GENERATOR STREQUAL "Ninja" AND CMAKE_VERSION VERSION_LESS 3.13)
 endif()
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
-# Not setting this sometimes makes XCode C compiler gets detected as "Clang",
+# Not setting this sometimes makes XCode C compiler gets  detected as "Clang",
 # even when the C++ one is detected as "AppleClang".
 cmake_policy(SET CMP0010 NEW)
 cmake_policy(SET CMP0025 NEW)
