@@ -18,18 +18,6 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
 }
 } // namespace
 
-/**
- * A implementation detail to support NamedTuple.
- */
-struct LabeledDynamicType {
-  c10::optional<std::string> label;
-  DynamicTypePtr ty;
-  explicit LabeledDynamicType(DynamicTypePtr t) : ty(std::move(t)) {}
-
-  bool equals(const LabeledDynamicType& other) const;
-  bool isSubtypeOf(const LabeledDynamicType& other) const;
-};
-
 std::string DynamicType::str() const {
   std::string ret = "Dynamic<";
   ret += std::to_string(static_cast<DynamicTypeBits>(tag_));
@@ -190,7 +178,8 @@ bool DynamicType::isSubtypeOfExt(const Type& rhs, std::ostream*) const {
   return false;
 }
 
-bool LabeledDynamicType::isSubtypeOf(const LabeledDynamicType& other) const {
+bool DynamicType::LabeledDynamicType::isSubtypeOf(
+    const LabeledDynamicType& other) const {
   if (!other.label || (label == other.label)) {
     return ty->isSubtypeOf(other.ty);
   }
@@ -198,7 +187,8 @@ bool LabeledDynamicType::isSubtypeOf(const LabeledDynamicType& other) const {
   return false;
 }
 
-bool LabeledDynamicType::equals(const LabeledDynamicType& other) const {
+bool DynamicType::LabeledDynamicType::equals(
+    const LabeledDynamicType& other) const {
   return (label == other.label) && (*ty == *other.ty);
 }
 
