@@ -218,9 +218,6 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
     std::vector<int64_t> self_broadcast_size, A_broadcast_size;
     std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
 
-    auto ndim = self_broadcast_size.size();
-    auto nrows = A.size(-2);
-
     // make column major strides for BLAS
     const auto solution_strides = at::native::contiguous_strides(self_broadcast_size, /*f-contig=*/true);
     set_output(0, self_broadcast_size, solution_strides, self.options(), {});
