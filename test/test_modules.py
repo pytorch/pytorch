@@ -514,15 +514,15 @@ class TestModule(TestCase):
                 self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
 
-    @modules([m for m in module_db if m.supports_channels_last])
+    @modules(module_db)
     def test_memory_format(self, device, dtype, module_info):
         module_cls = module_info.module_cls
-        name = module_info.module_cls.__name__
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
+        is_conv = 'Conv' in module_cls.__name__
         cudnn_greater_7_6 = False
         cudnn_greater_8 = False
-        if torch.backends.cudnn.is_available():
+        if ('cuda' in device) and torch.backends.cudnn.is_available():
             cudnn_greater_7_6 = torch.backends.cudnn.version() >= 7603
             cudnn_greater_8 = torch.backends.cudnn.version() >= 8005
 
@@ -537,7 +537,7 @@ class TestModule(TestCase):
                 return ([torch.contiguous_format],
                         [torch.preserve_format, torch.contiguous_format])
 
-        # Check that at least one Tensor input has dim=n
+        # Check that at least one Tensor input has dim == n
         def _check_dims(obj, n):
             if isinstance(obj, torch.Tensor):
                 return obj.dim() == n
@@ -546,11 +546,12 @@ class TestModule(TestCase):
             else:
                 return False
 
-        # Called after _check_dims
+        # Called after _check_dims, when we know that >= 1 tensor can be converted to mem_format
         def _to_mem_format(obj, mem_format):
             if isinstance(obj, torch.Tensor):
                 d = obj.dim()
-                if (mem_format == torch.channels_last and d != 4 or mem_format == torch.channels_last_3d and d != 5):
+                if ((mem_format == torch.channels_last and d != 4)
+                   or (mem_format == torch.channels_last_3d and d != 5)):
                     return obj
                 return obj.to(memory_format=mem_format)
             elif isinstance(obj, (tuple, list)):
@@ -562,11 +563,12 @@ class TestModule(TestCase):
 
         def _check_out_mem_format(output, input_mem_format, module_mem_format):
             if isinstance(output, torch.Tensor):
-                if (output.dim() == 4 and (input_mem_format == torch.channels_last
-                    or (module_mem_format == torch.channels_last and 'Conv' in name and cudnn_greater_7_6))):  # noqa: E129
+                d = output.dim()
+                if (d == 4 and ((input_mem_format == torch.channels_last and (not is_conv or cudnn_greater_7_6))
+                                or (module_mem_format == torch.channels_last and is_conv and cudnn_greater_7_6))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
-                elif (output.dim() == 5 and (input_mem_format == torch.channels_last_3d
-                      or (module_mem_format == torch.channels_last_3d and 'Conv' in name and cudnn_greater_8))):
+                elif (d == 5 and ((input_mem_format == torch.channels_last_3d and (not is_conv or cudnn_greater_8))
+                                  or (module_mem_format == torch.channels_last_3d and is_conv and cudnn_greater_8))):
                     self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
