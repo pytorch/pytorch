@@ -29,8 +29,14 @@ static Tensor value_selecting_reduction_backward_hack(
   return at::zeros(sizes, grad.options()).scatter(dim, indices, grad);
 }
 
+// TODO: upstream into core
+Tensor index_select_backward_hack(const Tensor& grad, IntArrayRef self_sizes, int64_t dim, const Tensor& index) {
+  return at::zeros(self_sizes, grad.options()).index_add(dim, index, grad);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   m.impl("value_selecting_reduction_backward", value_selecting_reduction_backward_hack);
+  m.impl("index_select_backward", index_select_backward_hack);
 }
 
 }}
