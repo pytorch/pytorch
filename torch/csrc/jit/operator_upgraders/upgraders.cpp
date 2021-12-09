@@ -13,13 +13,7 @@ void UpgradersMap::set_content(
   if (isPopulated) {
     return;
   }
-
   content_ = std::move(content);
-
-  // for (const auto& entry : content) {
-  //   content_.insert(std::move(entry));
-  // }
-
   isPopulated = true;
 }
 
