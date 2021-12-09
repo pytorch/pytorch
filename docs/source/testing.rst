@@ -3,8 +3,9 @@ torch.testing
 
 .. warning::
 
-    This module is in a PROTOTYPE state. New functions are still being added, and the available functions may change in
-    future PyTorch releases. We are actively looking for feedback for UI/UX improvements or missing functionalities.
+    This module is in a BETA state. New functions are still being added, and the available functions may change
+    slightly in future PyTorch releases. We are committing to seeing this module through to a stable state, but won't
+    guarantee backwards compatibility until then.
 
 .. automodule:: torch.testing
 
