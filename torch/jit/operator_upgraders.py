@@ -96,8 +96,7 @@ def collect_available_upgraders():
     # 2. Check if everything in this file is registered in version_map.h
     for entry in entries:
         if isinstance(entries[entry], torch.jit.ScriptFunction):
-            # test entries will be populated in the test cases so we ignore them here
-            if (not entry.startswith("_test")) and (entry not in available_upgraders_in_version_map):
+            if entry not in available_upgraders_in_version_map:
                 raise AssertionError("The upgrader {} is not registered in the version_map.h".format(entry))
 
     return available_upgraders_in_version_map
