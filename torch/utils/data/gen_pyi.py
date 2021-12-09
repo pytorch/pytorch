@@ -139,7 +139,12 @@ def get_method_definitions(files_to_exclude,
                            default_output_type: str,
                            method_to_special_output_type,
                            file_path) -> List[str]:
-
+    """
+    .pyi generation for functional DataPipes Process
+    # 1. Find files that we want to process (exclude the ones who don't)
+    # 2. Parse method name and signature
+    # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
+    """
     os.chdir(str(pathlib.Path(__file__).parent.resolve()))
     file_paths = find_file_paths([file_path],
                                  files_to_exclude=files_to_exclude.union(deprecated_files))
@@ -160,11 +165,7 @@ def get_method_definitions(files_to_exclude,
 
 def main() -> None:
     """
-    .pyi generation for functional DataPipes Process
-    # 1. Find files that we want to process (exclude the ones who don't)
-    # 2. Parse method name and signature
-    # 3. Remove first argument after self (unless it is "*datapipes"), default args, and spaces
-    # 4. Inject file into template dataset.pyi.in
+    # Inject file into template dataset.pyi.in
     TODO: The current implementation of this script only generates interfaces for built-in methods. To generate
           interface for user-defined DataPipes, consider changing `IterDataPipe.register_datapipe_as_function`.
     """
