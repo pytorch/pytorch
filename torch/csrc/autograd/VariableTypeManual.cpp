@@ -42,14 +42,16 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
 namespace {
 const Variable & checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
+             "for argument #", pos, " '", name, "'");
   }
   return t;
 }
 
 Variable & checked_cast_variable(Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #", pos, " '", name, "'");
+    AT_ERROR("Expected a proper Tensor but got None (or an undefined Tensor in C++) ",
+             "for argument #", pos, " '", name, "'");
   }
   return t;
 }
@@ -327,10 +329,7 @@ namespace ADInplaceOrView {
   Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(self.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
+      return at::alias(self);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!self.unsafeGetTensorImpl()->support_as_strided()) {
@@ -349,10 +348,7 @@ namespace ADInplaceOrView {
   Tensor _make_dual(c10::DispatchKeySet ks, const Tensor & primal, const Tensor & tangent, int64_t level) {
     auto tmp = ([&]() {
       at::AutoDispatchBelowADInplaceOrView guard;
-      // Make an empty shallow copy, the as_view call below will fill in the proper fields
-      return Tensor(primal.getIntrusivePtr()->shallow_copy_and_detach(
-        /*version_counter=*/0,
-        /*allow_tensor_metadata_change=*/false));
+      return at::alias(primal);
     })();
     std::function<at::Tensor(const at::Tensor&)> func=nullptr;
     if (!primal.unsafeGetTensorImpl()->support_as_strided()) {
