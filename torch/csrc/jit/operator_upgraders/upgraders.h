@@ -41,7 +41,5 @@ TORCH_API void test_only_populate_upgraders(
 TORCH_API void test_only_remove_upgraders(
     const std::unordered_map<std::string, std::string>& content);
 
-static UpgradersMap upgradersMap;
-
 } // namespace jit
 } // namespace torch

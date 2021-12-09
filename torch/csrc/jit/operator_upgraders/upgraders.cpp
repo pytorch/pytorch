@@ -6,6 +6,8 @@
 namespace torch {
 namespace jit {
 
+static UpgradersMap upgradersMap;
+
 void UpgradersMap::set_content(
     const std::unordered_map<std::string, std::string>&& content) {
   // make sure we populate the map only once
