@@ -98,36 +98,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   //////////////computation client interfaces///////////////////////
 
  public:
-  class TSData : public torch::lazy::BackendData {
-   public:
 
-    TSData(const at::Scalar& scalar, const torch::lazy::BackendDevice& device)
-        : torch::lazy::BackendData(device, torch::lazy::Shape(scalar.type(), {}), /*is_scalar=*/true),
-          scalar(scalar) {}
-
-    TSData(const at::Tensor& data, const torch::lazy::Shape& shape,
-           const torch::lazy::BackendDevice& device)
-        : torch::lazy::BackendData(device, shape), data_(data) {}
-
-    TSData(const torch::lazy::Shape& shape,
-           const torch::lazy::BackendDevice& device)
-        : torch::lazy::BackendData(device, shape) {}
-
-    Handle GetHandle() override { return reinterpret_cast<int64_t>(this); }
-
-    void Assign(const torch::lazy::BackendData& data) override {
-      data_ = static_cast<const TSData&>(data).data_;
-    }
-
-    bool HasValue() const override { return data_.defined(); }
-
-    at::Tensor data() { return data_; }
-
-    c10::optional<at::Scalar> scalar;
-
-   private:
-    at::Tensor data_;
-  };
 
   torch::lazy::BackendDataPtr CreateDataPlaceholder(
       const torch::lazy::BackendDevice& device,
@@ -183,7 +154,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
 torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
     const torch::lazy::BackendDevice& device,
     const torch::lazy::Shape& shape) const {
-  return std::make_shared<TSBackendImpl::TSData>(shape, device);
+  return std::make_shared<TSData>(shape, device);
 }
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
@@ -204,8 +175,8 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
   std::vector<torch::jit::IValue> stack;
   for (auto argument : arguments) {
     const auto ts_data =
-        std::static_pointer_cast<TSBackendImpl::TSData>(argument);
-    if (ts_data->is_scalar()){
+        std::static_pointer_cast<TSData>(argument);
+    if (ts_data->scalar.has_value()){
       stack.emplace_back(ts_data->scalar.value());
     } else {
       // TODO(whc) should this check be made more general? it's written somewhat oddly
@@ -224,7 +195,7 @@ std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
         result.scalar_type(),
         std::vector<int64_t>(result_sizes.begin(), result_sizes.end()));
     results.push_back(
-        std::make_shared<TSBackendImpl::TSData>(result, shape, device));
+        std::make_shared<TSData>(result, shape, device));
   }
   return results;
 }
