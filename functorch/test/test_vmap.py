@@ -4,20 +4,19 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+from unittest.case import skipIf, skip
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import torch.nn.functional as F
-import torch.utils._pytree as pytree
 from torch import Tensor
 import functools
 import itertools
 import textwrap
 import warnings
 import unittest
-import re
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
     skipCUDAIfNoMagma
-from torch.testing._internal.common_device_type import ops, onlyCPU
+from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_utils import (
     parametrize,
     instantiate_parametrized_tests,
@@ -25,12 +24,9 @@ from torch.testing._internal.common_utils import (
 )
 from functorch_lagging_op_db import functorch_lagging_op_db
 from functorch_additional_op_db import additional_op_db
-from torch.utils._pytree import tree_map
 from common_utils import (
     get_fallback_and_vmap_exhaustive,
-    opinfo_in_dict,
     xfail,
-    skip,
     skipOps,
     check_vmap_fallback,
 )
@@ -998,6 +994,66 @@ class TestVmapAPI(TestCase):
                     )
                 )""")
         self.assertEqual(buf, expected)
+
+    def _test_vmap_autocast(self, device):
+
+        if torch.device(device).type == "cpu":
+            amp_dtype = torch.bfloat16
+        else:
+            amp_dtype = torch.float16
+
+        a_float32 = torch.rand(4, 2, 3, device=device)
+        b_float32 = torch.rand(4, 3, 2, device=device)
+        c_float32 = torch.rand(4, 2, 2, device=device)
+        d_float32 = torch.rand(4, 3, 2, device=device)
+
+        # Case 1, autocast inside vmapped function
+        def func1(x, y, z, w):
+            with torch.autocast(dtype=amp_dtype, device_type=device):
+                e_float16 = torch.matmul(x, y)
+                assert e_float16.dtype == amp_dtype, e_float16.dtype
+                f_float16 = torch.matmul(z, e_float16)
+                assert f_float16.dtype == amp_dtype, f_float16.dtype
+            return torch.matmul(w, f_float16.float())
+
+        expected = func1(a_float32, b_float32, c_float32, d_float32)
+        out = vmap(func1)(a_float32, b_float32, c_float32, d_float32)
+        assert expected.allclose(out)
+
+        # Case 2, autocast decorator inside vmapped function
+        @torch.autocast(dtype=amp_dtype, device_type=device)
+        def func2(x, y, z, w):
+            e_float16 = torch.matmul(x, y)
+            assert e_float16.dtype == amp_dtype, e_float16.dtype
+            f_float16 = torch.matmul(z, e_float16)
+            assert f_float16.dtype == amp_dtype, f_float16.dtype
+            return torch.matmul(w, f_float16)
+
+        expected = func2(a_float32, b_float32, c_float32, d_float32)
+        out = vmap(func2)(a_float32, b_float32, c_float32, d_float32)
+        assert expected.allclose(out)
+
+        # Case 3, autocast is outside vmapped function
+        def func3(x, y, z, w):
+            e_float16 = torch.matmul(x, y)
+            assert e_float16.dtype == amp_dtype, e_float16.dtype
+            f_float16 = torch.matmul(z, e_float16)
+            assert f_float16.dtype == amp_dtype, f_float16.dtype
+            return torch.matmul(w, f_float16)
+
+        with torch.autocast(dtype=amp_dtype, device_type=device):
+            expected = func3(a_float32, b_float32, c_float32, d_float32)
+            out = vmap(func3)(a_float32, b_float32, c_float32, d_float32)
+
+        assert expected.allclose(out)
+
+    @skip("Somehow, vmap and autocast do not work on CPU")
+    def test_vmap_autocast_cpu(self):
+        self._test_vmap_autocast("cpu")
+
+    @skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_vmap_autocast_cuda(self):
+        self._test_vmap_autocast("cuda")
 
 
 def slice_inputs(inputs, bdims, i):
