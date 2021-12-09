@@ -12,7 +12,7 @@ namespace ir {
 namespace ops {
 
   Addcdiv::Addcdiv(const torch::lazy::Value& self, const torch::lazy::Value& tensor1, const torch::lazy::Value& tensor2, const at::Scalar& value, std::vector<torch::lazy::Shape>&& shapes)
-    : TsNode(torch::lazy::OpKind(at::aten::addcmul),
+    : TsNode(torch::lazy::OpKind(at::aten::addcdiv),
             {self, tensor1, tensor2, LazyGraphExecutor::Get()->GetIrValueForScalar(value, torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)))}, std::move(shapes),
             /* num_outputs */ 1) 
   {}
