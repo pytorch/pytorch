@@ -9,7 +9,7 @@ namespace jit {
 static UpgradersMap upgradersMap;
 
 void UpgradersMap::set_content(
-    const std::unordered_map<std::string, std::string>&& content) {
+    std::unordered_map<std::string, std::string>&& content) {
   // make sure we populate the map only once
   std::lock_guard<std::mutex> _(lock);
   if (isPopulated) {
@@ -46,7 +46,7 @@ void UpgradersMap::test_only_remove_content(
 }
 
 void populate_upgraders_map(
-    const std::unordered_map<std::string, std::string>&& content) {
+    std::unordered_map<std::string, std::string>&& content) {
   upgradersMap.set_content(std::move(content));
 }
 
