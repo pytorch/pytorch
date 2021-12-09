@@ -10,8 +10,7 @@ namespace jit {
 
 class UpgradersMap {
  public:
-  void set_content(
-      const std::unordered_map<std::string, std::string>&& content);
+  void set_content(std::unordered_map<std::string, std::string>&& content);
   int count();
   const std::unordered_map<std::string, std::string>& get_content();
   // THESE METHODS ARE ONLY USED FOR TESTING PURPOSES
@@ -27,7 +26,7 @@ class UpgradersMap {
 };
 
 TORCH_API void populate_upgraders_map(
-    const std::unordered_map<std::string, std::string>&& content);
+    std::unordered_map<std::string, std::string>&& content);
 
 TORCH_API int get_upgraders_map_size();
 
