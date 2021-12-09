@@ -11,8 +11,6 @@
 #include <unordered_set>
 #include <mutex>
 
-#include <THC/THC.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
