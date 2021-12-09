@@ -43,11 +43,11 @@ bool available(
          (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
-         (bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
-                                        ((transposed ? (weight.size(Layout::Filter::input) ==
-                                                        ((*bias_sizes_opt)[0] / groups))
-                                          : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0])))))
-                                    : true) &&
+         (bias_sizes_opt && bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
+                ((transposed ? (weight.size(Layout::Filter::input) ==
+                                ((*bias_sizes_opt)[0] / groups))
+                  : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0])))))
+            : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
          (padding[Layout::Parameter::width] >= 0) &&
