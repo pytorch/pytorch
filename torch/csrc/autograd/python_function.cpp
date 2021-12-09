@@ -562,8 +562,7 @@ static void _trace_post_record(
   if (node) {
     auto module_name = PyDict_GetItemString(((PyTypeObject*)op_obj)->tp_dict, "__module__");
     if (module_name) {
-      Py_ssize_t size;
-      const char *ptr = PyUnicode_AsUTF8AndSize(module_name, &size);
+      const char *ptr = PyUnicode_AsUTF8(module_name);
       if (ptr) {
           auto modname = std::string(ptr);
           node->s_(jit::attr::module, modname);
