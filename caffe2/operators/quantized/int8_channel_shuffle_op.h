@@ -16,7 +16,7 @@ namespace int8 {
 class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
  public:
   explicit Int8ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<CPUContext>(operator_def, ws), ws_(ws) {
+      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NHWC,
         "Int8ChannelShuffleOp only supports NHWC order");
@@ -90,7 +90,6 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
   }
 
  private:
-  Workspace* ws_;
   // QNNPACK channel shuffle operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };
