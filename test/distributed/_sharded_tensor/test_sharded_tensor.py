@@ -1890,6 +1890,10 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         values = [3.2, 4.5, 5.8]
         sparse_tensor = torch.sparse_coo_tensor(indices, values, (5, 5), device=f"cuda:{self.rank}")
 
+        empty_local_shards = []
+        with self.assertRaisesRegex(ValueError, 'have no local shards on all ranks'):
+            sharded_tensor = _sharded_tensor.init_from_local_shards(empty_local_shards, [10, 10], init_rrefs=True)
+
         wrong_layout_shards = [
             _sharded_tensor.Shard(sparse_tensor, local_shard_metadata)
         ]

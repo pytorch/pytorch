@@ -208,7 +208,6 @@ class ShardedTensor(object):
         self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
-        world_size = dist.get_world_size(self._process_group)
         worker_infos = rpc._get_current_rpc_agent().get_worker_infos()
         rank_to_name = {}
         name_to_rank = {}
@@ -319,11 +318,10 @@ class ShardedTensor(object):
         world_size = dist.get_world_size(process_group)
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
-        local_shards_device = torch.device("cpu")
         global_tensor_size = _flatten_tensor_size(global_size)
 
         if len(local_shards) > 0:
-            local_sharded_tensor_metadata, local_shards_device = \
+            local_sharded_tensor_metadata = \
                 build_metadata_from_local_shards(local_shards, global_tensor_size, current_rank, process_group)
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
@@ -332,11 +330,11 @@ class ShardedTensor(object):
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
-            if local_shards_device.type == "cuda":
+            if isinstance(process_group, dist.ProcessGroupNCCL):
                 # with GPU/NCCL, we need to set a device for all_gather_object
                 # to use as we need to know which device we should put the
                 # serialized tensor on before the NCCL collective.
-                with torch.cuda.device(local_shards_device):
+                with torch.cuda.device(current_rank):
                     dist.all_gather_object(
                         gathered_metadatas,
                         local_sharded_tensor_metadata,
