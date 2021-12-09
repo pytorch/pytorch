@@ -43,6 +43,7 @@ static uint8_t packFlags(const LocalState &state, const at::Tensor &v) {
          (static_cast<uint8_t>(dtype) << 1);
 }
 
+using hash_key_t = std::vector<int64_t>;
 /// Per-tensor cache specialization key targetting dynamic shapes. Records
 /// dtype, dispatch options, aliasing, and per-dim contiguity/broadcasting
 /// information.
@@ -102,8 +103,8 @@ std::vector<int> genDimFlags(c10::IntArrayRef sizes, c10::IntArrayRef strides) {
   return dimflags;
 }
 
-std::vector<int> dynamic_hasher(const LocalState &state, const at::Tensor &v) {
-    std::vector<int> hash = {
+hash_key_t dynamic_hasher(const LocalState &state, const at::Tensor &v) {
+    hash_key_t hash = {
       0,
       static_cast<int>(packFlags(state, v)),
       static_cast<int>(state.apply(v.key_set()).raw_repr()),
@@ -115,8 +116,8 @@ std::vector<int> dynamic_hasher(const LocalState &state, const at::Tensor &v) {
 
 /// Per-tensor cache specialization key targetting static shapes. Recordsdtype,
 /// dispatch options, aliasing, and full shapes and strides.
-std::vector<int> static_hasher(const LocalState &state, const at::Tensor &v) {
-    std::vector<int> hash = {
+hash_key_t static_hasher(const LocalState &state, const at::Tensor &v) {
+    hash_key_t hash = {
       1,
       static_cast<int>(packFlags(state, v)),
       static_cast<int>(state.apply(v.key_set()).raw_repr()),
@@ -138,7 +139,7 @@ public:
   /// Cache type mapping specialization keys to compiled kernels.
   class vector_hasher {
   public:
-    std::size_t operator()(std::vector<int> const& vec) const {
+    std::size_t operator()(hash_key_t const& vec) const {
       std::size_t seed = vec.size();
       for(auto& i : vec) {
         seed ^= i + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -146,14 +147,14 @@ public:
       return seed;
     }
   };
-  using Cache = std::unordered_map<std::vector<int>, py::object, vector_hasher>;
+  using Cache = std::unordered_map<hash_key_t, py::object, vector_hasher>;
 
   /// Compute the set of specialization keys based on the inputs to
   /// the kernel.
-  std::vector<int> computeCacheKey(const std::vector<at::Tensor>& args, int numArgs,
-                              const std::string& hasherType, int id) {
+  hash_key_t computeCacheKey(const std::vector<at::Tensor>& args, int numArgs,
+                              const std::string& hasherType, int64_t id) {
     LocalState state;
-    std::vector<int> cacheKey;
+    hash_key_t cacheKey;
     for (int i = 0; i < numArgs; ++i) {
       if (hasherType == "StaticShapeHasher") {
         auto res = static_hasher(state, args[i]);
@@ -182,7 +183,7 @@ public:
   py::object at(int64_t id, int numArgs, const std::string &hasherType,
                 PyObject *args) {
     std::vector<at::Tensor> tensorArgs = parsePythonArgs(numArgs, args);
-    std::vector<int> cacheKey = computeCacheKey(tensorArgs, numArgs, hasherType, id);
+    hash_key_t cacheKey = computeCacheKey(tensorArgs, numArgs, hasherType, id);
 
     auto item = cache_.find(cacheKey); // protected by GIL
 
@@ -197,7 +198,7 @@ public:
               const py::object &compileFn, PyObject *args) {
     std::vector<at::Tensor> tensorArgs = parsePythonArgs(numArgs, args);
     LocalState state;
-    std::vector<int> cacheKey= computeCacheKey(tensorArgs, numArgs, hasherType, id);
+    hash_key_t cacheKey= computeCacheKey(tensorArgs, numArgs, hasherType, id);
     cache_.emplace(cacheKey, compileFn);
   }
 
