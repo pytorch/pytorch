@@ -106,12 +106,12 @@ def mean_replacement(x, scale, zero_point):
 
 def mean_op_pattern(x, scale, zero_point):
     x = x.dequantize()
-    x = x.mean(dim, keepdim)
+    x = x.mean()
     x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
     return x
 
 def mean_op_replacement(x, scale, zero_point):
-    x = x.mean(dim, keepdim)
+    x = x.mean()
     return x
 
 def flatten_pattern(x, scale, zero_point):
