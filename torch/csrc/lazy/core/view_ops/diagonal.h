@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class Diagonal : public TsNode {
+class TORCH_API Diagonal : public TsNode {
  public:
   Diagonal(const Value& input, int64_t offset, int64_t dim1, int64_t dim2);
 
