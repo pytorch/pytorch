@@ -562,7 +562,11 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
 else
   install_torchvision
   install_monkeytype
+
   install_torch_ucc
+  torch_ucc_path=$(python -c "import inspect; import torch; import torch_ucc; print(inspect.getfile(torch_ucc))")
+  export TORCH_UCC_LIBRARY_PATH=${torch_ucc_path}
+
   test_python
   test_aten
   test_vec256

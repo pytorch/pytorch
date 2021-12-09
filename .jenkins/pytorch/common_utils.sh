@@ -106,7 +106,6 @@ function clone_pytorch_xla() {
 
 export UCX_HOME='/usr'
 function install_ucx() {
-    print(f'Will install ucx at: {$UCX_HOME}')
     git clone --recursive https://github.com/openucx/ucx.git
     pushd ucx
     ./autogen.sh
@@ -122,7 +121,6 @@ function install_ucx() {
 
 export UCC_HOME='/usr'
 function install_ucc() {
-    print(f'Will install ucc at: {$UCC_HOME}')
     rm -rf ucc
     git clone --recursive https://github.com/openucx/ucc.git
     pushd ucc
