@@ -119,7 +119,7 @@ void OptimizeGraph(
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
-    if (ops.use_maybe_copy_variants) {
+    if (opts.use_maybe_copy_variants) {
       ReplaceWithMaybeCopy(graph);
     }
     FuseListUnpack(graph);
