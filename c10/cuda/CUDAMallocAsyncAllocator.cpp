@@ -354,7 +354,7 @@ void setMemoryFraction(double fraction, int device) {
   // trimmed to a certain threshold, via
   // cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrReleaseThreshold, &threshold);
   // Or do we want to hard error if the total amount of live memory exceeds fraction?
-  // If we want the hard error, we need to add manual tracking of how much memory
+  // If we want the hard error, we need manual tracking of how much memory
   // is currently live per device.
 }
 
@@ -469,19 +469,18 @@ void resetPeakStats(int device) {
   CUDAGuard g(device);
   cudaMemPool_t mempool;
   C10_CUDA_CHECK(cudaDeviceGetDefaultMemPool(&mempool, device));
-  uint64_t current = 0;
-  C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
-                                         cudaMemPoolAttrReservedMemCurrent,
-                                         &current));
+  // Using zero as the reset value is the method recommended by Cuda driver team.
+  // Vivek Kini says:
+  //   "Resetting to zero (which is the only valid value when setting
+  //    ReservedMemHigh) resets it to ReservedMemCurrent inside the driver
+  //   (same goes for UsedMemHigh/UsedMemCurrent)"
+  uint64_t zero = 0;
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrReservedMemHigh,
-                                         &current));
-  C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
-                                         cudaMemPoolAttrUsedMemCurrent,
-                                         &current));
+                                         &zero));
   C10_CUDA_CHECK(cudaMemPoolSetAttribute(mempool,
                                          cudaMemPoolAttrUsedMemHigh,
-                                         &current));
+                                         &zero));
 }
 
 std::vector<SegmentInfo> snapshot() {
