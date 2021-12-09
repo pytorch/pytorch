@@ -11,9 +11,10 @@ class TestSparse(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.a = torch.rand(3, 4).to_sparse()
+                self.b = torch.rand(3, 4).to_sparse()
 
             def forward(self, x):
-                return x + self.a
+                return x + self.a + self.b
 
         x = torch.rand(3, 4).to_sparse()
 
@@ -41,9 +42,10 @@ class TestSparse(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.a = torch.rand(3, 4).to_sparse()
+                self.b = torch.rand(3, 4).to_sparse()
 
             def forward(self, x):
-                return x + self.a
+                return x + self.a + self.b
 
         x = torch.rand(3, 4).to_sparse()
         m = SparseTensorModule()

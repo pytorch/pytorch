@@ -321,6 +321,10 @@ struct PythonPrintImpl {
           continue;
         }
         auto& t2 = constant_table_[i].toTensor();
+        if (t.is_sparse() || t2.is_sparse()) {
+          // aten::equal is not implemented for sparse tensors
+          continue;
+        }
         if (t.options().type_equal(t2.options()) && t.equal(t2)) {
           return i;
         }
