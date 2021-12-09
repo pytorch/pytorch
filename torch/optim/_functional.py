@@ -82,7 +82,7 @@ def adam(params: List[Tensor],
 
     for i, param in enumerate(params):
 
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
@@ -105,10 +105,9 @@ def adam(params: List[Tensor],
             denom = (exp_avg_sq.sqrt() / math.sqrt(bias_correction2)).add_(eps)
 
 
-        step_size_with_direction = lr / bias_correction1 if maximize else -lr / bias_correction1
 
-        param.addcdiv_(exp_avg, denom, value=step_size_with_direction)
-
+        step_size = lr / bias_correction1
+        param.addcdiv_(exp_avg, denom, value=-step_size)
 
 def adamw(params: List[Tensor],
           grads: List[Tensor],

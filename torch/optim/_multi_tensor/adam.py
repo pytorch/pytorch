@@ -79,6 +79,8 @@ class Adam(Optimizer):
                 if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
+                    if group['maximize']:
+                        p.grad = -p.grad
                     params_with_grad.append(p)
                     grads.append(p.grad)
 
@@ -136,9 +138,8 @@ class Adam(Optimizer):
                 torch._foreach_div_(exp_avg_sq_sqrt, bias_correction_sqrt)
                 denom = torch._foreach_add(exp_avg_sq_sqrt, group['eps'])
 
-            direction_coefficient = 1 if group['maximize'] else -1
-            step_size_with_direction = [(group['lr'] / bc) * direction_coefficient for bc in bias_correction1]
-            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size_with_direction)
+            step_size = [(group['lr'] / bc) * -1 for bc in bias_correction1]
+            torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
 
