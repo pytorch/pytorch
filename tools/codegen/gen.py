@@ -102,7 +102,11 @@ def parse_native_yaml(path: str) -> ParsedYaml:
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-            dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
+            dispatch_key=DispatchKey.Undefined,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={}))
         for k, v in bs.items():
             # All structured in-tree operators are implemented in terms of their out operator.
             indices[k] = BackendIndex(
