@@ -20,12 +20,12 @@ def node_ctor_arg_rvalue_string(arg: NamedCType, schema: LazyIrSchema) -> str:
     if isValueType(arg.type):
         if isinstance(arg.type, BaseCType):
             if arg.name in schema.wrapped_scalar_names:
-                return f"LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name}, *device)"
+                return f"LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen({arg.name})"
             return f"lazy_{arg.name}.GetIrValue()"
         elif isinstance(arg.type, OptionalCType):
             if arg.name in schema.wrapped_scalar_names:
                 return f"{arg.name} ? " \
-                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name}, *device)) : " \
+                    f"c10::make_optional(LazyGraphExecutor::Get()->GetIrValueForScalarFromCodegen(*{arg.name})) : " \
                     "c10::nullopt"
             return f"lazy_{arg.name} ? " \
                    f"c10::make_optional(lazy_{arg.name}.GetIrValue()) : " \

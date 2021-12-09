@@ -511,9 +511,9 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
   return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(data));
 }
 
-torch::lazy::Value LazyGraphExecutor::GetIrValueForScalarFromCodegen (const at::Scalar& value, const torch::lazy::BackendDevice& device) {
-  auto device = torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
-  torch::lazy::BackendDataPtr data = torch::lazy::getBackend()->MakeComputationDataFromScalar(value, device);
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalarFromCodegen (const at::Scalar& value) {
+  auto cpu_device = torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
+  torch::lazy::BackendDataPtr data = torch::lazy::getBackend()->MakeComputationDataFromScalar(value, cpu_device);
   data->SetInfo(std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));
 }
