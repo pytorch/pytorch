@@ -195,7 +195,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
                     break
 
     # Now, we re-generate the fwd/bwd graphs.
-    # NB: This might be inefficient, but I doubt it matters  
+    # NB: This might increase compilation time, but I doubt it matters  
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
     bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
 
@@ -405,10 +405,13 @@ def compiled_module(mod, *args, **kwargs):
 
         def forward(self, *args, **kwargs):
             return compiled_f(
-                tuple(self.orig_module.parameters()),
-                tuple(self.orig_module.buffers()),
+                tuple(self.parameters()),
+                tuple(self.buffers()),
                 *args,
                 **kwargs
             )
 
     return CompiledModule()
+
+aot_function = compiled_function
+aot_module = compiled_module
