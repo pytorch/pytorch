@@ -141,7 +141,7 @@ class Adam(Optimizer):
 
             if amsgrad:
                 if is_complex:
-                        max_exp_avg_sq = self.foreach_view_as_real(max_exp_avg_sq)
+                    max_exp_avg_sq = self.foreach_view_as_real(max_exp_avg_sq)
                 # Maintains the maximum of all 2nd moment running avg. till now
                 max_exp_avg_sq = torch._foreach_maximum(max_exp_avg_sq, exp_avg_sq)
 
@@ -158,8 +158,6 @@ class Adam(Optimizer):
 
             step_size = [(group['lr'] / bc) * -1 for bc in bias_correction1]
             torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
-            if is_complex:
-                params_with_grad = self.foreach_view_as_complex(params_with_grad)
         return loss
 
     # TODO: refactor to a base class once foreach ops are in a good shape.

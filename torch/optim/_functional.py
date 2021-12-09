@@ -54,9 +54,6 @@ def adagrad(params: List[Tensor],
             state_sum.addcmul_(grad, grad, value=1)
             std = state_sum.sqrt().add_(eps)
             param.addcdiv_(grad, std, value=-clr)
-            if is_complex:
-                param = torch.view_as_complex(param)
-                state_sum = torch.view_as_complex(state_sum)
 
 
 
@@ -119,8 +116,6 @@ def adam(params: List[Tensor],
         step_size = lr / bias_correction1
 
         param.addcdiv_(exp_avg, denom, value=-step_size)
-        if is_complex:
-            param = torch.view_as_complex(param)
 
 def adamw(params: List[Tensor],
           grads: List[Tensor],
