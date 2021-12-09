@@ -1397,6 +1397,15 @@ def sample_inputs_dsplit(op_info, device, dtype, requires_grad):
                                     requires_grad=requires_grad),
                         args=(2,),),)
 
+def error_inputs_hvdsplit(op_info, device, **kwargs):
+    divide_by_zero_err = "Dividing by 0 error"
+    return (ErrorInput(SampleInput(make_tensor((S, S, S),
+                                               dtype=torch.float32,
+                                               device=device),
+                                   args=(0,),),
+                       error_type=RuntimeError,
+                       error_regex=divide_by_zero_err),)
+
 def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad):
     # Each test case consists of the sizes in the chain of multiplications
     # e.g. [2, 3, 4, 5] generates matrices (2, 3) @ (3, 4) @ (4, 5)
@@ -12535,19 +12544,22 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_hsplit,),
+           sample_inputs_func=sample_inputs_hsplit,
+           error_inputs_func=error_inputs_hvdsplit,),
     OpInfo('vsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_vsplit,),
+           sample_inputs_func=sample_inputs_vsplit,
+           error_inputs_func=error_inputs_hvdsplit,),
     OpInfo('dsplit',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs_dsplit,),
+           sample_inputs_func=sample_inputs_dsplit,
+           error_inputs_func=error_inputs_hvdsplit,),
     OpInfo('triangular_solve',
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
