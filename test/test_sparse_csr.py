@@ -1121,9 +1121,6 @@ class TestSparseCSR(TestCase):
     def test_sparse_csr_unary_consistency(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
 
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         for sample in samples:
             assert torch.is_tensor(sample.input)
             # Sparse CSR only supports 2D tensors as inputs
@@ -1141,9 +1138,6 @@ class TestSparseCSR(TestCase):
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_out(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
 
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
@@ -1171,9 +1165,6 @@ class TestSparseCSR(TestCase):
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_inplace(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
 
         if op.inplace_variant is None:
             self.skipTest("Skipped! Inplace variant not supported!")
