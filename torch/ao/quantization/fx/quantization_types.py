@@ -1,6 +1,8 @@
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Tuple, Union
+from torch.fx import Node
+from ..utils import Pattern  # noqa: F401
 
-Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Callable, Callable]]
+NodePattern = Union[Tuple[Node, Node], Tuple[Node, Tuple[Node, Node]], Any]
 
 # This is the Quantizer class instance from torch/quantization/fx/quantize.py.
 # Define separately to prevent circular imports.
