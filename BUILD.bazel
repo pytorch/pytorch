@@ -49,6 +49,7 @@ cc_library(
         "@com_github_gflags_gflags//:gflags",
         "@com_github_glog//:glog",
         "//c10/macros:Macros",
+        "//c10/util:Array",
         "//c10/util:C++17",
         ":cuda_cmake_macros_h",
     ],
