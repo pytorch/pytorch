@@ -63,11 +63,9 @@ Extension
 CFFI Extension
 ^^^^^^^^^^^^^^
 
-The support for CFFI Extension is very experimental. There're
-generally two steps to enable it under Windows.
-
-First, specify additional ``libraries`` in ``Extension``
-object to make it build on Windows.
+The support for CFFI Extension is very experimental. You must specify
+additional ``libraries`` in ``Extension`` object to make it build on
+Windows.
 
 .. code-block:: python
 
@@ -81,35 +79,6 @@ object to make it build on Windows.
        extra_compile_args=["-std=c99"],
        libraries=['ATen', '_C'] # Append cuda libraries when necessary, like cudart
    )
-
-Second, here is a workground for "unresolved external symbol
-state caused by ``extern THCState *state;``"
-
-Change the source code from C to C++. An example is listed below.
-
-.. code-block:: cpp
-
-    #include <THC/THC.h>
-    #include <ATen/ATen.h>
-
-    THCState *state = at::globalContext().thc_state;
-
-    extern "C" int my_lib_add_forward_cuda(THCudaTensor *input1, THCudaTensor *input2,
-                                            THCudaTensor *output)
-    {
-        if (!THCudaTensor_isSameSizeAs(state, input1, input2))
-        return 0;
-        THCudaTensor_resizeAs(state, output, input1);
-        THCudaTensor_cadd(state, output, input1, 1.0, input2);
-        return 1;
-    }
-
-    extern "C" int my_lib_add_backward_cuda(THCudaTensor *grad_output, THCudaTensor *grad_input)
-    {
-        THCudaTensor_resizeAs(state, grad_input, grad_output);
-        THCudaTensor_fill(state, grad_input, 1);
-        return 1;
-    }
 
 Cpp Extension
 ^^^^^^^^^^^^^
