@@ -152,6 +152,10 @@ struct TORCH_API StaticModuleOptions {
   // graph, where storage is deallocated outside static runtime
   // (enable_out_variant must be true)
   bool manage_output_tensors{false};
+  // Gates the ReplaceWithMaybeCopy pass, which replaces ops that
+  // sometimes alias their outputs with subgraphs that include an out
+  // variant.
+  bool use_maybe_copy_variants{true};
 };
 
 /// The static runime supports two execution modes.

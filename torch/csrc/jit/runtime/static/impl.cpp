@@ -119,7 +119,9 @@ void OptimizeGraph(
     // to exposed folders.
 #ifdef FBCODE_CAFFE2
     ReplaceWithCopy(graph);
-    ReplaceWithMaybeCopy(graph);
+    if (ops.use_maybe_copy_variants) {
+      ReplaceWithMaybeCopy(graph);
+    }
     FuseListUnpack(graph);
     EnableStaticRuntimeLayerNorm(graph);
 #endif
@@ -189,7 +191,8 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
           << opts.cleanup_activations << ", enable_out_variant "
           << opts.enable_out_variant << ", optimize_memory "
           << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors;
+          << opts.manage_output_tensors << ", use_maybe_copy_variants "
+          << opts.use_maybe_copy_variants;
 
   Module module = m.copy();
   if (!is_frozen) {
