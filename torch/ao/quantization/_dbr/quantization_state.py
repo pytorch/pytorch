@@ -247,7 +247,7 @@ class AutoQuantizationState(torch.nn.Module):
         kwargs: Dict[str, Any],
         first_call: bool,
         qtensor_id: List[int],
-        fqn: Optional[str],
+        fqn: str,
         root_module: torch.nn.Module,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
@@ -613,8 +613,7 @@ class AutoQuantizationState(torch.nn.Module):
         arg_tensor_infos: List[Optional[QTensorInfo]],
         func_output_dtype_type: FuncOutputDTypeType,
         qtensor_id: List[int],
-        # TODO(future PR): figure out if we can make fqn required
-        fqn: Optional[str],
+        fqn: str,
     ) -> None:
         """
         Runs the prepare hook during first_call for individual
@@ -644,8 +643,7 @@ class AutoQuantizationState(torch.nn.Module):
             # which will be converted to a quant later
             # TODO(future PR): share these observers if multiple ops need
             # this quant.
-            # TODO(future PR): make fqn required and remove the mypy ignore
-            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op)  # type: ignore[arg-type]
+            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op)
             if qconfig is None:
                 # If qconfig is None, we do not need any input observers
                 return
@@ -665,7 +663,7 @@ class AutoQuantizationState(torch.nn.Module):
         kwargs: Dict[str, Any],
         first_call: bool,
         qtensor_id: List[int],
-        fqn: Optional[str],
+        fqn: str,
         root_module: torch.nn.Module,
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
         """
