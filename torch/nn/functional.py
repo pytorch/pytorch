@@ -5003,7 +5003,8 @@ def _scaled_dot_product_attention(
     return output, attn
 
 
-def _mha_shape_check(query, key, value, key_padding_mask, attn_mask, num_heads):
+def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
+                     key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
     # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
     # and returns if the input is batched or not
 
