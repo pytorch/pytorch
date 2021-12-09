@@ -1483,6 +1483,7 @@ class TestNormalizeOperators(JitTestCase):
             "index_put",
             "nn.functional.conv2d",
             "nn.functional.dropout",
+            "nn.functional.dropout2d",
             "nn.functional.embedding",  # Implemented with a lambda
             "nn.functional.embedding_bag",  # Implemented with a lambda
             "nn.functional.rrelu",  # Implemented with a lambda

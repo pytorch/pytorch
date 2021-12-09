@@ -5,6 +5,8 @@
 #include <ATen/record_function.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
 #include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
@@ -841,33 +843,62 @@ void StaticRuntime::create_memory_planner() {
   }
 }
 
+namespace {
+
+void destroyNodeOutputs(ProcessedNode& p_node) {
+  const auto borrows_outputs = borrowsOutputs(p_node.node()->kind());
+  for (const auto i : c10::irange(p_node.num_outputs())) {
+    auto& output = p_node.Output(i);
+    if (doesNotHeapAllocateWhenStoredInIValue(*output.type())) {
+      continue;
+    }
+
+    if (borrows_outputs) {
+      // NB: No need to incref here. This codepath is only hit if the run didn't
+      // finish, so we shouldn't be returning anything to the client.
+      c10::MaybeOwnedTraits<IValue>::destroyBorrow(output);
+    } else {
+      output = IValue();
+    }
+  }
+}
+
+} // namespace
+
+void StaticRuntime::clean_up_intermediate_ivalues() noexcept {
+  for (auto& p_node : nodes_) {
+    destroyNodeOutputs(p_node);
+  }
+}
+
+void StaticRuntime::resetMemory() noexcept {
+  planner_.reset();
+  clean_up_input_ivalues();
+  clean_up_intermediate_ivalues();
+}
+
 c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
-#define TORCH_SR_MOVE_IF_POSSIBLE(idx)       \
-  (!isManagedOutputTensor(*outputs_[(idx)])  \
-       ? IValue(std::move(*outputs_[(idx)])) \
-       : IValue(*outputs_[(idx)]))
   switch (num_outputs) {
     case 1:
-      return c10::ivalue::Tuple::create(TORCH_SR_MOVE_IF_POSSIBLE(0));
+      return c10::ivalue::Tuple::create(IValue(std::move(*outputs_[0])));
     case 2:
       return c10::ivalue::Tuple::create(
-          TORCH_SR_MOVE_IF_POSSIBLE(0), TORCH_SR_MOVE_IF_POSSIBLE(1));
+          IValue(std::move(*outputs_[0])), IValue(std::move(*outputs_[1])));
     case 3:
       return c10::ivalue::Tuple::create(
-          TORCH_SR_MOVE_IF_POSSIBLE(0),
-          TORCH_SR_MOVE_IF_POSSIBLE(1),
-          TORCH_SR_MOVE_IF_POSSIBLE(2));
+          IValue(std::move(*outputs_[0])),
+          IValue(std::move(*outputs_[1])),
+          IValue(std::move(*outputs_[2])));
     default: {
       std::vector<c10::IValue> outputs;
       outputs.reserve(num_outputs);
       for (const auto i : c10::irange(num_outputs)) {
         // use move here. Otherwise, clean up outputs_[i] explicitly
-        outputs.emplace_back(TORCH_SR_MOVE_IF_POSSIBLE(i));
+        outputs.emplace_back(IValue(std::move(*outputs_[i])));
       }
       return c10::ivalue::Tuple::create(std::move(outputs));
     }
   }
-#undef TORCH_SR_MOVE_IF_POSSIBLE
 }
 
 /// [Check and correct bad schema alias info at runtime]
@@ -972,6 +1003,38 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   }
 }
 
+StaticRuntime::Deallocator::~Deallocator() {
+  // Assume cleanup cannot throw.
+  cleanupImpl();
+#ifndef NDEBUG
+  runtime_.check_for_memory_leak(false);
+#endif
+}
+
+void StaticRuntime::Deallocator::cleanupImpl() {
+  if (runtime_.static_module_.opts().cleanup_activations) {
+    // MemoryPlanner is created after the first invocation of `run()`. This
+    // is done intentionally because MemoryPlanner uses `Tensor` sizes of
+    // the previous `run()` for memory planning of subsequent runs
+    if (C10_LIKELY(finished_)) {
+      runtime_.create_memory_planner();
+    }
+
+    if (C10_LIKELY(runtime_.planner_)) {
+      runtime_.planner_->deallocate();
+    } else {
+      // This is the first run, and it didn't finish, so we can't use a
+      // `MemoryPlanner` to deallocate stuff. Just reset everything mannually.
+      runtime_.resetMemory();
+    }
+    // clean up owning refs of input tensors
+    runtime_.clean_up_input_ivalues();
+    if (C10_UNLIKELY(!finished_)) {
+      runtime_.deallocateOutputTensors();
+    }
+  }
+}
+
 template <typename IValueList>
 c10::IValue StaticRuntime::run_impl(
     IValueList&& args,
@@ -982,43 +1045,31 @@ c10::IValue StaticRuntime::run_impl(
   // functions, such as resize_ and resize_as_.
   c10::InferenceMode mode;
 
-  if (planner_) {
-    DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
-    planner_->allocate();
-  }
+  {
+    auto on_exit = Deallocator(*this);
 
-  set_inputs(std::forward<IValueList>(args), kwargs);
+    if (planner_) {
+      DCHECK(!manage_output_tensors_enabled_ || checkOutputTensorMemoryLeaks());
+      planner_->allocate();
+    }
 
-  for (auto& n : nodes_) {
-    // LOG(INFO) << "Running node: " << PrintNode(n.node());
-    n.run();
-    // Check for incorrect schema alias info.
-    verify_and_correct_memory_overlap(n);
-  }
+    set_inputs(std::forward<IValueList>(args), kwargs);
 
-  if (static_module_.opts().cleanup_activations) {
-    // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
-    // previous `run()` for memory planning of subsequent runs
-    create_memory_planner();
-    planner_->deallocate();
-    // clean up owning refs of input tensors
-    clean_up_input_ivalues();
+    for (auto& n : nodes_) {
+      // LOG(INFO) << "Running node: " << PrintNode(n.node());
+      n.run();
+      // Check for incorrect schema alias info.
+      verify_and_correct_memory_overlap(n);
+    }
+    on_exit.setFinished();
   }
 
   // no need to keep references of outputs in static runtime anymore
   if (static_module_.num_outputs() > 1) {
     return move_outputs_to_tuple(static_module_.num_outputs());
   }
-#ifndef NDEBUG
-  check_for_memory_leak(false);
-#endif
-  if (C10_UNLIKELY(isManagedOutputTensor(*outputs_[0]))) {
-    return *outputs_[0];
-  } else {
-    // use move here. Otherwise, clean up outputs_[0] explicitly
-    return std::move(*outputs_[0]);
-  }
+  // use move here. Otherwise, clean up outputs_[0] explicitly
+  return std::move(*outputs_[0]);
 }
 
 template <typename IValueList>
@@ -1273,6 +1324,9 @@ void StaticRuntime::display_nodes(
     const std::vector<c10::IValue>& args,
     const KeywordArgs& kwargs) {
   c10::InferenceMode mode;
+
+  auto on_exit = Deallocator(*this);
+
   if (planner_) {
     planner_->allocate();
   }
@@ -1282,16 +1336,7 @@ void StaticRuntime::display_nodes(
     node.run();
     display_pnode_info(node);
   }
-
-  if (static_module_.opts().cleanup_activations) {
-    // MemoryPlanner is created after the first invocation of `run()`. This is
-    // done intentionally because MemoryPlanner uses `Tensor` sizes of the
-    // previous `run()` for memory planning of subsequent runs
-    create_memory_planner();
-    planner_->deallocate();
-    // clean up owning refs of input tensors
-    clean_up_input_ivalues();
-  }
+  on_exit.setFinished();
 }
 
 StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
@@ -1584,23 +1629,21 @@ ProcessedFunction::ProcessedFunction(
   }
   {
     const Operator& op = node->getOperator();
-    f_ = [node_op = op.getOperation(node)](ProcessedNode* pnode) mutable {
+    f_ = [node_op = op.getOperation(node),
+          has_var_args = hasVarArgs(node)](ProcessedNode* pnode) mutable {
       std::vector<IValue> stack;
-      Node* node = pnode->node();
-      const size_t size = node->inputs().size();
-      stack.reserve(size + (hasVarArgs(node) ? 1 : 0));
+      const size_t size = pnode->num_inputs();
+      stack.reserve(size + has_var_args);
       for (const auto i : c10::irange(size)) {
         stack.emplace_back(pnode->Input(i));
       }
       // Need to store the number of inputs in stack for variadic ops.
-      if (hasVarArgs(node)) {
+      if (has_var_args) {
         stack.emplace_back(static_cast<int>(size));
       }
-
       node_op(stack);
-
-      DCHECK_EQ(stack.size(), node->outputs().size());
-      for (const auto i : c10::irange(node->outputs().size())) {
+      DCHECK_EQ(stack.size(), pnode->num_outputs());
+      for (const auto i : c10::irange(pnode->num_outputs())) {
         pnode->Output(i) = std::move(stack[i]);
       }
     };
