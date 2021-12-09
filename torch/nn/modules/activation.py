@@ -961,11 +961,10 @@ class MultiheadAttention(Module):
                 need_weights: bool = True, attn_mask: Optional[Tensor] = None) -> Tuple[Tensor, Optional[Tensor]]:
         r"""
     Args:
-        query: Query embeddings of shape :math:`(L, N, E_q)` when ``batch_first=False`` or :math:`(N, L, E_q)`
-            when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is the batch size,
-            and :math:`E_q` is the query embedding dimension ``embed_dim``. Queries can also be unbatched with shape
-            :math:`(L, E_q)`. Queries are compared against key-value pairs to produce the output.
-            See "Attention Is All You Need" for more details.
+        query: Query embeddings of shape :math:`(L, E_q)` for unbatched input, :math:`(L, N, E_q)` when ``batch_first=False``
+            or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
+            :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
+            Queries are compared against key-value pairs to produce the output. See "Attention Is All You Need" for more details.
         key: Key embeddings of shape :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
             ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
             :math:`E_k` is the key embedding dimension ``kdim``. For unbatched 2D `query`, shape should be :math:`(S, E_k)`.
