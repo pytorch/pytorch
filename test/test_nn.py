@@ -11220,6 +11220,10 @@ class TestNN(NNTestCase):
             fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
             fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
 
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 2), stride=1, dilation=8, padding=0)
+        with self.assertRaisesRegex(RuntimeError, r"calculated shape of the array of sliding blocks as"):
+            fold(torch.randn(1, 12, 12))
+
     def test_unfold_invalid_arg(self):
         # input wrong dimension
 
@@ -16938,6 +16942,24 @@ class TestNNDeviceType(NNTestCase):
         output_fp32 = torch.layer_norm(input.float(), normalized_shape, weight.float(), bias.float(), eps).half()
         self.assertEqual(output_fp16, output_fp32, atol=0, rtol=0)
 
+    @onlyCUDA
+    def test_layernorm_weight_bias(self):
+        width = 128
+        input = torch.rand(1, 5, width, device="cuda", dtype=torch.float32) * 0.1
+        normalized_shape = (width,)
+        data = torch.randn(width, device="cuda", dtype=torch.float32)
+        weight = torch.ones(width, device="cuda", dtype=torch.float32)
+        bias = torch.zeros(width, device="cuda", dtype=torch.float32)
+        eps = 1e-5
+
+        out_none_weight = torch.layer_norm(input, normalized_shape, None, data, eps)
+        out_one_weight = torch.layer_norm(input, normalized_shape, weight, data, eps)
+        self.assertEqual(out_none_weight, out_one_weight)
+
+        out_none_bias = torch.layer_norm(input, normalized_shape, data, None, eps)
+        out_zero_bias = torch.layer_norm(input, normalized_shape, data, bias, eps)
+        self.assertEqual(out_none_bias, out_zero_bias)
+
     def test_hardsigmoid_grad(self, device):
         inputs = (torch.randn(4, 16, 16, device=device) - 0.5) * 10
         inputs.requires_grad = True
@@ -18271,6 +18293,59 @@ class TestNNDeviceType(NNTestCase):
                 output_with_manual_smoothing = loss(input, target_with_smoothing)
 
                 self.assertEqual(output_with_smoothing, output_with_manual_smoothing)
+
+
+    def test_cross_entropy_label_smoothing_weight_ignore_indices(self, device):
+        reductions = ['none', 'sum', 'mean']
+        label_smoothings = [0.05, 0.15]
+
+        weight = torch.tensor([0.3, 0.6], device=device)
+        inp1 = torch.tensor([[0.3, 0.4], [1, 2]], device=device)
+        inp2 = torch.tensor([[0.3, 0.6], [1, 2]], device=device)
+
+        targ_default_ignore_index = torch.tensor([-100, 1], device=device)
+        targ_negative_ignore_index = torch.tensor([-2, 1], device=device)
+        targ_positive_ignore_index = torch.tensor([2, 1], device=device)
+
+        for reduction, label_smoothing, weight in product(reductions, label_smoothings, (None, weight)):
+            def check_equal(loss, inp_targ_1, inp_targ_2):
+                inp1, targ1 = inp_targ_1
+                inp2, targ2 = inp_targ_2
+                l1 = loss(inp1, targ1)
+                l2 = loss(inp2, targ2)
+                self.assertEqual(l1, l2)
+
+            # Default ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       weight=weight)
+            check_equal(loss, (inp1, targ_default_ignore_index), (inp2, targ_default_ignore_index))
+            if reduction != 'none':
+                # Check that we correctly tally the denominator for `mean`
+                # i.e. we don't count the ignored_idx at all.
+                check_equal(loss, (inp1, targ_default_ignore_index), (inp2[1:], targ_default_ignore_index[1:]))
+
+            # negative ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       ignore_index=-2,
+                                       weight=weight)
+            check_equal(loss, (inp1, targ_negative_ignore_index), (inp2, targ_negative_ignore_index))
+            if reduction != 'none':
+                # Check that we correctly tally the denominator for `mean`
+                # i.e. we don't count the ignored_idx at all.
+                check_equal(loss, (inp1, targ_negative_ignore_index), (inp2[1:], targ_negative_ignore_index[1:]))
+
+            # positive ignore_index
+            loss = nn.CrossEntropyLoss(reduction=reduction,
+                                       label_smoothing=label_smoothing,
+                                       ignore_index=2,
+                                       weight=weight)
+            check_equal(loss, (inp1, targ_positive_ignore_index), (inp2, targ_positive_ignore_index))
+            if reduction != 'none':
+                # Check that we correctly tally the denominator for `mean`
+                # i.e. we don't count the ignored_idx at all.
+                check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
 
     def test_softshrink_negative(self, device):
