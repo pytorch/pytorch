@@ -4646,7 +4646,7 @@ else:
             torch.empty((1,), device=device, dtype=dtype).exponential_(-0.5)
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half, torch.float)
+    @dtypes(torch.half, torch.float)
     def test_exponential_no_zero(self, device, dtype):
         # naively, 0 in exponential can be generated with probability 2^-24
         # so we need more samples to check if it's not generated
@@ -5522,7 +5522,7 @@ else:
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumsum(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -5532,7 +5532,7 @@ else:
         self._test_large_cum_fn_helper(x, lambda x: torch.cumsum(x, 0))
 
     @onlyCUDA
-    @dtypesIfCUDA(torch.half)  # only small dtype not to get oom
+    @dtypes(torch.half)  # only small dtype not to get oom
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -6122,8 +6122,8 @@ else:
     # torch.{zeros, ones} do not support ComplexHalf (torch.complex32)
     # So, we are skipping it here.
     @onlyCUDA
-    @dtypesIfCUDA(*(get_all_complex_dtypes() +
-                    get_all_int_dtypes()))
+    @dtypes(*(get_all_complex_dtypes() +
+              get_all_int_dtypes()))
     def test_scatter_reduce_multiply_unsupported_dtypes(self, device, dtype):
         height = 2
         width = 2
@@ -7446,6 +7446,30 @@ else:
         self.assertEqual(z, x)
 
     @skipMeta
+    @onlyCUDA
+    def test_dlpack_default_stream(self, device):
+        class DLPackTensor:
+            def __init__(self, tensor):
+                self.tensor = tensor
+
+            def __dlpack_device__(self):
+                return self.tensor.__dlpack_device__()
+
+            def __dlpack__(self, stream=None):
+                if torch.version.hip is None:
+                    assert stream == 1
+                else:
+                    assert stream == 0
+                capsule = self.tensor.__dlpack__(stream)
+                converted = True
+                return capsule
+
+        # CUDA-based tests runs on non-default streams
+        with torch.cuda.stream(torch.cuda.default_stream()):
+            x = DLPackTensor(make_tensor((5,), device, torch.float32))
+            from_dlpack(x)
+
+    @skipMeta
     @onlyNativeDeviceTypes
     @dtypes(*get_all_dtypes(include_bool=False))
     def test_dlpack_tensor_invalid_stream(self, device, dtype):
@@ -8165,16 +8189,34 @@ else:
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @skipXLA
     def test_skip_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             self.assertTrue(False)
+
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
+    def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
+        # Verify that self.assertRaisesRegex only checks the Error and ignores
+        # message for non-native devices.
+        x = torch.randn((10, 3), device=device)
+        t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
+        invalid_weight = torch.randn(4, device=device)
+        msg = "weight tensor should be defined either for all 3 classes or no classes"
+
+        # XLA raises RuntimeError with a different message.
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.

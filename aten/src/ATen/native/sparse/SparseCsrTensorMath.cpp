@@ -7,6 +7,7 @@
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
@@ -25,6 +26,16 @@ TORCH_META_FUNC(_convert_indices_from_coo_to_csr) (
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   set_output(size + 1, options);
+}
+
+TORCH_META_FUNC(_convert_indices_from_csr_to_coo) (
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32
+) {
+  TORCH_CHECK(crow_indices.dim() == 1, "crow_indices is supposed to be a vector");
+  TORCH_CHECK(col_indices.dim() == 1, "col_indices is supposed to be a vector");
+  ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
+  set_output(0, {2, col_indices.numel()}, {}, options, {});
 }
 
 } // namespace meta
@@ -60,6 +71,59 @@ void convert_indices_from_coo_to_csr_cpu(const Tensor& result, const Tensor& inp
     data_out[i] = static_cast<output_t>(numel);
 }
 
+template <typename F>
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+  TORCH_INTERNAL_ASSERT(result.is_sparse_csr());
+
+  if (!result.is_same(self)) {
+    // For the case of (0x0) result tensor, manually resize `result` tensor
+    // to the size of `self` tensor
+    if (result.numel() == 0) {
+      at::native::resize_as_sparse_csr_(result, self);
+    }
+    // copy_sparse_csr_ internally checks the sizes of result and self tensors
+    // Hence no external size check required
+    at::native::copy_sparse_csr_(result, self);
+  }
+
+  auto self_values = self.values();
+  auto result_values = result.values();
+
+  op_out(self_values, result_values);
+  return result;
+}
+
+template <typename F>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+
+  auto self_values = self.values();
+  op_inplace(self_values);
+  return self;
+}
+
+template <typename input_t, typename output_t>
+void convert_indices_from_csr_to_coo_cpu(const Tensor& indices, const Tensor& crow_indices, const Tensor& col_indices) {
+  int64_t nrows = crow_indices.numel() - 1;
+  if (nrows == 0) {
+    indices.zero_();
+    return;
+  }
+  auto crow_indices_ = crow_indices.expect_contiguous();
+  const input_t* crow_indices_data_in = crow_indices_->data_ptr<input_t>();
+  TORCH_INTERNAL_ASSERT(indices.is_contiguous());
+  output_t* data_out = indices.data_ptr<output_t>();
+
+  indices.select(0, 1).copy_(*col_indices.expect_contiguous());
+  at::parallel_for(0, nrows, GRAIN_SIZE, [&](int64_t start, int64_t end) {
+    for (int64_t i = start; i < end; i++) {
+      std::fill(&data_out[crow_indices_data_in[i]], &data_out[crow_indices_data_in[i + 1]], static_cast<output_t>(i));
+    }
+  });
+
+}
+
 } // end anonymous namespace
 
 namespace native {
@@ -67,6 +131,30 @@ namespace native {
 using namespace at::sparse_csr;
 // certain utiliy functions are usable from sparse COO.
 using namespace at::sparse;
+
+namespace {
+
+template <typename F>
+inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
+  auto values = input.values();
+
+  // To handle type promotion for inputs to unary ops,
+  // we first get the result from the underlined op, and use the result
+  // to create a sparse CSR tensor, which is used as the input to the out= variant
+  auto result_values = op(values);
+
+  auto result = at::native::_sparse_csr_tensor_unsafe(
+    input.crow_indices().clone(),
+    input.col_indices().clone(),
+    result_values,
+    input.sizes(),
+    result_values.scalar_type(),
+    input.layout(),
+    result_values.device());
+
+  return result;
+}
+}
 
 static constexpr bool is_mkl_supported() {
 #ifdef _MSC_VER
@@ -85,13 +173,75 @@ bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
   return (dim_i == dim_k  && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
 }
 
+/* Implementation of Unary Ufuncs, those supported for Sparse CSR Layout
+ * Only simple funcs, with 0->0 correspondence are currently supported. */
+
+#define CREATE_UNARY_UFUNC_OUT(op_name)                                    \
+  Tensor& op_name##_sparse_csr_out(const Tensor& self, Tensor& result) {   \
+    return unary_op_out(&at::op_name##_outf, self, result);                \
+  }
+
+#define CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)                             \
+  Tensor op_name##_sparse_csr(const Tensor& self) {                        \
+    return get_result_tensor_for_unary_op(&at::op_name, self);             \
+  }
+
+#define CREATE_UNARY_UFUNC_INPLACE(op_name)                                \
+  Tensor& op_name##_sparse_csr_(Tensor& self) {                            \
+    return unary_op_inplace(self, [](Tensor& t) {                          \
+      return t.op_name##_();                                               \
+    });                                                                    \
+  }
+
+#define CREATE_UNARY_UFUNC(op_name)                                        \
+  CREATE_UNARY_UFUNC_OUT(op_name);                                         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);                                  \
+  CREATE_UNARY_UFUNC_INPLACE(op_name);
+
+#define CREATE_UNARY_UFUNC_NO_INPLACE(op_name)                             \
+  CREATE_UNARY_UFUNC_OUT(op_name);                                         \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);
+
+// Exhaustive list of the unary ufuncs supported by sparse CSR
+CREATE_UNARY_UFUNC(abs);
+CREATE_UNARY_UFUNC(asin);
+CREATE_UNARY_UFUNC(asinh);
+CREATE_UNARY_UFUNC(atan);
+CREATE_UNARY_UFUNC(atanh);
+CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(erf);
+CREATE_UNARY_UFUNC(erfinv);
+CREATE_UNARY_UFUNC(expm1);
+CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(log1p);
+CREATE_UNARY_UFUNC(neg);
+CREATE_UNARY_UFUNC(rad2deg);
+CREATE_UNARY_UFUNC(round);
+CREATE_UNARY_UFUNC(sign);
+CREATE_UNARY_UFUNC(sin);
+CREATE_UNARY_UFUNC(sinh);
+CREATE_UNARY_UFUNC(sgn);
+CREATE_UNARY_UFUNC(sqrt);
+CREATE_UNARY_UFUNC(tan);
+CREATE_UNARY_UFUNC(tanh);
+CREATE_UNARY_UFUNC(trunc);
+CREATE_UNARY_UFUNC(conj_physical);
+
+// angle, isneginf, isposinf and signbit currently don't have an inplace variant
+CREATE_UNARY_UFUNC_NO_INPLACE(angle);
+CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
+CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
+CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+
+// isnan and isinf don't have an out variant
+CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
+
 template <typename scalar_t>
 void addmm_out_sparse_csr_native_cpu(const Tensor& sparse, const Tensor& dense, const Tensor& r, Scalar alpha, Scalar beta) {
 
   auto dim_i = sparse.size(0);
-  // auto dim_j = sparse.size(1); Unused
   auto dim_k = dense.size(1);
-  // auto nnz = sparse._nnz(); Unused
 
   auto csr = sparse.crow_indices();
   auto col_indices = sparse.col_indices();
@@ -214,9 +364,12 @@ Tensor& addmm_out_sparse_csr_cpu(
     return result;
   }
 
-#if !AT_MKL_ENABLED()
+#if !AT_USE_MKL_SPARSE()
     if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-      TORCH_CHECK(false, "Calling addmm on sparse CPU tensors requires compiling PyTorch with MKL. Please use PyTorch built with MKL.");
+      TORCH_CHECK(
+          false,
+          "Calling addmm on sparse CPU tensors requires Linux platform. ",
+          "Please use PyTorch built with MKL on Linux.");
     }
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.layout() == kStrided);
     AT_DISPATCH_FLOATING_TYPES(result.scalar_type(), "addmm_sparse_dense", [&] {
@@ -413,6 +566,20 @@ TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu) (
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(input.scalar_type(), "convert_indices_from_coo_to_csr_cpu", [&] {
       convert_indices_from_coo_to_csr_cpu<scalar_t, int64_t>(result, input, size);
+    });
+  }
+}
+
+TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu) (
+  const Tensor& crow_indices, const Tensor& col_indices, const bool out_int32, const Tensor& result
+) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int32_t>(result, crow_indices, col_indices);
+    });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
+      convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(result, crow_indices, col_indices);
     });
   }
 }
