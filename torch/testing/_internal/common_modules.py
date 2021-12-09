@@ -394,6 +394,7 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = []
     bool_vals = (True, False)
