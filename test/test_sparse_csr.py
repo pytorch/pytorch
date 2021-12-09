@@ -11,7 +11,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse)
-from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, )
+from torch.testing._internal.common_methods_invocations import (sparse_csr_unary_ufuncs, sparse_csr_pow,)
 from torch.testing._internal.common_cuda import _get_torch_cuda_version
 from torch.testing._internal.common_dtype import floating_types, get_all_dtypes
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
@@ -1119,6 +1119,7 @@ class TestSparseCSR(TestCase):
 
     @ops(sparse_csr_unary_ufuncs)
     def test_sparse_csr_unary_consistency(self, device, dtype, op):
+        print('ops: ', [x.name for x in sparse_csr_unary_ufuncs])
         samples = op.sample_inputs(device, dtype)
 
         if len(samples) == 0:
@@ -1129,11 +1130,12 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                continue
 
-            expected = op(sample.input)
+            expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr())
+            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
             assert torch.is_tensor(output)
 
             self.assertEqual(output.to_dense(), expected)
@@ -1153,7 +1155,8 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                continue
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -1183,7 +1186,8 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
+                continue
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -1205,6 +1209,46 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.crow_indices(), expect.crow_indices())
             self.assertEqual(actual.col_indices(), expect.col_indices())
             self.assertEqual(actual._nnz(), expect._nnz())
+
+    @ops(sparse_csr_pow)
+    def test_pow_scalar(self, device, dtype, op):
+        # First ensure that the op fails for exponent as zero
+        inp = make_tensor((1, 2), dtype=dtype, device=device)
+        # Sparse CSR only supports 2D tensors as inputs
+        # Fail early to prevent silent success with this test
+        assert inp.ndim == 2, "Expected 2D input tensor for Sparse CSR"
+
+        with self.assertRaisesRegex(RuntimeError, "Exponent as 0 is not supported yet for Sparse CSR Layout."):
+            if dtype.is_complex:
+                exp = 0 + 0j
+            elif dtype.is_floating_point:
+                exp = 0.
+            elif dtype == torch.bool:
+                exp = False
+            else:
+                exp = 0
+            op(inp.to_sparse_csr(), exp)
+
+        samples = op.sample_inputs(device, dtype)
+
+        if len(samples) == 0:
+            self.skipTest("Skipped! No sample inputs!")
+
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+
+            # Sparse CSR only supports 2D tensors as inputs
+            if sample.input.ndim != 2:
+                continue
+            if torch.is_tensor(sample.args[0]):
+                continue
+
+            expected = op(sample.input, *sample.args, **sample.kwargs)
+            assert torch.is_tensor(expected)
+            output = op(sample.input.to_sparse_csr(), *sample.args, **sample.kwargs)
+            assert torch.is_tensor(output)
+
+            self.assertEqual(output.to_dense(), expected)
 
     @dtypes(*get_all_dtypes(include_bool=False, include_half=False, include_bfloat16=False))
     def test_direct_coo_csr_conversion(self, device, dtype):

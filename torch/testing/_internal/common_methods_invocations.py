@@ -5626,7 +5626,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
 
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
-            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (3.14,))
+            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (3.14,)),
         )
         more_samples = list(SampleInput(
             (make_arg(shape, high=high, low=low) + additive).requires_grad_(b_grad),
@@ -5638,7 +5638,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
         args_tuple = (
             ((2, 2), 0, 5, requires_grad, (3.14,)),
             ((), 0, 1, requires_grad, (3.14,)),
-            ((), 0, 1, requires_grad, (3.14j,))
+            ((), 0, 1, requires_grad, (3.14j,)),
         )
         samples = list(SampleInput(
             (make_arg(shape, high=high, low=low) + 1e-3 * (1 + 1j)).requires_grad_(b_grad),
@@ -14798,6 +14798,7 @@ binary_ufuncs = [op for op in op_db if isinstance(op, BinaryUfuncInfo)]
 spectral_funcs = [op for op in op_db if isinstance(op, SpectralFuncInfo)]
 sparse_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse]
 sparse_csr_unary_ufuncs = [op for op in op_db if isinstance(op, UnaryUfuncInfo) and op.supports_sparse_csr]
+sparse_csr_pow = [op for op in op_db if op.name == "pow" and op.supports_sparse_csr]
 shape_funcs = [op for op in op_db if isinstance(op, ShapeFuncInfo)]
 reduction_ops = [op for op in op_db if isinstance(op, ReductionOpInfo)]
 reference_filtered_ops = [op for op in reduction_ops if op.ref not in (_NOTHING, None)]

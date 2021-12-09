@@ -239,14 +239,17 @@ CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
 
 // pow function for Sparse CSR, since square is composite - this will also enable square for Sparse CSR
 Tensor& pow_sparse_csr_scalar_out(const Tensor& self, const Scalar& exponent, Tensor& result) {
+  TORCH_CHECK(!exponent.equal<int>(0), "Exponent as 0 is not supported yet for Sparse CSR Layout.");
   return unary_op_out<Tensor& (*)(const Tensor&, const Scalar&, Tensor&)>(&at::pow_outf, self, result, exponent);
 }
 
 Tensor pow_sparse_csr_scalar(const Tensor& self, const Scalar& exponent) {
+  TORCH_CHECK(!exponent.equal<int>(0), "Exponent as 0 is not supported yet for Sparse CSR Layout.");
   return get_result_tensor_for_unary_op<Tensor (*)(const Tensor&, const Scalar&)>(&at::pow, self, exponent);
 }
 
 Tensor& pow_sparse_csr_scalar_(Tensor& self, const Scalar& exponent) {
+  TORCH_CHECK(!exponent.equal<int>(0), "Exponent as 0 is not supported yet for Sparse CSR Layout.");
   return unary_op_inplace(self, [&](Tensor& t) {
     return t.pow_(exponent);
   });
