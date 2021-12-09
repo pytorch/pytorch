@@ -13,11 +13,6 @@ import yaml
 from typing import List, no_type_check, Optional, Union
 
 @torch.jit.script
-def _test_serialization_subcmul_0_2(self: torch.Tensor, other: torch.Tensor,
-                                    alpha: Union[int, float] = 2) -> torch.Tensor:
-    return other - (self * alpha)
-
-@torch.jit.script
 def div_Tensor_0_3(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
     if (self.is_floating_point() or other.is_floating_point()):
         return self.true_divide(other)
@@ -93,7 +88,8 @@ def collect_available_upgraders():
 
     for op_name in version_map:
         for upgrader_entry in version_map[op_name]:
-            if upgrader_entry.upgrader_name not in entries:
+            # ignore test operators
+            if (not upgrader_entry.startsWith("aten::_test")) and (upgrader_entry.upgrader_name not in entries):
                 raise AssertionError("Upgrader entry {} needs to be defined in python".format(upgrader_entry.upgrader_name))
             available_upgraders_in_version_map.add(upgrader_entry.upgrader_name)
 

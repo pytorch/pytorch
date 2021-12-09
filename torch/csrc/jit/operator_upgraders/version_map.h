@@ -47,11 +47,11 @@ get_operator_version_map() {
   return kOperatorVersionMap;
 }
 
-void add_test_entry(std::string op_name, UpgraderEntry entry) {
+void test_only_add_entry(std::string op_name, UpgraderEntry entry) {
   kOperatorVersionMap[op_name].push_back(entry);
 }
 
-void remove_test_entry(std::string op_name) {
+void test_only_remove_entry(std::string op_name) {
   kOperatorVersionMap.erase(op_name);
 }
 
