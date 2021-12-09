@@ -62,6 +62,80 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   }
 }
 
+
+static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
+  // generate all permutations of a given dims
+  if (i == in.size()) {
+    out.push_back(in);
+  }
+  else {
+    for (int j = i; j < in.size(); ++j) {
+      std::swap(in[i], in[j]);
+      gen_allpermutations(out, in, i + 1);
+    }
+  }
+}
+
+static void slice_test(const std::vector<int64_t>& size, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  // Act
+  const auto out_cpu = at::slice(in_cpu, dim, start, end, step);
+  const auto out_vulkan = at::slice(in_vulkan, dim, start, end, step);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
+static void slice_tests(const std::unordered_map<int64_t, std::vector<int64_t>>& dim2sizes) {
+  for (const auto& dim2size : dim2sizes) {
+    slice_test(dim2size.second, dim2size.first, 10, 30, 1);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:30:1]
+    slice_test(dim2size.second, dim2size.first, 10, 30, 7);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:30:7]
+    slice_test(dim2size.second, dim2size.first, 10, 50, 2);         // i.e., 4D tensor's equivalent indexing = [:,:,:,10:50:2] with end=out of range
+    slice_test(dim2size.second, dim2size.first, -60, 60, 2);        // i.e., 4D tensor's equivalent indexing = [:,:,:,-60:60:2] with start/end=out of range
+    slice_test(dim2size.second, dim2size.first, -30, -10, 1);       // i.e., 4D tensor's equivalent indexing = [:,:,:,-30:-10:1] with negative start/end
+    slice_test(dim2size.second, dim2size.first, 0, INT64_MAX, 1);   // i.e., 4D 's equivalent indexing = [:,:,:,0:9223372036854775807:1] with end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, -10, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-10:9223372036854775807:1] with negative start and end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, INT64_MIN, INT64_MAX, 1); // i.e., 4D 's equivalent indexing = [:,:,:,-9223372036854775808:9223372036854775807:1] with start=INT64_MIN and end=INT64_MAX
+    slice_test(dim2size.second, dim2size.first, {}, {}, 1);         // i.e., 4D 's equivalent indexing = [:,:,:,::1] with empty start/end
+  }
+}
+
+static void clone_test(const std::vector<int64_t>& size, c10::optional<at::MemoryFormat> optional_memory_format) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const auto in_cpu = at::rand(size, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_vulkan = in_cpu.vulkan();
+
+  // Act
+  const auto out_cpu = at::clone(in_cpu, optional_memory_format);
+  const auto out_vulkan = at::clone(in_vulkan, optional_memory_format);
+
+  // Assert
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 } // namespace
 
 namespace {
@@ -2123,19 +2197,6 @@ TEST(VulkanAPITest, cat_dim2_invalidinputs_exceptions) {
   }
 }
 
-static void gen_allpermutations(std::vector<std::vector<int64_t>>& out, std::vector<int64_t> in, int i) {
-  // generate all permutations of a given dims
-  if (i == in.size()) {
-    out.push_back(in);
-  }
-  else {
-    for (int j = i; j < in.size(); ++j) {
-      std::swap(in[i], in[j]);
-      gen_allpermutations(out, in, i + 1);
-    }
-  }
-}
-
 TEST(VulkanAPITest, permute_2d_success) {
   // Guard
   if (!at::is_vulkan_available()) {
@@ -2384,6 +2445,107 @@ TEST(VulkanAPITest, permute_invalidinputs_exceptions) {
   EXPECT_THROW({
     const auto out_vulkan_5d = in_cpu_5d.vulkan();
     out_vulkan_5d.permute({4, 3, 2, 1, 0});
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, slice_width_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {3, {2, 3, 40, 50}},  // 4D tensors with dim=width
+    {2, {3, 40, 50}},     // 3D tensors with dim=width
+    {1, {40, 50}},        // 2D tensors with dim=width
+    {0, {50}},            // 1D tensors with dim=width
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_height_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {2, {2, 3, 40, 50}},  // 4D tensors with dim=height
+    {1, {3, 40, 50}},     // 3D tensors with dim=height
+    {0, {40, 50}},        // 2D tensors with dim=height
+                          // 1D tesnors don't have height dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_feature_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {1, {2, 40, 13, 14}}, // 4D tensors with dim=feature(channel)
+    {0, {40, 13, 14}},    // 3D tensors with dim=feature(channel)
+                          // 1D and 2D tesnors don't have feature(channel) dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_batch_success) {
+  // Arrange
+  std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
+    {0, {40, 3, 13, 14}}, // 4D tensors with dim=batch
+                          // 1D, 2D and 3D tesnors don't have batch dim for test
+  };
+
+  // Act/Assert
+  slice_tests(dim2sizes);
+}
+
+TEST(VulkanAPITest, slice_invalidinputs_exceptions) {
+  // Act: slice step must be positive
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
+  }, ::c10::Error);
+
+  // Act: Vulkan doesn't support zero-sized slice (when start=end)
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 0, 0, 1);
+  }, ::c10::Error);
+
+  // Act: Vulkan doesn't support zero-sized slice (when start > end)
+  EXPECT_THROW({
+    slice_test({2, 3, 4, 5}, 3, 3, 2, 1);
+  }, ::c10::Error);
+}
+
+TEST(VulkanAPITest, clone_success) {
+  // Arrange
+  std::multimap<c10::optional<c10::MemoryFormat>, std::vector<int64_t>> mem2sizes {
+    {c10::MemoryFormat::Preserve, {2, 3, 5, 161}},    // 4D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {2, 3, 5, 161}},  // 4D tensors with MemoryFormat::Contiguous
+    {{}, {2, 3, 5, 161}},                             // 4D tensors with null
+    {c10::MemoryFormat::Preserve, {3, 5, 161}},       // 3D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {3, 5, 161}},     // 3D tensors with MemoryFormat::Contiguous
+    {{}, {3, 5, 161}},                                // 3D tensors with null
+    {c10::MemoryFormat::Preserve, {5, 161}},          // 2D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {5, 161}},        // 2D tensors with MemoryFormat::Contiguous
+    {{}, {5, 161}},                                   // 2D tensors with null
+    {c10::MemoryFormat::Preserve, {161}},             // 1D tensors with MemoryFormat::Preserve
+    {c10::MemoryFormat::Contiguous, {161}},           // 1D tensors with MemoryFormat::Contiguous
+    {{}, {161}},                                      // 1D tensors with null
+  };
+
+  // Act/Assert
+  for (const auto& mem2size : mem2sizes) {
+    clone_test(mem2size.second, mem2size.first);
+  }
+}
+
+TEST(VulkanAPITest, clone_invalidinputs_exceptions) {
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
+  }, ::c10::Error);
+
+  // Act: Vulkan supports Preserve and Contiguous memory foramts
+  EXPECT_THROW({
+    clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
   }, ::c10::Error);
 }
 
