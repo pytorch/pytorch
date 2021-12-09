@@ -562,6 +562,7 @@ elif [[ "${TEST_CONFIG}" = docs_test ]]; then
 else
   install_torchvision
   install_monkeytype
+  install_torch_ucc
   test_python
   test_aten
   test_vec256
