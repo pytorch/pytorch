@@ -10,13 +10,14 @@ namespace jit {
 
 class UpgradersMap {
  public:
-  void set_content(const std::unordered_map<std::string, std::string>& content);
+  void set_content(
+      const std::unordered_map<std::string, std::string>&& content);
   int count();
   const std::unordered_map<std::string, std::string>& get_content();
   // THESE METHODS ARE ONLY USED FOR TESTING PURPOSES
-  void set_content_for_test(
+  void test_only_set_content(
       const std::unordered_map<std::string, std::string>& content);
-  void remove_content_for_test(
+  void test_only_remove_content(
       const std::unordered_map<std::string, std::string>& content);
 
  private:
@@ -25,7 +26,8 @@ class UpgradersMap {
   bool isPopulated = false;
 };
 
-TORCH_API void populate_upgraders_map(const std::unordered_map<std::string, std::string>& content);
+TORCH_API void populate_upgraders_map(
+    const std::unordered_map<std::string, std::string>&& content);
 
 TORCH_API int get_upgraders_map_size();
 
@@ -33,10 +35,10 @@ TORCH_API const std::unordered_map<std::string, std::string>&
 dump_upgraders_map();
 
 // THESE TWO METHODS BELOW ARE ONLY USED FOR TESTING
-TORCH_API void populate_test_upgraders(
+TORCH_API void test_only_populate_upgraders(
     const std::unordered_map<std::string, std::string>& content);
 
-TORCH_API void remove_test_upgraders(
+TORCH_API void test_only_remove_upgraders(
     const std::unordered_map<std::string, std::string>& content);
 
 static UpgradersMap upgradersMap;

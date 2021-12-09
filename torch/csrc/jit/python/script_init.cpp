@@ -1733,8 +1733,8 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_get_upgraders_map_size", &get_upgraders_map_size);
   m.def("_dump_upgraders_map", &dump_upgraders_map);
 
-  m.def("_populate_test_upgraders", &populate_test_upgraders);
-  m.def("_remove_test_upgraders", &remove_test_upgraders);
+  m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
+  m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_operator_version_map", &get_operator_version_map);

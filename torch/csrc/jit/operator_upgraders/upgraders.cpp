@@ -7,16 +7,18 @@ namespace torch {
 namespace jit {
 
 void UpgradersMap::set_content(
-    const std::unordered_map<std::string, std::string>& content) {
+    const std::unordered_map<std::string, std::string>&& content) {
   // make sure we populate the map only once
   std::lock_guard<std::mutex> _(lock);
   if (isPopulated) {
     return;
   }
 
-  for (const auto& entry : content) {
-    content_.insert(entry);
-  }
+  content_ = std::move(content);
+
+  // for (const auto& entry : content) {
+  //   content_.insert(std::move(entry));
+  // }
 
   isPopulated = true;
 }
@@ -32,14 +34,14 @@ const std::unordered_map<std::string, std::string>& UpgradersMap::
   return content_;
 }
 
-void UpgradersMap::set_content_for_test(
+void UpgradersMap::test_only_set_content(
     const std::unordered_map<std::string, std::string>& content) {
   std::lock_guard<std::mutex> _(lock);
   for (const auto& entry : content) {
     content_.insert(entry);
   }
 }
-void UpgradersMap::remove_content_for_test(
+void UpgradersMap::test_only_remove_content(
     const std::unordered_map<std::string, std::string>& content) {
   std::lock_guard<std::mutex> _(lock);
   for (const auto& entry : content) {
@@ -48,8 +50,8 @@ void UpgradersMap::remove_content_for_test(
 }
 
 void populate_upgraders_map(
-    const std::unordered_map<std::string, std::string>& content) {
-  upgradersMap.set_content(content);
+    const std::unordered_map<std::string, std::string>&& content) {
+  upgradersMap.set_content(std::move(content));
 }
 
 int get_upgraders_map_size() {
@@ -60,14 +62,14 @@ const std::unordered_map<std::string, std::string>& dump_upgraders_map() {
   return upgradersMap.get_content();
 }
 
-void populate_test_upgraders(
+void test_only_populate_upgraders(
     const std::unordered_map<std::string, std::string>& content) {
-  upgradersMap.set_content_for_test(content);
+  upgradersMap.test_only_set_content(content);
 }
 
-void remove_test_upgraders(
+void test_only_remove_upgraders(
     const std::unordered_map<std::string, std::string>& content) {
-  upgradersMap.remove_content_for_test(content);
+  upgradersMap.test_only_remove_content(content);
 }
 
 } // namespace jit
