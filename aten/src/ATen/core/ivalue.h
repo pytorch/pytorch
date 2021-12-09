@@ -888,6 +888,9 @@ public:
         // to use mkldnn storage
         return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
       } else if (ten.is_sparse()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
         return hashTensor(ten._values());
       } else {
         return reinterpret_cast<size_t>(

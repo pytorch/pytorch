@@ -27,6 +27,15 @@ class TestSparse(JitTestCase):
 
         self.assertEqual(unfrozen_result, frozen_result)
 
+        buffer = io.BytesIO()
+        torch.jit.save(frozen, buffer)
+        buffer.seek(0)
+        loaded_model = torch.jit.load(buffer)
+
+        loaded_result = loaded_model.forward(x)
+
+        self.assertEqual(unfrozen_result, loaded_result)
+
     def test_serialize_sparse_coo(self):
         class SparseTensorModule(torch.nn.Module):
             def __init__(self):
@@ -36,4 +45,15 @@ class TestSparse(JitTestCase):
             def forward(self, x):
                 return x + self.a
 
-        torch.jit.save(torch.jit.script(SparseTensorModule()), io.BytesIO())
+        x = torch.rand(3, 4).to_sparse()
+        m = SparseTensorModule()
+        expected_result = m.forward(x)
+
+        buffer = io.BytesIO()
+        torch.jit.save(torch.jit.script(m), buffer)
+        buffer.seek(0)
+        loaded_model = torch.jit.load(buffer)
+
+        loaded_result = loaded_model.forward(x)
+
+        self.assertEqual(expected_result, loaded_result)
