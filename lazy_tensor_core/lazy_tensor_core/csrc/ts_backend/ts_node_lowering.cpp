@@ -1,7 +1,11 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/cast.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
+#include <torch/csrc/lazy/core/internal_ops/expand.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
+#include <torch/csrc/lazy/core/internal_ops/scalar.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>
@@ -14,14 +18,10 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
-#include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
-#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
@@ -78,7 +78,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, *torch::lazy::ltc_as_strided_view_update));
     }
     if (node->op() == *torch::lazy::ltc_cast) {
-      return LowerCast(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Cast>(
+      return LowerCast(torch::lazy::NodeCast<torch::lazy::Cast>(
           node, *torch::lazy::ltc_cast));
     }
     if (node->op() == *torch::lazy::ltc_select_view_update) {
@@ -92,7 +92,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
               node, *torch::lazy::ltc_narrow_view_update));
     }
     if (node->op().op == at::prim::Constant) {
-      return LowerScalar(torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Scalar>(
+      return LowerScalar(torch::lazy::NodeCast<torch::lazy::Scalar>(
           node, torch::lazy::OpKind(at::prim::Constant)));
     }
     if (node->op().op == at::aten::bernoulli) {
@@ -132,7 +132,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     }
     if (node->op().op == at::aten::expand) {
       return LowerExpand(
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::Expand>(
+          torch::lazy::NodeCast<torch::lazy::Expand>(
               node, torch::lazy::OpKind(at::aten::expand)));
     }
     if (node->op().op == at::aten::narrow) {
@@ -172,8 +172,8 @@ class TSNodeLowering : public TSNodeLoweringInterface {
           node, torch::lazy::OpKind(at::aten::view)));
     }
     if (node->op() == *torch::lazy::ltc_device_data) {
-      const torch_lazy_tensors::ir::ops::DeviceData* device_data_node =
-          torch::lazy::NodeCast<torch_lazy_tensors::ir::ops::DeviceData>(
+      const torch::lazy::DeviceData* device_data_node =
+          torch::lazy::NodeCast<torch::lazy::DeviceData>(
               node, *torch::lazy::ltc_device_data);
       return {loctx()->GetParameter(device_data_node->data())};
     }
@@ -262,7 +262,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(node, arguments);
   }
 
-  TSOpVector LowerCast(const torch_lazy_tensors::ir::ops::Cast* node) {
+  TSOpVector LowerCast(const torch::lazy::Cast* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dtype());
@@ -366,7 +366,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(node, arguments);
   }
 
-  TSOpVector LowerExpand(const torch_lazy_tensors::ir::ops::Expand* node) {
+  TSOpVector LowerExpand(const torch::lazy::Expand* node) {
     std::vector<torch::jit::NamedValue> arguments;
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->size());
@@ -413,7 +413,7 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     return LowerBuiltin(node, arguments);
   }
 
-  TSOpVector LowerScalar(const torch_lazy_tensors::ir::ops::Scalar* node) {
+  TSOpVector LowerScalar(const torch::lazy::Scalar* node) {
     const at::Scalar& value = node->value();
     const torch::lazy::Shape& shape = node->shape();
     auto options =

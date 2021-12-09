@@ -3,19 +3,19 @@
 #include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/cast.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
+#include <torch/csrc/lazy/core/internal_ops/expand.h>
+#include <torch/csrc/lazy/core/internal_ops/scalar.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 #include <torch/jit.h>
 
-#include "lazy_tensor_core/csrc/ops/cast.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
 #include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
-#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
 #include "lazy_tensor_core/csrc/ops/ts_native_batch_norm_backward.h"
@@ -95,14 +95,6 @@ torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
 }
 torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
   switch (node->op().op) {
-    case at::aten::expand: {
-      auto expand = torch::lazy::NodeCast<ir::ops::Expand>(
-          node, torch::lazy::OpKind(at::aten::expand));
-      const torch::lazy::Output& argument = node->operand(0);
-      return torch::lazy::Shape(
-          torch::lazy::GetShapeFromTsOutput(argument).scalar_type(),
-          expand->size());
-    }
     case at::aten::convolution_overrideable: {
       return InferConvolutionOverrideable(
           torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(

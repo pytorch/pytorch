@@ -3,18 +3,18 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/arithmetic_ir_ops.h>
+#include <torch/csrc/lazy/core/internal_ops/expand.h>
+#include <torch/csrc/lazy/core/internal_ops/scalar.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/ops/arithmetic_ir_ops.h"
-#include "lazy_tensor_core/csrc/ops/expand.h"
 #include "lazy_tensor_core/csrc/ops/index_along_dim.h"
 #include "lazy_tensor_core/csrc/ops/index_get.h"
 #include "lazy_tensor_core/csrc/ops/index_put.h"
-#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_aten_ops.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
@@ -186,7 +186,7 @@ CanonicalIndexInfo GetCanonicalIndexInfo(
 torch::lazy::Value EnsureRank1(const torch::lazy::Value& index) {
   CHECK_LE(torch::lazy::GetShapeFromTsValue(index).dim(), 1);
   return torch::lazy::GetShapeFromTsValue(index).dim() == 0
-             ? torch::lazy::MakeNode<ir::ops::Expand>(
+             ? torch::lazy::MakeNode<torch::lazy::Expand>(
                    index, std::vector<int64_t>{1},
                    /*is_scalar_expand=*/false)
              : index;

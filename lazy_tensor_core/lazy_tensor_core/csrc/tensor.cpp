@@ -1,14 +1,14 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 
 #include <torch/csrc/lazy/core/helpers.h>
+#include <torch/csrc/lazy/core/internal_ops/cast.h>
+#include <torch/csrc/lazy/core/internal_ops/device_data.h>
+#include <torch/csrc/lazy/core/internal_ops/scalar.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
-#include "lazy_tensor_core/csrc/ops/cast.h"
-#include "lazy_tensor_core/csrc/ops/device_data.h"
-#include "lazy_tensor_core/csrc/ops/scalar.h"
 #include "lazy_tensor_core/csrc/tensor_impl.h"
 #include "lazy_tensors/computation_client/sys_util.h"
 
@@ -189,7 +189,7 @@ void LazyTensor::SetInPlaceIrValue(torch::lazy::Value ir_value) {
   auto tensor_shape = shape();
   if (tensor_shape.Get().scalar_type() !=
       torch::lazy::GetShapeFromTsValue(ir_value).scalar_type()) {
-    ir_value = torch::lazy::MakeNode<ir::ops::Cast>(
+    ir_value = torch::lazy::MakeNode<torch::lazy::Cast>(
         ir_value, tensor_shape.Get().scalar_type());
   }
   SetIrValue(std::move(ir_value));
@@ -263,7 +263,7 @@ torch::lazy::Value LazyTensor::GetIrValueForTensor(const at::Tensor& tensor,
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (torch::lazy::IsSpecialScalar(value)) {
-      return torch::lazy::MakeNode<ir::ops::Scalar>(std::move(value),
+      return torch::lazy::MakeNode<torch::lazy::Scalar>(std::move(value),
                                                     tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
@@ -425,7 +425,7 @@ torch::lazy::Value LazyTensor::CreateTensorNode(
     torch::lazy::BackendDataPtr data, bool read_only) const {
   data->SetInfo(std::make_shared<LazyGraphExecutor::DeviceDataInfo>(
       GetUniqueId(), read_only));
-  return torch::lazy::MakeNode<ir::ops::DeviceData>(std::move(data));
+  return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(data));
 }
 
 std::vector<LazyTensor> LazyTensor::MakeOutputTensors(
