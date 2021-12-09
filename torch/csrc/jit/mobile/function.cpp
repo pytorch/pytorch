@@ -1,9 +1,12 @@
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
+#include <torch/csrc/jit/mobile/parse_bytecode.h>
+#include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/prim_ops_registery.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/operator.h>
+#include <torch/csrc/jit/serialization/import_export_constants.h>
 
 namespace torch {
 namespace jit {
@@ -213,6 +216,37 @@ c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
     }
   }
   return fn;
+}
+
+Function& Function::registerFunc(
+    const std::string& qualified_name,
+    const std::vector<Instruction>& instructions,
+    const std::vector<c10::IValue>& constants,
+    const std::vector<c10::TypePtr>& types,
+    const size_t register_size) {
+  static std::unordered_map<c10::QualifiedName, Function>
+      upgrader_function_holder;
+  c10::QualifiedName name = c10::QualifiedName(qualified_name);
+  auto found = upgrader_function_holder.find(name);
+  // Register the function if it's not found in the map.
+  if (found == upgrader_function_holder.end()) {
+    auto name_function_pair =
+        upgrader_function_holder.emplace(name, Function(name));
+    auto& func = name_function_pair.first->second;
+    for (auto const& inst : instructions) {
+      func.append_instruction(inst.op, inst.X, inst.N);
+    }
+    for (auto const& constant : constants) {
+      func.append_constant(constant);
+    }
+    for (auto const& type : types) {
+      func.append_type(type);
+    }
+    func.set_register_size(register_size);
+    return func;
+  }
+  auto& upgrader_function_in_holder = found->second;
+  return upgrader_function_in_holder;
 }
 
 } // namespace mobile
