@@ -1851,12 +1851,6 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 */
 template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
-#if !AT_MAGMA_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling torch.lu on a CUDA tensor requires compiling ",
-      "PyTorch with MAGMA. Please rebuild with MAGMA.");
-#else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
   Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
@@ -1888,7 +1882,6 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
     }
   }
   infos.copy_(infos_cpu);
-#endif
 }
 
 /*
@@ -1976,7 +1969,12 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
     infos.zero_();
     return;
   }
-  const auto lu_factor_magma = [](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+
+#if AT_MAGMA_ENABLED()
+  const auto lu_factor_magma = [batch_size](const Tensor& input, const Tensor& pivots, const Tensor& infos, const bool compute_pivots) {
+    if (batch_size == 1) {
+        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
+    } else {
       // There is a bug in lu_factor_batched_magma in MAGMA < 2.5.2, see
       // https://bitbucket.org/icl/magma/issues/13/getrf_batched-kernel-produces-nans-on
       std::tuple<magma_int_t, magma_int_t, magma_int_t> version;
@@ -1986,7 +1984,10 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
       } else {
         lu_factor_looped_magma(input, pivots, infos, compute_pivots);
       }
+    }
   };
+#endif
+
 #ifdef USE_CUSOLVER
   auto preferred_backend = at::globalContext().linalgPreferredBackend();
   switch (preferred_backend) {
@@ -1994,32 +1995,40 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
       lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
       break;
     case at::LinalgBackend::Magma:
-      if (batch_size == 1) {
-        lu_factor_looped_magma(input, pivots, infos, compute_pivots);
-      } else {
-        lu_factor_magma(input, pivots, infos, compute_pivots);
-      }
+#if AT_MAGMA_ENABLED()
+      lu_factor_magma(input, pivots, infos, compute_pivots);
       break;
+#endif
     default:
-      // If there's no magma, we always default to CUSOLVER
-      // Otherwise, we do not use it for complex inputs if !get_pivots since nan_to_num_ does not work with it.
+#if AT_MAGMA_ENABLED()
+      // We do not use cuSOLVER for complex inputs if !get_pivots since nan_to_num_ does not work with it.
       // See https://github.com/pytorch/pytorch/issues/59247 for more info
       // Provided the above, use a heuristic to determine that cusolver is faster than MAGMA
-      auto m = input.size(-2);
-      if (((batch_size == 1 || (batch_size <= 8 && m <= 16))
-           && (!input.is_complex() || compute_pivots))
-          || !use_magma_ ){
+      const auto m = input.size(-2);
+      const auto use_cusolver = ((batch_size == 1 || (batch_size <= 8 && m <= 16))
+                                 && (!input.is_complex() || compute_pivots));
+      if (use_cusolver) {
         lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
       } else {
         lu_factor_magma(input, pivots, infos, compute_pivots);
       }
+#else // USE_CUSOLVER && !AT_MAGMA_ENABLED
+      lu_factor_looped_cusolver(input, pivots, infos, compute_pivots, use_magma_);
+#endif
   }
-#else
+#else // !USE_CUSOLVER
+#if AT_MAGMA_ENABLED()
     if (batch_size == 1) {
       lu_factor_looped_magma(input, pivots, infos, compute_pivots);
     } else {
       lu_factor_magma(input, pivots, infos, compute_pivots);
     }
+#else
+  TORCH_CHECK(
+      false,
+      "Calling linalg.lu_factor on a CUDA tensor requires compiling ",
+      "PyTorch with MAGMA or cuSolver. Please rebuild with MAGMA.");
+#endif // AT_MAGMA_ENABLED
 #endif // USE_CUSOLVER
 
   // We return the trivial permutation of pivots starting with 1 (FORTRAN indexing)

@@ -614,8 +614,11 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
-                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            other_args = []
+            if IMPORT_DISABLED_TESTS:
+                other_args.append('--import-disabled-tests')
+            if IMPORT_SLOW_TESTS:
+                other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
