@@ -28,7 +28,7 @@ OpKind OpKind::Get(const std::string& name) {
 }
 
 hash_t OpKind::hash() const {
-  return StringHash(op.toQualString());
+  return Hash(static_cast<c10::unique_t>(op));
 }
 
 Node::Node(OpKind op, size_t num_outputs, hash_t node_hash, hash_t dag_hash)
