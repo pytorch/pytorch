@@ -293,96 +293,15 @@ class C10_API DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-// autograd_dispatch_keyset should include all runtime autograd keys.
-// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
-// NB: keys in this set also get associated with CompositeImplicitAutograd
-static DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutogradCPU,
-    DispatchKey::AutogradCUDA,
-    DispatchKey::AutogradXLA,
-    DispatchKey::AutogradLazy,
-    DispatchKey::AutogradNestedTensor,
-    DispatchKey::AutogradMLC,
-    DispatchKey::AutogradHPU,
-    DispatchKey::AutogradXPU,
-    DispatchKey::AutogradPrivateUse1,
-    DispatchKey::AutogradPrivateUse2,
-    DispatchKey::AutogradPrivateUse3,
-    DispatchKey::AutogradOther,
-});
-
-static DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-});
-
-// See Note [TLS Initialization]
-static DispatchKeySet default_included_set = DispatchKeySet({
-    DispatchKey::BackendSelect,
-    DispatchKey::ADInplaceOrView,
-});
-
-static DispatchKeySet default_excluded_set = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-});
-
-static DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
-    autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
-
-// backend dispatch keys that map to DispatchKey::AutogradOther
-// NB: keys in this set also get associated with CompositeImplicitAutograd
-static DispatchKeySet autogradother_backends = DispatchKeySet(
-    // TODO: delete commented code before landing.
-    // HIP and VE now have their own backend bits, which means that
-    // they can now have their own Autograd keys.
-    // Technically, HIP will now redispatch to its own custom AutogradHIP slot
-    // in the runtime table.
-    //{DispatchKey::HIP,
-     //DispatchKey::VE,
-     {DispatchKey::FPGA,
-     DispatchKey::ORT,
-     DispatchKey::Vulkan,
-     DispatchKey::Metal,
-     DispatchKey::QuantizedCPU,
-     DispatchKey::QuantizedCUDA,
-     DispatchKey::CustomRNGKeyId,
-     DispatchKey::MkldnnCPU,
-     DispatchKey::SparseCPU,
-     DispatchKey::SparseCUDA,
-     DispatchKey::SparseHIP,
-     DispatchKey::SparseVE,
-     DispatchKey::SparseCsrCPU,
-     DispatchKey::SparseCsrCUDA,
-     DispatchKey::Meta});
-
-// The set of dispatch keys that come after autograd
-// n.b. this relies on the fact that AutogradOther is currently the lowest
-// Autograd key
-static DispatchKeySet after_autograd_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
-
-// The set of dispatch keys that come after ADInplaceOrView
-static DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
-    DispatchKeySet::FULL_AFTER,
-    c10::DispatchKey::ADInplaceOrView);
-
-// The set of dispatch keys that come after Functionalize
-static DispatchKeySet after_func_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
-        .removeFunctionalityKey(
-            // NOTE: we also need to remove ADInplaceOrView from the keyset when
-            // redispatching after the func kernels. This is because we're not
-            // calling the same op; we originally called an inplace op, and now
-            // we aren't. The original key calculation figured out which keys
-            // were Fallthrough based on the inplace op. That means that it did
-            // not include the ADInPlaceOrView kernel as a fallthrough key.
-            // However, we WANT the ADInPlaceOrView kernel to be ignored now
-            // that we're calling an out-of-place op. Re-invoking
-            // Dispatcher::call would re-run the Fallthrough key calculation and
-            // get us that, But at::redispatch is more performant. We can get
-            // away with it by explicitly removing the key here.
-            c10::DispatchKey::ADInplaceOrView);
+extern C10_API DispatchKeySet autograd_dispatch_keyset;
+extern C10_API DispatchKeySet autocast_dispatch_keyset;
+extern C10_API DispatchKeySet default_included_set;
+extern C10_API DispatchKeySet default_excluded_set;
+extern C10_API DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
+extern C10_API DispatchKeySet autogradother_backends;
+extern C10_API DispatchKeySet after_autograd_keyset;
+extern C10_API DispatchKeySet after_ADInplaceOrView_keyset;
+extern C10_API DispatchKeySet after_func_keyset;
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW,
