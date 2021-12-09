@@ -130,15 +130,7 @@ void FunctionalTensorWrapper::commit_update() {
   generation_ = storage_impl->generation();
 }
 
-bool FunctionalTensorWrapper::is_aliased() const {
-  // Two FunctionalTensorWrapper objects are aliased if they share storage.
-  // That means that we can check if a given FunctionalTensorWrapper is aliased
-  // by checking the reference count on its storage.
-  return storage_.use_count() > 1;
-}
-
 bool FunctionalTensorWrapper::is_up_to_date() const {
-  if (!is_aliased()) return true;
   auto alias_generation = functional_storage_impl()->generation();
   return generation_ == alias_generation;
 }
