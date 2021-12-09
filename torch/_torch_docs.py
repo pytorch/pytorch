@@ -2225,7 +2225,7 @@ Example::
             [ 1.4551,  0.1294,  1.6724]])
     >>> a = torch.randn(3, 2, 2) # Example for batched input
     >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
-    >>> l = torch.linalg.cholesky(a)
+    >>> l = torch.cholesky(a)
     >>> z = l @ l.mT
     >>> torch.dist(z, a)
     tensor(2.3842e-07)
