@@ -7289,17 +7289,26 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
             ErrorInput(SampleInput(torch.tensor(2, device=device), args=(3,)),
                        error_type=RuntimeError, error_regex=k_out_of_range_err),)
 
+def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
+                          train=None, min_input_dim=None, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-def sample_inputs_dropout(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, (S,), device=device, dtype=dtype, requires_grad=requires_grad)
+    if min_input_dim:
+        # Create cases with dim ranging from min_input_dim to min_input_dim + 2 (inclusive)
+        cases = [(S,) * i for i in range(min_input_dim, min_input_dim + 3)]
+    else:
+        cases = [(S, S), (S,), ()]
+    p_vals = [0.0, 0.5, 1.0]
+    # This is to handle special case for feature_alpha_dropout which has different
+    # supported dtypes depending on `train` parameter
+    training_vals = [train] if train is not None else [True, False]
 
-    return [
-        SampleInput(make_arg()),
-        SampleInput(make_arg(), kwargs=dict(p=0.0)),
-        SampleInput(make_arg(), kwargs=dict(p=1.0)),
-        SampleInput(make_arg(), kwargs=dict(training=False)),
-    ]
+    def generator():
+        for case, p, training in product(cases, p_vals, training_vals):
+            yield SampleInput(make_arg(case), kwargs=dict(p=p, training=training))
+        yield SampleInput(make_arg(case), kwargs=dict())
 
+    return list(generator())
 
 def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
@@ -7875,6 +7884,43 @@ def sample_inputs_allclose(op_info, device, dtype, requires_grad, **kwargs):
         samples.append(r_sample)
 
     return samples
+
+
+def sample_inputs_kl_div(op_info, device, dtype, requires_grad, **kwargs):
+    make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_and_reduction = [
+        ((2,), "mean"),
+        ((2, 3), "mean"),
+        ((2, 3, 4), "mean"),
+        ((2,), "none"),
+        ((2,), "batchmean"),
+        ((2,), "sum"),
+    ]
+
+    sample_inputs = []
+    for (shape, reduction), log_target in itertools.product(shapes_and_reduction, (True, False)):
+        # input should be log-probability, i.e. lie in (-inf, 0]
+        input = make(shape, low=None, high=0)
+        # target should be a probability by default, i.e. lie in [0, 1], and a log-probability if log_target is set,
+        # i.e. lie in (-inf, 0]
+        target = make(shape, low=None, high=0) if log_target else make(shape, low=0, high=1)
+        sample_inputs.append(
+            SampleInput(input, args=(target,), kwargs=dict(reduction=reduction, log_target=log_target))
+        )
+    return sample_inputs
+
+def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        SampleInput(make_input(())),
+        SampleInput(make_input((2,))),
+        SampleInput(make_input((2, 2))),
+        SampleInput(make_input((2,)), kwargs=dict(offset=1)),
+        SampleInput(make_input((2,)), kwargs=dict(offset=-1)),
+    ]
+
 
 foreach_unary_op_db: List[OpInfo] = [
     ForeachFuncInfo('exp'),
@@ -9172,7 +9218,13 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                    ),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='trunc_rounding',
@@ -9181,7 +9233,13 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                    ),),
     BinaryUfuncInfo('div',
                     aliases=('divide',),
                     variant_test_name='floor_rounding',
@@ -9190,7 +9248,13 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     promotes_int_to_float=True,
                     assert_autodiffed=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=True),
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
+                    ),),
     BinaryUfuncInfo('true_divide',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     supports_forward_ad=True,
@@ -13954,9 +14018,57 @@ op_db: List[OpInfo] = [
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
+        "nn.functional.dropout2d",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, min_input_dim=2),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
+    # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
+    # unlike when `train=False`, it supports complex inputs, hence 2 OpInfos to cover all cases
+    OpInfo(
         "nn.functional.feature_alpha_dropout",
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
+        variant_test_name="with_train",
+        ref=_NOTHING,
+        dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        skips=(
+            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
+            # vmap: We do not yet support calling random operations inside of vmap.
+            # Please perform random operations outside of vmap as a workaround
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),
+            # Probably because we have used lambda for the op here
+            # AssertionError: JIT Test does not execute any logic
+            DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
+        gradcheck_wrapper=wrapper_set_seed,
+        supports_forward_ad=True,
+        supports_out=False,
+        sample_inputs_func=partial(sample_inputs_dropout, train=True, min_input_dim=2),
+        inplace_variant=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
+    OpInfo(
+        "nn.functional.feature_alpha_dropout",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
+        variant_test_name="without_train",
         ref=_NOTHING,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         skips=(
@@ -13966,7 +14078,7 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_out=False,
-        sample_inputs_func=sample_inputs_dropout,
+        sample_inputs_func=partial(sample_inputs_dropout, train=False),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs, inplace=True)),
     OpInfo(
@@ -14787,6 +14899,35 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32, torch.complex64),
             ),
         ),
+    ),
+    OpInfo(
+        "nn.functional.kl_div",
+        sample_inputs_func=sample_inputs_kl_div,
+        dtypes=floating_types_and(torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64),
+        backward_dtypesIfCPU=floating_types_and(torch.int8, torch.int16, torch.int32, torch.int64),
+        dtypesIfCUDA=floating_types_and(
+            torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
+        ),
+        backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.int8, torch.int16, torch.int32, torch.int64),
+        supports_out=False,
+        check_batched_grad=False,
+        skips=(
+            # See https://github.com/pytorch/pytorch/issues/65466
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestGradients",
+                "test_fn_gradgrad",
+            ),
+        ),
+    ),
+    OpInfo(
+        "diagflat",
+        ref=lambda input, offset=0: np.diagflat(input, k=offset),
+        sample_inputs_func=sample_inputs_diagflat,
+        dtypes=all_types_and_complex_and(torch.bool),
+        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
     )
 ]
 

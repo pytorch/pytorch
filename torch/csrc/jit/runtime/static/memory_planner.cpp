@@ -162,6 +162,7 @@ MemoryPlanner::MemoryPlanner(
   FastSet<IValue*> unmanaged_ivalues;
   FastSet<IValue*> unmanaged_borrowed_ivalues;
   for (ProcessedNode& pnode : runtime->nodes()) {
+    const auto borrows_outputs = borrowsOutputs(pnode.node()->kind());
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const Value* out_v = pnode.node()->outputs()[i];
       const bool in_managed_sets = setIncludes(managed_tensor_values, out_v) ||
@@ -174,18 +175,10 @@ MemoryPlanner::MemoryPlanner(
       if (in_managed_sets && !isUnmanagedSpecialCase(pnode, i)) {
         continue;
       }
-      static const std::array<c10::Symbol, 2> symbols_with_borrowed_outputs = {
-          c10::Symbol::fromQualString("static_runtime::dict_unpack"),
-          c10::Symbol::fromQualString("static_runtime::VarTupleUnpack"),
-      };
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
         // Scalars do not need to be freed after each iteration.
         num_unmanaged_scalar_ivalues_++;
-      } else if (
-          std::find(
-              symbols_with_borrowed_outputs.begin(),
-              symbols_with_borrowed_outputs.end(),
-              pnode.node()->kind()) != symbols_with_borrowed_outputs.end()) {
+      } else if (borrows_outputs) {
         IValue& out = pnode.Output(i);
         unmanaged_borrowed_ivalues.insert(&out);
       } else {
