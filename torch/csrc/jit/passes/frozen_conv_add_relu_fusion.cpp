@@ -15,14 +15,17 @@
 namespace torch {
 namespace jit {
 
-std::function<void(std::shared_ptr<Graph>&)> _fuseFrozenConvAddReluImpl;
+std::function<void(std::shared_ptr<Graph>&)>& getFuseFrozenConvAddReluImpl() {
+  static std::function<void(std::shared_ptr<Graph>&)> impl;
+  return impl;
+}
 
 // Implementation is in frozen_conv_add_relu_fusion.cpp; at runtime the
 // implementation is registered in _fuseFrozenConvAddReluImpl. This allows
 // the GPU code to be built separately from CPU-only code.
 void FuseFrozenConvAddRelu(std::shared_ptr<Graph>& graph) {
-  if (_fuseFrozenConvAddReluImpl) {
-    _fuseFrozenConvAddReluImpl(graph);
+  if (getFuseFrozenConvAddReluImpl()) {
+    getFuseFrozenConvAddReluImpl()(graph);
   } else {
     TORCH_WARN("No definition of _fuseFrozenConvAddReluImpl found");
   }

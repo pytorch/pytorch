@@ -83,6 +83,7 @@ SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
 slow_tests_dict: Optional[Dict[str, Any]] = None
 disabled_tests_dict: Optional[Dict[str, Any]] = None
 
+NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
 class _TestParametrizer(object):
     """
@@ -613,8 +614,11 @@ def run_tests(argv=UNITTEST_ARGS):
         test_cases = discover_test_cases_recursively(suite)
         for case in test_cases:
             test_case_full_name = case.id().split('.', 1)[1]
-            other_args = (['--import-disabled-tests'] if IMPORT_DISABLED_TESTS else List[str]([]) +
-                          ['--import-slow-tests'] if IMPORT_SLOW_TESTS else List[str]([]))
+            other_args = []
+            if IMPORT_DISABLED_TESTS:
+                other_args.append('--import-disabled-tests')
+            if IMPORT_SLOW_TESTS:
+                other_args.append('--import-slow-tests')
             cmd = [sys.executable] + [argv[0]] + other_args + argv[1:] + [test_case_full_name]
             string_cmd = " ".join(cmd)
             exitcode = shell(cmd)
@@ -2106,6 +2110,18 @@ class TestCase(expecttest.TestCase):
     # Reimplemented to provide special behavior when
     # _ignore_not_implemented_error is True
     def assertRaisesRegex(self, expected_exception, expected_regex, *args, **kwargs):
+        # Verifies that an exception with the type expected_exception and message
+        # matching the regular expression defined by expected_regex is thrown.
+        # If the test is instantiated for a non-native device type (like XLA)
+        # then the message is not validated.
+
+        # Checks whether the test is instantiated for a device type by testing
+        # if the test class has defined the device_type attribute and,
+        # if so, tests whether the instantiated device type is native or not
+        if hasattr(self, 'device_type') and self.device_type not in NATIVE_DEVICES:  # type: ignore[attr-defined]
+            # empty string matches any string
+            expected_regex = ''
+
         if self._ignore_not_implemented_error:
             context = AssertRaisesContextIgnoreNotImplementedError(  # type: ignore[call-arg]
                 expected_exception, self, expected_regex)
