@@ -204,6 +204,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         # Generate IR node classes
         fm.write_with_template(f'{backend_dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
             'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+                "ATen/core/Formatting.h",
                 "c10/core/ScalarType.h",
                 "c10/util/Optional.h",
                 "torch/csrc/lazy/core/hash.h",
@@ -211,7 +212,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "lazy_tensor_core/csrc/ops/scalar.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],
             'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
