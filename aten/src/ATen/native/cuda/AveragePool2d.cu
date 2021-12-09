@@ -12,6 +12,8 @@ namespace at {
 namespace native {
 namespace {
 
+using namespace at::cuda::detail;
+
 __device__ inline int min(int a, int b) {
   return a <= b ? a : b;
 }
@@ -21,7 +23,11 @@ __device__ inline int max(int a, int b) {
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_out_cuda_frame(const int nthreads,
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+avg_pool2d_out_cuda_frame(const int nthreads,
     const scalar_t* const bottom_data, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -70,7 +76,11 @@ __global__ void avg_pool2d_out_cuda_frame(const int nthreads,
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const bottom_data, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
@@ -119,7 +129,11 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+avg_pool2d_backward_out_cuda_frame(const int nthreads, const scalar_t* const top_diff,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
@@ -175,7 +189,11 @@ __global__ void avg_pool2d_backward_out_cuda_frame(const int nthreads, const sca
 }
 
 template <typename scalar_t, typename accscalar_t>
-__global__ void avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+avg_pool2d_backward_out_cuda_frame_nhwc(const int nthreads,
     const scalar_t* const top_diff,
     const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,

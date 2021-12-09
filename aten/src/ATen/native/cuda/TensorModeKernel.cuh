@@ -194,7 +194,11 @@ __device__ inline void bitonicSortKeys(
 // dimension as the innermost dim, such that we can get the particular slice for
 // a Tensor via its linear block dimension * the slice size.
 template <typename T, unsigned int Power2Size>
-__global__ void compute_mode(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(1024, 1)
+#endif
+compute_mode(
     T* input,
     at::cuda::detail::TensorInfo<T, unsigned int> values,
     at::cuda::detail::TensorInfo<int64_t, unsigned int> indices,

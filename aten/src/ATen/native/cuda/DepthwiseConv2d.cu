@@ -93,7 +93,11 @@ __global__ void conv_depthwise2d_forward_kernel(
 }
 
 template <int kSize, int stride, typename scalar_t, typename index_t>
-__global__ void conv_depthwise2d_backward_kernel(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+conv_depthwise2d_backward_kernel(
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_input,
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> weight,
@@ -164,7 +168,11 @@ __global__ void conv_depthwise2d_backward_kernel(
 
 
 template <typename scalar_t, typename index_t=unsigned>
-__global__ void conv_depthwise2d_grad_weight_kernel(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+conv_depthwise2d_grad_weight_kernel(
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_output,
     const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> grad_weight,

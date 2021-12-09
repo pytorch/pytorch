@@ -198,7 +198,11 @@ T spatialBlockReduceX(T *shared, T val) {
 }
 
 template <typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__global__ void cunn_SpatialSoftMaxForward(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(512, 1)
+#endif
+cunn_SpatialSoftMaxForward(
     outscalar_t *output, scalar_t *input,
     uint32_t outer_size, uint32_t dim_size, uint32_t inner_size)
 {
@@ -256,7 +260,11 @@ __global__ void cunn_SpatialSoftMaxForward(
 
 
 template <typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
-__global__ void cunn_SpatialSoftMaxBackward(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(512, 1)
+#endif
+cunn_SpatialSoftMaxBackward(
     scalar_t *gradInput, outscalar_t *output, outscalar_t *gradOutput,
     uint32_t outer_size, uint32_t dim_size, uint32_t inner_size)
 {
@@ -650,6 +658,9 @@ cunn_SoftMaxForward(outscalar_t *output, scalar_t *input, int classes)
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template<typename, typename, typename> class Epilogue>
 __global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(512, 1)
+#endif
 cunn_SoftMaxBackward(scalar_t *gradInput, outscalar_t *output, outscalar_t *gradOutput, int classes)
 {
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;

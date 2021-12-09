@@ -51,6 +51,8 @@ if TEST_SCIPY:
     except ModuleNotFoundError:
         pass
 
+dev_name = torch.cuda.get_device_name(torch.cuda.current_device()).lower()
+IS_JETSON = 'xavier' in dev_name or 'nano' in dev_name or 'jetson' in dev_name or 'tegra' in dev_name
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -12388,7 +12390,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/issues/66402
                        DecorateInfo(unittest.expectedFailure, "TestUnaryUfuncs", "test_reference_numerics_hard",
-                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_MACOS or IS_WINDOWS)),
+                                    device_type='cpu', dtypes=(torch.complex64,), active_if=not (IS_JETSON or IS_MACOS or IS_WINDOWS)),
                    )),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,

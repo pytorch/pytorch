@@ -18,7 +18,11 @@ using namespace at::cuda::detail;
 
 // Kernel for fast unfold+copy on volumes
 template <typename T>
-__global__ void vol2col_kernel(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+vol2col_kernel(
     const int n,
     const T* data_vol,
     const int depth,
@@ -129,7 +133,11 @@ void vol2col(
 }
 
 template <typename T, typename accT>
-__global__ void vol2im_kernel(
+__global__ void
+#if __CUDA_ARCH__ == 620
+  __launch_bounds__(CUDA_NUM_THREADS, 1)
+#endif
+vol2im_kernel(
     const unsigned n,
     const T* data_col,
     const unsigned depth,
