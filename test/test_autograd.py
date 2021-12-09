@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle
 
@@ -7554,6 +7555,46 @@ class TestAutogradForwardMode(TestCase):
             dual = fwAD.make_dual(foo, bar)
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
+
+    def test_make_dual_inference_tensor_in_inference_mode(self):
+        with torch.inference_mode():
+            foo = torch.rand(2)
+            bar = torch.rand(2)
+            foo_copy = foo.clone()
+
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(foo, bar)
+                self.assertFalse(dual._is_view())
+
+                dual += 1
+                self.assertFalse(torch.allclose(foo, foo_copy))
+
+    def test_make_dual_torch_dispatch(self):
+        counter = [0]
+
+        class MySubclass(torch.Tensor):
+            def __new__(cls, data=None):
+                return torch.Tensor._make_subclass(cls, data)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.alias:
+                    counter[0] += 1
+
+                    with no_dispatch():
+                        return MySubclass(torch.ops.aten.alias(*args))
+
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        a = torch.tensor(1.)
+        s = MySubclass(a)
+
+        with fwAD.dual_level():
+            fwAD.make_dual(s, torch.rand_like(s))
+            self.assertEqual(counter[0], 1)
+            fwAD.make_dual(torch.rand_like(s), s)
+            self.assertEqual(counter[0], 2)
 
     def test_print(self):
         with fwAD.dual_level() as level:
