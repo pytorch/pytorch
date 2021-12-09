@@ -4,7 +4,7 @@ from .graph_module import QuantizedGraphModule
 from .quantized_fusion_patterns_and_replacements import get_fbgemm_patterns_and_replacements
 from .match_utils import is_match
 from .match_utils import MatchAllNode
-from .utils import _parent_name
+from ..utils import _parent_name
 
 def _lower_ref_linear_module(model: QuantizedGraphModule) -> QuantizedGraphModule:
     # traverse the graph and find dequantize - ref quantized linear - quantize patterns and

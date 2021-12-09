@@ -54,8 +54,8 @@ from .match_utils import (
     find_matches,
 )
 
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
