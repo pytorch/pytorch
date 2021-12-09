@@ -6,6 +6,7 @@ def define_rules(rules):
         srcs = rules.glob(
             ["*.h"],
             exclude=[
+                "Array.h",
                 "C++17.h",
                 "TypeTraits.h",
             ]),
@@ -17,11 +18,19 @@ def define_rules(rules):
         srcs = rules.glob(
             ["*.cpp"],
             exclude=[
+                "Array.cpp",
                 "C++17.cpp",
                 "TypeTraits.cpp",
             ],
         ),
         visibility = ["//:__pkg__"],
+    )
+
+    rules.cc_library(
+        name = "Array",
+        hdrs = ["Array.h"],
+        srcs = ["Array.cpp"],
+        deps = [":C++17"],
     )
 
     rules.cc_library(
