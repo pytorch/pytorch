@@ -5114,7 +5114,7 @@ def multi_head_attention_forward(
             static_v=static_v,
         )
 
-    is_unbatched = False
+    is_batched = True
     # Shape check.
     if query.dim() == 3:
         assert key.dim() == 3 and value.dim() == 3, \
@@ -5132,15 +5132,11 @@ def multi_head_attention_forward(
         assert key.dim() == 2 and value.dim() == 2, \
             ("For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
              f" but found {key.dim()}-D and {value.dim()}-D tensors respectively")
-        query = query.unsqueeze(1)
-        key = key.unsqueeze(1)
-        value = value.unsqueeze(1)
 
         if key_padding_mask is not None:
             assert key_padding_mask.dim() == 1, \
                 ("For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
                  f" but found {key_padding_mask.dim()}-D tensor instead")
-            key_padding_mask = key_padding_mask.unsqueeze(0)
 
         if attn_mask is not None:
             assert attn_mask.dim() in (2, 3), \
@@ -5151,10 +5147,17 @@ def multi_head_attention_forward(
                 assert attn_mask.shape == expected_shape, \
                     (f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}")
 
-        is_unbatched = True
+        is_batched = False
     else:
         raise AssertionError(
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor")
+
+    if not is_batched:
+        query = query.unsqueeze(1)
+        key = key.unsqueeze(1)
+        value = value.unsqueeze(1)
+        if key_padding_mask is not None:
+            key_padding_mask = key_padding_mask.unsqueeze(0)
 
     # set up shape vars
     tgt_len, bsz, embed_dim = query.shape
@@ -5300,11 +5303,11 @@ def multi_head_attention_forward(
         attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len)
         attn_output_weights = attn_output_weights.sum(dim=1) / num_heads
 
-        if is_unbatched:
+        if not is_batched:
             attn_output = attn_output.squeeze(1)
             attn_output_weights = attn_output_weights.squeeze(0)
         return attn_output, attn_output_weights
     else:
-        if is_unbatched:
+        if not is_batched:
             attn_output = attn_output.squeeze(1)
         return attn_output, None

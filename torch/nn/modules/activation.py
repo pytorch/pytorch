@@ -964,7 +964,7 @@ class MultiheadAttention(Module):
         query: Query embeddings of shape :math:`(L, N, E_q)` when ``batch_first=False`` or :math:`(N, L, E_q)`
             when ``batch_first=True``, where :math:`L` is the target sequence length, :math:`N` is the batch size,
             and :math:`E_q` is the query embedding dimension ``embed_dim``. Queries can also be unbatched with shape
-            :math:`(L, E_q)`.Queries are compared against key-value pairs to produce the output.
+            :math:`(L, E_q)`. Queries are compared against key-value pairs to produce the output.
             See "Attention Is All You Need" for more details.
         key: Key embeddings of shape :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
             ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
@@ -1003,8 +1003,8 @@ class MultiheadAttention(Module):
         .. note::
             `batch_first` argument is ignored for unbatched inputs.
         """
-        org_dim = query.dim()
-        if self.batch_first and org_dim == 3:
+        is_batched = query.dim() == 3
+        if self.batch_first and is_batched:
             query, key, value = [x.transpose(1, 0) for x in (query, key, value)]
 
         if not self._qkv_same_embed_dim:
@@ -1027,7 +1027,7 @@ class MultiheadAttention(Module):
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
                 attn_mask=attn_mask)
-        if self.batch_first and org_dim == 3:
+        if self.batch_first and is_batched:
             return attn_output.transpose(1, 0), attn_output_weights
         else:
             return attn_output, attn_output_weights

@@ -364,7 +364,8 @@ class TestModule(TestCase):
                     default_output.backward(grad_output, retain_graph=True)
                 else:
                     grad_output = tuple(o.clone().detach_().normal_() for o in default_output)
-                    (o.backward(grad_output, retain_graph=True) for o in grad_output)
+                    for o, g_o in zip(default_output, grad_output):
+                        o.backward(g_o, retain_graph=True)
 
             default_input_args_grad, default_input_kwargs_grad = deepcopy(self._get_grads((input_args, input_kwargs)))
             default_param_grad = deepcopy([p.grad for p in m.parameters()])
@@ -387,7 +388,8 @@ class TestModule(TestCase):
                     if isinstance(out, torch.Tensor):
                         out.backward(g_out_copy, retain_graph=True)
                     else:
-                        (o.backward(grad_output, retain_graph=True) for o in grad_output)
+                        for o, g_o in zip(out, g_out_copy):
+                            o.backward(g_o, retain_graph=True)
 
                 input_args_grad, input_kwargs_grad = self._get_grads((in_args, in_kwargs))
                 self.assertEqual(out, default_output)

@@ -253,15 +253,15 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
-    dim = 0 if kwargs.get('batch_first', True) else 1
+    batch_dim = 0 if kwargs.get('batch_first', True) else 1
     if 'batch_first' in kwargs:
         kwargs.pop('batch_first')
     if 'key_padding_mask' in kwargs and kwargs['key_padding_mask'] is not None:
         kwargs['key_padding_mask'] = kwargs['key_padding_mask'].unsqueeze(0)
-    single_batch_input_args = [input.unsqueeze(dim) for input in args]
+    single_batch_input_args = [input.unsqueeze(batch_dim) for input in args]
     with freeze_rng_state():
         output = m(*single_batch_input_args, **kwargs)
-        return (output[0].squeeze(dim), output[1].squeeze(0))
+        return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
 def generate_regression_criterion_inputs(make_input):
