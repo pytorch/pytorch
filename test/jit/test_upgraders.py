@@ -51,14 +51,14 @@ class TestUpgraders(JitTestCase):
         upgraders_size = torch._C._get_upgraders_map_size()
 
         test_map = {"a": "b", "c": "d"}
-        torch._C._populate_test_upgraders(test_map)
+        torch._C._test_only_populate_upgraders(test_map)
         upgraders_size_after_test = torch._C._get_upgraders_map_size()
         self.assertEqual(upgraders_size_after_test - upgraders_size, 2)
         upgraders_dump = torch._C._dump_upgraders_map()
         self.assertTrue("a" in upgraders_dump)
         self.assertTrue("c" in upgraders_dump)
 
-        torch._C._remove_test_upgraders(test_map)
+        torch._C._test_only_remove_upgraders(test_map)
         upgraders_size_after_remove_test = torch._C._get_upgraders_map_size()
         self.assertTrue(upgraders_size_after_remove_test == upgraders_size)
         upgraders_dump_after_remove_test = torch._C._dump_upgraders_map()
