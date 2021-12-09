@@ -1,5 +1,6 @@
 from collections import OrderedDict
-from typing import Any, Dict, Callable
+import re
+from typing import Any, Dict, Callable, Union
 
 from .utils import (
     get_combined_dict,
@@ -7,6 +8,55 @@ from .utils import (
 from .quantization_mappings import (
     get_default_qat_module_mappings,
 )
+# TODO(future PR): move this out of the torch.ao.quantization.fx folder
+from torch.ao.quantization.fx.utils import _parent_name
+from torch.ao.quantization.qconfig import QConfigAny
+
+
+def get_object_type_qconfig(
+        qconfig_dict: Any,
+        object_type: Union[Callable, str],
+        fallback_qconfig: QConfigAny) -> QConfigAny:
+    # object_type can be
+    # 1. module type (call_module)
+    # 2. function (call_function)
+    # 3. string (call_method)
+    return qconfig_dict['object_type'].get(
+        object_type, fallback_qconfig)
+
+
+def get_module_name_regex_qconfig(qconfig_dict, module_name, fallback_qconfig):
+    for regex_pattern, qconfig in \
+            qconfig_dict['module_name_regex'].items():
+        if re.match(regex_pattern, module_name):
+            # first match wins
+            return qconfig
+    return fallback_qconfig
+
+
+def get_module_name_qconfig(qconfig_dict, module_name, fallback_qconfig):
+    if module_name == '':
+        # module name qconfig not found
+        return fallback_qconfig
+    if module_name in qconfig_dict['module_name']:
+        return qconfig_dict['module_name'][module_name]
+    else:
+        parent, _ = _parent_name(module_name)
+        return get_module_name_qconfig(qconfig_dict, parent, fallback_qconfig)
+
+
+def maybe_adjust_qconfig_for_module_type_or_name(qconfig_dict, module_type, module_name, global_qconfig):
+    # get qconfig for module_name,
+    # fallback to module_name_regex_qconfig, module_type_qconfig,
+    # global_qconfig if necessary
+    module_type_qconfig = get_object_type_qconfig(
+        qconfig_dict, module_type, global_qconfig)
+    module_name_regex_qconfig = get_module_name_regex_qconfig(
+        qconfig_dict, module_name, module_type_qconfig)
+    module_name_qconfig = get_module_name_qconfig(
+        qconfig_dict, module_name, module_name_regex_qconfig)
+    return module_name_qconfig
+
 
 def get_flattened_qconfig_dict(qconfig_dict):
     """ flatten the global, object_type and module_name qconfig
