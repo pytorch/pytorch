@@ -270,59 +270,61 @@ std::ostream& operator<<(std::ostream& out, ArrayRef<T> list) {
 /// @{
 
 /// Construct an ArrayRef from a single element.
-template<typename T>
-ArrayRef<T> makeArrayRef(const T &OneElt) {
+template <typename T>
+ArrayRef<T> makeArrayRef(const T& OneElt) {
   return OneElt;
 }
 
 /// Construct an ArrayRef from a pointer and length.
-template<typename T>
-ArrayRef<T> makeArrayRef(const T *data, size_t length) {
+template <typename T>
+ArrayRef<T> makeArrayRef(const T* data, size_t length) {
   return ArrayRef<T>(data, length);
 }
 
 /// Construct an ArrayRef from a range.
-template<typename T>
-ArrayRef<T> makeArrayRef(const T *begin, const T *end) {
+template <typename T>
+ArrayRef<T> makeArrayRef(const T* begin, const T* end) {
   return ArrayRef<T>(begin, end);
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T>
-ArrayRef<T> makeArrayRef(const SmallVectorImpl<T> &Vec) {
+ArrayRef<T> makeArrayRef(const SmallVectorImpl<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a SmallVector.
 template <typename T, unsigned N>
-ArrayRef<T> makeArrayRef(const SmallVector<T, N> &Vec) {
+ArrayRef<T> makeArrayRef(const SmallVector<T, N>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::vector.
-template<typename T>
-ArrayRef<T> makeArrayRef(const std::vector<T> &Vec) {
+template <typename T>
+ArrayRef<T> makeArrayRef(const std::vector<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a std::array.
 template <typename T, std::size_t N>
-ArrayRef<T> makeArrayRef(const std::array<T, N> &Arr) {
+ArrayRef<T> makeArrayRef(const std::array<T, N>& Arr) {
   return Arr;
 }
 
 /// Construct an ArrayRef from an ArrayRef (no-op) (const)
-template <typename T> ArrayRef<T> makeArrayRef(const ArrayRef<T> &Vec) {
+template <typename T>
+ArrayRef<T> makeArrayRef(const ArrayRef<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from an ArrayRef (no-op)
-template <typename T> ArrayRef<T> &makeArrayRef(ArrayRef<T> &Vec) {
+template <typename T>
+ArrayRef<T>& makeArrayRef(ArrayRef<T>& Vec) {
   return Vec;
 }
 
 /// Construct an ArrayRef from a C array.
-template<typename T, size_t N>
+template <typename T, size_t N>
 ArrayRef<T> makeArrayRef(const T (&Arr)[N]) {
   return ArrayRef<T>(Arr);
 }

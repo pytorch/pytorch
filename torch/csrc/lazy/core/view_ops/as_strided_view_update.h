@@ -7,7 +7,7 @@
 namespace torch {
 namespace lazy {
 
-class AsStridedViewUpdate : public TsNode {
+class TORCH_API AsStridedViewUpdate : public TsNode {
  public:
   AsStridedViewUpdate(
       const Value& target,
