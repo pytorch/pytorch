@@ -958,7 +958,7 @@ def gen_aggregated_headers(
         static_dispatch_idx: Optional[BackendIndex],
         backend_indices: Dict[DispatchKey, BackendIndex],
         cpu_fm: FileManager,
-):
+) -> None:
     # Buck doesn't support dynamic output files, so we aggregate all operator
     # headers into a single file
     structured_native_functions = [g for g in grouped_native_functions
@@ -1008,7 +1008,7 @@ def gen_per_operator_headers(
         backend_indices: Dict[DispatchKey, BackendIndex],
         cpu_fm: FileManager,
         ops_fm: FileManager,
-):
+) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
     functions_by_base_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
