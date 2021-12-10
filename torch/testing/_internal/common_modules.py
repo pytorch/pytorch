@@ -200,19 +200,19 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, *
             if x1.shape[0] == 1:
                 result = result.view(-1) + p[1]
             else:
-                result = result + p[1].view(1, -1).expand(x1.shape[0], 40)
+                result = result + p[1].view(1, -1).expand(x1.shape[0], p[0].shape[0])
         return result
 
     module_inputs = [
-        ModuleInput(constructor_input=FunctionInput(20, 30, 40),
-                    forward_input=FunctionInput(make_input(shape=(128, 20)), make_input(shape=(128, 30))),
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4),
+                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2)),
-        ModuleInput(constructor_input=FunctionInput(20, 30, 40, bias=False),
-                    forward_input=FunctionInput(make_input(shape=(128, 20)), make_input(shape=(128, 30))),
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4, bias=False),
+                    forward_input=FunctionInput(make_input(shape=(8, 2)), make_input(shape=(8, 3))),
                     desc='no_bias',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1, x2, bias=False)),
-        ModuleInput(constructor_input=FunctionInput(20, 30, 40),
-                    forward_input=FunctionInput(make_input(shape=(20)), make_input(shape=(30))),
+        ModuleInput(constructor_input=FunctionInput(2, 3, 4),
+                    forward_input=FunctionInput(make_input(shape=(2)), make_input(shape=(3))),
                     desc='no_batch_dim',
                     reference_fn=lambda m, p, x1, x2: bilinear_reference_fn(m, p, x1.view(1, -1), x2.view(1, -1))),
     ]
