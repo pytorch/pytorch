@@ -5626,7 +5626,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
 
         tensor_scalar_inputs = (
             ((2, 2), 0, 5, 1e-3, requires_grad, (3.14,)),
-            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (3.14,)),
+            ((), 1e-3, 1e-3 + 1, 0, requires_grad, (3.14,))
         )
         more_samples = list(SampleInput(
             (make_arg(shape, high=high, low=low) + additive).requires_grad_(b_grad),
@@ -5638,7 +5638,7 @@ def sample_inputs_pow(op_info, device, dtype, requires_grad, **kwargs):
         args_tuple = (
             ((2, 2), 0, 5, requires_grad, (3.14,)),
             ((), 0, 1, requires_grad, (3.14,)),
-            ((), 0, 1, requires_grad, (3.14j,)),
+            ((), 0, 1, requires_grad, (3.14j,))
         )
         samples = list(SampleInput(
             (make_arg(shape, high=high, low=low) + 1e-3 * (1 + 1j)).requires_grad_(b_grad),

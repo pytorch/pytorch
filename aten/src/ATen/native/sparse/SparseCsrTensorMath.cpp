@@ -90,7 +90,7 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result, Args... args)
   auto self_values = self.values();
   auto result_values = result.values();
 
-  op_out(self_values, std::forward<Args>(args)..., result_values);
+  op_out(self_values, args..., result_values);
   return result;
 }
 
@@ -141,7 +141,7 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input, Args... 
   // To handle type promotion for inputs to unary ops,
   // we first get the result from the underlined op, and use the result
   // to create a sparse CSR tensor, which is used as the input to the out= variant
-  auto result_values = op(values, std::forward<Args>(args)...);
+  auto result_values = op(values, args...);
 
   auto result = at::native::_sparse_csr_tensor_unsafe(
     input.crow_indices().clone(),
