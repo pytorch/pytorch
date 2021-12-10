@@ -2,17 +2,15 @@ from typing import List, cast
 
 import torch
 import torch.distributed as dist
-from torch.distributed._sharded_tensor.ops._common import (
-    _handle_col_wise_sharding_base,
-)
 from torch.distributed._sharding_spec import ChunkShardingSpec
 from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
+    get_chuck_sharding_params,
 )
 from torch.distributed.nn.functional import (
+    all_gather,
     all_to_all_single,
-    reduce_scatter,
 )
 
 
@@ -24,6 +22,9 @@ def sharded_linear(types, args, kwargs, pg):
     1. Supports only sharding of ``weight``.
     2. Supports only ``ChunkShardingSpec``.
     3. Supports only a single local shard per rank.
+    4. Tailored for Megatron-LM style model(tensor) parallelism. Further API
+       calls are needed if a fully synced local tensor is needed.
+       Megatron-LM paper link: https://arxiv.org/abs/1909.08053
 
     Based on the dimension that the weight is sharded on, there are two
     algorithms:
@@ -47,11 +48,13 @@ def sharded_linear(types, args, kwargs, pg):
        size that we need for the global result which would be (13 x 16)
        multiplied by (16 x 17). But the final result needs to be aggregated
        across the rest of the ranks.
-    3. Now the local matmul results are aggregated and shared to all the
-       corresponding ranks using a reduce_scatter operation ensuring each rank
+    3. Here we just return the partial result here. One can call API
+       aggregate_partial_tensor_list to get the aggregated final result.
+       The API uses a reduce_scatter operation ensuring each rank
        aggregates its own result. This is essentially a sum operation across
        all the (13 x 17) local computations we did for each rank.
-    4. Finally, we add the bias term locally to the final computation.
+    4. For partial result, we only add 1 / n of the bias term to the partial
+       result. n is # of all GPUs.
 
     COLWISE SHARDING
     ================
@@ -69,22 +72,68 @@ def sharded_linear(types, args, kwargs, pg):
     2. Next we perform local matmuls by multiplying each input (13 x 17)
        with the local shard (17 x 4) (transposed). This results in 4 (13 x 4)
        matrices on each rank.
-    3. Next, we concat these 4 matrices and perform an all2all to share the
-       appropriate (13 x 4) matrices to each rank.
-    4. Now, each rank receives a (13 x 16) matrix which is basically the size
-       of the result we need.
+    3. Next, we stack them into a (4 x 13 x 4) tensor and build a sharded
+       tensor across 4 ranks.
+    4. To merge them into a fully-sync local tensor, one can call API
+       merge_sharded_local_results.
+       This API concat these 4 matrices and perform an all2all to share the
+       appropriate (13 x 4) matrices to each rank. Specifically, each rank
+       receives a (13 x 16) matrix which is basically the size of the result.
     5. If placements are not in order any appropriate rearrangement of rows
        are done for the (13 x 16) matrix and finally the bias term is added.
     """
     from torch.distributed._sharded_tensor import ShardedTensor
+    # Validate input params
+    _validate_embedding_param(args, kwargs)
+    input = args[0]
+    weight = args[1]
+    bias = kwargs["bias"]
 
+    local_shard = weight.local_shards()[0].tensor
+    local_shard_t = local_shard.t().contiguous()
+    sharding_dim = weight._sharding_spec.dim
+    world_size = dist.get_world_size(pg)
+    rank = dist.get_rank(pg)
+
+    if sharding_dim == 1 and isinstance(input, torch.Tensor):
+        return _handle_row_wise_sharding_tensor(
+            input, world_size, weight, rank, local_shard_t, bias, pg
+        )
+    elif sharding_dim == 1 and isinstance(input, ShardedTensor):
+        return _handle_row_wise_sharding_sharded_tensor(
+            input, world_size, local_shard_t, bias
+        )
+    elif sharding_dim == 0:
+        return _handle_col_wise_sharding(
+            input, world_size, weight, rank, local_shard_t, bias, pg
+        )
+    else:
+        raise RuntimeError(
+            f"nn.Linear weight sharded on dim {sharding_dim} not supported!"
+        )
+
+
+def _validate_embedding_param(args, kwargs):
+    """
+    Validate input params of sharded embedding op.
+
+    Args:
+        input: input of the linear layer.
+        weight: shareded weight tensor.
+        kwargs: same as normal Linear.
+
+    Return: None.
+    """
+    from torch.distributed._sharded_tensor import ShardedTensor
     input = args[0]
     weight = args[1]
     bias = kwargs["bias"]
 
     # Validate types
-    if not isinstance(input, torch.Tensor) or not isinstance(bias, torch.Tensor):
-        raise TypeError("input and bias need to be torch.Tensor")
+    if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
+        raise TypeError("input needs to be either torch.Tensor or ShardedTensor")
+    if not isinstance(bias, torch.Tensor):
+        raise TypeError("bias needs to be torch.Tensor")
     if not isinstance(weight, ShardedTensor):
         raise TypeError("weight needs to be ShardedTensor")
     if len(input.size()) < 2:
@@ -105,27 +154,8 @@ def sharded_linear(types, args, kwargs, pg):
     if len(weight.local_shards()) != 1:
         raise ValueError("Only one local shard supported!")
 
-    local_shard = weight.local_shards()[0].tensor
-    local_shard_t = local_shard.t().contiguous()
-    sharding_dim = weight._sharding_spec.dim
-    world_size = dist.get_world_size(pg)
-    rank = dist.get_rank(pg)
 
-    if sharding_dim == 1:
-        return _handle_row_wise_sharding(
-            input, world_size, weight, rank, local_shard_t, bias, pg
-        )
-    elif sharding_dim == 0:
-        return _handle_col_wise_sharding(
-            input, world_size, weight, local_shard_t, bias, pg
-        )
-    else:
-        raise RuntimeError(
-            f"nn.Linear weight sharded on dim {sharding_dim} not supported!"
-        )
-
-
-def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg):
+def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
     """
     Entry-point function to handle the logic of col-wise sharding of weight
     for Linear. (Detailed explanations of the logic can be found in the
@@ -135,28 +165,28 @@ def _handle_col_wise_sharding(input, world_size, weight, local_shard_t, bias, pg
         input: matrix to be multiplied with the sharded weight.
         world_size: number of ranks.
         weight: shareded weight tensor.
+        rank:
         local_shard_t: row-wise shared local weight used for lookup.
         bias: bias term of linear op.
         pg: process group.
 
-    Returns: final result of linear operation.
+    Returns: Intermediate result stored as a sharded tensor.
     """
-    return (
-        _handle_col_wise_sharding_base(
-            torch.matmul,
-            weight.size(0),
-            len(input.size()) - 1,
-            input,
-            world_size,
-            weight,
-            local_shard_t,
-            pg,
-        )
-        + bias
-    )
+    from torch.distributed._sharded_tensor import init_sharded_tensor_from_local_result
+    # allgather the inputs first.
+    gathered_inputs = all_gather(input, group=pg)
+    (start_pos, chunk_size) = get_chuck_sharding_params(bias.size(0), world_size, weight._sharding_spec, rank)
+    local_bias = torch.narrow(bias, 0, start_pos, chunk_size)
+    results = []
+    for i, inp in enumerate(gathered_inputs):
+        results.append(inp.matmul(local_shard_t) + local_bias)
+    return init_sharded_tensor_from_local_result(
+        weight, torch.stack(results), 0, 2, world_size, pg)
 
 
-def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bias, pg):
+def _handle_row_wise_sharding_tensor(
+    input, world_size, weight, rank, local_shard_t, bias, pg
+):
     """
     Entry-point function to handle the logic of row-wise sharding of weight
     for Linear. (Detailed explanations of the logic can be found in the
@@ -207,22 +237,32 @@ def _handle_row_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
             0, torch.tensor(indices_flatten, device=input_t.device)
         )
 
-    gathered_input = torch.empty(input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device)
+    gathered_input = torch.empty(
+        input_split_sizes[rank] * world_size, input_t_size[1], device=input_t.device
+    )
 
     # Perform autograd enabled alltoall
-    all_to_all_single(gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg)
+    all_to_all_single(
+        gathered_input, input_t, input_split_sizes=input_split_sizes, group=pg
+    )
     gathered_input = gathered_input.t()
 
     # Perform local matmuls for all shards
-    shard_size = local_shard_t.size()[0]
     results = []
+    shard_size = local_shard_t.size()[0]
     for r in range(world_size):
         inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
-        results.append(inp.matmul(local_shard_t))
+        results.append(inp.matmul(local_shard_t) + bias / world_size)
 
-    # Gather all the results appropriately.
-    local_result = torch.empty_like(results[rank])
-    local_result = reduce_scatter(local_result, results, group=pg)
+    # Return the partial local result.
+    return results
 
-    # Return the appropriate local result.
-    return local_result + bias
+
+def _handle_row_wise_sharding_sharded_tensor(input, world_size, local_shard_t, bias):
+    results = []
+    local_shard = input.local_shards()[0].tensor
+    for i in range(local_shard.size(0)):
+        results.append(local_shard[i].matmul(local_shard_t) + bias / world_size)
+
+    # Return the partial local result.
+    return results

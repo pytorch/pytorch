@@ -5,7 +5,9 @@ import sys
 import torch
 import torch.distributed as dist
 from torch.distributed._sharded_tensor import (
+    aggregate_partial_tensor_list,
     shard_parameter,
+    merge_sharded_local_results,
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -34,11 +36,10 @@ if TEST_WITH_DEV_DBG_ASAN:
 
 
 class TestShardedTensorOpsLinear(ShardedTensorTestBase):
-    def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim):
+    def _run_sharded_linear(self, spec, input_size, linear_size, sharded_dim, merge_func):
         # Use same seed.
         torch.manual_seed(0)
         local_linear = torch.nn.Linear(*linear_size).cuda(self.rank)
-
         sharded_linear = torch.nn.Linear(*linear_size)
 
         # Copy the weights and bias from local linear
@@ -51,7 +52,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         # Run sharded computation
         torch.manual_seed(self.rank)  # inputs different on each rank
         inp = torch.rand(*input_size).cuda(self.rank)
-        sharded_output = sharded_linear(inp)
+        sharded_output = merge_func(sharded_linear(inp))
 
         # Run local computation
         local_output = local_linear(inp)
@@ -66,6 +67,7 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         sharded_output = torch.nn.functional.linear(
             inp, sharded_linear.weight, sharded_linear.bias
         )
+        sharded_output = merge_func(sharded_output)
         self.assertEqual(local_output, sharded_output)
 
         # Compute loss and run backward pass.
@@ -87,32 +89,49 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
         local_weight_narrowed = local_linear.weight.narrow(
             sharded_dim, start_pos, chunk_size
         )
+        local_bias_grad = local_linear.bias.grad
+        sharded_bias_grad = sharded_linear.bias.grad
+        # For col-wise sharding, the gradient of bias is also sharded.
+        if sharded_dim == 0:
+            dist.all_reduce(local_bias_grad)
+            local_bias_grad = local_bias_grad.narrow(
+                sharded_dim, start_pos, chunk_size
+            )
+            sharded_bias_grad = sharded_bias_grad.narrow(
+                sharded_dim, start_pos, chunk_size
+            )
 
         # Test backward gradient calculation.
-        self.assertEqual(sharded_linear.bias.grad, local_linear.bias.grad)
+        self.assertEqual(sharded_bias_grad, local_bias_grad)
         self.assertEqual(sharded_weight.grad, local_grad_narrowed)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_colwise(self):
+        def aggregate_colwise_local_result(sharded_local_result):
+            return merge_sharded_local_results(sharded_local_result, TEST_GPU_NUM)
+
         for spec in generate_chunk_sharding_specs_for_test(0):
-            self._run_sharded_linear(spec, [2, 17], [17, 12], 0)
-            self._run_sharded_linear(spec, [8, 21], [21, 11], 0)
-            self._run_sharded_linear(spec, [7, 23], [23, 13], 0)
-            self._run_sharded_linear(spec, [4, 15], [15, 14], 0)
+            self._run_sharded_linear(spec, [2, 17], [17, 12], 0, aggregate_colwise_local_result)
+            self._run_sharded_linear(spec, [8, 21], [21, 11], 0, aggregate_colwise_local_result)
+            self._run_sharded_linear(spec, [7, 23], [23, 13], 0, aggregate_colwise_local_result)
+            self._run_sharded_linear(spec, [4, 15], [15, 14], 0, aggregate_colwise_local_result)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
     @requires_nccl()
     def test_sharded_linear_rowwise(self):
+        def aggregate_rowwise_partial_result(tensor_list):
+            return aggregate_partial_tensor_list(tensor_list, self.rank)
+
         for spec in generate_chunk_sharding_specs_for_test(1):
             # Test even split.
-            self._run_sharded_linear(spec, [8, 16], [16, 11], 1)
+            self._run_sharded_linear(spec, [8, 16], [16, 11], 1, aggregate_rowwise_partial_result)
 
             # Test uneven split.
-            self._run_sharded_linear(spec, [5, 19], [19, 11], 1)
-            self._run_sharded_linear(spec, [10, 21], [21, 11], 1)
+            self._run_sharded_linear(spec, [5, 19], [19, 11], 1, aggregate_rowwise_partial_result)
+            self._run_sharded_linear(spec, [10, 21], [21, 11], 1, aggregate_rowwise_partial_result)
 
 
 if __name__ == "__main__":

@@ -28,6 +28,7 @@ from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .ops import (
     kaiming_uniform_,
+    math_ops,
     normal_,
     sharded_embedding,
     sharded_embedding_bag,
@@ -553,6 +554,9 @@ class ShardedTensor(object):
             return sharded_embedding(types, args, kwargs, self._process_group)
         if func == torch.nn.functional.embedding_bag:
             return sharded_embedding_bag(types, args, kwargs, self._process_group)
+        if func == torch.nn.functional.gelu:
+            kwargs['math_op'] = torch.nn.functional.gelu
+            return math_ops(types, args, kwargs)
         elif func == torch.nn.init.normal_:
             return normal_(types, args, kwargs)
         elif func == torch.nn.init.uniform_:

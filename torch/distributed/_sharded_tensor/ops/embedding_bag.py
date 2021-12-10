@@ -315,7 +315,6 @@ def _handle_col_wise_sharding(
 
     output = _handle_col_wise_sharding_base(
         torch.nn.functional.embedding_bag,
-        weight.size(1),
         1,
         input,
         world_size,

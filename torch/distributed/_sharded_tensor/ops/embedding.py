@@ -221,7 +221,6 @@ def _handle_col_wise_sharding(
 
     output = _handle_col_wise_sharding_base(
         torch.nn.functional.embedding,
-        weight.size(1),
         len(input.size()),
         input,
         world_size,

@@ -2,6 +2,9 @@
 
 import copy
 import torch
+from torch.distributed.nn.functional import (
+    reduce_scatter,
+)
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
     ShardingSpec,
@@ -451,7 +454,6 @@ def shard_parameter(
     # Rearrange chunks according to placement.
     local_metadata = None
     current_offsets = [0] * len(tensor.size())
-    shards_metadata = []
     sharding_dim_size = tensor.size(sharding_spec.dim)  # type: ignore[arg-type]
     split_size = get_split_size(sharding_dim_size, world_size)
     tensor_sizes = list(tensor.size())
@@ -465,7 +467,6 @@ def shard_parameter(
             shard_sizes=shard_size,
             placement=placement,
         )
-        shards_metadata.append(shard_metadata)
 
         if rank == placement.rank():  # type: ignore[union-attr]
             local_metadata = shard_metadata
@@ -510,3 +511,109 @@ def shard_parameter(
 
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
+
+
+def init_sharded_tensor_from_local_result(
+    sharded_tensor,
+    local_result,
+    tensor_shard_dim,
+    result_shard_dim,
+    world_size,
+    pg,
+):
+    """
+    Given a sharded tensor and local_result from an op on top of it. We want
+    to create a new sharded tensor from the local_result so that the the next
+    op can be performed on the basis of the new sharded tensor. This can seen
+    as the last step of the first phase of the Megatron-LM style model(tensor)
+    parallelism.
+
+    Args:
+        sharded_tensor: Sharded tensor which the op was performed on.
+        local_result: A tensor which is from the op performed on the local_shard of
+            the sharded_tensor.
+        tensor_shard_dim: Dim which the tensor is sharded on.
+        result_shard_dim: Dim which the new sharded tensor will be sharded on.
+        world_size: number of ranks.
+        pg (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Return: new sharded tensor from the local_result.
+    """
+    sharded_weight_metadata = sharded_tensor.local_shards()[0].metadata
+    current_offsets = [0] * len(local_result.size())
+    current_offsets[result_shard_dim] = sharded_weight_metadata.shard_offsets[tensor_shard_dim]
+    local_shard_metadata = ShardMetadata(
+        shard_offsets=current_offsets,
+        shard_sizes=list(local_result.size()),
+        placement=sharded_weight_metadata.placement,
+    )
+    local_shards = [Shard(local_result, local_shard_metadata)]
+    global_size = list(local_result.size())
+    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
+
+    new_st = ShardedTensor._init_from_local_shards(local_shards, tuple(global_size), process_group=pg)
+
+    # Manually set sharding_spec
+    new_st._sharding_spec = copy.deepcopy(sharded_tensor._sharding_spec)
+    new_st._sharding_spec.dim = result_shard_dim
+    return new_st
+
+
+def merge_sharded_local_results(
+    sharded_local_result,
+    world_size,
+    pg=None,
+):
+    """
+    Given a local result sharded tensor, we want to merge it into a local tensor.
+
+    Args:
+        sharded_local_result: Sharded tensor which we need to merge.
+        world_size: number of ranks.
+        pg (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Return: new sharded tensor from the local_result.
+    """
+    from torch.distributed._sharded_tensor.ops._common import (
+        _result_distribute_with_col_rearrange,
+    )
+    local_shard = sharded_local_result.local_shards()[0].tensor
+    local_results = []
+    for i in range(local_shard.size(0)):
+        local_results.append(local_shard[i].t().contiguous())
+
+    # Distribute results to each rank with col rearrangement.
+    output = _result_distribute_with_col_rearrange(
+        local_results,
+        local_shard,
+        world_size,
+        sharded_local_result,
+        pg
+    )
+
+    # transpose the output and return result.
+    return output.t().contiguous()
+
+
+def aggregate_partial_tensor_list(
+    tensor_list,
+    rank,
+    pg=None,
+):
+    """
+    Given parital result from op on a sharded tensor. We want to aggregate the
+    partial result to create a fully synced local tensor. This can seen as the
+    last step of the second phase of the Megatron-LM style model(tensor) parallelism.
+
+    Args:
+        tensor_list: List of partial results to be aggergated on.
+        rank: # of cuda process.
+        pg (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Return: new sharded tensor from the local_result.
+    """
+    local_result = torch.empty_like(tensor_list[rank])
+    return reduce_scatter(local_result, tensor_list, group=pg)
