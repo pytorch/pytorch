@@ -1500,15 +1500,6 @@ class TensorOrArrayPair(TensorLikePair):
 
         super()._check_supported(tensor, id=id)
 
-    # TODO: As discussed in https://github.com/pytorch/pytorch/issues/68590#issuecomment-975333883,
-    #  this relaxation should only be temporary and this overwrite should be removed completely in the future.
-    def _equalize_attributes(self, actual, expected):
-        actual, expected = super()._equalize_attributes(actual, expected)
-        if not actual.is_sparse:
-            return actual, expected
-
-        return actual.coalesce(), expected.coalesce()
-
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
