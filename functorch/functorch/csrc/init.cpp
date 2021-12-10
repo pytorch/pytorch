@@ -15,6 +15,7 @@
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <functorch/csrc/PointwiseOperatorCompileCache.h>
 #include <functorch/csrc/CompileCache.h>
+#include <functorch/csrc/CustomFunction.h>
 
 
 namespace at {
@@ -205,6 +206,9 @@ static int64_t maybe_get_bdim(const Tensor& tensor) {
 } // namespace functorch
 }
 
+
+namespace at { namespace functorch {
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("_add_batch_dim", &at::functorch::_add_batch_dim, "add batch dim");
   m.def("_remove_batch_dim", &at::functorch::_remove_batch_dim, "remove batch dim");
@@ -231,4 +235,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
   at::functorch::initCompileCacheBindings(m.ptr());
+  initDispatchBindings(m.ptr());
 }
+
+}}
