@@ -9,7 +9,6 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
-#include <mutex>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
