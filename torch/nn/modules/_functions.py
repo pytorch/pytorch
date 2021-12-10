@@ -68,6 +68,8 @@ class SyncBatchNorm(Function):
             count_all.view(-1)
         )
 
+        print("MEAN: ", )
+
         self.save_for_backward(input, weight, mean, invstd, count_all.to(torch.int32))
         self.process_group = process_group
 

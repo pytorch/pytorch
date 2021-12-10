@@ -265,17 +265,16 @@ class Task(nn.Module):
 class BatchNormNet(nn.Module):
     def __init__(self, affine=True):
         super(BatchNormNet, self).__init__()
-        #self.fc1 = nn.Linear(2, 40, bias=False)
+        self.fc1 = nn.Linear(2, 40, bias=False)
         self.bn = nn.BatchNorm1d(4, affine=affine)
-        #self.fc2 = nn.Linear(40, 4, bias=False)
+        self.fc2 = nn.Linear(40, 4, bias=False)
 
     def forward(self, x):
-        #x = torch.reshape(self.fc1(x), (-1, 4, 10))
+        x = torch.reshape(self.fc1(x), (-1, 4, 10))
         x = self.bn(x)
-        #x = torch.reshape(x, (-1, 40))
-        #x = self.fc2(x)
-        return x
-        #return F.softmax(x, dim=1)
+        x = torch.reshape(x, (-1, 40))
+        x = self.fc2(x)
+        return F.softmax(x, dim=1)
 
 
 class UnusedParamTwoLinLayerNet(nn.Module):
@@ -3621,10 +3620,6 @@ class DistributedTest:
                     memory_format=memory_format,
                 )
 
-                self._assert_equal_param(
-                    list(model_base.parameters()), list(model_DDP.module.parameters())
-                )
-
                 # Update weights and run a second iteration to shake out errors
                 if zero_grad:
                     self._model_step_with_zero_grad(model_base)
@@ -3633,6 +3628,9 @@ class DistributedTest:
                     self._model_step(model_base)
                     self._model_step(model_DDP)
 
+                self._assert_equal_param(
+                    list(model_base.parameters()), list(model_DDP.module.parameters())
+                )
 
                 # Shuffle the input so that DDP input is different
                 input = input[torch.randperm(batch_size)]
@@ -4592,6 +4590,7 @@ class DistributedTest:
             print("global batch size: ", global_batch_size)
             print("input: ", input_cpu.shape)
             print("target: ", target.shape)
+            print("gpu subset: ", gpu_subset)
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(

@@ -779,7 +779,7 @@ std::tuple<Tensor, Tensor> batch_norm_gather_stats_cuda_template(const Tensor& m
   save_mean_ = at::empty({features}, input_options);
   save_invstd_ = at::empty({features}, input_options);
 
-  if (mean_.size(0) == 0) {  // empty batch
+  if (save_mean_.size(0) == 0) {  // empty batch
     return std::make_tuple(save_mean_, save_invstd_);
   }
 
