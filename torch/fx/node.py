@@ -192,7 +192,6 @@ class Node:
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
-        self._stack_trace : Optional[str] = None
 
         # Dictionary to store metadata passes need to do their
         # transformations. This metadata is preserved across node copies
@@ -355,11 +354,11 @@ class Node:
         stack traces during tracing for debug purposes, set
         `record_stack_traces = True` on the `Tracer` instance.
         """
-        return self._stack_trace
+        return self.meta.get("stack_trace", None)
 
     @stack_trace.setter
     def stack_trace(self, trace : Optional[str]):
-        self._stack_trace = trace
+        self.meta["stack_trace"] = trace
 
     def __update_args_kwargs(self, new_args : Tuple['Argument', ...], new_kwargs : Dict[str, 'Argument']):
         """
