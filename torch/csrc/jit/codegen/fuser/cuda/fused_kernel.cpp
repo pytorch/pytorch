@@ -7,7 +7,6 @@
 #include <ATen/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <THC/THC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/csrc/jit/resource_guard.h>
 

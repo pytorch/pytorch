@@ -252,7 +252,7 @@ option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 cmake_dependent_option(
     USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_LESS \"3.16\"" OFF)
+    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
@@ -770,6 +770,7 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-noexcept-type")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"

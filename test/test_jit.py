@@ -68,7 +68,7 @@ from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobi
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
-from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 
 # Torch
@@ -382,6 +382,15 @@ class TestJit(JitTestCase):
 
         files = zipfile.ZipFile(buf).filelist
         self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
+
+    def test_script_fn_pkl(self):
+        with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
+
+            @torch.jit.script
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -11219,6 +11228,12 @@ dedent """
             return x.where(x > 0.0, y)
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
+    def test_union_to_number(self):
+        @torch.jit.script
+        def fn(x: Union[int, complex, float], y: Union[int, complex, float]):
+            return x + y
+        FileCheck().check(": Scalar):").run(fn.graph)
 
     def test_reassign_module_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\''):

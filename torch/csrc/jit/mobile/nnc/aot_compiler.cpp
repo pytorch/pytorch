@@ -62,7 +62,7 @@ std::unique_ptr<Function> compileMethod(
   auto const_descriptors = kernel->getConstantDescriptors();
   for (const auto& cd : const_descriptors) {
     auto sizes = getConstSizes(cd.buf);
-    if (cd.ptr) {
+    if (!cd.node) {
       // sizes.empty() needs to be handled as sizes can be empty for Scalar
       // Tensors
       at::Tensor const_tensor = !sizes.empty()
