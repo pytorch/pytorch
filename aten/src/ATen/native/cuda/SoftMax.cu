@@ -713,8 +713,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t remaining = outer_size;
             int64_t chunk_size = (1L << 30L) / dim_size;
             while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax>(
-                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, is_log_softmax, false>(
+                output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
               input_ptr += chunk_size * dim_size;
               output_ptr += chunk_size * dim_size;
               remaining -= chunk_size;
@@ -734,8 +734,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             int64_t remaining = outer_size;
             int64_t chunk_size = (1<<30) / dim_size;
             while(remaining > 0) {
-              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax>(
-                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size));
+              dispatch_softmax_forward<scalar_t, accscalar_t, accscalar_t, is_log_softmax, false>(
+                  output_ptr, input_ptr, dim_size, dim_size, std::min<int64_t>(remaining, chunk_size), nullptr/* not masked */);
               input_ptr += chunk_size * dim_size;
               output_ptr += chunk_size * dim_size;
               remaining -= chunk_size;
@@ -940,6 +940,33 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   }
   Tensor tmp = grad * output;
   host_softmax_backward<SoftMaxBackwardEpilogue,false>(tmp, output, dim, half_to_float, grad_input);
+}
+
+Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
+    TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
+    // Always do masked softmax on last dim
+    int softmax_elements = input.size(input.dim() - 1);
+    TORCH_CHECK(softmax_elements <= 1024, "TODO: Masked softmax only support softmax elements <= 1024");
+    Tensor output = at::empty_like(input, input.options());
+    int batch_count = input.numel() / softmax_elements;
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half,
+      ScalarType::BFloat16,
+      input.scalar_type(),
+      "masked_softmax",
+      [&] {
+        using accscalar_t = acc_type<scalar_t, true>;
+        dispatch_softmax_forward<scalar_t, scalar_t, accscalar_t, false, true>(
+          output.data_ptr<scalar_t>(),      // dst
+          input.data_ptr<scalar_t>(),       // src
+          softmax_elements,
+          softmax_elements,
+          batch_count,
+          mask.data_ptr<bool>()
+        );
+      });
+    return output;
 }
 }
 }
