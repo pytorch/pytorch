@@ -186,17 +186,70 @@ c10::optional<bool> ConstantValueMap::GetUseInferredType(
   return ConstantValueMap::getInstance().useInferredTypeMap[tensorName];
 }
 
+void ConstantValueMap::SetShapeValue(
+    const std::string& tensorName,
+    const c10::SymbolicShape& shapeValue) {
+  ConstantValueMap::getInstance().shapeValueMap[tensorName] = shapeValue;
+}
+
+bool ConstantValueMap::HasShapeValue(const std::string& tensorName) {
+  return ConstantValueMap::getInstance().shapeValueMap.find(tensorName) !=
+      ConstantValueMap::getInstance().shapeValueMap.end();
+}
+
+c10::optional<c10::SymbolicShape> ConstantValueMap::GetShapeValue(
+    const std::string& tensorName) {
+  if (!HasShapeValue(tensorName)) {
+    return c10::nullopt;
+  }
+  return ConstantValueMap::getInstance().shapeValueMap[tensorName];
+}
+
+template <typename Map>
+void UpdateStrKey(
+    Map& map,
+    const std::string& old_key,
+    const std::string& new_key) {
+  TORCH_INTERNAL_ASSERT(old_key != new_key);
+  if (map.find(old_key) == map.end()) {
+    return;
+  }
+  map[new_key] = map[old_key];
+  map.erase(old_key);
+}
+
+void ConstantValueMap::UpdateValueName(
+    const std::string& old_name,
+    const std::string& new_name) {
+  if (old_name == new_name) {
+    return;
+  }
+  UpdateStrKey<decltype(rankMap)>(
+      ConstantValueMap::getInstance().rankMap, old_name, new_name);
+  UpdateStrKey<decltype(shapeMap)>(
+      ConstantValueMap::getInstance().shapeMap, old_name, new_name);
+  UpdateStrKey<decltype(tensorValueMap)>(
+      ConstantValueMap::getInstance().tensorValueMap, old_name, new_name);
+  UpdateStrKey<decltype(typeReliableMap)>(
+      ConstantValueMap::getInstance().typeReliableMap, old_name, new_name);
+  UpdateStrKey<decltype(useInferredTypeMap)>(
+      ConstantValueMap::getInstance().useInferredTypeMap, old_name, new_name);
+  UpdateStrKey<decltype(shapeValueMap)>(
+      ConstantValueMap::getInstance().shapeValueMap, old_name, new_name);
+}
+
 void ConstantValueMap::ClearMaps() {
   ConstantValueMap::getInstance().rankMap.clear();
   ConstantValueMap::getInstance().shapeMap.clear();
   ConstantValueMap::getInstance().tensorValueMap.clear();
   ConstantValueMap::getInstance().typeReliableMap.clear();
   ConstantValueMap::getInstance().useInferredTypeMap.clear();
+  ConstantValueMap::getInstance().shapeValueMap.clear();
 }
 
 // For debug only.
 void ConstantValueMap::PrintMaps() {
-  std::cout << "Print rank/shape Maps:" << std::endl;
+  std::cout << "Rank/Shape Map:" << std::endl;
   for (const auto& x : ConstantValueMap::getInstance().rankMap) {
     std::stringstream ss;
     if (ConstantValueMap::getInstance().shapeMap.find(x.first) !=
@@ -217,12 +270,12 @@ void ConstantValueMap::PrintMaps() {
     std::cout << "node " << x.first << ": " << ss.str() << std::endl;
   }
   std::cout << std::endl;
-  std::cout << "Print Value Maps:" << std::endl;
+  std::cout << "Value Map:" << std::endl;
   for (const auto& x : ConstantValueMap::getInstance().tensorValueMap) {
     std::cout << "node " << x.first << ": " << x.second << std::endl;
   }
   std::cout << std::endl;
-  std::cout << "Print TypeReliable Maps:" << std::endl;
+  std::cout << "TypeReliable Map:" << std::endl;
   size_t count = 0;
   for (const auto& x : ConstantValueMap::getInstance().typeReliableMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
@@ -232,9 +285,19 @@ void ConstantValueMap::PrintMaps() {
     }
   }
   std::cout << std::endl;
-  std::cout << "Print UseInferredType Maps:" << std::endl;
+  std::cout << "UseInferredType Map:" << std::endl;
   count = 0;
   for (const auto& x : ConstantValueMap::getInstance().useInferredTypeMap) {
+    std::cout << "(node " << x.first << ": " << x.second << "), ";
+    count++;
+    if (count % 10 == 0) {
+      std::cout << std::endl;
+    }
+  }
+  std::cout << std::endl;
+  std::cout << "ShapeValue Map:" << std::endl;
+  count = 0;
+  for (const auto& x : ConstantValueMap::getInstance().shapeValueMap) {
     std::cout << "(node " << x.first << ": " << x.second << "), ";
     count++;
     if (count % 10 == 0) {
