@@ -1444,7 +1444,7 @@ def gradgradcheck(
     assert not (check_undefined_grad and not check_rev_over_rev), \
         "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
     assert not (check_batched_grad and not check_rev_over_rev), (
-        "Setting check_batched_grad=True requires check_fwd_over_rev to be True")
+        "Setting check_batched_grad=True requires check_rev_over_rev to be True")
     # TODO: do we want to test this too?
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")

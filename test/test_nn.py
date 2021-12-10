@@ -14786,11 +14786,13 @@ class TestNNDeviceType(NNTestCase):
 
             # Checks upsampling
             input = torch.randn(1, 1, 2, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
 
             # Checks downsampling
             input = torch.randn(1, 1, 20, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=True)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
 
             # consistency CUDA/CPU check
             if torch.device(device).type == 'cuda':
@@ -14898,15 +14900,15 @@ class TestNNDeviceType(NNTestCase):
 
             # test backward when input's height is not same as width
             input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input])
-            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=True)
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=True)
 
             input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode=mode),
                 F.interpolate(input, scale_factor=2, mode=mode))
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -14934,8 +14936,8 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last, "nearest")
         # Uncomment below once F.interpolate is updated
-        # helper(torch.contiguous_format, "nearest-exact")
-        # helper(torch.channels_last, "nearest-exact")
+        helper(torch.contiguous_format, "nearest-exact")
+        helper(torch.channels_last, "nearest-exact")
 
     def test_upsamplingNearest2d_correctness(self, device):
         # Here we check if output matches OpenCV's INTER_NEAREST-like result
@@ -15010,7 +15012,8 @@ class TestNNDeviceType(NNTestCase):
             input = torch.randn(
                 1, 2, 2, 2, 2, requires_grad=True, device=device
             ).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input])
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -15025,11 +15028,11 @@ class TestNNDeviceType(NNTestCase):
                 out_cpu = torch.nn.functional.interpolate(a.to('cpu'), scale_factor=2, mode=mode)
                 self.assertEqual(out_cpu, out_cuda.to('cpu'))
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a])
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=True)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=True)
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')])
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')])
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=True)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=True)
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last_3d, "nearest")
@@ -15118,7 +15121,8 @@ class TestNNDeviceType(NNTestCase):
                         self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
                         input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_forward_ad=True)
+                        gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=True)
 
                         # Assert that cpu and cuda give same results
                         if torch.device(device).type == 'cuda':
