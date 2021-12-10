@@ -68,7 +68,7 @@ from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobi
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
-from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
 from jit.test_dce import TestDCE  # noqa: F401
 from jit.test_sparse import TestSparse  # noqa: F401
 
@@ -383,6 +383,15 @@ class TestJit(JitTestCase):
 
         files = zipfile.ZipFile(buf).filelist
         self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
+
+    def test_script_fn_pkl(self):
+        with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
+
+            @torch.jit.script
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):

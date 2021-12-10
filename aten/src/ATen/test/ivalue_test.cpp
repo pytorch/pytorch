@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/Dict.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <torch/torch.h>
@@ -643,7 +644,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   auto moreSampleIValues = makeMoreSampleIValues();
 
   ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
-  for (int ii = 0; ii < sampleIValues.size(); ++ii) {
+  for (const auto ii : c10::irange(sampleIValues.size())) {
     if (sampleIValues[ii].isComplexDouble() ||
         sampleIValues[ii].isBlob() ||
         sampleIValues[ii].isList() ||
