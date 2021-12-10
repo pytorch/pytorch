@@ -5892,6 +5892,11 @@
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
   variants: function, method
 
+- func: _masked_softmax(Tensor self, Tensor mask) -> Tensor
+  dispatch:
+    CUDA: masked_softmax_cuda
+    CPU: masked_softmax_cpu
+
 - func: view(Tensor(a) self, int[] size) -> Tensor(a)
   variants: method
   device_check: NoCheck
