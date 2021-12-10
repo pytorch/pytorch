@@ -524,7 +524,6 @@ cc_library(
     name = "aten_headers",
     hdrs = [
         "torch/csrc/Export.h",
-        "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
         "aten/src/**/*.h",
