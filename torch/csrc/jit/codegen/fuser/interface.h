@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/stack.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <cstdint>
