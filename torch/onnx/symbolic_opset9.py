@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 import torch
 from torch._C import ListType, OptionalType
 from torch.nn.modules.utils import _single, _pair, _triple
@@ -3335,6 +3337,10 @@ class Prim:
 
     @staticmethod
     def ListUnpack(g, *inputs, **kwargs):
+        return None
+
+    @staticmethod
+    def TupleConstruct(g, *inputs, **kwargs):
         return None
 
     @staticmethod
