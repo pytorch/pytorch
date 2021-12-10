@@ -17,21 +17,6 @@
   see NOTE [TORCH_ASSERT_ONLY_METHOD_OPERATORS].
 #endif
 
-#include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/TracerMode.h>
-#include <ATen/core/Generator.h>
-#include <ATen/core/Reduction.h>
-#include <ATen/core/Tensor.h>
-#include <c10/core/Scalar.h>
-#include <c10/core/Storage.h>
-#include <c10/core/TensorOptions.h>
-#include <c10/util/Deprecated.h>
-#include <c10/util/Optional.h>
-
-${static_dispatch_extra_headers}
-
 // NOTE: [TORCH_ASSERT_ONLY_METHOD_OPERATORS]
 //
 // In ATen, certain generated headers files include the definitions of
@@ -47,19 +32,44 @@ ${static_dispatch_extra_headers}
 // that use the specific operator being changed. With `at::sum` as an
 // example, you should include
 //
-//   <ATen/core/sum.h>               // instead of ATen/Functions.h
-//   <ATen/core/sum_native.h>        // instead of ATen/NativeFunctions.h
-//   <ATen/core/sum_ops.h>           // instead of ATen/Operators.h
-//   <ATen/core/sum_cpu_dispatch.h>  // instead of ATen/CPUFunctions.h
+//   <ATen/ops/sum.h>               // instead of ATen/Functions.h
+//   <ATen/ops/sum_native.h>        // instead of ATen/NativeFunctions.h
+//   <ATen/ops/sum_ops.h>           // instead of ATen/Operators.h
+//   <ATen/ops/sum_cpu_dispatch.h>  // instead of ATen/CPUFunctions.h
 //
 // However, even if you're careful to use this in your own code.
 // `Functions.h` might be included indirectly through another header
 // without you realising. To avoid this, you can add
 //
-// #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+//   #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 //
 // to the top of your source file. This way any time the non-specific
 // headers are included, the compiler will error out.
+//
+// Also, be aware that `ops` are not available in all build
+// configurations (namely fb-internal) so you must guard these
+// includes with `#ifdef AT_PER_OPERATOR_HEADERS`. e.g.
+//
+//   #ifndef AT_PER_OPERATOR_HEADERS
+//   #include <ATen/Functions.h>
+//   #else
+//   #include <ATen/ops/sum.h>
+//   #endif
+
+#include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/TracerMode.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Reduction.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Deprecated.h>
+#include <c10/util/Optional.h>
+
+${static_dispatch_extra_headers}
 
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>
