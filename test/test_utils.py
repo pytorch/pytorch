@@ -688,6 +688,14 @@ class TestHub(TestCase):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
+    
+    def test_hub_dir_expand(self):
+        with tempfile.TemporaryDirectory('cur_dir') as dirname:
+            home_dir = os.path.join("~", "hub")
+            torch.hub.set_dir(home_dir)
+            # This doesn't actually ensure that the directories will be created downstream in the proper place at ~/hub/,
+            #  but that would kind of defeat the purpose of using a tempdir
+            self.assertEqual(torch.hub.get_dir(), os.path.expanduser(home_dir))  # Should not be dirname/~/hub
 
     @retry(Exception, tries=3)
     def test_hub_parse_repo_info(self):
