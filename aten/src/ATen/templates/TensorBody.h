@@ -19,12 +19,12 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/macros/Export.h>
 #include <ATen/core/DeprecatedTypePropertiesRegistry.h>
 #include <ATen/core/DeprecatedTypeProperties.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/core/QuantizerBase.h>
 #include <ATen/core/TensorBase.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 
 namespace c10{
 template<class T> class List;
