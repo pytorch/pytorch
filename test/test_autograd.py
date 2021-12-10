@@ -42,6 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta)
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.testing._internal.logging_tensor import no_dispatch
 
 import pickle
 
@@ -4285,8 +4286,7 @@ for shape in [(1,), ()]:
 
 
     @slowTest
-    @parametrize("input_requires_grad", [True, False])
-    def test_checkpointing(self, input_requires_grad):
+    def test_checkpointing(self):
         num_inp = 2000
         nz_inp = 10
         nz_out = 10
@@ -4303,7 +4303,7 @@ for shape in [(1,), ()]:
         for r in range(num_inp):
             data_r = torch.empty(1, nz_inp)
             data_r.uniform_()
-            data_r.requires_grad = input_requires_grad
+            data_r.requires_grad = True
             feat_r = checkpoint(module, data_r)
             feat_combined.append(feat_r)
 
@@ -7556,6 +7556,46 @@ class TestAutogradForwardMode(TestCase):
             with self.assertRaisesRegex(RuntimeError, "has a forward gradient at the same level"):
                 fwAD.make_dual(baz, dual)
 
+    def test_make_dual_inference_tensor_in_inference_mode(self):
+        with torch.inference_mode():
+            foo = torch.rand(2)
+            bar = torch.rand(2)
+            foo_copy = foo.clone()
+
+            with fwAD.dual_level():
+                dual = fwAD.make_dual(foo, bar)
+                self.assertFalse(dual._is_view())
+
+                dual += 1
+                self.assertFalse(torch.allclose(foo, foo_copy))
+
+    def test_make_dual_torch_dispatch(self):
+        counter = [0]
+
+        class MySubclass(torch.Tensor):
+            def __new__(cls, data=None):
+                return torch.Tensor._make_subclass(cls, data)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.alias:
+                    counter[0] += 1
+
+                    with no_dispatch():
+                        return MySubclass(torch.ops.aten.alias(*args))
+
+                with no_dispatch():
+                    return func(*args, **kwargs)
+
+        a = torch.tensor(1.)
+        s = MySubclass(a)
+
+        with fwAD.dual_level():
+            fwAD.make_dual(s, torch.rand_like(s))
+            self.assertEqual(counter[0], 1)
+            fwAD.make_dual(torch.rand_like(s), s)
+            self.assertEqual(counter[0], 2)
+
     def test_print(self):
         with fwAD.dual_level() as level:
             a = torch.rand(3)
@@ -8708,16 +8748,17 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        @torch.inference_mode()
-        def func(x):
-            self.assertTrue(torch.is_inference_mode_enabled())
-            return x * x
+        for mode in (True, False):
+            @torch.inference_mode(mode)
+            def func(x):
+                self.assertEqual(torch.is_inference_mode_enabled(), mode)
+                return x * x
 
-        for requires_grad in (True, False):
-            c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-            d = func(c)
-            self.assertTrue(torch.is_inference(d))
-            self.assertFalse(d.requires_grad)
+            for requires_grad in (True, False):
+                c = torch.ones(1, 2, 3, requires_grad=requires_grad)
+                d = func(c)
+                self.assertTrue(not mode or torch.is_inference(d))
+                self.assertEqual(d.requires_grad, requires_grad and not mode)
 
     def test_inference_mode_tensor_creation(self):
         with torch.inference_mode():

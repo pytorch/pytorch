@@ -12,7 +12,7 @@
 #include <ATen/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/int128.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace lazy {
