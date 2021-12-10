@@ -685,7 +685,7 @@ class TensorLikePair(Pair):
         elif actual.is_sparse_csr:
             compare_fn = self._compare_sparse_csr_values
         else:
-            compare_fn = self._compare_regular_values
+            compare_fn = self._compare_regular_values_close
 
         compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
 
@@ -700,7 +700,7 @@ class TensorLikePair(Pair):
             than checking the individual quantization parameters for closeness and the integer representation for
             equality in https://github.com/pytorch/pytorch/issues/68548.
         """
-        return self._compare_regular_values(
+        return self._compare_regular_values_close(
             actual.dequantize(),
             expected.dequantize(),
             rtol=rtol,
@@ -737,15 +737,12 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual._indices(),
             expected._indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse COO indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual._values(),
             expected._values(),
             rtol=rtol,
@@ -773,23 +770,17 @@ class TensorLikePair(Pair):
                 ),
             )
 
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.crow_indices(),
             expected.crow_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR crow_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_equal(
             actual.col_indices(),
             expected.col_indices(),
-            rtol=0,
-            atol=0,
-            equal_nan=False,
             identifier="Sparse CSR col_indices",
         )
-        self._compare_regular_values(
+        self._compare_regular_values_close(
             actual.values(),
             expected.values(),
             rtol=rtol,
@@ -798,7 +789,18 @@ class TensorLikePair(Pair):
             identifier="Sparse CSR values",
         )
 
-    def _compare_regular_values(
+    def _compare_regular_values_equal(
+            self,
+            actual: torch.Tensor,
+            expected: torch.Tensor,
+            *,
+            equal_nan: bool = False,
+            identifier: Optional[Union[str, Callable[[str], str]]] = None,
+    ) -> None:
+        """Checks if the values of two tensors are equal."""
+        self._compare_regular_values_close(actual, expected, rtol=0, atol=0, equal_nan=equal_nan, identifier=identifier)
+
+    def _compare_regular_values_close(
         self,
         actual: torch.Tensor,
         expected: torch.Tensor,
