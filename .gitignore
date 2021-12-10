@@ -311,3 +311,6 @@ pr.diff
 
 # coverage files
 */**/.coverage.*
+
+# generated flatbuffer schema header
+torch/csrc/jit/serialization/mobile_bytecode_generated.h

@@ -5,7 +5,12 @@ import warnings
 import functools
 import torch
 from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any
+from typing import Tuple, Any, Union, Callable
+
+# Type for fusion patterns, it can be more complicated than the following actually,
+# see pattern.md for docs
+# TODO: not sure if typing supports recursive data types
+Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
 
 def get_combined_dict(default_dict, additional_dict):
     d = default_dict.copy()
