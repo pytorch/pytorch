@@ -252,7 +252,7 @@ option(USE_OPENCV "Use OpenCV" OFF)
 option(USE_OPENMP "Use OpenMP for parallel code" ON)
 cmake_dependent_option(
     USE_PRECOMPILED_HEADERS "Use pre-compiled headers to accelerate build. Requires cmake >= 3.16." OFF
-    "CMAKE_VERSION VERSION_LESS \"3.16\"" OFF)
+    "CMAKE_VERSION VERSION_GREATER_EQUAL \"3.16\"" OFF)
 
 option(USE_PROF "Use profiling" OFF)
 option(USE_QNNPACK "Use QNNPACK (quantized 8-bit operators)" ON)
