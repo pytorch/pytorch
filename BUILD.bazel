@@ -352,7 +352,6 @@ filegroup(
     name = "th_srcs",
     srcs = [
         "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THTensor.cpp",
     ],
 )
 
