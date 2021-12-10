@@ -1230,9 +1230,8 @@ void testAssignStorageToManagedTensors(
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
   auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
-  std::vector<StorageGroup> groups;
-  assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor, groups);
+  auto groups = assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
   checkStorageGroups(
       groups, ranges, tensor_value_to_tensor, min_reused_tensors);
