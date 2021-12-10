@@ -610,6 +610,7 @@ class TestGradients(TestCase):
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
                       check_undefined_grad=True, check_batched_grad=None, check_batched_forward_grad=False):
+        assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -659,20 +660,23 @@ class TestGradients(TestCase):
                                           check_backward_ad=check_backward_ad,
                                           check_undefined_grad=check_undefined_grad,
                                           check_batched_forward_grad=check_batched_forward_grad))
-            elif check == 'gradgradcheck':
+            elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=False,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
-                self.assertTrue(gradgradcheck(fn, gradcheck_args,
-                                              gen_non_contig_grad_outputs=True,
-                                              check_batched_grad=op.check_batched_gradgrad,
-                                              check_grad_dtypes=True,
-                                              nondet_tol=op.gradcheck_nondet_tol,
-                                              fast_mode=op.gradcheck_fast_mode))
+                for gen_non_contig_grad_outputs in (False, True):
+                    kwargs = {
+                        "gen_non_contig_grad_outputs": gen_non_contig_grad_outputs,
+                        "check_batched_grad": op.check_batched_gradgrad,
+                        "check_grad_dtypes": True,
+                        "nondet_tol": op.gradcheck_nondet_tol,
+                        "fast_mode": op.gradcheck_fast_mode
+                    }
+                    if check == "fwgrad_bwgrad":
+                        kwargs["check_fwd_over_rev"] = True
+                        kwargs["check_rev_over_rev"] = False
+                        kwargs["check_batched_grad"] = False
+                        kwargs["check_undefined_grad"] = False
+
+                    self.assertTrue(gradgradcheck(fn, gradcheck_args, **kwargs))
             else:
                 self.assertTrue(False, msg="Unknown check requested!")
 
@@ -682,9 +686,6 @@ class TestGradients(TestCase):
                                   check_backward_ad=check_backward_ad, check_undefined_grad=check_undefined_grad,
                                   check_batched_grad=check_batched_grad,
                                   check_batched_forward_grad=check_batched_forward_grad)
-
-    def _gradgrad_test_helper(self, device, dtype, op, variant):
-        return self._check_helper(device, dtype, op, variant, 'gradgradcheck')
 
     def _skip_helper(self, op, device, dtype):
         if not op.supports_autograd and not op.supports_forward_ad:
@@ -718,7 +719,21 @@ class TestGradients(TestCase):
         self._skip_helper(op, device, dtype)
         if not op.supports_gradgrad:
             self.skipTest("Skipped! Operation does not support gradgrad")
-        self._gradgrad_test_helper(device, dtype, op, op.get_op())
+        self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
+
+    # Test that forward-over-reverse gradgrad is computed correctly
+    @_gradcheck_ops(op_db)
+    def test_fn_fwgrad_bwgrad(self, device, dtype, op):
+        self._skip_helper(op, device, dtype)
+
+        if op.supports_fwgrad_bwgrad:
+            self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
+        else:
+            err_msg = r"Trying to use forward AD with .* that does not support it\."
+            hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
+                        "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
+            with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
+                self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
 
     # Test that gradients of gradients are properly raising
     @_gradcheck_ops(op_db)
@@ -729,7 +744,7 @@ class TestGradients(TestCase):
 
         err_msg = r"derivative for .* is not implemented"
         with self.assertRaisesRegex(RuntimeError, err_msg):
-            self._gradgrad_test_helper(device, dtype, op, op.get_op())
+            self._check_helper(device, dtype, op, op.get_op(), 'bwgrad_bwgrad')
 
     # Method gradgrad (and grad, see above) tests are disabled since they're
     #   costly and redundant with function gradgrad (and grad) tests

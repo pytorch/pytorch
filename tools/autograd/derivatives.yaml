@@ -1328,6 +1328,7 @@
 
 - name: slice_backward(Tensor grad_output, int[] input_sizes, int dim, int start, int end, int step) -> Tensor
   grad_output: grad.slice(dim, start, end, step)
+  result: auto_linear
 
 - name: slice_scatter(Tensor self, Tensor src, int dim=0, int? start=None, int? end=None, int step=1) -> Tensor
   self: slice_scatter(grad, zeros_like(src), dim, start, end, step)
