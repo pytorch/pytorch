@@ -815,7 +815,6 @@ import torch.backends.mkldnn
 import torch.backends.openmp
 import torch.backends.quantized
 import torch.utils.data
-import torch.linalg
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler

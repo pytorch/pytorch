@@ -35,7 +35,6 @@ from torch.distributions.binomial import Binomial
 # NOTE: jit_metaprogramming_utils sets the default dtype to double!
 torch.set_default_dtype(torch.float32)
 assert torch.get_default_dtype() is torch.float32
-import torch.linalg.LinAlgError
 
 if TEST_SCIPY:
     import scipy
@@ -3297,7 +3296,7 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         info = torch.linalg.inv_ex(A).info
         self.assertEqual(info, 3)
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'diagonal element 3 is zero, the inversion could not be completed'):
+        with self.assertRaisesRegex(torch.LinAlgError, r'diagonal element 3 is zero, the inversion could not be completed'):
             torch.linalg.inv_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
@@ -3311,7 +3310,7 @@ class TestLinalg(TestCase):
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
-        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The diagonal element 2 is zero'):
+        with self.assertRaisesRegex(torch.LinAlgError, r'\(Batch element 3\): The diagonal element 2 is zero'):
             torch.linalg.inv_ex(A, check_errors=True)
 
     @slowTest
@@ -3348,7 +3347,7 @@ class TestLinalg(TestCase):
         def run_test_singular_input(batch_dim, n):
             x = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             x[n, -1, -1] = 0
-            with self.assertRaisesRegex(RuntimeError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
+            with self.assertRaisesRegex(torch.LinAlgError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
                 torch.inverse(x)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -3365,7 +3364,7 @@ class TestLinalg(TestCase):
         x = torch.empty((8, 10, 616, 616), dtype=dtype, device=device)
         x[:] = torch.eye(616, dtype=dtype, device=device)
         x[..., 10, 10] = 0
-        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 0\): The diagonal element 11 is zero'):
+        with self.assertRaisesRegex(torch.LinAlgError, r'\(Batch element 0\): The diagonal element 11 is zero'):
             torch.inverse(x)
 
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3, torch.float64: 1e-7, torch.complex128: 1e-7})
@@ -3499,7 +3498,7 @@ class TestLinalg(TestCase):
         def run_test_singular_input(batch_dim, n):
             a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             a[n, -1, -1] = 0
-            with self.assertRaisesRegex(RuntimeError, rf"\(Batch element {n}\): The diagonal element 3 is zero"):
+            with self.assertRaisesRegex(torch.LinAlgError, rf"\(Batch element {n}\): The diagonal element 3 is zero"):
                 torch.linalg.inv(a)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -3630,7 +3629,7 @@ class TestLinalg(TestCase):
             a = torch.eye(3, 3, dtype=dtype, device=device).reshape((1, 3, 3)).repeat(batch_dim, 1, 1)
             a[n, -1, -1] = 0
             b = torch.randn(batch_dim, 3, 1, dtype=dtype, device=device)
-            with self.assertRaisesRegex(RuntimeError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
+            with self.assertRaisesRegex(torch.LinAlgError, rf'\(Batch element {n}\): The diagonal element 3 is zero'):
                 torch.linalg.solve(a, b)
 
         for params in [(1, 0), (2, 0), (2, 1), (4, 0), (4, 2), (10, 2)]:
@@ -4037,7 +4036,7 @@ class TestLinalg(TestCase):
             a = torch.eye(prod_ind_end, dtype=dtype, device=device)
             a[-1, -1] = 0   # Now `a` is singular
             a = a.reshape(a_shape)
-            with self.assertRaisesRegex(RuntimeError, "Failed to invert the input tensor, because it is singular"):
+            with self.assertRaisesRegex(torch.LinAlgError, "The diagonal element"):
                 torch.linalg.tensorinv(a, ind=ind)
 
         # test for non-invertible input

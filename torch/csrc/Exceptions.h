@@ -264,10 +264,6 @@ bool THPException_init(PyObject *module);
 
 namespace torch {
 
-namespace linalg {
-  extern PyObject *Pytorch_LinAlgError;
-}
-
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
 TORCH_PYTHON_API bool get_cpp_stacktraces_enabled();
@@ -336,6 +332,8 @@ struct AttributeError : public PyTorchError {
 };
 
 namespace linalg {
+extern PyObject *Pytorch_LinAlgError;
+
 // Translates to Python LinAlgError
 struct LinAlgError : public PyTorchError {
   LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
