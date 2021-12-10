@@ -229,8 +229,8 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
             raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
 
     def __getstate__(self):
-        if IterableDataset.getstate_hook is not None:
-            return IterableDataset.getstate_hook(self)
+        if IterDataPipe.getstate_hook is not None:
+            return IterDataPipe.getstate_hook(self)
         return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
@@ -243,9 +243,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_DataPipeMeta):
 
     @classmethod
     def set_getstate_hook(cls, hook_fn):
-        if IterableDataset.getstate_hook is not None and hook_fn is not None:
+        if IterDataPipe.getstate_hook is not None and hook_fn is not None:
             raise Exception("Attempt to override existing getstate_hook")
-        IterableDataset.getstate_hook = hook_fn
+        IterDataPipe.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):
