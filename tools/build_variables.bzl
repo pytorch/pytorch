@@ -72,7 +72,6 @@ def libtorch_generated_sources(gencode_pattern):
 jit_core_headers = [
     "torch/csrc/utils/memory.h",
     "torch/csrc/Export.h",
-    "torch/csrc/WindowsTorchApiMacro.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
     "torch/csrc/jit/serialization/source_range_serialization.h",
