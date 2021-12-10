@@ -250,7 +250,7 @@ Tensor pow_sparse_csr_scalar(const Tensor& self, const Scalar& exponent) {
   return get_result_tensor_for_unary_op<Tensor (*)(const Tensor&, const Scalar&)>(&at::pow, self, exponent);
 }
 
-Tensor& pow_sparse_csr_scalar_(Tensor& self, const Scalar& exponent) { 
+Tensor& pow_sparse_csr_scalar_(Tensor& self, const Scalar& exponent) {
   TORCH_CHECK(!(exponent.isBoolean() && exponent.equal(false)), "Exponent as False is not supported for Sparse CSR Layout.");
   TORCH_CHECK(!exponent.equal<int>(0), "Exponent as 0 is not supported for Sparse CSR Layout.");
   return unary_op_inplace(self, [&](Tensor& t) {
