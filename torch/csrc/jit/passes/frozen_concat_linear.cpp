@@ -12,7 +12,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/utils/memory.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/cat.h>
+#endif
 
 #include <unordered_set>
 #include <vector>

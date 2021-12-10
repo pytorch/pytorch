@@ -6,7 +6,11 @@
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/zeros.h>
+#endif
 
 #include <cstdint>
 

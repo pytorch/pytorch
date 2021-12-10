@@ -12,7 +12,11 @@
 // See the `Tracer` section in `torch/csrc/jit/OVERVIEW.md`.
 // NOTE See [Sharded File] comment in VariableType
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Operators.h>
+#else
 $ops_headers
+#endif
 
 using namespace at;
 
