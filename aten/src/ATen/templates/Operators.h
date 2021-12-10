@@ -10,7 +10,7 @@
   See NOTE: [Tensor vs. TensorBase]
 #endif
 
-#ifdef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#if defined(AT_PER_OPERATOR_HEADERS) && defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
 #error This change adds a dependency on all pytorch operators, meaning the     \
   file will need to be re-compiled every time an operator is changed or added. \
   Consider including a specific operator from <ATen/ops/{my_operator}_ops.h>   \
@@ -63,3 +63,9 @@ ${Operators_includes}
 // scheme for the functions in at::_ops
 
 // See Note [The ATen Operators API] for details of the at::_ops namespace
+
+namespace at {
+namespace _ops {
+${Operators_declarations}
+} // namespace _ops
+} // namespace at
