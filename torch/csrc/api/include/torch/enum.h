@@ -5,7 +5,7 @@
 #include <ATen/core/Reduction.h>
 #include <c10/util/Exception.h>
 #include <c10/util/variant.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #define TORCH_ENUM_DECLARE(name) \
 namespace torch { \
