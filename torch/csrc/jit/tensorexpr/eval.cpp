@@ -682,22 +682,23 @@ class SimpleIREvaluatorImpl : public IRVisitor {
   void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {
     const std::vector<ExprPtr>& dims = buf->dims();
     if (dims.size() != indices.size()) {
+      // indices are flattened, but not buffer
       if (indices.size() == 1) {
-        // indices are flattened, but not buffer
-        int64_t buf_size = 1;
-        if (dims.size() > 0) {
-          TORCH_INTERNAL_ASSERT(dims.size() == buf->strides().size());
-          ExprPtr buf_size_expr = immLike(dims[0], 1);
-          ExprPtr negative_one = immLike(dims[0], -1);
-          for (const auto& i : c10::irange(dims.size())) {
-            buf_size_expr = alloc<Add>(
-                buf_size_expr,
-                alloc<Mul>(
-                    alloc<Add>(dims[i], negative_one), buf->strides()[i]));
-          }
-          buf_size_expr->accept(this);
-          buf_size = value().intValue();
+        if (dims.size() == 0) {
+          // dim size is unknown
+          return;
         }
+        TORCH_INTERNAL_ASSERT(dims.size() == buf->strides().size());
+        ExprPtr buf_size_expr = immLike(dims[0], 1);
+        ExprPtr negative_one = immLike(dims[0], -1);
+        for (const auto& i : c10::irange(dims.size())) {
+          buf_size_expr = alloc<Add>(
+              buf_size_expr,
+              alloc<Mul>(
+                  alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+        }
+        buf_size_expr->accept(this);
+        int64_t buf_size = value().intValue();
         indices[0]->accept(this);
         const auto& index_values = indexVec(value());
         for (auto& j : index_values) {
