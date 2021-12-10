@@ -118,9 +118,9 @@ concurrency:
           submodules: !{{ submodules }}
 {%- endmacro -%}
 
-{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True) -%}
+{%- macro upload_downloaded_files(name, artifact_name="", use_s3=True, when="always()") -%}
       - name: Zip JSONs for upload
-        if: always()
+        if: !{{ when }}
         env:
 {%- if name == 'linux' or name == 'windows' or name == 'macos' %}
           FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
@@ -145,7 +145,7 @@ concurrency:
       - uses: actions/upload-artifact@v2
         name: Store Test Downloaded JSONs on Github
 {%- endif %}
-        if: always()
+        if: !{{ when }}
         with:
 {%- if artifact_name != "" %}
           name: !{{ artifact_name }}

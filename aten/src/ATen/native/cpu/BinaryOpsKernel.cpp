@@ -651,7 +651,7 @@ void fmin_kernel(TensorIteratorBase& iter) {
   }
 }
 
-void smooth_l1_kernel(TensorIterator& iter, double beta) {
+void smooth_l1_kernel(TensorIteratorBase& iter, double beta) {
   AT_DISPATCH_FLOATING_TYPES_AND2(
         kBFloat16, kHalf, iter.dtype(), "smooth_l1_cpu", [&]() {
         using Vec = Vectorized<scalar_t>;
@@ -994,7 +994,7 @@ void logaddexp2_kernel(TensorIteratorBase& iter) {
 }
 
 void gcd_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "gcd_cpu", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "gcd_cpu", [&]() {
       cpu_kernel(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
@@ -1004,7 +1004,7 @@ void gcd_kernel(TensorIteratorBase& iter) {
 }
 
 void lcm_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lcm_cpu", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "lcm_cpu", [&]() {
       cpu_kernel(
           iter,
           [](scalar_t a, scalar_t b) -> scalar_t {
