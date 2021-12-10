@@ -1013,7 +1013,7 @@ StaticRuntime::Deallocator::~Deallocator() {
   // Assume cleanup cannot throw.
   cleanupImpl();
 #ifndef NDEBUG
-  runtime_.check_for_memory_leak(false);
+  runtime_.check_for_memory_leak(/*output_returned*/ false);
 #endif
 }
 
@@ -1074,8 +1074,11 @@ c10::IValue StaticRuntime::run_impl(
   if (static_module_.num_outputs() > 1) {
     return move_outputs_to_tuple(static_module_.num_outputs());
   }
+
+  DCHECK(check_for_memory_leak(/*output_returned*/ false));
   // The exact output tensor should never be managed.
   DCHECK(!isManagedOutputTensor(*outputs_[0]));
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -1437,9 +1440,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
-#ifndef NDEBUG
-      check_for_memory_leak(false);
-#endif
+      DCHECK(check_for_memory_leak(/*output_returned*/ false));
 
       // use move here. Otherwise, clean up outputs_[0] explicitly
       output = std::move(*outputs_[0]);
@@ -1478,9 +1479,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
-void StaticRuntime::check_for_memory_leak(bool output_returned) {
+bool StaticRuntime::check_for_memory_leak(bool output_returned) {
   if (!static_module_.opts().cleanup_activations) {
-    return;
+    return true;
   }
 
   // check for inputs
@@ -1531,6 +1532,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     }
   }
   VLOG(1) << "Finished checking for memory leak";
+  return true;
 }
 
 void StaticRuntime::deallocateOutputTensors() {
