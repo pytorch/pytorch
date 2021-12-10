@@ -54,6 +54,7 @@ jobs:
         with:
           repository: pytorch/benchmark
           path: benchmark
+          lfs: true
           ref: ${{ env.TORCHBENCH_BRANCH }}
       - name: Install TorchBench dependencies
         run: |
