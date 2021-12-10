@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/internal_ops/generic.h>
+#include <torch/csrc/lazy/ts_backend/ops/generic.h>
 
 namespace torch {
 namespace lazy {
