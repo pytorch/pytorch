@@ -485,6 +485,11 @@ __global__ void batch_norm_reduce_statistics_kernel(
       avg = n * factor * avg + count * factor * m;
       n += count;
     }
+
+    for (int j = 0; j < world_size; ++j) {
+      printf("J: %d COUNT: %ld, MEAN: %lf\n", j, counts[j], avg);
+    }
+
     mean[i] = avg;
     invstd[i] = static_cast<accscalar_t>(1) / device_sqrt(var_n / n + epsilon);
     if (running_mean.data() != NULL) {

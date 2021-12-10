@@ -3602,11 +3602,11 @@ class DistributedTest:
             for p_gpu, p_DDP in zip(param_gpu, param_DDP):
                 self.assertEqual(p_gpu, p_DDP)
                 if p_gpu.requires_grad and p_DDP.requires_grad:
-                    self.assertTrue(p_gpu.grad is not None)
-                    self.assertTrue(p_DDP.grad is not None)
-                    print("P GPU: ", p_gpu.grad[0])
-                    print("P DDP: ", p_DDP.grad[0])
-                    print("DIFFERENCE: ", p_gpu.grad[0] - p_DDP.grad[0])
+                    # self.assertTrue(p_gpu.grad is not None)
+                    # self.assertTrue(p_DDP.grad is not None)
+                    # print("P GPU: ", p_gpu.grad[0])
+                    # print("P DDP: ", p_DDP.grad[0])
+                    # print("DIFFERENCE: ", p_gpu.grad[0] - p_DDP.grad[0])
                     self.assertEqual(p_gpu.grad, p_DDP.grad)
 
         def _test_DDP_niter(
@@ -3628,6 +3628,7 @@ class DistributedTest:
         ):
             for idx in range(n_iter):
                 # single cpu/gpu training
+                print("RUN SINGLE GPU MODEL")
                 self._test_DDP_helper(
                     model_base, input, target, loss, memory_format=memory_format
                 )
@@ -3636,6 +3637,7 @@ class DistributedTest:
                     offset = rank * local_bs
 
                 # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+                print("RUN MULTI GPU MODEL")
                 self._test_DDP_helper(
                     model_DDP,
                     input[offset : offset + local_bs],
@@ -4612,10 +4614,10 @@ class DistributedTest:
             target = torch.randn(global_batch_size, 4)
             loss = nn.MSELoss()
 
-            print("global batch size: ", global_batch_size)
-            print("input: ", input_cpu.shape)
-            print("target: ", target.shape)
-            print("gpu subset: ", gpu_subset)
+            # print("global batch size: ", global_batch_size)
+            # print("input: ", input_cpu.shape)
+            # print("target: ", target.shape)
+            # print("gpu subset: ", gpu_subset)
 
             # check two model parameters over 5 iterations
             self._test_DDP_niter(
@@ -4630,7 +4632,8 @@ class DistributedTest:
                 True,
                 offset,
                 dist.get_world_size(),
-                5 if affine else 2,
+                1
+                #5 if affine else 2,
             )
             self._barrier()
 
@@ -4754,8 +4757,8 @@ class DistributedTest:
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_bs,
+                global_batch_size=global_bs,
                 offset=bs_offset,
             )
 
@@ -4763,8 +4766,8 @@ class DistributedTest:
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_bs,
+                global_batch_size=global_bs,
                 offset=bs_offset,
                 output_device=torch.device("cuda"),
             )
@@ -4774,8 +4777,8 @@ class DistributedTest:
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_bs,
+                global_batch_size=global_bs,
                 offset=bs_offset,
                 output_device=torch.device("cuda"),
             )
@@ -4799,8 +4802,8 @@ class DistributedTest:
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_bs,
+                global_batch_size=global_bs,
                 offset=bs_offset,
                 affine=False,
             )
@@ -4962,8 +4965,8 @@ class DistributedTest:
             self._test_DistributedDataParallel_SyncBatchNorm(
                 gpu_subset=gpus,
                 rank=rank,
-                local_bs=local_bs,
-                global_bs=global_bs,
+                local_batch_size=local_bs,
+                global_batch_size=global_bs,
                 offset=bs_offset,
             )
 
