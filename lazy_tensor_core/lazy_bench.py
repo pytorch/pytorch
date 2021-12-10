@@ -124,6 +124,36 @@ class DivAddMul(nn.Module):
         out2 = out1 + mask
         out3 = out2 * 5.0
         return out3
+class FallbackBenchmark:
+    def __init__(self, dims=[128, 16, 128, 128]):
+        self.name = "Fallback[" + ','.join([str(d) for d in dims]) + ']'
+        self.dims = dims
+
+    def __call__(self, device, jit):
+        return Fallback(self.dims, device, jit)
+
+class Fallback(nn.Module):
+    def __init__(self, dims, device='cuda', jit=False):
+        super(Fallback, self).__init__()
+        self.attention_head_size = dims[1]
+        self.name = "Fallback[" + ','.join([str(d) for d in dims]) + ']'
+        self.example_inputs = (
+            torch.randn(*dims, device=device, dtype=torch.float32),
+            torch.randn(*dims, device=device, dtype=torch.float32),
+        )
+
+    def get_module(self):
+        return self, self.example_inputs
+
+    def name(self):
+        return self.name
+
+    def forward(self, inputs, mask):
+        out1 = ((inputs / 0.1) + mask ) * 2.0
+        out2 = torch.nn.functional.hardtanh(out1) # not implemented by Lazy at this time
+        out3 = ((out2 / 0.1) + mask ) * 2.0
+        return out3
+
 toy_models = [
     HardSwishBenchmark,
     DivAddMulBenchmark,
@@ -139,7 +169,9 @@ for dims in toy_dims:
     # and it's too late to add it inside the generator func below...
     SKIP_TRAIN_ONLY.add("DivAddMul[" + ','.join([str(d) for d in dims]) + ']')
     SKIP_TRAIN_ONLY.add("HardSwish[" + ','.join([str(d) for d in dims]) + ']')
+SKIP_TRAIN_ONLY.add("Fallback")
 def list_toy_models():
+    yield FallbackBenchmark()
     for dims in toy_dims:
         for model in toy_models:
             yield model(dims=dims)
