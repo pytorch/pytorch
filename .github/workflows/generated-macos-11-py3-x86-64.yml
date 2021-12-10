@@ -179,7 +179,7 @@ jobs:
         run: |
           python3 tools/render_junit.py test/
       - name: Zip JSONs for upload
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: always()
         env:
           FILE_SUFFIX: '${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}'
         run: |
@@ -188,7 +188,7 @@ jobs:
           zip -r "test-jsons-${FILE_SUFFIX}.zip" test -i '*.json'
       - uses: actions/upload-artifact@v2
         name: Store Test Downloaded JSONs on Github
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: always()
         with:
           name: test-jsons
           retention-days: 14
@@ -213,7 +213,7 @@ jobs:
           path:
             test-reports-*.zip
       - name: Display and upload test statistics (Click Me)
-        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        if: always()
         # temporary hack: set CIRCLE_* vars, until we update
         # tools/stats/print_test_stats.py to natively support GitHub Actions
         env:

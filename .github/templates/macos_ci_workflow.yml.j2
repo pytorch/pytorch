@@ -136,9 +136,9 @@ jobs:
           python3 -mpip install dist/*.whl
           .jenkins/pytorch/macos-test.sh
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='macos', use_s3=False, artifact_name="test-jsons", when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
+      !{{ common.upload_downloaded_files(name='macos', artifact_name="test-jsons", use_s3=False) }}
       !{{ common.upload_test_reports("macos", artifact_name="test-reports", use_s3=False) }}
-      !{{ common.upload_test_statistics(build_environment, when="${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}") }}
+      !{{ common.upload_test_statistics(build_environment) }}
 {% endblock +%}
 {%- endif %}
 
