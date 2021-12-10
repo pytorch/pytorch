@@ -98,6 +98,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::dict_unpack,
     static_runtime_dict_unpack,
@@ -476,6 +477,7 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       };
     });
 
+// See [Borrowed IValue Outputs]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     static_runtime::VarTupleUnpack,
     static_runtime_VarTupleUnpack,
