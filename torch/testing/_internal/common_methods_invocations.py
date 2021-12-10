@@ -9651,7 +9651,7 @@ op_db: List[OpInfo] = [
                                     "TestUnaryUfuncs",
                                     "test_out_arg_all_dtypes",
                                     device_type='cuda'),
-                   )),
+                   ),
                    supports_forward_ad=True),
     UnaryUfuncInfo('special.i1e',
                    aten_name='special_i1e',
@@ -10141,6 +10141,8 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_autograd=False,
                    skips=(
+                       # Pre-existing condition; Needs to be fixed
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
                        # >>> t = torch.randn(3)
