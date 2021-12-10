@@ -1054,7 +1054,6 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
-        self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_sample(self):
@@ -1066,7 +1065,7 @@ class TestDistributions(TestCase):
                                              'Binomial(total_count={}, probs={})'.format(count, prob))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_binomial_log_prob(self):
+    def test_binomial_log_prob_and_entropy(self):
         probs = torch.arange(0.05, 1, 0.1)
         for total_count in [1, 2, 10]:
 
@@ -1077,6 +1076,12 @@ class TestDistributions(TestCase):
             self._check_log_prob(Binomial(total_count, probs), ref_log_prob)
             logits = probs_to_logits(probs, is_binary=True)
             self._check_log_prob(Binomial(total_count, logits=logits), ref_log_prob)
+
+            bin = Binomial(total_count, logits=logits)
+            self.assertEqual(
+                bin.entropy(),
+                scipy.stats.binom(total_count, bin.probs.detach().numpy(), loc=-1).entropy(),
+                atol=1e-3, rtol=0)
 
     def test_binomial_stable(self):
         logits = torch.tensor([-100., 100.], dtype=torch.float)
@@ -1193,7 +1198,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_multinomial_1d_log_prob(self):
+    def test_multinomial_1d_log_prob_and_entropy(self):
         total_count = 10
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
         dist = Multinomial(total_count, probs=p)
@@ -1207,6 +1212,9 @@ class TestDistributions(TestCase):
         log_prob = dist.log_prob(x)
         expected = torch.tensor(scipy.stats.multinomial.logpmf(x.numpy(), n=total_count, p=dist.probs.detach().numpy()))
         self.assertEqual(log_prob, expected)
+
+        expected = scipy.stats.multinomial.entropy(total_count, dist.probs.detach().numpy())
+        self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
 
     def test_multinomial_2d(self):
         total_count = 10
@@ -1225,9 +1233,6 @@ class TestDistributions(TestCase):
         # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
         self.assertEqualIgnoreType(Multinomial(total_count, s).sample(),
                                    torch.tensor([[total_count, 0], [0, total_count]]))
-
-        # check entropy computation
-        self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
     def test_categorical_1d(self):
         p = torch.tensor([0.1, 0.2, 0.3], requires_grad=True)
@@ -3646,6 +3651,7 @@ class TestKL(TestCase):
             (lognormal, lognormal),
             (laplace, normal),
             (normal, gumbel),
+            (normal, laplace),
             (normal, normal),
             (onehotcategorical, onehotcategorical),
             (pareto, chi2),

@@ -43,7 +43,7 @@ class DataChunk(list, Generic[T]):
         for i in super().__iter__():
             yield i
 
-    def raw_iterator(self):
+    def raw_iterator(self) -> T:
         for i in self.items:
             yield i
 
@@ -80,7 +80,7 @@ class Dataset(Generic[T_co]):
             function = functools.partial(Dataset.functions[attribute_name], self)
             return function
         else:
-            raise AttributeError
+            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
 
     @classmethod
     def register_function(cls, function_name, function):
@@ -207,7 +207,8 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
         [3, 4, 5, 6]
     """
     functions: Dict[str, Callable] = {}
-    reduce_ex_hook : Optional[Callable] = None
+    reduce_ex_hook: Optional[Callable] = None
+    getstate_hook: Optional[Callable] = None
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
@@ -223,7 +224,12 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             function = functools.partial(IterableDataset.functions[attribute_name], self)
             return function
         else:
-            raise AttributeError
+            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
+
+    def __getstate__(self):
+        if IterableDataset.getstate_hook is not None:
+            return IterableDataset.getstate_hook(self)
+        return self.__dict__
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterableDataset.reduce_ex_hook is not None:
@@ -232,6 +238,12 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             except NotImplementedError:
                 pass
         return super().__reduce_ex__(*args, **kwargs)
+
+    @classmethod
+    def set_getstate_hook(cls, hook_fn):
+        if IterableDataset.getstate_hook is not None and hook_fn is not None:
+            raise Exception("Attempt to override existing getstate_hook")
+        IterableDataset.getstate_hook = hook_fn
 
     @classmethod
     def set_reduce_ex_hook(cls, hook_fn):

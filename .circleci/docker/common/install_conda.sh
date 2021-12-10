@@ -13,7 +13,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
       CONDA_FILE="Miniconda2-latest-Linux-x86_64.sh"
     ;;
     3)
-      CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
+      if [ "$ANACONDA_PYTHON_VERSION" = "3.6" ]; then
+        # Latest release of Conda that still supports python-3.6
+        CONDA_FILE="Miniconda3-py37_4.10.3-Linux-x86_64.sh"
+      else
+        CONDA_FILE="Miniconda3-latest-Linux-x86_64.sh"
+      fi
     ;;
     *)
       echo "Unsupported ANACONDA_PYTHON_VERSION: $ANACONDA_PYTHON_VERSION"
@@ -56,7 +61,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   pushd /opt/conda
 
   # Track latest conda update
-  as_jenkins conda update -y -n base conda
+  if [ "$ANACONDA_PYTHON_VERSION" != "3.6" ]; then
+    as_jenkins conda update -y -n base conda
+  fi
 
   # Install correct Python version
   as_jenkins conda install -y python="$ANACONDA_PYTHON_VERSION"
@@ -86,14 +93,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six dataclasses typing_extensions
   fi
 
-  if [[ "$CUDA_VERSION" == 10.2* ]]; then
-    conda_install magma-cuda102 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.0* ]]; then
-    conda_install magma-cuda110 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.1* ]]; then
-    conda_install magma-cuda111 -c pytorch
-  elif [[ "$CUDA_VERSION" == 11.3* ]]; then
-    conda_install magma-cuda113 -c pytorch
+  # Magma package names are concatenation of CUDA major and minor ignoring revision
+  # I.e. magma-cuda102 package corresponds to CUDA_VERSION=10.2 and CUDA_VERSION=10.2.89
+  if [ -n "$CUDA_VERSION" ]; then
+    conda_install magma-cuda$(TMP=${CUDA_VERSION/./};echo ${TMP%.*[0-9]}) -c pytorch
   fi
 
   # TODO: This isn't working atm

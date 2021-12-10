@@ -591,7 +591,7 @@ observation and quantization. The user needs to specify:
    created from the original fp32 module.
 3. The Python type of the quantized module (provided by user). This module needs
    to define a `from_observed` function which defines how the quantized module is
-   created from the obseved module.
+   created from the observed module.
 4. A configuration describing (1), (2), (3) above, passed to the quantization APIs.
 
 
@@ -828,6 +828,7 @@ is not supported. To save/load quantized models, the following ways can be used:
 
 1. Saving/Loading the quantized model state_dict
 2. Saving/Loading scripted quantized models using ``torch.jit.save`` and ``torch.jit.load``
+
 An example::
 
   class M(torch.nn.Module):

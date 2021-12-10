@@ -11,11 +11,19 @@ target_link_libraries(torchbind_test torch)
 add_library(jitbackend_test SHARED ${JIT_TEST_ROOT}/test_backend_lib.cpp)
 target_link_libraries(jitbackend_test torch)
 
+set(BACKEND_WITH_COMPILER_SRCS
+  ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp
+  ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
+)
+if(USE_KINETO)
+  # Testing edge profiler for backend use
+  # profiler_edge should only be aded when USE_KINETO flag is on
+  list(APPEND BACKEND_WITH_COMPILER_SRCS
+    ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp)
+endif()
+
 add_library(backend_with_compiler SHARED
-        ${JIT_TEST_ROOT}/test_backend_compiler_lib.cpp
-        ${JIT_TEST_ROOT}/test_backend_compiler_preprocess.cpp
-        # This is for testing edge profiler for backend use
-        ${TORCH_SRC_DIR}/csrc/jit/mobile/profiler_edge.cpp
+        ${BACKEND_WITH_COMPILER_SRCS}
         )
 if(USE_KINETO)
   set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
@@ -59,6 +67,7 @@ set(JIT_TEST_SRCS
   ${JIT_TEST_ROOT}/test_irparser.cpp
   ${JIT_TEST_ROOT}/test_jit_type.cpp
   ${JIT_TEST_ROOT}/test_lite_interpreter.cpp
+  ${JIT_TEST_ROOT}/test_lite_interpreter_direct.cpp
   ${JIT_TEST_ROOT}/test_lite_trainer.cpp
   ${JIT_TEST_ROOT}/test_memory_dag.cpp
   ${JIT_TEST_ROOT}/test_misc.cpp
@@ -88,6 +97,32 @@ add_executable(test_jit
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${JIT_TEST_SRCS}
 )
+
+set(schema ${TORCH_SRC_DIR}/csrc/jit/serialization/mobile_bytecode.fbs)
+set(generated_include
+"${TORCH_ROOT}/build2/torch/csrc/jit/serialization/mobile_bytecode_generated.h")
+## cann add--reflect-names
+add_custom_command(
+  OUTPUT ${generated_include}
+  COMMAND bash ${TORCH_ROOT}/scripts/gen_flatbuffer.sh
+  DEPENDS ${schema}
+  WORKING_DIRECTORY "${TORCH_ROOT}"
+  COMMENT "Generating mobile_bytecode_generated.h"
+)
+add_library(mobile_bytecode_generated_h_test INTERFACE)
+target_sources(
+  mobile_bytecode_generated_h_test
+  INTERFACE ${generated_include}
+)
+add_dependencies(mobile_bytecode_generated_h_test flatc ${generated_include})
+target_include_directories(
+  mobile_bytecode_generated_h_test
+  INTERFACE ${TORCH_ROOT}/build)
+
+add_dependencies(test_jit mobile_bytecode_generated_h_test)
+target_link_libraries(
+  test_jit PRIVATE mobile_bytecode_generated_h_test flatbuffers)
+
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_jit PRIVATE USE_GTEST)

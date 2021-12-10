@@ -157,15 +157,12 @@ TEST(THNNConvTest, Basic) {
   at::Tensor bias = torch::randn({out_channels});
 
   // run forward eagerly
-  at::Tensor output, finput;
-  std::tie(output, finput) = at::_slow_conv2d_forward(
+  at::Tensor output = at::_slow_conv2d_forward(
       input, weight, kernel_size, bias, stride, padding);
 
   // make grad_outputs
   at::Tensor grad_output =
       torch::randn_like(output, at::MemoryFormat::Preserve);
-  at::Tensor grad_finput =
-      torch::zeros_like(finput, at::MemoryFormat::Preserve);
 
   // run backward eagerly
   at::Tensor grad_input, grad_weight, grad_bias;
@@ -176,7 +173,6 @@ TEST(THNNConvTest, Basic) {
       kernel_size,
       stride,
       padding,
-      finput,
       {true, true, true});
 
   // make JIT graph
@@ -213,7 +209,6 @@ TEST(THNNConvTest, Basic) {
 
   tensor_list tensor_grads_in;
   tensor_grads_in.push_back(grad_output);
-  tensor_grads_in.push_back(grad_finput);
 
   // Get outputs from the interpreter
   tensor_list tensors_out, tensor_grads_out;
@@ -223,7 +218,6 @@ TEST(THNNConvTest, Basic) {
   // prepare expected structs
   tensor_list expected_tensors_out, expected_tensor_grads_out;
   expected_tensors_out.push_back(output);
-  expected_tensors_out.push_back(finput);
   expected_tensor_grads_out.push_back(grad_input);
   expected_tensor_grads_out.push_back(grad_weight);
   expected_tensor_grads_out.push_back(grad_bias);
@@ -808,15 +802,15 @@ void checkScopeCallbacks() {
   at::addGlobalCallback(at::RecordFunctionCallback(
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         if (fn.scope() == at::RecordScope::FUNCTION &&
-            std::string(fn.name().str()) == "test_function") {
+            std::string(fn.name()) == "test_function") {
           found_function_scope = true;
         }
         if (fn.scope() == at::RecordScope::TORCHSCRIPT_FUNCTION &&
-            std::string(fn.name().str()) == "test_method") {
+            std::string(fn.name()) == "test_method") {
           found_method_scope = true;
         }
         if (fn.scope() == at::RecordScope::USER_SCOPE &&
-            std::string(fn.name().str()) == "test_user_scope") {
+            std::string(fn.name()) == "test_user_scope") {
           found_user_scope = true;
         }
         return nullptr;
@@ -866,9 +860,9 @@ std::unique_ptr<at::ObserverContext> tracedInputsCallback(
         sizes.push_back(std::vector<int64_t>());
       }
     }
-    traced_inputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_inputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_input_names.insert(fn.name().str());
+    ts_input_names.insert(fn.name());
   }
   return nullptr;
 }
@@ -884,9 +878,9 @@ void tracedOutputsCallback(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         sizes.emplace_back();
       }
     }
-    traced_outputs.push_back(std::make_tuple(fn.name().str(), sizes));
+    traced_outputs.push_back(std::make_tuple(fn.name(), sizes));
   } else if (fn.scope() == RecordScope::TORCHSCRIPT_FUNCTION) {
-    ts_output_names.insert(fn.name().str());
+    ts_output_names.insert(fn.name());
   }
 }
 
@@ -938,7 +932,7 @@ TEST(RecordFunctionTest, TracedTestInputsOutputs) {
 
 static int sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++sampled_cb_ctr;
   }
   return nullptr;
@@ -946,7 +940,7 @@ std::unique_ptr<ObserverContext> sampledCallback(const RecordFunction& fn) {
 
 static int non_sampled_cb_ctr = 0;
 std::unique_ptr<ObserverContext> nonSampledCallback(const RecordFunction& fn) {
-  if (std::string(fn.name().str()) == "test") {
+  if (std::string(fn.name()) == "test") {
     ++non_sampled_cb_ctr;
   }
   return nullptr;
@@ -1013,7 +1007,7 @@ TEST(RecordFunctionTest, RecordFunctionGuard) {
       [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
         std::lock_guard<std::mutex> lock(guard_mtx);
         // NOLINTNEXTLINE(modernize-use-emplace)
-        fn_names.push_back(fn.name().str());
+        fn_names.push_back(fn.name());
         return nullptr;
       }));
   {
@@ -1223,7 +1217,7 @@ TEST(RecordFunctionTest, Basic) {
     RecordFunctionGuard enable_rec_fn;
     auto handle = addThreadLocalCallback(RecordFunctionCallback(
         [](const RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-          recorded_op = fn.name().str();
+          recorded_op = fn.name();
           return nullptr;
         }));
     ThreadLocalState state;
@@ -1823,6 +1817,15 @@ TEST(JitTracing, Basic) {
   auto graph = build_lstm();
   auto stack = createStack({input, hx, cx, w_ih, w_hh});
   auto traced = TraceGraph(graph, stack);
+
+  // Check that the inputs of traced graph have the same type as the inputs
+  // specified here.
+  ASSERT_EQ(*traced->inputs().at(0)->type(), *TensorType::create(input));
+  ASSERT_EQ(*traced->inputs().at(1)->type(), *TensorType::create(hx));
+  ASSERT_EQ(*traced->inputs().at(2)->type(), *TensorType::create(cx));
+  ASSERT_EQ(*traced->inputs().at(3)->type(), *TensorType::create(w_ih));
+  ASSERT_EQ(*traced->inputs().at(4)->type(), *TensorType::create(w_hh));
+
   Tensor prof_out;
   pop(stack, prof_out);
 
@@ -2302,6 +2305,13 @@ TEST(FuturesTest, Error) {
   ASSERT_TRUE(strcmp(f1->tryRetrieveErrorMessage().c_str(), "Failed") == 0);
   ASSERT_EQ(sat1, 1);
   ASSERT_EQ(sat2, 1);
+  try {
+    (void)f1->constValue();
+    ASSERT_TRUE(false); // Supposed to throw.
+  } catch (const std::exception& e) {
+    // Original error should be logged.
+    ASSERT_TRUE(std::string(e.what()).find("Failed") != std::string::npos);
+  }
 }
 
 // then

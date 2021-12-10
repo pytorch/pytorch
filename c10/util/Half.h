@@ -460,7 +460,7 @@ overflows(From f) {
     return greater_than_max<To>(f) ||
         (c10::is_negative(f) && -static_cast<uint64_t>(f) > limit::max());
   } else {
-    return f < limit::lowest() || greater_than_max<To>(f);
+    return c10::less_than_lowest<To>(f) || greater_than_max<To>(f);
   }
 }
 
