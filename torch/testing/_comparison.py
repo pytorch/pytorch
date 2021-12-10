@@ -591,9 +591,6 @@ class TensorLikePair(Pair):
             ) from error
 
     def _check_supported(self, tensor: torch.Tensor, *, id: Tuple[Any, ...]) -> None:
-        if tensor.is_quantized and tensor.qscheme() not in self._QUANTIZED_COMPONENT_COMPARE_FNS.keys():
-            raise ErrorMeta(ValueError, f"Quantization scheme {tensor.qscheme()} is currently not supported")
-
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
@@ -703,82 +700,24 @@ class TensorLikePair(Pair):
 
         compare_fn(actual, expected, rtol=self.rtol, atol=self.atol, equal_nan=self.equal_nan)
 
-    def _compare_per_tensor_quantized_components(
-        self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> None:
-        r"""TODO"""
-        self._compare_regular_values_close(
-            torch.tensor(actual.q_scale()),
-            torch.tensor(expected.q_scale()),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
-            identifier=lambda default_identifier: f"Scale of quantized {default_identifier.lower()}",
-        )
-        self._compare_regular_values_close(
-            torch.tensor(actual.q_zero_point()),
-            torch.tensor(expected.q_zero_point()),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
-            identifier=lambda default_identifier: f"Zero point of quantized {default_identifier.lower()}",
-        )
-
-    def _compare_per_channel_quantized_components(
-        self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> None:
-        r"""TODO"""
-        if actual.q_per_channel_axis() != expected.q_per_channel_axis():
-            raise self._make_error_meta(
-                AssertionError,
-                (
-                    f"The quantization dimension of per-channel quantized tensors does not match: "
-                    f"{actual.q_per_channel_axis()} != {expected.q_per_channel_axis()}"
-                ),
-            )
-        self._compare_regular_values_close(
-            actual.q_per_channel_scales(),
-            expected.q_per_channel_scales(),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
-            identifier=lambda default_identifier: (
-                f"Per-channel scales of quantized {default_identifier.lower()}"
-            ),
-        )
-        self._compare_regular_values_close(
-            actual.q_per_channel_zero_points(),
-            expected.q_per_channel_zero_points(),
-            rtol=rtol,
-            atol=atol,
-            equal_nan=equal_nan,
-            identifier=lambda default_identifier: (
-                f"Per-channel zero points of quantized {default_identifier.lower()}"
-            ),
-        )
-
-    _QUANTIZED_COMPONENT_COMPARE_FNS = {
-        torch.per_tensor_affine: _compare_per_tensor_quantized_components,
-        torch.per_channel_affine: _compare_per_channel_quantized_components,
-        torch.per_channel_affine_float_qparams: _compare_per_channel_quantized_components,
-    }
-
     def _compare_quantized_values(
         self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
     ) -> None:
         """Compares quantized tensors by comparing the :meth:`~torch.Tensor.dequantize`'d variants for closeness.
 
-        FIXME
-        """
-        component_compare_fn = self._QUANTIZED_COMPONENT_COMPARE_FNS[actual.qscheme()]
-        # Although it looks weird to pass `self` here, this is the correct way. The dictionary stores the methods at
-        # class instantiation and thus the values are equal to `Foo.bar` and not `Foo().bar`.
-        component_compare_fn(self, actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        .. note::
 
-        self._compare_regular_values_equal(
-            actual.int_repr(),
-            expected.int_repr(),
-            identifier=lambda default_identifier: f"Integer representation of quantized {default_identifier.lower()}",
+            You can find a detailed discussion about why only the dequantized variant is checked for closeness rather
+            than checking the individual quantization parameters for closeness and the integer representation for
+            equality in https://github.com/pytorch/pytorch/issues/68548.
+        """
+        return self._compare_regular_values_close(
+            actual.dequantize(),
+            expected.dequantize(),
+            rtol=rtol,
+            atol=atol,
+            equal_nan=equal_nan,
+            identifier=lambda default_identifier: f"Quantized {default_identifier.lower()}",
         )
 
     def _compare_sparse_coo_values(
@@ -862,13 +801,14 @@ class TensorLikePair(Pair):
         )
 
     def _compare_regular_values_equal(
-        self,
-        actual: torch.Tensor,
-        expected: torch.Tensor,
-        *,
-        equal_nan: bool = False,
-        identifier: Optional[Union[str, Callable[[str], str]]] = None,
+            self,
+            actual: torch.Tensor,
+            expected: torch.Tensor,
+            *,
+            equal_nan: bool = False,
+            identifier: Optional[Union[str, Callable[[str], str]]] = None,
     ) -> None:
+        """Checks if the values of two tensors are equal."""
         self._compare_regular_values_close(actual, expected, rtol=0, atol=0, equal_nan=equal_nan, identifier=identifier)
 
     def _compare_regular_values_close(
@@ -1186,7 +1126,7 @@ def assert_close(
 
     If ``actual`` and ``expected`` are quantized, they are considered close if they have the same
     :meth:`~torch.Tensor.qscheme` and the result of :meth:`~torch.Tensor.dequantize` is close according to the
-    definition above. FIXME
+    definition above.
 
     ``actual`` and ``expected`` can be :class:`~torch.Tensor`'s or any tensor-or-scalar-likes from which
     :class:`torch.Tensor`'s can be constructed with :func:`torch.as_tensor`. Except for Python scalars the input types
@@ -1226,8 +1166,6 @@ def assert_close(
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
         ValueError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the future.
-        ValueError: If a tensor was not quantized with the :attr:`~torch.per_tensor_affine` or
-            :attr:`~torch.per_channel_affine` scheme. This is a temporary restriction and will be relaxed in the future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.
