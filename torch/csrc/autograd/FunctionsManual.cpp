@@ -985,23 +985,11 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
 }
 
-static constexpr int64_t kSmallBufferSizeHintForDim = 8;
-
-static inline c10::SmallBuffer<int64_t, kSmallBufferSizeHintForDim> all_dims_less_than(int64_t dim) {
-  // This function is useful if you want to do a complete reduction, but keepdim
-  auto all_dims = c10::SmallBuffer<int64_t, kSmallBufferSizeHintForDim>(dim);
-  for(const auto i : c10::irange(dim)) {
-    all_dims[i] = i;
-  }
-  return all_dims;
-}
-
-Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, c10::optional<IntArrayRef> dim_opt,
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
     c10::optional<int64_t> correction_opt, bool keepdim) {
   auto correction = correction_opt.value_or(1);
   if (self_p.dim() == 0 || !dim_opt.has_value()) {
-
-    return var_backward(self_t.conj(), self_p, correction).sum(all_dims_less_than(self_t.dim()), keepdim).conj();
+    return var_backward(self_t.conj(), self_p, correction).sum().expand_as(result).conj();
   }
   auto dim = dim_opt.value();
   const int64_t dof = _safe_size(self_p.sizes(), dim) - correction;
