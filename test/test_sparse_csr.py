@@ -1134,8 +1134,7 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
-                continue
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             expected = op(sample.input, *sample.args, **sample.kwargs)
             assert torch.is_tensor(expected)
@@ -1159,8 +1158,7 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
-                continue
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
@@ -1190,8 +1188,7 @@ class TestSparseCSR(TestCase):
             # Sparse CSR only supports 2D tensors as inputs
             # Fail early to prevent silent success with this test
             if sample.input.ndim != 2:
-                raise Warning("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
-                continue
+                raise ValueError("Expected 2D tensor but got tensor with dimension: {sample.input.ndim}.")
 
             sample.input = sample.input.to_sparse_csr()
             expect = op(sample.input, *sample.args, **sample.kwargs)
