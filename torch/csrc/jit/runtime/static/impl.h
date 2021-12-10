@@ -574,8 +574,8 @@ class TORCH_API ProcessedFunction {
     kInterpreterFallback,
   };
 
-  const std::function<void(ProcessedNode*)>& f() const {
-    return f_;
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
   }
 
   Kind kind() const {
