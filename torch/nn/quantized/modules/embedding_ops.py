@@ -93,6 +93,7 @@ class Embedding(torch.nn.Module):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
+        self.dtype = dtype
 
         if _weight is None:
             scales = torch.ones(num_embeddings, dtype=torch.float)
@@ -109,7 +110,10 @@ class Embedding(torch.nn.Module):
         self._packed_params.set_weight(qweight)
 
     def forward(self, indices: Tensor) -> Tensor:
-        return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
+        if self.dtype == torch.quint4x2:
+            return torch.ops.quantized.embedding_4bit(self._packed_params._packed_weight, indices)
+        else:
+            return torch.ops.quantized.embedding_byte(self._packed_params._packed_weight, indices)
 
     def _get_name(self):
         return 'QuantizedEmbedding'
