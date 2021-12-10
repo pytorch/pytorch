@@ -56,3 +56,9 @@ ${Operators_includes}
 // scheme for the functions in at::_ops
 
 // See Note [The ATen Operators API] for details of the at::_ops namespace
+
+namespace at {
+namespace _ops {
+${Operators_declarations}
+} // namespace _ops
+} // namespace at
