@@ -3292,7 +3292,6 @@ class TestQuantizedLinear(TestCase):
            use_channelwise=st.booleans())
     @override_qengines
     def test_qlinear_unpack(self, W, use_channelwise):
-
         W, (W_scale, W_zp, torch_type) = W
         if use_channelwise:
             output_channels = W.shape[0]
@@ -3327,7 +3326,6 @@ class TestQuantizedLinear(TestCase):
                 W_q.q_scale()), np.float32(W_q_origin.q_scale()))
             np.testing.assert_equal(
                 W_q.q_zero_point(), W_q_origin.q_zero_point())
-
 
 @unittest.skipIf(IS_MACOS, "Known test failure on Mac.")
 @unittest.skipIf(not BUILD_WITH_CAFFE2, "Test needs Caffe2")
@@ -3578,8 +3576,6 @@ class TestQuantizedEmbeddingOps(TestCase):
                         include_last_offset=include_last_offset)
             torch.testing.assert_close(reference_result, result, atol=atol, rtol=rtol)
 
-
-
     """ Tests the correctness of the embedding_bag_8bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
@@ -3659,13 +3655,12 @@ class TestQuantizedEmbeddingOps(TestCase):
                                                sparsity=sparsity,
                                                atol=1.0, rtol=1e-1)
 
-    """ Tests the correctness of the quantized embedding lookup operator """
+    """ Tests the correctness of the quantized 8 bit embedding lookup operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
     def test_embedding_byte(self, num_embeddings, embedding_dim):
         quant_op = torch.ops.quantized.embedding_byte
         prepack_op = torch.ops.quantized.embedding_bag_prepack
-
         weights = torch.from_numpy((np.random.random_sample((
             num_embeddings, embedding_dim)) + 1).astype(np.float32))
 
@@ -3690,6 +3685,38 @@ class TestQuantizedEmbeddingOps(TestCase):
 
         ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
         torch.testing.assert_close(ref, qresult, atol=0.005, rtol=1e-3)
+
+    """ Tests the correctness of the quantized 4 bit embedding lookup operator """
+    @given(num_embeddings=st.integers(10, 100),
+           embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0))
+    def test_embedding_4bit(self, num_embeddings, embedding_dim):
+        quant_op = torch.ops.quantized.embedding_4bit
+        prepack_op = torch.ops.quantized.embedding_bag_prepack
+
+        weights = torch.from_numpy((np.random.random_sample((
+            num_embeddings, embedding_dim)) + 1).astype(np.float32))
+
+        obs = PerChannelMinMaxObserver(dtype=torch.quint4x2, qscheme=torch.per_channel_affine_float_qparams, ch_axis=0)
+        obs(weights)
+        # Get the scale and zero point for the weight tensor
+        qparams = obs.calculate_qparams()
+
+        # Quantize the weights to 4bits
+        qweight = torch.quantize_per_channel(weights, qparams[0], qparams[1], axis=0, dtype=torch.quint4x2)
+        max_segments = 5
+        max_segment_length = 20
+        num_lengths = np.random.randint(1, max_segments + 1)
+        lengths = np.random.randint(1, max_segment_length + 1,
+                                    size=num_lengths).astype(np.int32)
+        num_indices = np.sum(lengths)
+        indices = torch.from_numpy(np.random.randint(
+            low=0, high=num_embeddings, size=num_indices, dtype=np.int64))
+
+        packed_weight = prepack_op(qweight)
+        qresult = quant_op(packed_weight, indices, pruned_weights=False)
+
+        ref = torch.embedding(weights, indices, padding_idx=-1, scale_grad_by_freq=False, sparse=False)
+        torch.testing.assert_close(ref, qresult, atol=0.1, rtol=1e-2)
 
 
     def test_embedding_2d_indices(self):
