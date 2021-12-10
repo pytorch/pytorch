@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/library.h>
 #include <memory>
-#include "ATen/core/List.h"
 
 namespace torch {
 namespace jit {
@@ -134,25 +133,22 @@ struct DeviceTypePropagationPass {
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    bool changed = false;
     at::ArrayRef<Block*> blocks = graph_->block();
     for (auto block : blocks) {
-      changed |= processBlock(block);
+      processBlock(block);
     }
-    return changed;
+    return changed_;
   }
 
  private:
-  bool processBlock(Block* block) {
+  void processBlock(Block* block) {
     GRAPH_DEBUG("processBlock");
-    bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
-      changed |= processNode(*it);
+      processNode(*it);
     }
-    return changed;
   }
 
-  bool processNode(Node* n) {
+  void processNode(Node* n) {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
@@ -172,13 +168,13 @@ struct DeviceTypePropagationPass {
 
     if (!has_tensor_output) {
       // if output contains no tensor, nothing to propagate
-      return false;
+      return;
     }
 
     switch (n->kind()) {
       case prim::Constant:
         // This is already been propagated by something else in freezing
-        return false;
+        return;
       case prim::ListConstruct:
       case prim::ListUnpack:
         TORCH_INTERNAL_ASSERT(false, "not supported IR");
@@ -190,19 +186,19 @@ struct DeviceTypePropagationPass {
           TORCH_INTERNAL_ASSERT(false, "not supported IR");
         }
     }
-    return false;
   }
 
   // for efficiency
-  bool processAtenOps(Node* n) {
+  void processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
     // Custom Rule Matching
     if (auto prop_fn = device_prop_registry_->find(n->getOperator())) {
       PropRule rule = *prop_fn;
-      return rule(n);
+      changed_ |= rule(n);
+      return;
     }
-    return defaultDeviceProp(n);
+    changed_ |= defaultDeviceProp(n);
   }
 
   void buildRuleRegistry() {
@@ -218,6 +214,7 @@ struct DeviceTypePropagationPass {
   }
   std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
   std::shared_ptr<Graph> graph_;
+  bool changed_ = false;
 };
 
 } // anonymous namespace
