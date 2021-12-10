@@ -23,6 +23,7 @@ from .observer import (
     MovingAverageMinMaxObserver,
     NoopObserver,
     PlaceholderObserver,
+    ReuseInputObserver,
     default_debug_observer,
     default_dynamic_quant_observer,
     default_float_qparams_observer,
@@ -31,6 +32,7 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    default_reuse_input_observer,
 )
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -170,6 +172,12 @@ default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight
 Fused version of `default_qat_config`, has performance benefits.
 """
 
+default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
+                                      weight=NoopObserver)
+"""
+Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
+"""
+
 def get_default_qconfig(backend='fbgemm'):
     """
     Returns the default PTQ qconfig for the specified backend.
@@ -192,10 +200,10 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)
 
-default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
@@ -244,6 +252,20 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = default_qat_qconfig_v2
     return qconfig
 
+def get_default_qconfig_dict(backend='fbgemm', version=0):
+    qconfig = get_default_qconfig(backend)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
+def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+    qconfig = get_default_qat_qconfig(backend, version=version)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
     """
@@ -256,6 +278,9 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         isinstance(mod, torch.nn.ConvTranspose2d) or
         isinstance(mod, torch.nn.ConvTranspose3d))
     if is_conv_transpose_mod:
+        if qconfig.weight is None:
+            # for now, we assume that any qconfig for ConvTranspose without a weight is valid
+            return
         example_observer = qconfig.weight()
         is_per_channel = (
             isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
@@ -355,3 +380,8 @@ def activation_is_memoryless(qconfig: QConfig):
         return _is_memoryless(act.activation_post_process)
     else:
         return _is_memoryless(act)
+
+def is_reuse_input_qconfig(qconfig: Union[QConfig, QConfigDynamic, None]):
+    return qconfig is not None and \
+        isinstance(qconfig.activation(), ReuseInputObserver) and \
+        isinstance(qconfig.weight(), NoopObserver)
