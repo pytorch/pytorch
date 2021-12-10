@@ -50,7 +50,7 @@ jobs:
           echo "$PR_BODY" > ${PR_BODY_FILE}
           python pytorch/.github/scripts/run_torchbench.py --pr-body "${PR_BODY_FILE}" set-torchbench-branch
       - name: Checkout TorchBench
-        uses: actions/checkout@v2
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
           repository: pytorch/benchmark
           path: benchmark
