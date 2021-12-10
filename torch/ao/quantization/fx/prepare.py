@@ -173,9 +173,15 @@ def is_pattern_dtype_config_supported_by_backend(
     assert matched_nodes is not None and len(matched_nodes) >= 1
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
     dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
+    print("pattern:", pattern)
+    print("dtype cnofigs:", dtype_configs)
 
-    input_node = matched_nodes[0]
-    output_node = matched_nodes[-1]
+    # TODO: this only checks one input and one output, need to generalize to multiple
+    # inputs/output
+    input_node = matched_nodes[-1]
+    output_node = matched_nodes[0]
+    print("input node:", input_node)
+    print("output node:", output_node)
     for dtype_config in dtype_configs:
         # check if arg dtype are supported
         supported = True
@@ -686,6 +692,7 @@ def maybe_insert_observers_before_graph_output(
     assert output_quantized_idxs == [0] or output_quantized_idxs == [], \
         'unrecognized format of output_quantized_idxs'
 
+    print("output qunatized idxs:", output_quantized_idxs)
     # Currently dequants are inserted in the convert step. So, we only
     # have to do anything if the output is hardcoded to be quantized
     if output_quantized_idxs == []:
@@ -722,6 +729,8 @@ def maybe_insert_observers_before_graph_output(
             # check dtype of this node
             this_node_dtype = get_arg_target_dtype_as_output(
                 maybe_node, modules, node_name_to_target_dtype)
+            print("this node dtype:", this_node_dtype)
+            print("target dtype:", target_dtype)
             if this_node_dtype != target_dtype:
                 # insert observer
                 qconfig = qconfig_map.get(maybe_node.name)
@@ -1057,10 +1066,15 @@ def insert_observers_for_model(
 
             is_supported_by_backend = is_pattern_dtype_config_supported_by_backend(
                 pattern, matched_nodes, node_name_to_target_dtype, backend_config_dict)
+            print("root node:", root_node)
+            print("skip_inserting observers:", skip_inserting_observers)
+            print("is_supported_by_backend", is_supported_by_backend)
 
             if not skip_inserting_observers and is_supported_by_backend:
                 modules = dict(model.named_modules(remove_duplicate=False))
+                print("inserting for node:", node.format_node())
                 if node.op != 'output':
+                    print("in inserting observer branch")
                     assert matched_nodes is not None
                     # add matched nodes to the observed node name set
                     for n in matched_nodes:
@@ -1092,6 +1106,7 @@ def insert_observers_for_model(
                                 is_quantized_branch = True
 
                     # this modifies node inplace
+                    print("inserting input observer for:", node.format_node())
                     maybe_insert_input_observers_for_node(
                         node, qconfig, model, modules, graph,
                         node_name_to_target_dtype,
@@ -1341,6 +1356,8 @@ def prepare(
     matches = find_matches(
         model.graph, modules, patterns, qconfig_map, standalone_module_names,
         standalone_module_classes, custom_module_classes)
+
+    print("matches:", matches)
 
     input_quantized_idxs: List[int] = prepare_custom_config_dict.get(
         "input_quantized_idxs", [])

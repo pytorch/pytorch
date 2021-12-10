@@ -1,5 +1,5 @@
-from ..fusion_patterns import ModuleReLUFusion
+from ..fusion_patterns import DefaultFuseHandler
 
-# TODO: move ModuleReLUFusion here
+# TODO: move DefaultFuseHandler
 def get_fuse_handler_cls():
-    return ModuleReLUFusion
+    return DefaultFuseHandler

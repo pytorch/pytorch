@@ -44,33 +44,46 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
         self_match = pattern
         arg_matches = []
 
+    print("node:", node.format_node())
+
     if isinstance(self_match, type) and issubclass(self_match, MatchAllNode):
         return True
 
     if len(node.users) > max_uses:
+        print("returnning false 1")
         return False
 
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
+            print("returnning false 2")
             return False
         if not type(modules[node.target]) == self_match:
+            print("returnning false 3")
             return False
     elif callable(self_match):
         if node.op != 'call_function' or node.target is not self_match:
+            print("returnning false 4")
             return False
         elif node.target is getattr:
             if node.args[1] != pattern[1]:
+                print("returnning false 5")
                 return False
     elif isinstance(self_match, str):
         if node.op != 'call_method' or node.target != self_match:
+            print("returnning false 6")
             return False
     elif node.target != self_match:
+        print("returnning false 7")
         return False
 
     if not arg_matches:
+        print("returnning false 8")
         return True
 
     if len(arg_matches) != len(node.args):
+        print("arg matches:", arg_matches)
+        print("node args:", list(node.args))
+        print("returnning false 9")
         return False
 
     return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
@@ -131,6 +144,8 @@ def find_matches(
     for node in reversed(graph.nodes):
         if node.name not in match_map and node.name not in all_matched:
             for pattern, value in patterns.items():
+                print("matching:", node, pattern)
+                print("is match:", is_match(modules, node, pattern))
                 if is_match(modules, node, pattern):
                     matched: List[Any] = []
                     record_match(pattern, node, matched)
