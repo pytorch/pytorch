@@ -16,14 +16,10 @@ namespace rpc {
 class TestE2ETensorPipe : public TestE2EBase {
  protected:
   void buildRpcAgent() override {
-    c10d::ProcessGroupGloo::Options options;
-    options.devices.push_back(
+    auto options = c10d::ProcessGroupGloo::Options::create();
+    options->devices.push_back(
         ::c10d::ProcessGroupGloo::createDeviceForHostname(serverAddress));
     float rpcTimeout = 30;
-
-    // Initialize server rpc agent.
-    auto pg = c10::make_intrusive<c10d::ProcessGroupGloo>(
-        store, 0, numWorkers, options);
 
     TensorPipeRpcBackendOptions opts(
         /*numWorkerThreads=*/std::max(16U, std::thread::hardware_concurrency()),
@@ -37,8 +33,9 @@ class TestE2ETensorPipe : public TestE2EBase {
         "worker",
         0,
         numWorkers,
-        pg,
         opts,
+        std::unordered_map<std::string, DeviceMap>{},
+        std::vector<c10::Device>{},
         std::make_unique<RequestCallbackNoPython>());
   }
 };

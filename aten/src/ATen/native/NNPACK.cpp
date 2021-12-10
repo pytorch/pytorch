@@ -9,9 +9,8 @@ namespace at {
 namespace native {
 
 at::Tensor _nnpack_spatial_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+    const Tensor& input,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   throw std::runtime_error(
@@ -61,6 +60,7 @@ bool _nnpack_available() {
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/Parallel.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -124,6 +124,7 @@ static thread_local size_t workspace_size = 0;
 
 static inline void deallocate_workspace() {
   if (workspace) {
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
     std::free(workspace);
     workspace = nullptr;
   }
@@ -142,11 +143,14 @@ static inline void allocate_workspace() {
 }
 
 Tensor _nnpack_spatial_convolution(
-    const at::Tensor& input,
-    const at::Tensor& weight,
-    const at::Tensor& bias,
+    const Tensor& input,
+    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   at::Tensor output = at::empty(
       conv_output_size(input.sizes(), weight.sizes(), padding, stride),
       input.options());
@@ -226,15 +230,16 @@ Tensor _nnpack_spatial_convolution(
   };
 
   const auto input_ = input.contiguous();
+  const auto weight_ = weight.contiguous();
   // If we don't have a defined bias Tensor, we need to create one filled with zeroes
-  const auto bias_ = bias.defined() ? bias : at::zeros({weight.size(0)}, input.options());
+  const auto bias_ = bias.defined() ? bias.contiguous() : at::zeros({weight.size(0)}, input.options());
 
   const auto compute = [&](const size_t batch_size) -> nnp_status {
     if ((batch_size == 1) || (output_subsample.width != 1) || (output_subsample.height != 1)) {
       const size_t input_size_per_batch = input_channels * input_size.width * input_size.height;
       const size_t output_size_per_batch = output_channels * output_size.width * output_size.height;
 
-      for (size_t batch = 0u; batch < batch_size; ++batch) {
+      for (const auto batch : c10::irange(0u, batch_size)) {
         const nnp_status status = nnp_convolution_inference(
             algorithm,
             nnp_convolution_transform_strategy_compute,
@@ -245,7 +250,7 @@ Tensor _nnpack_spatial_convolution(
             kernel_size,
             output_subsample,
             input_.data_ptr<float>() + batch * input_size_per_batch,
-            weight.data_ptr<float>(),
+            weight_.data_ptr<float>(),
             bias_.data_ptr<float>(),
             output.data_ptr<float>() + batch * output_size_per_batch,
             workspace,
@@ -272,7 +277,7 @@ Tensor _nnpack_spatial_convolution(
         input_padding,
         kernel_size,
         input_.data_ptr<float>(),
-        weight.data_ptr<float>(),
+        weight_.data_ptr<float>(),
         bias_.data_ptr<float>(),
         output.data_ptr<float>(),
         workspace,

@@ -1,6 +1,12 @@
 #!/bin/bash
 
+# shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+if [[ ${BUILD_ENVIRONMENT} == *onnx* ]]; then
+  pip install click mock tabulate networkx==2.0
+  pip -q install --user "file:///var/lib/jenkins/workspace/third_party/onnx#egg=onnx"
+fi
 
 # Skip tests in environments where they are not built/applicable
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
@@ -39,39 +45,42 @@ fi
 ################################################################################
 # C++ tests #
 ################################################################################
-echo "Running C++ tests.."
-for test in $(find "$cpp_test_dir" -executable -type f); do
-  case "$test" in
-    # skip tests we know are hanging or bad
-    */mkl_utils_test|*/aten/integer_divider_test)
-      continue
-      ;;
-    */scalar_tensor_test|*/basic|*/native_test)
-      if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+# Don't run cpp tests a second time in the sharded ort_test2 job
+if [[ "$BUILD_ENVIRONMENT" != *ort_test2* ]]; then
+  echo "Running C++ tests.."
+  for test in $(find "$cpp_test_dir" -executable -type f); do
+    case "$test" in
+      # skip tests we know are hanging or bad
+      */mkl_utils_test|*/aten/integer_divider_test)
         continue
-      else
-        LD_LIBRARY_PATH="$ld_library_path" "$test"
-      fi
-      ;;
-    */*_benchmark)
-      LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
-      ;;
-    *)
-      # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
-      # planning to migrate to gtest as the common PyTorch c++ test suite, we
-      # currently do NOT use the xml test reporter, because Catch doesn't
-      # support multiple reporters
-      # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
-      # which means that enabling XML output means you lose useful stdout
-      # output for Jenkins.  It's more important to have useful console
-      # output than it is to have XML output for Jenkins.
-      # Note: in the future, if we want to use xml test reporter once we switch
-      # to all gtest, one can simply do:
-      LD_LIBRARY_PATH="$ld_library_path" \
-          "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
-      ;;
-  esac
-done
+        ;;
+      */scalar_tensor_test|*/basic|*/native_test)
+        if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+          continue
+        else
+          LD_LIBRARY_PATH="$ld_library_path" "$test"
+        fi
+        ;;
+      */*_benchmark)
+        LD_LIBRARY_PATH="$ld_library_path" "$test" --benchmark_color=false
+        ;;
+      *)
+        # Currently, we use a mixture of gtest (caffe2) and Catch2 (ATen). While
+        # planning to migrate to gtest as the common PyTorch c++ test suite, we
+        # currently do NOT use the xml test reporter, because Catch doesn't
+        # support multiple reporters
+        # c.f. https://github.com/catchorg/Catch2/blob/master/docs/release-notes.md#223
+        # which means that enabling XML output means you lose useful stdout
+        # output for Jenkins.  It's more important to have useful console
+        # output than it is to have XML output for Jenkins.
+        # Note: in the future, if we want to use xml test reporter once we switch
+        # to all gtest, one can simply do:
+        LD_LIBRARY_PATH="$ld_library_path" \
+            "$test" --gtest_output=xml:"$gtest_reports_dir/$(basename $test).xml"
+        ;;
+    esac
+  done
+fi
 
 ################################################################################
 # Python tests #
@@ -139,21 +148,27 @@ if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
   done
 fi
 
-pip install --user pytest-sugar
-"$PYTHON" \
-  -m pytest \
-  -x \
-  -v \
-  --disable-warnings \
-  --junit-xml="$pytest_reports_dir/result.xml" \
-  --ignore "$caffe2_pypath/python/test/executor_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
-  --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
-  --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
-  --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
-  ${rocm_ignore_test[@]} \
-  "$caffe2_pypath/python" \
-  "${EXTRA_TESTS[@]}"
+# Some Caffe2 tests fail when run using AVX512 ISA, see https://github.com/pytorch/pytorch/issues/66111
+export DNNL_MAX_CPU_ISA=AVX2
+
+# Should still run even in the absence of SHARD_NUMBER
+if [[ "${SHARD_NUMBER:-1}" == "1" ]]; then
+  pip install --user pytest-sugar
+  "$PYTHON" \
+    -m pytest \
+    -x \
+    -v \
+    --disable-warnings \
+    --junit-xml="$pytest_reports_dir/result.xml" \
+    --ignore "$caffe2_pypath/python/test/executor_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/matmul_op_test.py" \
+    --ignore "$caffe2_pypath/python/operator_test/pack_ops_test.py" \
+    --ignore "$caffe2_pypath/python/mkl/mkl_sbn_speed_test.py" \
+    --ignore "$caffe2_pypath/python/trt/test_pt_onnx_trt.py" \
+    ${rocm_ignore_test[@]} \
+    "$caffe2_pypath/python" \
+    "${EXTRA_TESTS[@]}"
+fi
 
 #####################
 # torchvision tests #
@@ -166,7 +181,7 @@ if [[ "$BUILD_ENVIRONMENT" == *onnx* ]]; then
   # JIT C++ extensions require ninja, so put it into PATH.
   export PATH="/var/lib/jenkins/.local/bin:$PATH"
   if [[ "$BUILD_ENVIRONMENT" == *py3* ]]; then
-    pip install -q --user onnxruntime==1.6.0
+    pip install -q --user flatbuffers==2.0 onnxruntime==1.9.0
   fi
   "$ROOT_DIR/scripts/onnx/test.sh"
 fi

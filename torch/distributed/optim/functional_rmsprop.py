@@ -23,7 +23,8 @@ class _FunctionalRMSprop(object):
         eps: float = 1e-8,
         weight_decay: float = 0.0,
         momentum: float = 0.0,
-        centered: bool = False
+        centered: bool = False,
+        _allow_empty_param_list: bool = False,
     ):
         self.defaults = {
             "lr": lr,
@@ -34,7 +35,7 @@ class _FunctionalRMSprop(object):
         }
         self.centered = centered
 
-        if len(params) == 0:
+        if len(params) == 0 and not _allow_empty_param_list:
             raise ValueError("optimizer got an empty parameter list")
 
         # NOTE: we only have one param_group and don't allow user to add additional
@@ -45,6 +46,7 @@ class _FunctionalRMSprop(object):
 
     def step(self, gradients: List[Optional[Tensor]]):
         params = self.param_group['params']
+        params_with_grad = []
         grads = []
         square_avgs = []
         grad_avgs = []
@@ -64,6 +66,7 @@ class _FunctionalRMSprop(object):
 
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
                 if param not in self.state:
@@ -86,14 +89,14 @@ class _FunctionalRMSprop(object):
                 state['step'] += 1
 
         with torch.no_grad():
-            F.rmsprop(params,
+            F.rmsprop(params_with_grad,
                       grads,
                       square_avgs,
                       grad_avgs,
                       momentum_buffer_list,
-                      lr,
-                      alpha,
-                      eps,
-                      weight_decay,
-                      momentum,
-                      self.centered)
+                      lr=lr,
+                      alpha=alpha,
+                      eps=eps,
+                      weight_decay=weight_decay,
+                      momentum=momentum,
+                      centered=self.centered)

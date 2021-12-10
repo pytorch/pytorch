@@ -8,9 +8,10 @@
 namespace torch {
 namespace jit {
 
-// try to match a list if inputs and keyword 'attributes' to this schema,
-// if it works return the flat list of positional inputs to the call
-// if it returns nullopt, then failure_messages contains a good error report
+// Try to match a list of inputs and keyword 'attributes' to this
+// schema. Return the flat list of positional inputs to the call or
+// `c10::nullopt` on failure (`failure_messages` contains a good error
+// report in this case)
 
 struct MatchedSchema {
   std::vector<Value*> inputs;

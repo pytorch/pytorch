@@ -103,8 +103,10 @@ REGISTER_EXTERNAL_TENSOR_FUNCTIONS(
 OPERATOR_SCHEMA(FbFCPacked)
     .NumInputs(3)
     .NumOutputs(1)
+    // NOLINTNEXTLINE(modernize-avoid-bind)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        // NOLINTNEXTLINE(modernize-avoid-bind)
         std::bind(CostInferenceForFC, _1, _2, false)))
     .SetDoc(R"DOC(Same as FC,
       but the weight is prepacked as a fbgemm::PackedGemmMatrixFP16)DOC");

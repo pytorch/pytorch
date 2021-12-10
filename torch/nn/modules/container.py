@@ -7,7 +7,7 @@ import torch
 from .module import Module
 from torch._jit_internal import _copy_to_script_wrapper
 
-from typing import Any, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
+from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, TYPE_CHECKING, overload, Tuple, TypeVar, Union
 
 if TYPE_CHECKING:
     from torch.nn import Parameter
@@ -28,12 +28,32 @@ class Container(Module):
 
 class Sequential(Module):
     r"""A sequential container.
-    Modules will be added to it in the order they are passed in the constructor.
-    Alternatively, an ordered dict of modules can also be passed in.
+    Modules will be added to it in the order they are passed in the
+    constructor. Alternatively, an ``OrderedDict`` of modules can be
+    passed in. The ``forward()`` method of ``Sequential`` accepts any
+    input and forwards it to the first module it contains. It then
+    "chains" outputs to inputs sequentially for each subsequent module,
+    finally returning the output of the last module.
 
-    To make it easier to understand, here is a small example::
+    The value a ``Sequential`` provides over manually calling a sequence
+    of modules is that it allows treating the whole container as a
+    single module, such that performing a transformation on the
+    ``Sequential`` applies to each of the modules it stores (which are
+    each a registered submodule of the ``Sequential``).
 
-        # Example of using Sequential
+    What's the difference between a ``Sequential`` and a
+    :class:`torch.nn.ModuleList`? A ``ModuleList`` is exactly what it
+    sounds like--a list for storing ``Module`` s! On the other hand,
+    the layers in a ``Sequential`` are connected in a cascading way.
+
+    Example::
+
+        # Using Sequential to create a small model. When `model` is run,
+        # input will first be passed to `Conv2d(1,20,5)`. The output of
+        # `Conv2d(1,20,5)` will be used as the input to the first
+        # `ReLU`; the output of the first `ReLU` will become the input
+        # for `Conv2d(20,64,5)`. Finally, the output of
+        # `Conv2d(20,64,5)` will be used as input to the second `ReLU`
         model = nn.Sequential(
                   nn.Conv2d(1,20,5),
                   nn.ReLU(),
@@ -41,7 +61,8 @@ class Sequential(Module):
                   nn.ReLU()
                 )
 
-        # Example of using Sequential with OrderedDict
+        # Using Sequential with OrderedDict. This is functionally the
+        # same as the above code
         model = nn.Sequential(OrderedDict([
                   ('conv1', nn.Conv2d(1,20,5)),
                   ('relu1', nn.ReLU()),
@@ -49,6 +70,8 @@ class Sequential(Module):
                   ('relu2', nn.ReLU())
                 ]))
     """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
 
     @overload
     def __init__(self, *args: Module) -> None:
@@ -143,6 +166,8 @@ class ModuleList(Module):
                 return x
     """
 
+    _modules: Dict[str, Module]  # type: ignore[assignment]
+
     def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
         super(ModuleList, self).__init__()
         if modules is not None:
@@ -229,8 +254,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    def forward(self):
-        raise NotImplementedError()
+    # remove forward alltogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -244,9 +268,9 @@ class ModuleDict(Module):
 
     * the order of insertion, and
 
-    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged 
+    * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
       ``OrderedDict``, ``dict`` (started from Python 3.6) or another
-      :class:`~torch.nn.ModuleDict` (the argument to 
+      :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
@@ -276,6 +300,8 @@ class ModuleDict(Module):
                 x = self.activations[act](x)
                 return x
     """
+
+    _modules: Dict[str, Module]  # type: ignore[assignment]
 
     def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
         super(ModuleDict, self).__init__()
@@ -372,8 +398,7 @@ class ModuleDict(Module):
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    def forward(self):
-        raise NotImplementedError()
+    # remove forward alltogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
@@ -399,6 +424,8 @@ class ParameterList(Module):
                     x = self.params[i // 2].mm(x) + p.mm(x)
                 return x
     """
+
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Iterable['Parameter']] = None) -> None:
         super(ParameterList, self).__init__()
@@ -541,6 +568,8 @@ class ParameterDict(Module):
                 x = self.params[choice].mm(x)
                 return x
     """
+
+    _parameters: Dict[str, 'Parameter']  # type: ignore[assignment]
 
     def __init__(self, parameters: Optional[Mapping[str, 'Parameter']] = None) -> None:
         super(ParameterDict, self).__init__()

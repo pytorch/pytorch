@@ -1,5 +1,6 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/multi_class_accuracy_op.h"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -18,9 +19,9 @@ __global__ void MultiClassAccuracyKernel(const int N, const int D, const float* 
     }
     int labelid = labeldata[i];
     if (maxid == labelid) {
-      atomicAdd(accuracies + labelid, static_cast<float>(1));
+      gpu_atomic_add(accuracies + labelid, static_cast<float>(1));
     }
-    atomicAdd(amounts + labelid, static_cast<int>(1));
+    gpu_atomic_add(amounts + labelid, static_cast<int>(1));
   }
 }
 __global__ void MultiClassAccuracyDivideKernel(
@@ -37,8 +38,8 @@ template <>
 bool MultiClassAccuracyOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(PREDICTION);
   auto& label = Input(LABEL);
-  
-  
+
+
   DCHECK_EQ(X.dim(), 2);
   // amount, number of instances
   int N = X.dim32(0);

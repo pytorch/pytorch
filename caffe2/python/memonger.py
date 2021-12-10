@@ -393,7 +393,7 @@ def _compute_tree_height(g, root):
         if children:
             child_heights = [_get_height(x) for x in children]
             height = max(child_heights) + 1
-        g.node[root]["height"] = height
+        g.nodes[root]["height"] = height
         return height
 
     _get_height(root)
@@ -404,7 +404,7 @@ def _sort_tree_leaves(g, root):
         Return the leaf nodes of the tree after sorting.
     '''
     def _get_height(root):
-        return g.node[root]["height"]
+        return g.nodes[root]["height"]
 
     def _get_sorted_leaves(root):
         children = list(g.successors(root))
@@ -459,7 +459,7 @@ def topological_sort_traversal_longest_path(g):
         ret = nx.algorithms.dag.lexicographical_topological_sort(
             g, key=lambda x: sort_key[x])
         ret = list(ret)
-    assert(len(ret) == len(g.node))
+    assert(len(ret) == len(g.nodes))
     return ret
 
 

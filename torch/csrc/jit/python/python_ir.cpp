@@ -1,11 +1,14 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
 #include <pybind11/pybind11.h>
+#include <torch/csrc/Dtype.h>
+#include <torch/csrc/api/include/torch/python.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
+#include <torch/csrc/jit/passes/symbolic_shape_analysis.h>
 #include <torch/csrc/jit/python/pybind.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
@@ -20,6 +23,9 @@
 
 namespace torch {
 namespace jit {
+
+// Controls whether graph source ranges are printed by default
+bool global_print_source_ranges = true;
 
 Symbol ConcretePythonOp::Kind = prim::PythonOp;
 
@@ -74,33 +80,6 @@ std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
   }
 }
 
-std::vector<Node*> findAllNodes(
-    c10::ArrayRef<torch::jit::Block*> blocks,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Node*> ret;
-  for (Block* block : blocks) {
-    for (Node* n : block->nodes()) {
-      if (n->kind() == kind) {
-        ret.push_back(n);
-      }
-      if (recurse) {
-        auto nodes = findAllNodes(n->blocks(), kind, recurse);
-        ret.insert(ret.end(), nodes.begin(), nodes.end());
-      }
-    }
-  }
-  return ret;
-}
-
-std::vector<Node*> findAllNodes(
-    Block* block,
-    Symbol kind,
-    bool recurse = true) {
-  std::vector<Block*> blocks = {block};
-  return findAllNodes(blocks, kind, recurse);
-}
-
 Node* findNode(
     c10::ArrayRef<torch::jit::Block*> blocks,
     Symbol kind,
@@ -136,6 +115,7 @@ std::string ConcretePythonOp::name() const {
 }
 
 void ConcretePythonOp::cloneFrom(Node* other_) {
+  // NOLINTNEXTLINE(bugprone-parent-virtual-call)
   Node::cloneFrom(other_);
   auto other = other_->cast<ConcretePythonOp>();
   this->cconv = other->cconv;
@@ -209,11 +189,35 @@ Node* Graph::createPythonOp(
 
 void initPythonIRBindings(PyObject* module_) {
   auto m = py::handle(module_).cast<py::module>();
+
+  py::class_<AliasDb, std::shared_ptr<AliasDb>>(m, "AliasDb")
+      .def("dump", &AliasDb::dump)
+      .def("to_graphviz_str", &AliasDb::toGraphviz)
+      .def(
+          "may_contain_alias",
+          [&](AliasDb& db, Value* v1, Value* v2) {
+            return db.mayContainAlias(v1, v2);
+          })
+      .def("__str__", &AliasDb::toString);
+
 #define GS(name) def(#name, &Graph ::name)
   py::class_<Graph, std::shared_ptr<Graph>>(m, "Graph")
       .def(py::init<>())
-      .def("__repr__", [](Graph& g) { return g.toString(); })
+      .def(
+          "__repr__",
+          [&](Graph& g) { return g.toString(global_print_source_ranges); })
       .def("str", &Graph::toString, py::arg("print_source_ranges") = true)
+      .def_readonly_static(
+          "global_print_source_ranges", &global_print_source_ranges)
+      .def_static(
+          "set_global_print_source_ranges",
+          [&](const bool enabled) { global_print_source_ranges = enabled; },
+          py::arg("enabled") = true)
+      .def(
+          "alias_db",
+          [](std::shared_ptr<Graph> g) {
+            return std::make_shared<AliasDb>(std::move(g));
+          })
       .def(
           "dump_alias_db",
           [](std::shared_ptr<Graph> g) {
@@ -234,26 +238,32 @@ void initPythonIRBindings(PyObject* module_) {
              bool keep_initializers_as_inputs,
              const std::map<std::string, int>& custom_opsets,
              bool add_node_names,
-             bool use_external_data_format,
-             const std::string& onnx_file_path) {
+             const std::string& onnx_file_path,
+             const NodeAttrNameMap& node_attr_to_name) {
             std::string graph;
             std::shared_ptr<::ONNX_NAMESPACE::ModelProto> model_proto;
             RawDataExportMap export_map;
             SymbolDimMap symbol_map;
-            std::tie(model_proto, export_map, symbol_map) = export_onnx(
-                g,
-                initializers,
-                onnx_opset_version,
-                dynamic_axes,
-                defer_weight_export,
-                operator_export_type,
-                strip_doc_string,
-                keep_initializers_as_inputs,
-                custom_opsets,
-                add_node_names,
-                use_external_data_format,
-                onnx_file_path);
-            graph = serialize_model_proto_to_string(model_proto);
+            bool val_use_external_data_format = false;
+            std::tie(
+                model_proto,
+                export_map,
+                symbol_map,
+                val_use_external_data_format) =
+                export_onnx(
+                    g,
+                    initializers,
+                    onnx_opset_version,
+                    dynamic_axes,
+                    defer_weight_export,
+                    operator_export_type,
+                    strip_doc_string,
+                    keep_initializers_as_inputs,
+                    custom_opsets,
+                    add_node_names,
+                    val_use_external_data_format,
+                    onnx_file_path,
+                    node_attr_to_name);
             std::unordered_map<std::string, py::bytes>
                 python_serialized_export_map;
             for (auto& kv : export_map) {
@@ -267,7 +277,9 @@ void initPythonIRBindings(PyObject* module_) {
             }
             graph = serialize_model_proto_to_string(model_proto);
             return std::make_tuple(
-                py::bytes(graph), python_serialized_export_map);
+                py::bytes(graph),
+                python_serialized_export_map,
+                val_use_external_data_format);
           },
           py::arg("initializers"),
           py::arg("onnx_opset_version") = 0,
@@ -279,8 +291,8 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("keep_initializers_as_inputs") = true,
           py::arg("custom_opsets"),
           py::arg("add_node_names") = true,
-          py::arg("use_external_data_format") = false,
-          py::arg("onnx_file_path") = std::string())
+          py::arg("onnx_file_path") = std::string(),
+          py::arg("node_attr_to_name") = NodeAttrNameMap())
       .def(
           "_pretty_print_onnx",
           [](const std::shared_ptr<Graph>& g,
@@ -343,8 +355,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "findAllNodes",
           [](Graph& g, const std::string& kind, bool recurse) {
-            return findAllNodes(
-                g.block(), Symbol::fromQualString(kind), recurse);
+            return findAllNodes(g, Symbol::fromQualString(kind), recurse);
           },
           "Find all nodes",
           py::arg("kind"),
@@ -366,6 +377,12 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "create",
           [](Graph& g, const char* str, const std::vector<Value*>& inputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs);
           })
       .def(
@@ -374,6 +391,12 @@ void initPythonIRBindings(PyObject* module_) {
              const char* str,
              const std::vector<Value*>& inputs,
              size_t noutputs) {
+            TORCH_CHECK_VALUE(
+                std::all_of(
+                    inputs.begin(),
+                    inputs.end(),
+                    [](Value* v) { return (v != nullptr); }),
+                "cannot pass None in inputs");
             return g.create(Symbol::fromQualString(str), inputs, noutputs);
           })
       .def("param_node", [](Graph& g) { return g.block()->param_node(); })
@@ -392,6 +415,16 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      .def(
+          "makeMultiOutputIntoTuple",
+          [](Graph& g) {
+            auto tup = g.createTuple(g.outputs());
+            tup->insertBefore(g.return_node());
+            for (int64_t i = g.outputs().size() - 1; i >= 0; i--) {
+              g.eraseOutput(0);
+            }
+            g.registerOutput(tup->output());
+          })
       .def(
           "insertConstant",
           [](Graph& g, const IValue& ival) { return g.insertConstant(ival); })
@@ -438,7 +471,9 @@ void initPythonIRBindings(PyObject* module_) {
       .VS(requires_grad)
       .def(
           "requiresGrad",
-          [](Value& n) { n.type()->expectRef<TensorType>().requiresGrad(); })
+          [](Value& n) {
+            return n.type()->expectRef<TensorType>().requiresGrad();
+          })
       .def("toIValue", [](Value& n) { return toIValue(&n); })
       .def("type", [](Value& v) { return v.type(); });
 #undef VS
@@ -460,7 +495,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "findAllNodes",
           [](Block& b, const std::string& kind, bool recurse) {
-            return findAllNodes(&b, Symbol::fromQualString(kind), recurse);
+            return findAllNodes(b, Symbol::fromQualString(kind), recurse);
           },
           "Find all nodes",
           py::arg("kind"),
@@ -477,6 +512,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def("returnNode", [](Block& b) { return b.return_node(); })
       .def("paramNode", [](Block& b) { return b.param_node(); })
+      .def("owningNode", [](Block& b) { return b.owningNode(); })
       .def(
           "addNode",
           [](Block& b, const char* str, const std::vector<Value*>& inputs) {
@@ -501,6 +537,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("inputsSize", [](Node& n) { return n.inputs().size(); })
       .def("outputsSize", [](Node& n) { return n.outputs().size(); })
       .NS(kind)
+      .def("owningBlock", [](Node& n) { return n.owningBlock(); })
       .def("inputsAt", [](Node& n, size_t i) { return n.inputs().at(i); })
       .def(
           "inputs",
@@ -543,7 +580,11 @@ void initPythonIRBindings(PyObject* module_) {
           py::arg("recurse") = true)
       .def("input", [](Node& n) { return n.input(); })
       .def("output", [](Node& n) { return n.output(); })
+      .def(
+          "getModuleHierarchy",
+          [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
       .NS(addInput)
+      .NS(copyMetadata)
       .NS(replaceInput)
       .NS(replaceInputWith)
       .NS(replaceAllUsesWith)
@@ -591,6 +632,7 @@ void initPythonIRBindings(PyObject* module_) {
   })
       .CREATE_ACCESSOR(Float, f)
       .CREATE_ACCESSOR(Floats, fs)
+      .CREATE_ACCESSOR(Complex, c)
       .CREATE_ACCESSOR(String, s)
       .CREATE_ACCESSOR(Strings, ss)
       .CREATE_ACCESSOR(Int, i)
@@ -713,6 +755,36 @@ void initPythonIRBindings(PyObject* module_) {
             return py::none();
           })
       .def(
+          "symbolic_sizes",
+          [](Type& t) -> py::object {
+            if (auto ptt = t.expect<TensorType>()) {
+              auto ss = ptt->symbolic_sizes();
+              if (!ss.rank().has_value()) {
+                return py::none();
+              }
+
+              std::vector<int64_t> ss_vals;
+              for (size_t i = 0; i < *ss.rank(); ++i) {
+                ss_vals.push_back(ss.at(i).value());
+              }
+              return py::cast(ss_vals);
+            }
+            return py::none();
+          })
+      .def(
+          "with_sizes",
+          [](Type& t, c10::optional<std::vector<c10::optional<int64_t>>> sizes)
+              -> py::object {
+            auto ptt = t.expect<TensorType>();
+            if (!ptt) {
+              return py::none();
+            }
+            if (!sizes) {
+              return py::cast(ptt->withSymbolicShapes(c10::SymbolicShape()));
+            }
+            return py::cast(ptt->withSymbolicShapes(*sizes));
+          })
+      .def(
           "varyingSizes",
           [](Type& t) -> py::object {
             if (auto ptt = t.expect<TensorType>()) {
@@ -746,6 +818,31 @@ void initPythonIRBindings(PyObject* module_) {
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
+          "dtype",
+          [](Type& t) -> py::object {
+            auto scalar_type =
+                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            if (!scalar_type) {
+              return py::none();
+            }
+            THPDtype* thp_dtype = torch::getTHPDtype(*scalar_type);
+            py::object dtype =
+                py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
+            return dtype;
+          })
+      .def(
+          "with_dtype",
+          [](Type& t, py::object dtype) -> py::object {
+            at::ScalarType scalar_type =
+                python::detail::py_object_to_dtype(dtype);
+
+            if (auto ptt = t.expect<TensorType>()) {
+              // auto scalar_type = dtype->scalar_type;
+              return py::cast(ptt->withScalarType(scalar_type));
+            }
+            return py::none();
+          })
+      .def(
           "__eq__",
           [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
             if (!other) {
@@ -761,9 +858,15 @@ void initPythonIRBindings(PyObject* module_) {
             }
             return self->isSubtypeOf(other);
           })
-      .def("is_interface_type", [](const std::shared_ptr<Type>& self) {
-        return self->cast<InterfaceType>() != nullptr;
-      });
+      .def(
+          "is_interface_type",
+          [](const std::shared_ptr<Type>& self) {
+            return self->cast<InterfaceType>() != nullptr;
+          })
+      .def_property_readonly(
+          "annotation_str", [](const std::shared_ptr<Type>& self) {
+            return self->annotation_str();
+          });
 
   py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
       .def_static("get", &AnyType::get);
@@ -777,7 +880,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &ComplexType::get);
   py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
       .def_static("get", &TensorType::get)
-      .def_static("getInferred", &TensorType::getInferred);
+      .def_static("getInferred", &TensorType::getInferred)
+      .def_static("create_from_tensor", [](const at::Tensor& t) {
+        return TensorType::create(t);
+      });
   py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
@@ -804,6 +910,12 @@ void initPythonIRBindings(PyObject* module_) {
           types.push_back(type);
         }
         return types;
+      });
+  py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
+      .def(py::init(
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
+      .def("containedTypes", [](UnionType& self) {
+        return self.containedTypes().vec();
       });
   py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
@@ -837,7 +949,10 @@ void initPythonIRBindings(PyObject* module_) {
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
-      .def("name", [](ClassType& self) { return self.name()->name(); });
+      .def("name", [](ClassType& self) { return self.name()->name(); })
+      .def("qualified_name", [](ClassType& self) {
+        return self.name()->qualifiedName();
+      });
   py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,
@@ -902,6 +1017,19 @@ void initPythonIRBindings(PyObject* module_) {
       .def("isAfter", [](Use& self, Use& other_use) {
         return isBeforeOrAfter(self, other_use, false);
       });
+
+  py::class_<torch::jit::ShapeComputeGraphMapping>(
+      m, "_ShapeComputeGraphMapping")
+      .def(
+          "partial_eval_shape_graph",
+          [](ShapeComputeGraphMapping& g) {
+            return g.partial_eval_shape_graph;
+          })
+      .def(
+          "graph_output_to_symbolic_shape_dim",
+          [](ShapeComputeGraphMapping& g) {
+            return g.graph_output_to_symbolic_shape_dim_;
+          });
 }
 } // namespace jit
 } // namespace torch

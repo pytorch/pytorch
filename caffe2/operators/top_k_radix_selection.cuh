@@ -4,6 +4,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/utils/GpuDefs.cuh"
 #include "caffe2/utils/GpuScanUtils.cuh"
+#include "caffe2/utils/GpuAtomics.cuh"
 #include "caffe2/utils/math.h"
 #include <cuda_runtime.h>
 
@@ -169,11 +170,11 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
 #pragma unroll
     for (unsigned int j = 0; j < RadixSize; ++j) {
       bool vote = hasVal && (digitInRadix == j);
-#if defined(__HIP_PLATFORM_HCC__)
+#if defined(USE_ROCM)
       counts[j] += __popcll(__ballot(vote));
 #else
       counts[j] += __popc(__ballot_sync(__activemask(), vote));
-#endif  // __HIP_PLATFORM_HCC__
+#endif  // USE_ROCM
     }
   }
 
@@ -181,7 +182,7 @@ __device__ void countRadixUsingMask(CountType counts[RadixSize],
   if (getLaneId() == 0) {
 #pragma unroll
     for (unsigned int i = 0; i < RadixSize; ++i) {
-      atomicAdd(&smem[i], counts[i]);
+      gpu_atomic_add(&smem[i], counts[i]);
     }
   }
 

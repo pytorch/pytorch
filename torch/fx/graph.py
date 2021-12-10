@@ -1,13 +1,25 @@
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
+import torch.utils._pytree as pytree
+from . import _pytree as fx_pytree
+from ._compatibility import compatibility
+import contextlib
 
-from typing import Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
+import copy
 import torch
 import keyword
 import re
 import builtins
 import math
+import warnings
+
+
+if TYPE_CHECKING:
+    from .graph_module import GraphModule  # noqa: F401
+    from ._symbolic_trace import Tracer   # noqa: F401
+
 
 # Mapping of builtins to their `typing` equivalent.
 _origin_type_map = {
@@ -17,6 +29,12 @@ _origin_type_map = {
     frozenset: FrozenSet,
     tuple: Tuple,
 }
+
+
+# Signature for functions thattransforms the body (`list[str]`) of the
+# generated code
+TransformCodeFunc = Callable[[List[str]], List[str]]
+
 
 class _CustomBuiltin(NamedTuple):
     """Additional objs that we add to every graph's globals.
@@ -41,10 +59,14 @@ _register_custom_builtin('inf', 'from math import inf', math.inf)
 _register_custom_builtin('nan', 'from math import nan', math.nan)
 _register_custom_builtin('NoneType', 'NoneType = type(None)', type(None))
 _register_custom_builtin('torch', 'import torch', torch)
+_register_custom_builtin('device', 'from torch import device', torch.device)
+_register_custom_builtin('fx_pytree', 'import torch.fx._pytree as fx_pytree', fx_pytree)
+_register_custom_builtin('pytree', 'import torch.utils._pytree as pytree', pytree)
 
 
 def _is_magic(x: str) -> bool:
     return x.startswith('__') and x.endswith('__')
+
 
 def _snake_case(s: str) -> str:
     """
@@ -109,16 +131,24 @@ class _Namespace:
 
         # delete all characters that are illegal in a Python identifier
         candidate = self._illegal_char_regex.sub('_', candidate)
+
         if candidate[0].isdigit():
             candidate = f'_{candidate}'
 
+        match = self._name_suffix_regex.match(candidate)
+        if match is None:
+            base = candidate
+            num = None
+        else:
+            base, num_str = match.group(1, 2)
+            num = int(num_str)
+
+        candidate = base if num is None else f'{base}_{num}'
+        num = num if num else 0
+
         while candidate in self._used_names or self._is_illegal_name(candidate, obj):
-            match = self._name_suffix_regex.match(candidate)
-            if match is None:
-                candidate = candidate + '_1'
-            else:
-                base, num = match.group(1, 2)
-                candidate = f'{base}_{int(num) + 1}'
+            num += 1
+            candidate = f'{base}_{num}'
 
         self._used_names.setdefault(candidate)
         if obj is None:
@@ -153,9 +183,12 @@ class _Namespace:
         return False
 
 
+@compatibility(is_backward_compatible=True)
 @dataclass
 class PythonCode:
-    """Represents all the information necessary to exec or save a graph as Python code."""
+    """
+    Represents all the information necessary to exec or save a graph as Python code.
+    """
     # Python source code for the forward function definition.
     src: str
     # Values in global scope during exection of `src_def`.
@@ -210,6 +243,15 @@ class _node_list:
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
 
+class _PyTreeInfo(NamedTuple):
+    """
+    Contains extra info stored when we're using Pytrees
+    """
+    orig_args: List[str]
+    in_spec: pytree.TreeSpec
+    out_spec: Optional[pytree.TreeSpec]
+
+@compatibility(is_backward_compatible=True)
 class Graph:
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
@@ -253,7 +295,9 @@ class Graph:
 
     For the semantics of operations represented in the ``Graph``, please see :class:`Node`.
     """
-    def __init__(self):
+
+    @compatibility(is_backward_compatible=True)
+    def __init__(self, owning_module: Optional["GraphModule"] = None, tracer_cls: Optional[Type["Tracer"]] = None):
         """
         Construct an empty Graph.
         """
@@ -262,6 +306,28 @@ class Graph:
         self._insert = self._root.prepend
         self._len = 0
         self._graph_namespace = _Namespace()
+        self._owners = 0
+        self._owning_module = owning_module
+        self._tracer_cls = tracer_cls
+        self._pytree_info: Optional[_PyTreeInfo] = None
+
+        # A function `list[str] -> list[str]` to transform the body of the generated code
+        self._on_generate_code: Optional[TransformCodeFunc] = None
+
+    @property
+    def owning_module(self):
+        """
+        Return the module that owns this ``GraphModule``, if there is one,
+        ``None`` if there is no owning module or if there are multiple owning
+        modules.
+        """
+        return self._owning_module
+
+    @owning_module.setter
+    def owning_module(self, mod: Optional["GraphModule"]):
+        if mod:
+            self._owning_module = mod if not self._owners else None
+            self._owners += 1
 
     @property
     def nodes(self) -> _node_list:
@@ -278,7 +344,8 @@ class Graph:
         """
         return _node_list(self)
 
-    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node]) -> 'Optional[Argument]':
+    @compatibility(is_backward_compatible=True)
+    def graph_copy(self, g : 'Graph', val_map : Dict[Node, Node], return_output_node=False) -> 'Optional[Argument]':
         """
         Copy all nodes from a given graph into ``self``.
 
@@ -300,7 +367,7 @@ class Graph:
                 continue
             if node.op == 'output':
                 rv = map_arg(node.args[0], lambda n: val_map[n])
-                return rv
+                return rv if not return_output_node else (rv, node)
             val_map[node] = self.node_copy(node, lambda n : val_map[n])
         return None
 
@@ -310,14 +377,17 @@ class Graph:
         from the default implementation. This uses graph_copy to copy the nodes
         in an iterative way, rather than recursive. It also populates the
         memoization table to prevent unnecessary copies (e.g. references to
-        nodes or other parts of the Graph from a custom GraphModule implementation
+        nodes or other parts of the Graph from a custom GraphModule implementation.
         """
         memo = memo if memo else {}
-        g = Graph()
-        output_val = g.graph_copy(self, val_map=memo)
-        g.output(output_val)
+        g = Graph(tracer_cls=self._tracer_cls)
+        output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
+        assert isinstance(output_vals, tuple)
+        output_val, old_output_val = output_vals
+        g.output(output_val, type_expr=getattr(old_output_val, 'type', None))
         return g
 
+    @compatibility(is_backward_compatible=True)
     def create_node(self, op: str, target: 'Target',
                     args: Optional[Tuple['Argument', ...]] = None,
                     kwargs: Optional[Dict[str, 'Argument']] = None,
@@ -364,6 +434,21 @@ class Graph:
         self._len += 1
         return n
 
+    @compatibility(is_backward_compatible=False)
+    def flatten_inps(self, *args):
+        flat_args, args_spec = pytree.tree_flatten(args)
+        return flat_args
+
+    @compatibility(is_backward_compatible=False)
+    def unflatten_outs(self, out):
+        if self._pytree_info is None:
+            return out
+        if not isinstance(out, list):
+            out = [out]
+        assert(self._pytree_info.out_spec is not None)
+        return pytree.tree_unflatten(out, self._pytree_info.out_spec)
+
+    @compatibility(is_backward_compatible=True)
     def erase_node(self, to_erase : Node) -> None:
         """
         Erases a ``Node`` from the ``Graph``. Throws an exception if
@@ -390,6 +475,7 @@ class Graph:
         assert isinstance(new_kwargs, dict)
         to_erase.kwargs = new_kwargs
 
+    @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -412,6 +498,7 @@ class Graph:
         assert n.graph == self, "Node to insert before is not in graph."
         return _InsertPoint(self, n.prepend)
 
+    @compatibility(is_backward_compatible=True)
     def inserting_after(self, n: Optional[Node] = None):
         """Set the point at which create_node and companion methods will insert into the graph.
         When used within a 'with' statement, this will temporary set the insert point and
@@ -434,7 +521,7 @@ class Graph:
         assert n.graph == self, "Node to insert after is not in graph."
         return _InsertPoint(self, n.append)
 
-    # sugar for create_node when you know the op
+    @compatibility(is_backward_compatible=True)
     def placeholder(self, name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``placeholder`` node into the Graph. A ``placeholder`` represents
@@ -456,6 +543,7 @@ class Graph:
         """
         return self.create_node('placeholder', name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def get_attr(self, qualified_name: str, type_expr: Optional[Any] = None) -> Node:
         """
         Insert a ``get_attr`` node into the Graph. A ``get_attr`` ``Node`` represents the
@@ -480,8 +568,41 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as ``Graph.create_node``.
         """
+        def _get_attr_reference_exists(mod: torch.nn.Module, qualified_name: str) -> bool:
+            module_path, _, name = qualified_name.rpartition(".")
+
+            try:
+                submod: torch.nn.Module = mod.get_submodule(module_path)
+            except AttributeError:
+                warnings.warn(f"Failed to fetch module {module_path}!")
+                return False
+
+            if not hasattr(submod, name):
+                return False
+
+            res = getattr(submod, name)
+
+            if (not isinstance(res, torch.nn.Module)
+                    and not isinstance(res, torch.nn.Parameter)
+                    and name not in submod._buffers):
+                return False
+
+            return True
+
+        if (self.owning_module and
+                not _get_attr_reference_exists(self.owning_module, qualified_name)):
+            warnings.warn("Attempted to insert a get_attr Node with no "
+                          "underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule, "
+                          "GraphModule.add_parameter to add the "
+                          "necessary Parameter, or "
+                          "nn.Module.register_buffer to add the "
+                          "necessary buffer")
         return self.create_node('get_attr', qualified_name, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_module(self,
                     module_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -517,8 +638,16 @@ class Graph:
             The same insertion point and type expression rules apply for this method
             as :meth:`Graph.create_node`.
         """
+        if (self.owning_module and
+                self.owning_module.get_submodule(module_name) is None):
+            warnings.warn("Attempted to insert a call_module Node with "
+                          "no underlying reference in the owning "
+                          "GraphModule! Call "
+                          "GraphModule.add_submodule to add the "
+                          "necessary submodule")
         return self.create_node('call_module', module_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_method(self,
                     method_name: str,
                     args: Optional[Tuple['Argument', ...]] = None,
@@ -553,6 +682,7 @@ class Graph:
         """
         return self.create_node('call_method', method_name, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def call_function(self,
                       the_function: Callable[..., Any],
                       args: Optional[Tuple['Argument', ...]] = None,
@@ -588,6 +718,7 @@ class Graph:
         """
         return self.create_node('call_function', the_function, args, kwargs, type_expr=type_expr)
 
+    @compatibility(is_backward_compatible=True)
     def node_copy(self, node: Node, arg_transform: Callable[[Node], 'Argument'] = lambda x: x) -> Node:
         """
         Copy a node from one graph into another. ``arg_transform`` needs to transform arguments from
@@ -614,8 +745,11 @@ class Graph:
         kwargs = map_arg(node.kwargs, arg_transform)
         assert isinstance(args, tuple)
         assert isinstance(kwargs, dict)
-        return self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node = self.create_node(node.op, node.target, args, kwargs, node.name, node.type)
+        result_node.meta = copy.copy(node.meta)
+        return result_node
 
+    @compatibility(is_backward_compatible=True)
     def output(self, result: 'Argument', type_expr: Optional[Any] = None):
         """
         Insert an ``output`` ``Node`` into the ``Graph``. An ``output`` node represents
@@ -647,6 +781,7 @@ class Graph:
         op = _snake_case(op)
         return op
 
+    @compatibility(is_backward_compatible=True)
     def python_code(self, root_module: str) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -712,6 +847,7 @@ class Graph:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
+        wrapped_fns: Dict[str, None] = {}
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
@@ -724,7 +860,7 @@ class Graph:
 
             Returns: the global name that should be used to reference 'obj' in generated source.
             """
-            if _is_from_torch(obj):
+            if _is_from_torch(obj) and obj != torch.device:  # to support registering torch.device
                 # HACK: workaround for how torch custom ops are registered. We
                 # can't import them like normal modules so they must retain their
                 # fully qualified name.
@@ -732,10 +868,10 @@ class Graph:
 
             # normalize the name hint to get a proper identifier
             global_name = namespace.create_name(name_hint, obj)
+
             if global_name in globals_:
                 assert globals_[global_name] is obj
                 return global_name
-
             globals_[global_name] = obj
             return global_name
 
@@ -744,6 +880,10 @@ class Graph:
             add_global(name, obj)
 
         def type_repr(o : Any):
+            if o == ():
+                # Empty tuple is used for empty tuple type annotation Tuple[()]
+                return '()'
+
             typename = _type_repr(o)
 
             # This is a generic type, e.g. typing.List[torch.Tensor]
@@ -753,6 +893,7 @@ class Graph:
 
                 # Assign global names for each of the inner type variables.
                 args = [type_repr(arg) for arg in o.__args__]
+
                 return f'{origin_typename}[{",".join(args)}]'
 
             # Common case: this is a regular module name like 'foo.bar.baz'
@@ -794,9 +935,9 @@ class Graph:
 
 
         def emit_node(node : Node):
+            maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_type_annotation = '' if node.type is None else f' : {type_repr(node.type)}'
                 maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
@@ -806,7 +947,7 @@ class Graph:
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{repr(node)} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
@@ -814,31 +955,40 @@ class Graph:
                 # pretty print operators
                 if node.target.__module__ == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
-                    body.append(f'{repr(node)} = {magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = '
+                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
                     return
                 qualified_name = _get_qualified_name(node.target)
                 global_name = add_global(qualified_name, node.target)
+                # special case for getattr: node.args could be 2-argument or 3-argument
+                # 2-argument: attribute access; 3-argument: fall through to attrib function call with default value
                 if global_name == 'getattr' and \
                    isinstance(node.args, tuple) and \
                    isinstance(node.args[1], str) and \
-                   node.args[1].isidentifier():
-                    # pretty print attribute access
-                    body.append(f'{repr(node)} = {_format_target(repr(node.args[0]), node.args[1])}')
+                   node.args[1].isidentifier() and \
+                   len(node.args) == 2:
+                    body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
                     return
-                body.append(f'{repr(node)} = {global_name}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
+                if node.meta.get('is_wrapped', False):
+                    wrapped_fns.setdefault(global_name)
                 return
             elif node.op == 'call_module':
                 assert isinstance(node.target, str)
-                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
+                body.append(f'{repr(node)}{maybe_type_annotation} = '
+                            f'{_format_target(root_module, node.target)}({_format_args(node.args, node.kwargs)})')
                 return
             elif node.op == 'get_attr':
                 assert isinstance(node.target, str)
-                body.append(f'{repr(node)} = {_format_target(root_module, node.target)}')
+                body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(root_module, node.target)}')
                 return
             elif node.op == 'output':
                 if node.type is not None:
                     maybe_return_annotation[0] = f" -> {type_repr(node.type)}"
-                body.append(f'return {repr(node.args[0])}')
+                if self._pytree_info is None:
+                    body.append(f'return {repr(node.args[0])}')
+                else:
+                    body.append(f'return pytree.tree_unflatten({repr(node.args[0])}, self._out_spec)')
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
@@ -853,19 +1003,41 @@ class Graph:
             # have been emitted. To continue to have valid Python code, emit a
             # single pass statement
             body.append('pass\n')
+        if self._pytree_info is not None:
+            orig_args = self._pytree_info.orig_args
+            has_orig_self = (orig_args[0] == 'self')
+            if has_orig_self:
+                free_vars.insert(0, 'self')
+            if len(free_vars) > 0:  # pytree has placeholders in it
+                body.insert(0, f"{', '.join(free_vars)}, = fx_pytree.tree_flatten_spec([{', '.join(orig_args)}], self._in_spec)\n")
+        else:
+            orig_args = free_vars
 
+        if len(wrapped_fns) > 0:
+            wrap_name = add_global('wrap', torch.fx.wrap)
+            wrap_stmts = '\n'.join([f'{wrap_name}("{name}")' for name in wrapped_fns])
+        else:
+            wrap_stmts = ''
+
+        if self._on_generate_code:
+            body = self._on_generate_code(body)
+
+        # If the original function didn't have self as its first argument, we
+        # would have added it.
+        if len(orig_args) == 0 or orig_args[0] != 'self':
+            orig_args.insert(0, 'self')
         code = ''.join(body)
         code = '\n'.join('    ' + line for line in code.split('\n'))
         fn_code = f"""
-def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
-{code}"""
+{wrap_stmts}
 
-        return PythonCode(fn_code,
-                          globals_)
+def forward({', '.join(orig_args)}){maybe_return_annotation[0]}:
+{code}"""
+        return PythonCode(fn_code, globals_)
 
     def __str__(self) -> str:
         """
-        Print a human-readable (not machine-readable) string representation
+        Return a human-readable (not machine-readable) string representation
         of this Graph
         """
         placeholder_names : List[str] = []
@@ -881,10 +1053,12 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
                 s += '\n    ' + node_str
         return s
 
+    @compatibility(is_backward_compatible=True)
     def print_tabular(self):
         """
         Prints the intermediate representation of the graph in tabular
-        format.
+        format. Note that this API requires the ``tabulate`` module to be
+        installed.
         """
         try:
             from tabulate import tabulate
@@ -897,19 +1071,15 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
         print(tabulate(node_specs,
               headers=['opcode', 'name', 'target', 'args', 'kwargs']))
 
-    def lint(self, root : Optional[torch.nn.Module] = None):
+    @compatibility(is_backward_compatible=True)
+    def lint(self):
         """
         Runs various checks on this Graph to make sure it is well-formed. In
         particular:
         - Checks Nodes have correct ownership (owned by this graph)
         - Checks Nodes appear in topological order
-        - If ``root`` is provided, checks that targets exist in ``root``
-
-        Args:
-
-            root (Optional[torch.nn.Module]): The root module with which to check
-                for targets. This is equivalent to the ``root`` argument that is
-                passed when constructing a ``GraphModule``.
+        - If this Graph has an owning GraphModule, checks that targets
+        exist in that GraphModule
         """
 
         # Check topo order
@@ -939,18 +1109,169 @@ def forward(self, {', '.join(free_vars)}){maybe_return_annotation[0]}:
             seen_names.add(node.name)
 
         # Check targets are legit
-        if root:
+        if self.owning_module:
             for node in self.nodes:
+                if node.op == 'call_function':
+                    if not callable(node.target):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a Callable is expected')
+                else:
+                    if not isinstance(node.target, str):
+                        raise ValueError(f'Node {node} target {node.target} has type {torch.typename(node.target)} but '
+                                         'a str is expected')
                 if node.op in ['get_attr', 'call_module']:
-                    assert isinstance(node.target, str)
                     target_atoms = node.target.split('.')
-                    m_itr = root
+                    m_itr = self.owning_module
                     for i, atom in enumerate(target_atoms):
-                        m_itr = getattr(m_itr, atom, None)
-                        if m_itr is None:
-                            seen_qualname = '.'.join(target_atoms[:i])
+                        new_m_itr = getattr(m_itr, atom, None)
+                        seen_qualname = '.'.join(target_atoms[:i])
+                        if new_m_itr is None:
                             raise RuntimeError(f'Node {node} target {node.target} references nonexistent attribute '
                                                f'{atom} of {seen_qualname}')
+                        if (node.op == "call_module"
+                                and not isinstance(new_m_itr, torch.nn.Module)):
+                            raise RuntimeError(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                               'not reference an nn.Module')
+                        elif (node.op == "get_attr"
+                              and not isinstance(new_m_itr, torch.nn.Module)
+                              and not isinstance(new_m_itr, torch.nn.Parameter)
+                              and atom not in m_itr._buffers):
+                            warnings.warn(f'Node {node} target {node.target} {atom} of {seen_qualname} does '
+                                          'not reference an nn.Module, nn.Parameter, or buffer, which is '
+                                          'what \'get_attr\' Nodes typically target')
+                        else:
+                            m_itr = new_m_itr
+
+    @compatibility(is_backward_compatible=True)
+    def eliminate_dead_code(self):
+        """
+        Remove all dead code from the graph, based on each node's number of
+        users, and whether the nodes have any side effects. The graph must be
+        topologically sorted before calling.
+
+        Returns:
+          bool: Whether the graph was changed as a result of the pass.
+
+        Example:
+
+        Before dead code is eliminated, `a` from `a = x + 1` below has no users
+        and thus can be eliminated from the graph without having an effect.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                a = x + 1
+                return x + self.attr_1
+
+        After dead code is eliminated, `a = x + 1` has been removed, and the rest
+        of `forward` remains.
+
+        .. code-block:: python
+
+            def forward(self, x):
+                return x + self.attr_1
+        """
+        # Lint the graph first to make sure its topologically sorted, otherwise
+        # DCE below will not behave as expected.
+        self.lint()
+
+        # Reverse iterate so that when we remove a node, any nodes used as an
+        # input to that node have an updated user count that no longer reflects
+        # the removed node.
+        changed = False
+        for node in reversed(self.nodes):
+            if not node.is_impure() and len(node.users) == 0:
+                self.erase_node(node)
+                changed = True
+
+        return changed
+
+
+    @compatibility(is_backward_compatible=False)
+    def on_generate_code(
+        self,
+        make_transformer: Callable[[Optional[TransformCodeFunc]], TransformCodeFunc]
+    ):
+        """Register a transformer function when python code is generated
+
+        Args:
+            make_transformer (Callable[[Optional[TransformCodeFunc]], TransformCodeFunc]):
+                a function that returns a code transformer to be registered.
+                This function is called by `on_generate_code` to obtain the
+                code transformer.
+
+                This function is also given as its input the currently
+                registered code transformer (or None if nothing is registered),
+                in case it is not desirable to overwrite it. This is useful to
+                chain code transformers together.
+
+        Returns:
+            a context manager that when used in a `with` statement, to automatically
+            restore the previously registered code transformer.
+
+        Example:
+
+        .. code-block:: python
+
+
+            gm: fx.GraphModule = ...
+
+            # This is a code transformer we want to register. This code
+            # transformer prepends a pdb import and trace statement at the very
+            # beginning of the generated torch.fx code to allow for manual
+            # debugging with the PDB library.
+            def insert_pdb(body):
+                return ["import pdb; pdb.set_trace()\\n", *body]
+
+            # Registers `insert_pdb`, and overwrites the current registered
+            # code transformer (given by `_` to the lambda):
+            gm.graph.on_generate_code(
+                lambda _: insert_pdb
+            )
+
+            # Or alternatively, registers a code transformer which first
+            # runs `body` through existing registered transformer, then
+            # through `insert_pdb`:
+            gm.graph.on_generate_code(
+                lambda current_trans: (
+                    lambda body: insert_pdb(
+                        current_trans(body) if current_trans
+                        else body
+                    )
+                )
+            )
+
+            gm.recompile()
+            gm(*inputs)  # drops into pdb
+
+
+        This function can also be used as a context manager, with the benefit to
+        automatically restores the previously registered code transformer:
+
+        .. code-block:: python
+
+            # ... continue from previous example
+
+            with gm.graph.on_generate_code(lambda _: insert_pdb):
+                # do more stuff with `gm`...
+                gm.recompile()
+                gm(*inputs)  # drops into pdb
+
+            # now previous code transformer is restored (but `gm`'s code with pdb
+            # remains - that means you can run `gm` with pdb here too, until you
+            # run next `recompile()`).
+        """
+        on_gen_code_old = self._on_generate_code
+        self._on_generate_code = make_transformer(on_gen_code_old)
+
+        @contextlib.contextmanager
+        def on_generate_code_context_manager():
+            try:
+                yield
+            finally:
+                self._on_generate_code = on_gen_code_old
+
+        return on_generate_code_context_manager()
 
 
 reflectable_magic_methods = {
@@ -964,10 +1285,11 @@ reflectable_magic_methods = {
     'pow': '{} ** {}',
     'lshift': '{} << {}',
     'rshift': '{} >> {}',
-    'and': '{} & {}',
-    'or': '{} | {}',
+    'and_': '{} & {}',
+    'or_': '{} | {}',
     'xor': '{} ^ {}',
-    'getitem': '{}[{}]'
+    'getitem': '{}[{}]',
+    'matmul': '{} @ {}',
 }
 
 magic_methods = dict({

@@ -15,7 +15,6 @@ DEFINE_DISPATCH(_compute_linear_combination_stub);
 // This is relevant when scalar_t<T> == complex<T>.
 Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficients) {
   auto output_first_dim_size = coefficients.size(0);
-  auto input_first_dim_size = coefficients.size(1);
 
   auto output_sizes = input.sizes().vec();
   output_sizes[0] = output_first_dim_size;
@@ -24,7 +23,7 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
     input.options().memory_format(at::MemoryFormat::Contiguous)
   );
 
-  native::_compute_linear_combination_out(output, input, coefficients);
+  native::_compute_linear_combination_out(input, coefficients, output);
 
   return output;
 }
@@ -32,7 +31,7 @@ Tensor _compute_linear_combination(const Tensor& input, const Tensor& coefficien
 // Note: the function is implemented using the __restrict__ memory modifier,
 // which means that if `output` actually is aliased by `input`, the result
 // produced is undefined.
-Tensor& _compute_linear_combination_out(Tensor& output, const Tensor& input, const Tensor& coefficients) {
+Tensor& _compute_linear_combination_out(const Tensor& input, const Tensor& coefficients, Tensor& output) {
   auto output_first_dim_size = coefficients.size(0);
   auto input_first_dim_size = coefficients.size(1);
 

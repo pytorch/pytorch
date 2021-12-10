@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/Dispatch.h>
@@ -13,7 +14,7 @@ struct AbsFunctor {
   }
 };
 
-void abs_kernel_cuda(TensorIterator& iter) {
+void abs_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, iter.dtype(), "abs_cuda", [&]() {
     gpu_kernel(iter, AbsFunctor<scalar_t>());
   });

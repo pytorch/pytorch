@@ -55,7 +55,7 @@ class RocksDBTransaction : public Transaction {
     batch_.reset(new rocksdb::WriteBatch());
   }
   ~RocksDBTransaction() { Commit(); }
-  void Put(const string& key, const string& value) override {
+  void Put(const string& key, string&& value) override {
     batch_->Put(key, value);
   }
   void Commit() override {

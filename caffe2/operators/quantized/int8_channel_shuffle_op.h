@@ -47,7 +47,6 @@ class Int8ChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
     const auto C = X.t.dim32(3);
     const auto G = this->group_;
     CAFFE_ENFORCE(C % G == 0, "");
-    const auto B = X.t.numel() / C;
 
     initQNNPACK();
 

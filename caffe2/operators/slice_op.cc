@@ -89,6 +89,7 @@ Y:
       vector<int> dst_sizes(data.dims_size());
 
       for (int i = 0; i < data.dims_size(); ++i) {
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         if (i >= starts.size()) {
           dst_sizes[i] = data.dims(i);
           continue;

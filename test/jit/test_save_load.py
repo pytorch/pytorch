@@ -1,3 +1,5 @@
+# Owner(s): ["oncall: jit"]
+
 from itertools import product as product
 from typing import NamedTuple, Optional
 import io
@@ -810,18 +812,18 @@ class TestSaveLoad(JitTestCase):
             def not_bar(self, x: Tensor) -> Tensor:
                 pass
 
-        @torch.jit.script   # noqa F811
-        class ImplementInterface(object):  # noqa F811
+        @torch.jit.script  # noqa: F811
+        class ImplementInterface(object):  # noqa: F811
             def __init__(self):
                 pass
 
             def not_bar(self, x):
                 return x
 
-        def lol(x):  # noqa F811
+        def lol(x):  # noqa: F811
             return "asdofij"
 
-        class MyCoolNamedTuple(NamedTuple):  # noqa F811
+        class MyCoolNamedTuple(NamedTuple):  # noqa: F811
             a: str
 
         class Foo(torch.nn.Module):

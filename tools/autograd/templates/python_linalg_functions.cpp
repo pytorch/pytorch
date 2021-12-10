@@ -4,6 +4,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_linalg_functions.h"
+#include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
@@ -17,6 +18,7 @@ using at::ScalarType;
 using at::MemoryFormat;
 using at::Generator;
 using at::IntArrayRef;
+using at::TensorList;
 
 using namespace torch::autograd::utils;
 

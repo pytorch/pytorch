@@ -2,7 +2,7 @@
 
 namespace at { namespace native {
 
-bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
+bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   int64_t elements = t.numel();
   if (elements >= max_elem) {
     return false;
@@ -15,6 +15,7 @@ bool canUse32BitIndexMath(const Tensor& t, int64_t max_elem) {
   int64_t linearId = elements - 1;
 
   // NOTE: Assumes all strides are positive, which is true for now
+  // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   for (int i = t.dim() - 1; i >= 0; --i) {
     int64_t curDimIndex = linearId % t.size(i);
     int64_t curDimOffset = curDimIndex * t.stride(i);

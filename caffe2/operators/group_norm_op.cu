@@ -44,7 +44,7 @@ __global__ void ComputeFusedParamsCUDAKernel<float>(
   if (index < N * C) {
     const int ng = index / K;
     const int c = index % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     const float scale_val = __ldg(gamma + c) * __ldg(rsig + ng);
     scale[index] = scale_val;
     bias[index] = fmaf(-scale_val, __ldg(mu + ng), __ldg(beta + c));
@@ -78,7 +78,7 @@ __global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NCHW>(
   const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (index < N * C * HxW) {
     const int nc = index / HxW;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[index] = fmaf(__ldg(X + index), __ldg(scale + nc), __ldg(bias + nc));
 #else
     Y[index] = fmaf(X[index], scale[nc], bias[nc]);
@@ -98,7 +98,7 @@ __global__ void GroupNormForwardCUDAKernel<float, StorageOrder::NHWC>(
   const int index = blockIdx.x * CAFFE_CUDA_NUM_THREADS + threadIdx.x;
   if (index < N * C * HxW) {
     const int nc = index / (HxW * C) * C + index % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[index] = fmaf(__ldg(X + index), __ldg(scale + nc), __ldg(bias + nc));
 #else
     Y[index] = fmaf(X[index], scale[nc], bias[nc]);
@@ -120,7 +120,7 @@ __global__ void ComputeInternalGradientsNCHWCUDAKernel(
   T db_sum = 0;
   for (int i = threadIdx.x; i < HxW; i += blockDim.x) {
     const int index = nc * HxW + i;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     ds_sum += __ldg(dY + index) * __ldg(X + index);
     db_sum += __ldg(dY + index);
 #else
@@ -160,7 +160,7 @@ __global__ void ComputeYGradientScaleCUDAKernel(
   if (index < N * C) {
     const int ng = index / K;
     const int c = index % C;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dY_scale[index] = __ldg(gamma + c) * __ldg(rsig + ng);
 #else
     dY_scale[index] = gamma[c] * rsig[ng];
@@ -203,7 +203,7 @@ __global__ void ComputeXScaleAndBiasCUDAKernel<float>(
   for (int i = threadIdx.x; i < K; i += blockDim.x) {
     const int index = ng * K + i;
     const int c = g * K + i;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     ds_sum += __ldg(ds + index) * __ldg(gamma + c);
     db_sum += __ldg(db + index) * __ldg(gamma + c);
 #else
@@ -214,7 +214,7 @@ __global__ void ComputeXScaleAndBiasCUDAKernel<float>(
   ds_sum = BlockReduce<float>(ds_storage).Sum(ds_sum);
   db_sum = BlockReduce<float>(db_storage).Sum(db_sum);
   if (threadIdx.x == 0) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     const float x = fmaf(db_sum, __ldg(mu + ng), -ds_sum) *
         math::utils::Cube<float>(__ldg(rsig + ng)) * alpha;
     X_scale[ng] = x;
@@ -258,7 +258,7 @@ __global__ void GroupNormBackwardCUDAKernel<float, StorageOrder::NCHW>(
   if (index < N * C * HxW) {
     const int nc = index / HxW;
     const int ng = nc / K;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dX[index] = fmaf(
         __ldg(dY_scale + nc),
         __ldg(dY + index),
@@ -287,7 +287,7 @@ __global__ void GroupNormBackwardCUDAKernel<float, StorageOrder::NHWC>(
   if (index < N * C * HxW) {
     const int nc = index / (HxW * C) * C + index % C;
     const int ng = nc / K;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dX[index] = fmaf(
         __ldg(dY_scale + nc),
         __ldg(dY + index),
@@ -333,7 +333,7 @@ __global__ void GammaBetaBackwardCUDAKernel<float>(
   for (int i = threadIdx.x; i < N; i += blockDim.x) {
     const int nc = i * C + c;
     const int ng = i * G + g;
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     dg_sum += fmaf(-__ldg(db + nc), __ldg(mu + ng), __ldg(ds + nc)) *
         __ldg(rsig + ng);
     db_sum += __ldg(db + nc);

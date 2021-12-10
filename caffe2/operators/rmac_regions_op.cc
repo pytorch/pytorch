@@ -1,5 +1,6 @@
 #include "caffe2/operators/rmac_regions_op.h"
 
+// NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <float.h>
 
 namespace caffe2 {
@@ -29,7 +30,9 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
     int max_step = 6;
     float cur_min = FLT_MAX;
     for (int idx = min_step; idx <= max_step; ++idx) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       float b = (std::max(H, W) - minW) / (1.0 * idx);
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       float val = std::abs((minW * minW - minW * b) / (minW * minW) - overlap_);
       if (val < cur_min) {
         step = idx;
@@ -53,8 +56,10 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
 
     // Region coordinates
     float bw =
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         (l + Wd - 1 > 0) ? ((W - region_size) / (1.0 * (l + Wd - 1))) : 0;
     float bh =
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         (l + Hd - 1 > 0) ? ((H - region_size) / (1.0 * (l + Hd - 1))) : 0;
 
     int cur_rows = output->dim32(0);
@@ -63,7 +68,9 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
 
     for (int i = 0; i < l + Wd; ++i) {
       for (int j = 0; j < l + Hd; ++j) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int x1 = bw * i;
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         int y1 = bh * j;
         // Careful with the borders
         if (x1 + region_size > W) {
@@ -76,6 +83,7 @@ bool RMACRegionsOp<CPUContext>::RunOnDevice() {
         int y2 = y1 + region_size - 1;
 
         // Write region coordinates for batch 0
+        // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
         *outputData++ = 0;
         *outputData++ = x1;
         *outputData++ = y1;

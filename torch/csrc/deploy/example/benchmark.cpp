@@ -1,19 +1,20 @@
+#include <torch/deploy.h>
+
+#include <ATen/ATen.h>
+#include <ATen/TypeDefault.h>
+#include <c10/util/irange.h>
+
+#include <torch/script.h>
+
 #include <pthread.h>
 #include <algorithm>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <iostream>
 #include <sstream>
 #include <thread>
 #include <vector>
-
-#include <assert.h>
-#include <torch/deploy.h>
-
-#include <ATen/ATen.h>
-#include <ATen/TypeDefault.h>
-
-#include <torch/script.h>
 
 typedef void (*function_type)(const char*);
 
@@ -24,6 +25,7 @@ constexpr auto latency_p = {
     50.,
     95.}; //{1., 5., 25., 50., 75., 90., 95., 99., 99.25, 99.5, 99.75, 99.9};
 
+// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct Report {
   std::string benchmark;
   std::string strategy;
@@ -51,22 +53,25 @@ struct Report {
 const int min_items_to_complete = 1;
 
 struct RunPython {
-  static torch::MovableObject load_and_wrap(torch::Package& package) {
-    auto I = package.acquire_session();
+  static torch::deploy::ReplicatedObj load_and_wrap(
+      torch::deploy::Package& package) {
+    auto I = package.acquireSession();
     auto obj = I.self.attr("load_pickle")({"model", "model.pkl"});
     if (cuda) {
       obj = I.global("gpu_wrapper", "GPUWrapper")({obj});
     }
-    return I.create_movable(obj);
+    return I.createMovable(obj);
   }
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   RunPython(
-      torch::Package& package,
+      torch::deploy::Package& package,
       std::vector<at::IValue> eg,
-      const torch::Interpreter* interps)
+      const torch::deploy::Interpreter* interps)
       : obj_(load_and_wrap(package)), eg_(std::move(eg)), interps_(interps) {}
   void operator()(int i) {
-    auto I = obj_.acquire_session();
+    auto I = obj_.acquireSession();
     if (cuda) {
+      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::vector<at::IValue> eg2 = {i};
       eg2.insert(eg2.end(), eg_.begin(), eg_.end());
       I.self(eg2);
@@ -74,9 +79,9 @@ struct RunPython {
       I.self(eg_);
     }
   }
-  torch::MovableObject obj_;
+  torch::deploy::ReplicatedObj obj_;
   std::vector<at::IValue> eg_;
-  const torch::Interpreter* interps_;
+  const torch::deploy::Interpreter* interps_;
 };
 
 // def to_device(i, d):
@@ -128,7 +133,7 @@ struct RunJIT {
     if (!cuda) {
       models_.push_back(torch::jit::load(file_to_run + "_jit"));
     } else {
-      for (int i = 0; i < 2; ++i) {
+      for (const auto i : c10::irange(2)) {
         auto d = torch::Device(torch::DeviceType::CUDA, i);
         std::stringstream qualified;
         qualified << file_to_run << "_jit_" << i;
@@ -142,7 +147,7 @@ struct RunJIT {
   }
   void operator()(int i) {
     if (cuda) {
-      int device_id = i % models_.size();
+      const auto device_id = i % models_.size();
       auto d = torch::Device(torch::DeviceType::CUDA, device_id);
       to_device(
           models_[device_id].forward(to_device_vec(eg_, d)),
@@ -156,10 +161,12 @@ struct RunJIT {
 };
 
 struct Benchmark {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   Benchmark(
-      torch::InterpreterManager& manager,
+      torch::deploy::InterpreterManager& manager,
       size_t n_threads,
       std::string strategy,
+      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::string file_to_run,
       size_t n_seconds = 5)
       : manager_(manager),
@@ -170,6 +177,7 @@ struct Benchmark {
         should_run_(true),
         items_completed_(0),
         reached_min_items_completed_(0) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (strategy == "one_python") {
       manager.debugLimitInterpreters(1);
     } else if (strategy == "multi_python") {
@@ -180,29 +188,33 @@ struct Benchmark {
   Report run() {
     pthread_barrier_init(&first_run_, nullptr, n_threads_ + 1);
 
-    torch::Package package = manager_.load_package(file_to_run_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    torch::deploy::Package package = manager_.loadPackage(file_to_run_);
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::IValue> eg;
     {
-      auto I = package.acquire_session();
+      auto I = package.acquireSession();
 
       eg = I.global("builtins", "tuple")(
                 I.self.attr("load_pickle")({"model", "example.pkl"}))
                .toIValue()
-               .toTuple()
-               ->elements();
+               .toTupleRef()
+               .elements();
     }
 
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (strategy_ == "jit") {
       run_one_work_item = RunJIT(file_to_run_, std::move(eg));
     } else {
       run_one_work_item =
-          RunPython(package, std::move(eg), manager_.all_instances().data());
+          RunPython(package, std::move(eg), manager_.allInstances().data());
     }
 
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<std::vector<double>> latencies(n_threads_);
 
-    for (size_t i = 0; i < n_threads_; ++i) {
+    for (const auto i : c10::irange(n_threads_)) {
       threads_.emplace_back([this, &latencies, i] {
         torch::NoGradGuard guard;
         // do initial work
@@ -239,6 +251,7 @@ struct Benchmark {
       thread.join();
     }
     auto end = std::chrono::steady_clock::now();
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     double total_seconds = std::chrono::duration<double>(end - begin).count();
     Report report;
     report.benchmark = file_to_run_;
@@ -255,6 +268,7 @@ struct Benchmark {
   void reportLatencies(
       std::vector<double>& results,
       const std::vector<std::vector<double>>& latencies) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<double> flat_latencies;
     for (const auto& elem : latencies) {
       flat_latencies.insert(flat_latencies.end(), elem.begin(), elem.end());
@@ -268,7 +282,7 @@ struct Benchmark {
       results.push_back(time);
     }
   }
-  torch::InterpreterManager& manager_;
+  torch::deploy::InterpreterManager& manager_;
   size_t n_threads_;
   std::string strategy_;
   std::string file_to_run_;
@@ -281,21 +295,23 @@ struct Benchmark {
   std::function<void(int)> run_one_work_item;
 };
 
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
   int max_thread = atoi(argv[1]);
   cuda = std::string(argv[2]) == "cuda";
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool jit_enable = std::string(argv[3]) == "jit";
   Report::report_header(std::cout);
-  torch::InterpreterManager manager(max_thread);
+  torch::deploy::InterpreterManager manager(max_thread);
 
   // make sure gpu_wrapper.py is in the import path
-  for (auto& interp : manager.all_instances()) {
-    auto I = interp.acquire_session();
+  for (auto& interp : manager.allInstances()) {
+    auto I = interp.acquireSession();
     I.global("sys", "path").attr("append")({"torch/csrc/deploy/example"});
   }
 
   auto n_threads = {1, 2, 4, 8, 16, 32, 40};
-  for (int i = 4; i < argc; ++i) {
+  for (const auto i : c10::irange(4, argc)) {
     std::string model_file = argv[i];
     for (int n_thread : n_threads) {
       if (n_thread > max_thread) {

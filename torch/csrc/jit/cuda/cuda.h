@@ -13,12 +13,18 @@ class CUDAEvent;
 // c10/cuda/CUDAStream.h.
 class CUDAStream final : public CustomClassHolder {
  public:
-  CUDAStream(int64_t device = -1, int64_t priority = 0) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+  CUDAStream(
+      c10::optional<c10::Device> device = c10::nullopt,
+      int64_t priority = 0) {
     constexpr int64_t PRIORITY_INDEX = 0;
+    c10::DeviceIndex device_index =
+        device.has_value() ? device->index() : c10::cuda::current_device();
     stream_ = std::make_unique<c10::cuda::CUDAStream>(
-        c10::cuda::getStreamFromPool(priority < PRIORITY_INDEX, device));
+        c10::cuda::getStreamFromPool(priority < PRIORITY_INDEX, device_index));
   }
 
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAStream(c10::cuda::CUDAStream s) {
     stream_ = std::make_unique<c10::cuda::CUDAStream>(s);
   }
@@ -72,10 +78,12 @@ class CUDAStream final : public CustomClassHolder {
 // aten/src/ATen/cuda/CUDAEvent.h.
 class CUDAEvent final : public CustomClassHolder {
  public:
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   CUDAEvent(
       bool enable_timing = false,
       bool blocking = false,
       bool interprocess = false) {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     int flags = cudaEventDisableTiming;
     if (enable_timing) {
       flags = cudaEventDefault;
@@ -96,6 +104,7 @@ class CUDAEvent final : public CustomClassHolder {
   }
 
   std::string ipcHandle() {
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     cudaIpcEventHandle_t handle;
     event_->ipc_handle(&handle);
     std::string str_handle((const char*)&handle, sizeof(handle));
@@ -154,9 +163,15 @@ void CUDAEvent::wait(c10::intrusive_ptr<CUDAStream> stream) {
 
 TORCH_LIBRARY(cuda, m) {
   auto stream_class = m.class_<torch::jit::CUDAStream>("Stream").def(
-      torch::init<int64_t, int64_t>());
+      torch::init<c10::optional<c10::Device>, int64_t>(),
+      "",
+      {torch::arg("device") = c10::nullopt, torch::arg("priority") = 0});
   auto event_class = m.class_<torch::jit::CUDAEvent>("Event").def(
-      torch::init<bool, bool, bool>());
+      torch::init<bool, bool, bool>(),
+      "",
+      {torch::arg("enable_timing") = false,
+       torch::arg("blocking") = false,
+       torch::arg("interprocess") = false});
 
   stream_class.def("query", &CUDAStream::query)
       .def("record_event", &CUDAStream::recordEvent)
@@ -164,7 +179,7 @@ TORCH_LIBRARY(cuda, m) {
       .def("wait_event", &CUDAStream::waitEvent)
       .def("wait_stream", &CUDAStream::waitStream)
       .def("device_index", &CUDAStream::device_index)
-      .def("device", &CUDAStream::device)
+      .def_property("device", &CUDAStream::device)
       .def("pack", &CUDAStream::pack)
       .def("id", &CUDAStream::id);
 

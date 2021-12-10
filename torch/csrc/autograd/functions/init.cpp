@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/pybind.h>
@@ -62,7 +63,7 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
   auto num_elems = arr.size();
   THPObjectPtr py_tuple(PyTuple_New(num_elems));
   if (!py_tuple) return nullptr;
-  for (size_t i = 0; i < num_elems; ++i) {
+  for (const auto i : c10::irange(num_elems)) {
     PyTuple_SET_ITEM(py_tuple.get(), i, Convert(arr[i]));
   }
   return py_tuple.release();
@@ -87,6 +88,7 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
   return THPVariable_Wrap(grad_acc->variable);
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static struct PyGetSetDef accumulate_grad_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
   {(char*)"variable", accumulateGradVar, nullptr, nullptr, nullptr},

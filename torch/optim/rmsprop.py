@@ -6,15 +6,44 @@ from .optimizer import Optimizer
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.
 
-    Proposed by G. Hinton in his
-    `course <https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_.
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
+                \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
+            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
+            &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
+                \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
+            &\hspace{5mm}v_t           \leftarrow   \alpha v_{t-1} + (1 - \alpha) g^2_t
+                \hspace{8mm}                                                                     \\
+            &\hspace{5mm} \tilde{v_t} \leftarrow v_t                                             \\
+            &\hspace{5mm}if \: centered                                                          \\
+            &\hspace{10mm} g^{ave}_t \leftarrow g^{ave}_{t-1} \alpha + (1-\alpha) g_t            \\
+            &\hspace{10mm} \tilde{v_t} \leftarrow \tilde{v_t} -  \big(g^{ave}_{t} \big)^2        \\
+            &\hspace{5mm}if \: \mu > 0                                                           \\
+            &\hspace{10mm} \textbf{b}_t\leftarrow \mu \textbf{b}_{t-1} +
+                g_t/ \big(\sqrt{\tilde{v_t}} +  \epsilon \big)                                   \\
+            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \textbf{b}_t                \\
+            &\hspace{5mm} else                                                                   \\
+            &\hspace{10mm}\theta_t      \leftarrow   \theta_{t-1} -
+                \gamma  g_t/ \big(\sqrt{\tilde{v_t}} + \epsilon \big)  \hspace{3mm}              \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
 
-    The centered version first appears in `Generating Sequences
+    For further details regarding the algorithm we refer to
+    `lecture notes <https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_ by G. Hinton.
+    and centered version `Generating Sequences
     With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
-
     The implementation here takes the square root of the gradient average before
     adding epsilon (note that TensorFlow interchanges these two operations). The effective
-    learning rate is thus :math:`\alpha/(\sqrt{v} + \epsilon)` where :math:`\alpha`
+    learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
     is the scheduled learning rate and :math:`v` is the weighted moving average
     of the squared gradient.
 
@@ -108,11 +137,11 @@ class RMSprop(Optimizer):
                       square_avgs,
                       grad_avgs,
                       momentum_buffer_list,
-                      group['lr'],
-                      group['alpha'],
-                      group['eps'],
-                      group['weight_decay'],
-                      group['momentum'],
-                      group['centered'])
+                      lr=group['lr'],
+                      alpha=group['alpha'],
+                      eps=group['eps'],
+                      weight_decay=group['weight_decay'],
+                      momentum=group['momentum'],
+                      centered=group['centered'])
 
         return loss

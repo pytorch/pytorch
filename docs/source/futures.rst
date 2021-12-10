@@ -5,10 +5,6 @@
 torch.futures
 =============
 
-.. warning::
-  The ``torch.futures`` package is experimental and subject to change.
-
-
 This package provides a :class:`~torch.futures.Future` type that encapsulates
 an asynchronous execution and a set of utility functions to simplify operations
 on :class:`~torch.futures.Future` objects. Currently, the

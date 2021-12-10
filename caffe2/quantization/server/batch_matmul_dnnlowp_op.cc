@@ -94,7 +94,9 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
     return ss.str();
   };
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int num_sub_batches, num_outer_batches;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   size_t M, N, K;
   size_t A_stride = 1; // How far to increment A pointer each itr
   size_t B_stride = 1; // How far to increment B pointer each itr
@@ -154,6 +156,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
 
     // Standard M, N, and K parameters respecting GEMM API and transpose
     // flags
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     size_t K_dim;
     if (trans_a_) {
       M = dims_A[ndims_A - 1];
@@ -296,6 +299,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
       column_offsets_.resize(num_batches_B * N);
       for (int i = 0; i < num_batches_B; ++i) {
         if (this->template InputIsType<int8::Int8TensorCPU>(1)) {
+          // NOLINTNEXTLINE(modernize-use-emplace)
           B_qparams_.push_back(TensorQuantizationParams());
           B_qparams_[i].scale =
               this->template Input<int8::Int8TensorCPU>(1).scale;
@@ -304,6 +308,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
               signed_min;
 
           const T* B_data = B.template data<T>() + i * B_quantized_temp.size();
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (auto j = 0; j < B_quantized_temp.size(); ++j) {
             B_quantized_temp[j] = B_data[j] + signed_min;
           }
@@ -335,13 +340,16 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
             1)); /*groups*/
 
         // Pre-compute column_offset
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int j = 0; j < N; ++j) {
           int32_t sum = 0;
           if (trans_b_) {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_temp[j * K + k];
             }
           } else {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_temp[k * N + j];
             }
@@ -652,13 +660,16 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         int32_t const_offset =
             in_qparams_[0].zero_point * B_qparams_[0].zero_point * K;
         vector<int32_t> column_offsets(N);
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int n = 0; n < N; ++n) {
           int32_t sum = 0;
           if (trans_b_) {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_i[k + n * K];
             }
           } else {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               sum += B_quantized_i[k * N + n];
             }
@@ -666,37 +677,45 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
           column_offsets[n] = sum * in_qparams_[0].zero_point;
         }
 
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int m = 0; m < M; ++m) {
           int32_t row_offset = 0;
           if (trans_a_) {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               row_offset += A_quantized_i[m + k * M];
             }
           } else {
+            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
             for (int k = 0; k < K; ++k) {
               row_offset += A_quantized_i[m * K + k];
             }
           }
           row_offset *= B_qparams_[0].zero_point;
 
+          // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
           for (int n = 0; n < N; ++n) {
             int32_t sum = 0;
             if (!trans_a_ && !trans_b_) {
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               for (int k = 0; k < K; ++k) {
                 sum += static_cast<int32_t>(A_quantized_i[m * K + k]) *
                     static_cast<int32_t>(B_quantized_i[k * N + n]);
               }
             } else if (!trans_a_ && trans_b_) {
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               for (int k = 0; k < K; ++k) {
                 sum += static_cast<int32_t>(A_quantized_i[m * K + k]) *
                     static_cast<int32_t>(B_quantized_i[k + n * K]);
               }
             } else if (trans_a_ && !trans_b_) {
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               for (int k = 0; k < K; ++k) {
                 sum += static_cast<int32_t>(A_quantized_i[m + k * M]) *
                     static_cast<int32_t>(B_quantized_i[k * N + n]);
               }
             } else if (trans_a_ && trans_b_) {
+              // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
               for (int k = 0; k < K; ++k) {
                 sum += static_cast<int32_t>(A_quantized_i[m + k * M]) *
                     static_cast<int32_t>(B_quantized_i[k + n * K]);
@@ -709,6 +728,7 @@ bool BatchMatMulDNNLowPOp<T>::RunOnDevice() {
         } // for each output row
 
         // Requantization
+        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
         for (int j = 0; j < M * N; ++j) {
           Y_quantized[p * Y_stride + i * M * N + j] = fbgemm::Requantize<T>(
               Y_int32_[p * Y_stride + i * M * N + j],

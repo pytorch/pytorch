@@ -2,6 +2,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -9,21 +10,15 @@
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/frozen_conv_folding.h>
+#include <torch/csrc/jit/passes/utils/optimization_utils.h>
 #include <torch/csrc/jit/tensorexpr/types.h>
 
 namespace torch {
 namespace jit {
 
-using Tensor = at::Tensor;
+namespace {
 
-bool nonConstantParameters(Node* n) {
-  for (size_t i = 1; i < n->inputs().size(); i++) {
-    if (n->inputs().at(i)->node()->kind() != prim::Constant) {
-      return true;
-    }
-  }
-  return false;
-}
+using Tensor = at::Tensor;
 
 bool supportedConvNode(Node* n) {
   switch (n->kind()) {
@@ -300,7 +295,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
       // channels-out resize it to the shape that will broadcast to
       // weight_tensor when the op is run so we dont change weight size
       std::vector<int64_t> weight_compatible_size = {out_channels};
-      for (int64_t i = 1; i < weight_tensor.ndimension(); ++i) {
+      for (const auto i : c10::irange(1, weight_tensor.ndimension())) {
+        (void)i; // Suppress unused variable warning
         weight_compatible_size.push_back(1);
       }
 
@@ -356,6 +352,8 @@ void FoldFrozenConvMulOrDiv(Block* b) {
     }
   }
 }
+
+} // namespace
 
 void FoldFrozenConvBatchnorm(std::shared_ptr<Graph>& graph) {
   FoldFrozenConvBatchnorm(graph->block());

@@ -20,6 +20,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
+// NOLINTNEXTLINE(bugprone-exception-escape)
 class Cloneable : public virtual Module {
  public:
   using Module::Module;
@@ -41,12 +42,8 @@ class Cloneable : public virtual Module {
     copy->buffers_.clear();
     copy->children_.clear();
     copy->reset();
-    // [[this pointer note]]
-    // Don't remove 'this' pointer, nvcc needs it to be explicitly given in some envs.
-    // eg. ubuntu 16.04 + gcc 5.x + cuda 9.2
-    //     ubuntu 16.04 + gcc 7.x + cuda 9.2
     TORCH_CHECK(
-        copy->parameters_.size() == this->parameters_.size(),
+        copy->parameters_.size() == parameters_.size(),
         "The cloned module does not have the same number of "
         "parameters as the original module after calling reset(). "
         "Are you sure you called register_parameter() inside reset() "
@@ -57,9 +54,8 @@ class Cloneable : public virtual Module {
           tensor.to(*device) : autograd::Variable(tensor).clone();
       copy->parameters_[parameter.key()].set_data(data);
     }
-    // Don't remove 'this' pointer. See [[this pointer note]]
     TORCH_CHECK(
-        copy->buffers_.size() == this->buffers_.size(),
+        copy->buffers_.size() == buffers_.size(),
         "The cloned module does not have the same number of "
         "buffers as the original module after calling reset(). "
         "Are you sure you called register_buffer() inside reset() "
@@ -70,15 +66,13 @@ class Cloneable : public virtual Module {
           tensor.to(*device) : autograd::Variable(tensor).clone();
       copy->buffers_[buffer.key()].set_data(data);
     }
-    // Don't remove 'this' pointer. See [[this pointer note]]
     TORCH_CHECK(
-        copy->children_.size() == this->children_.size(),
+        copy->children_.size() == children_.size(),
         "The cloned module does not have the same number of "
         "child modules as the original module after calling reset(). "
         "Are you sure you called register_module() inside reset() "
         "and not the constructor?");
-    // Don't remove 'this' pointer. See [[this pointer note]]
-    for (const auto& child : this->children_) {
+    for (const auto& child : children_) {
       copy->children_[child.key()]->clone_(*child.value(), device);
     }
     return copy;

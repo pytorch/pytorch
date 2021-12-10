@@ -22,25 +22,30 @@ void THCPGraph_init(PyObject *module) {
   // but CI linter and some builds prefer "module".
   auto torch_C_m = py::handle(module).cast<py::module>();
 
-  shared_ptr_class_<::at::cuda::CUDAGraph>(module, "_CudaGraphBase")
+  torch_C_m
+      .def("_graph_pool_handle",
+           &::at::cuda::graph_pool_handle);
+
+  shared_ptr_class_<::at::cuda::CUDAGraph>
+      (torch_C_m,
+       "_CUDAGraph")
       .def(py::init<>())
+      // I'm not sure this is the correct order of all the arguments. Pybind11 docs
+      // aren't clear. But it works.
       .def("capture_begin",
            &::at::cuda::CUDAGraph::capture_begin,
            py::call_guard<py::gil_scoped_release>(),
-           R"(``capture_begin`` begins Cuda graph capture on the current stream.)")
+           py::arg("pool") = c10::cuda::MempoolId_t{0, 0})
       .def("capture_end",
            &::at::cuda::CUDAGraph::capture_end,
-           py::call_guard<py::gil_scoped_release>(),
-           R"(``capture_end`` ends Cuda graph capture on the current stream.
-           After ``capture_end``, ``replay`` may be called on this instance.)")
+           py::call_guard<py::gil_scoped_release>())
       .def("replay",
            &::at::cuda::CUDAGraph::replay,
-           py::call_guard<py::gil_scoped_release>(),
-           R"(``replay`` replays the Cuda graph captured by this instance.)")
-      // reset is called in __del__ on the Python side
-      // (see class Graph in torch/cuda/streams.py for reasons and caveats)
+           py::call_guard<py::gil_scoped_release>())
       .def("reset",
            &::at::cuda::CUDAGraph::reset,
-           py::call_guard<py::gil_scoped_release>(),
-           R"(``reset`` deletes the graph currently held by this instance.)");
+           py::call_guard<py::gil_scoped_release>())
+      .def("pool",
+           &::at::cuda::CUDAGraph::pool,
+           py::call_guard<py::gil_scoped_release>());
 }

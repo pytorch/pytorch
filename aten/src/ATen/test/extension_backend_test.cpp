@@ -6,6 +6,11 @@
 
 #include <torch/csrc/jit/runtime/operator.h>
 
+// NB. These tests use the ORT dispatch key to test backend dispatching
+// machinery, but these tests are not specific to ORT at all. The ORT
+// backend is fully out-of-tree, so it's safe to use this key for
+// in-tree tests.
+
 using namespace at;
 
 static int test_int;
@@ -17,17 +22,18 @@ Tensor empty_override(IntArrayRef size, c10::optional<ScalarType> dtype, c10::op
       Storage(
           Storage::use_byte_size_t(),
           0,
-          at::DataPtr(nullptr, Device(DeviceType::MSNPU, 1)),
+          at::DataPtr(nullptr, Device(DeviceType::ORT, 1)),
           nullptr,
           false),
-      DispatchKey::MSNPU,
+      DispatchKey::ORT,
       caffe2::TypeMeta::Make<float>());
   return Tensor(std::move(tensor_impl));
 }
 
-Tensor add_override(const Tensor & a, const Tensor & b , Scalar c) {
+Tensor add_override(const Tensor & a, const Tensor & b , const Scalar& c) {
+  auto out = empty({5, 5}, at::kORT);  // Don't return self as-is
   test_int = 2;
-  return a;
+  return out;
 }
 
 Tensor empty_strided_override(
@@ -41,28 +47,28 @@ Tensor empty_strided_override(
   return empty_override(size, dtype, layout, device, pin_memory, c10::nullopt);
 }
 
-TORCH_LIBRARY_IMPL(aten, MSNPU, m) {
+TORCH_LIBRARY_IMPL(aten, ORT, m) {
   m.impl("aten::empty.memory_format",  empty_override);
   m.impl("aten::empty_strided",        empty_strided_override);
   m.impl("aten::add.Tensor",           add_override);
 }
 
 TEST(BackendExtensionTest, TestRegisterOp) {
-  Tensor a = empty({5, 5}, at::kMSNPU);
-  ASSERT_EQ(a.device().type(), at::kMSNPU);
+  Tensor a = empty({5, 5}, at::kORT);
+  ASSERT_EQ(a.device().type(), at::kORT);
   ASSERT_EQ(a.device().index(), 1);
   ASSERT_EQ(a.dtype(), caffe2::TypeMeta::Make<float>());
   ASSERT_EQ(test_int, 1);
 
-  Tensor b = empty_like(a, at::kMSNPU);
-  ASSERT_EQ(b.device().type(), at::kMSNPU);
+  Tensor b = empty_like(a, at::kORT);
+  ASSERT_EQ(b.device().type(), at::kORT);
   ASSERT_EQ(b.device().index(), 1);
   ASSERT_EQ(b.dtype(), caffe2::TypeMeta::Make<float>());
 
   add(a, b);
   ASSERT_EQ(test_int, 2);
 
-  // Ensure that non-MSNPU operator still works
+  // Ensure that non-ORT operator still works
   Tensor d = empty({5, 5}, at::kCPU);
   ASSERT_EQ(d.device().type(), at::kCPU);
 }

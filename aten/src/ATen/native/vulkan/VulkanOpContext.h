@@ -57,8 +57,8 @@ class VulkanConv2dOpContext final : public Conv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       uint64_t groups,
-      c10::optional<Scalar> min,
-      c10::optional<Scalar> max,
+      const c10::optional<Scalar>& min,
+      const c10::optional<Scalar>& max,
       ContextConv2D&& op_context)
       : op_context_(std::move(op_context)) {
     orig_weight_ = std::move(weight);
@@ -71,7 +71,7 @@ class VulkanConv2dOpContext final : public Conv2dOpContext {
     output_max_ = max;
   }
 
-  virtual Tensor run(const Tensor& input) override;
+   Tensor run(const Tensor& input) override;
 
   static c10::intrusive_ptr<Conv2dOpContext> create_context(
       Tensor&& weight,
@@ -80,8 +80,8 @@ class VulkanConv2dOpContext final : public Conv2dOpContext {
       std::vector<int64_t>&& stride,
       std::vector<int64_t>&& dilation,
       int64_t groups,
-      const c10::optional<Scalar> output_min,
-      const c10::optional<Scalar> output_max);
+      const c10::optional<Scalar>& output_min,
+      const c10::optional<Scalar>& output_max);
 };
 
 } // namespace vulkan

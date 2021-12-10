@@ -62,6 +62,7 @@ C10_DEFINE_REGISTRY(ConverterRegistry, Converter);
 std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
     caffe2::OperatorDef op) {
   std::map<std::string, caffe2::Argument> argMap;
+  // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto arg : op.arg()) {
     argMap[arg.name()] = arg;
   }
@@ -151,6 +152,7 @@ class ConvConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ConvConverter() override {}
 };
 
@@ -171,6 +173,7 @@ class ConvTransposeConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-override,modernize-use-equals-default)
   virtual ~ConvTransposeConverter() {}
 };
 
@@ -211,6 +214,7 @@ class ClipConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ClipConverter() override {}
 };
 REGISTER_CONVERTER(Clip, ClipConverter);
@@ -226,6 +230,7 @@ class AveragePoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~AveragePoolConverter() override {}
 };
 REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
@@ -241,6 +246,7 @@ class MaxPoolConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~MaxPoolConverter() override {}
 };
 REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
@@ -267,6 +273,7 @@ class ConcatConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~ConcatConverter() override {}
 };
 REGISTER_CONVERTER(Concat, ConcatConverter);
@@ -294,6 +301,7 @@ class FCConverter : public Converter {
   }
   // Does not override default converter to OperatorDef
 
+  // NOLINTNEXTLINE(modernize-use-equals-default)
   ~FCConverter() override {}
 };
 REGISTER_CONVERTER(FC, FCConverter);

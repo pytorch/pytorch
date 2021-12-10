@@ -7,34 +7,34 @@ namespace native {
 
 using qrelu_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qrelu_leaky_fn = void (*)(Tensor& /*out*/, const Tensor& /*qx*/,
-                                Scalar /*negval_*/);
+                                const Scalar& /*negval_*/);
 using qsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/, double output_scale, int64_t output_zero_point);
 using qhardsigmoid_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qclamp_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar min,
-    Scalar max,
+    const Scalar& min,
+    const Scalar& max,
     at::Tensor& /*qy*/);
 using qclamp_minmax_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar /*min or max*/,
+    const Scalar& /*min or max*/,
     at::Tensor& /*qy*/);
 using qthreshold_fn = void (*)(
     const at::Tensor& /*qx*/,
-    Scalar threshold,
-    Scalar value,
+    const Scalar& threshold,
+    const Scalar& value,
     at::Tensor& /*qy*/);
 using qtanh_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qelu_fn = void(*)(
     const at::Tensor& /*qx*/,
-    Scalar /*alpha*/,
-    Scalar /*scale*/,
-    Scalar /*input_scale*/,
+    const Scalar& /*alpha*/,
+    const Scalar& /*scale*/,
+    const Scalar& /*input_scale*/,
     at::Tensor& /*qy*/);
 using qbinary_fn =
     void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Tensor& /*other*/);
 using qadd_scalar_fn =
-    void (*)(Tensor& /*out*/, const Tensor& /*self*/, Scalar other /*other*/);
+    void (*)(Tensor& /*out*/, const Tensor& /*self*/, const Scalar& other /*other*/);
 using qhardswish_fn = void (*)(const at::Tensor& /*qx*/, at::Tensor& /*qy*/);
 using qmaxpool_2d_fn = void (*)(
     const Tensor& qx,
@@ -55,7 +55,7 @@ using qmaxpool_2d_fn = void (*)(
 using qadaptive_avg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeH,
     int64_t isizeW,
@@ -68,7 +68,7 @@ using qadaptive_avg_pool2d_fn = void (*)(
 using qadaptive_avg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t sizeB,
     int64_t sizeC,
     int64_t isizeD,
     int64_t isizeH,
@@ -84,7 +84,7 @@ using qadaptive_avg_pool3d_fn = void (*)(
 using qavg_pool2d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -102,7 +102,7 @@ using qavg_pool2d_fn = void (*)(
 using qavg_pool3d_fn = void (*)(
     const Tensor& qx,
     Tensor& qy,
-    int64_t b,
+    int64_t nBatch,
     int64_t nInputPlane,
     int64_t inputWidth,
     int64_t inputHeight,
@@ -178,7 +178,6 @@ DECLARE_DISPATCH(qhardsigmoid_fn, qhardsigmoid_stub);
 DECLARE_DISPATCH(qhardswish_fn, qhardswish_stub);
 DECLARE_DISPATCH(qmaxpool_2d_fn, qmaxpool_2d_nhwc_stub);
 DECLARE_DISPATCH(qnormalize_fn, quantized_normalize_stub);
-DECLARE_DISPATCH(qrelu_fn, qrelu6_stub);
 DECLARE_DISPATCH(qrelu_fn, qrelu_stub);
 DECLARE_DISPATCH(qrelu_leaky_fn, qrelu_leaky_stub);
 DECLARE_DISPATCH(qsigmoid_fn, qsigmoid_stub);

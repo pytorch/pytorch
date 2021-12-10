@@ -1,17 +1,16 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION                    sampler3D uKernel;
-layout(set = 0, binding = 3) buffer  PRECISION restrict readonly  Bias {
-  vec4 data[];
-} uBias;
-layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -36,9 +35,9 @@ void main() {
     kstart.x *= 4;
     kstart.y += pos.z * uBlock.ikernel.y;
 
-    vec4 sum = uBias.data[pos.z];
+    vec4 sum = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
 
-    for (int z4 = 0; z4 < uBlock.size.w; ++z4, kstart.x += uBlock.ikernel.x) {
+    for (int z4 = 0; z4 < uBlock.size.w/4; ++z4, kstart.x += uBlock.ikernel.x*4) {
       for (int y = start.y, ky = kstart.y; y < end.y; y += uBlock.dilate.y, ++ky) {
         for (int x = start.x, kx = kstart.x; x < end.x; x += uBlock.dilate.x, kx += 4) {
           const vec4 In = texelFetch(uInput, ivec3(x, y, z4), 0);

@@ -49,6 +49,7 @@ void* alloc_cpu(size_t nbytes) {
       "alloc_cpu() seems to have been called with negative number: ",
       nbytes);
 
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   void* data;
 #ifdef __ANDROID__
   data = memalign(gAlignment, nbytes);
@@ -72,7 +73,7 @@ void* alloc_cpu(size_t nbytes) {
       data,
       "DefaultCPUAllocator: not enough memory: you tried to allocate ",
       nbytes,
-      " bytes. Buy new RAM!");
+      " bytes.");
 
   // move data to a thread's NUMA node
   NUMAMove(data, nbytes, GetCurrentNUMANode());
@@ -93,13 +94,13 @@ void free_cpu(void* data) {
 #ifdef _MSC_VER
   _aligned_free(data);
 #else
+  // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(data);
 #endif
 }
 
 struct C10_API DefaultCPUAllocator final : at::Allocator {
-  DefaultCPUAllocator() {}
-  ~DefaultCPUAllocator() override {}
+  DefaultCPUAllocator() = default;
   at::DataPtr allocate(size_t nbytes) const override {
     void* data = alloc_cpu(nbytes);
     profiledCPUMemoryReporter().New(data, nbytes);
@@ -149,7 +150,8 @@ template <uint32_t PreGuardBytes, uint32_t PostGuardBytes>
 class DefaultMobileCPUAllocator final : public at::Allocator {
  public:
   DefaultMobileCPUAllocator() = default;
-  virtual ~DefaultMobileCPUAllocator() override = default;
+  // NOLINTNEXTLINE(modernize-use-override)
+  ~DefaultMobileCPUAllocator() override = default;
 
   static void deleter(void* const pointer) {
     if (C10_UNLIKELY(!pointer)) {
@@ -167,6 +169,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
       c10::free_cpu(pointer);
       // This adds extra cost to freeing memory to the default case when
       // caching allocator is not enabled.
+      // NOLINTNEXTLINE(clang-analyzer-unix.Malloc)
       CPUCachingAllocator::record_free(pointer);
       auto allocation_planner = GetThreadLocalAllocationPlanner();
       if (allocation_planner != nullptr) {
@@ -175,7 +178,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
   }
 
-  virtual DataPtr allocate(const size_t nbytes) const override {
+  DataPtr allocate(const size_t nbytes) const override {
     if (C10_UNLIKELY(0u == nbytes)) {
       return {
           nullptr,
@@ -186,6 +189,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     }
 
     auto alloc_size = PreGuardBytes + nbytes + PostGuardBytes;
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     void* data;
     auto allocator_ptr = GetThreadLocalCachingAllocator();
     auto profiling_allocator_ptr = GetThreadLocalProfilingAllocator();
@@ -209,7 +213,7 @@ class DefaultMobileCPUAllocator final : public at::Allocator {
     };
   }
 
-  virtual DeleterFnPtr raw_deleter() const override {
+  DeleterFnPtr raw_deleter() const override {
     return deleter;
   }
 };
@@ -232,6 +236,7 @@ void SetCPUAllocator(at::Allocator* alloc, uint8_t priority) {
 //            returned to the user.
 // Post-guard: 16 bytes for XNNPACK.
 
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-avoid-non-const-global-variables)
 static DefaultMobileCPUAllocator<gAlignment, 16u> g_mobile_cpu_allocator;
 
 at::Allocator* GetDefaultMobileCPUAllocator() {
@@ -276,7 +281,8 @@ void ProfiledCPUMemoryReporter::New(void* ptr, size_t nbytes) {
               << " bytes.";
   }
   if (profile_memory) {
-    reportMemoryUsageToProfiler(ptr, nbytes, c10::Device(c10::DeviceType::CPU));
+    reportMemoryUsageToProfiler(
+        ptr, nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 
@@ -293,9 +299,13 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
       nbytes = it->second;
       size_table_.erase(it);
     } else {
-      C10_LOG_EVERY_MS(WARNING, 1000)
-          << "Memory block of unknown size was allocated before the profiling started, "
-          << "profiler results will not include the deallocation event";
+      // C10_LOG_EVERY_MS might log every time in some builds,
+      // using a simple counter to avoid spammy logs
+      if (log_cnt_++ % 1000 == 0) {
+        LOG(WARNING) << "Memory block of unknown size was allocated before "
+                     << "the profiling started, profiler results will not "
+                     << "include the deallocation event";
+      }
     }
   }
   if (nbytes == 0) {
@@ -307,7 +317,7 @@ void ProfiledCPUMemoryReporter::Delete(void* ptr) {
   }
   if (profile_memory) {
     reportMemoryUsageToProfiler(
-        ptr, -nbytes, c10::Device(c10::DeviceType::CPU));
+        ptr, -nbytes, allocated, 0, c10::Device(c10::DeviceType::CPU));
   }
 }
 

@@ -124,6 +124,7 @@ vector<float> SimpleNet::TEST_Benchmark(
     }
     millis = timer.MilliSeconds();
     std::cout << "Main run finished. Milliseconds per iter: "
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               << millis / main_runs
               << ". Iters per second: " << 1000.0 * main_runs / millis
               << std::endl;
@@ -139,10 +140,13 @@ vector<float> SimpleNet::TEST_Benchmark(
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
   std::vector<float> time_per_op(results.GetTimePerOp());
+  // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < time_per_op.size(); ++i) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     time_per_op[i] /= main_runs;
   }
   if (FLAGS_caffe2_simple_net_benchmark_run_whole_net) {
+    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     time_per_op.insert(time_per_op.begin(), millis / main_runs);
   }
   return time_per_op;
@@ -243,6 +247,7 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
                       << " MB)";
     }
     std::cout << "Operator #" << idx << " (" << print_name << ", " << op_type
+              // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
               << ") " << time_per_op[idx] / main_runs_ << " ms/iter"
               << flops_str.str() << memory_bytes_written_str.str()
               << param_bytes_str.str() << std::endl;
@@ -274,6 +279,7 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
         PairLargerThan<string, float>);
     float total_metric = 0.;
     for (const auto& op_item : metric_per_op_type_vec) {
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       total_metric += op_item.second * normalizer[i];
     }
     if (total_metric > 0.) {
@@ -284,6 +290,7 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
       const string& op = op_item.first;
       float value = op_item.second;
       if (total_metric > 0.) {
+        // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
         percent = (100.0 * value * normalizer[i] / total_metric);
       }
       std::cout << std::setw(15) << std::setfill(' ') << value * normalizer[i]
@@ -315,6 +322,7 @@ void IndividualMetrics::PrintOperatorProfilingResults() {
                   << output_dealloc_time * normalizer[i] << " " << unit[i]
                   << std::endl;
       }
+      std::cout << "Number of operators: " << operators_.size() << std::endl;
     }
   }
 }

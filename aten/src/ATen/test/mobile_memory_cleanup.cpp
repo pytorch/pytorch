@@ -18,6 +18,7 @@ TEST(MemoryCleanUp, NoErrorWithoutRelease) {
   m.eval();
   auto m_optimized = optimizeForMobile(m);
   std::stringstream ss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_NO_THROW(m_optimized.save(ss));
 }
 
@@ -33,6 +34,7 @@ TEST(MemoryCleanUp, UnpackError) {
   m.eval();
   auto m_optimized = optimizeForMobile(m);
   std::stringstream ss;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   EXPECT_ANY_THROW(m_optimized.save(ss));
 }
 

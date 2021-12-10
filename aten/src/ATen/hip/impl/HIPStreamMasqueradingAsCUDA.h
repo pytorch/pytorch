@@ -16,7 +16,7 @@ public:
   explicit HIPStreamMasqueradingAsCUDA(Stream stream)
     : HIPStreamMasqueradingAsCUDA(UNCHECKED, stream) {
     // We did the coercion unchecked; check that it was right.
-    TORCH_CHECK(stream.device().type() == DeviceType::CUDA /* !!! */);
+    TORCH_CHECK(stream.device().is_cuda() /* !!! */);
   }
 
   explicit HIPStreamMasqueradingAsCUDA(Unchecked, Stream stream)
@@ -88,6 +88,11 @@ private:
 HIPStreamMasqueradingAsCUDA
 inline getStreamFromPoolMasqueradingAsCUDA(const bool isHighPriority = false, DeviceIndex device = -1) {
   return HIPStreamMasqueradingAsCUDA(getStreamFromPool(isHighPriority, device));
+}
+
+HIPStreamMasqueradingAsCUDA
+inline getStreamFromExternalMasqueradingAsCUDA(hipStream_t ext_stream, DeviceIndex device) {
+  return HIPStreamMasqueradingAsCUDA(getStreamFromExternal(ext_stream, device));
 }
 
 inline HIPStreamMasqueradingAsCUDA getDefaultHIPStreamMasqueradingAsCUDA(DeviceIndex device_index = -1) {

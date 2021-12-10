@@ -37,7 +37,7 @@ Python
 
 For custom operators, you might need to set python seed as well::
 
-    inport random
+    import random
     random.seed(0)
 
 Random number generators in other libraries
@@ -111,7 +111,7 @@ deterministic implementation will be used::
     tensor([[[ 1.1900, -2.3409],
              [ 0.4796,  0.8003]],
             [[ 0.1509,  1.8027],
-             [ 0.0333, -1.1444]]], device='cuda:0') 
+             [ 0.0333, -1.1444]]], device='cuda:0')
 
 Furthermore, if you are using CUDA tensors, and your CUDA version is 10.2 or greater, you
 should set the environment variable `CUBLAS_WORKSPACE_CONFIG` according to CUDA documentation:
@@ -136,18 +136,20 @@ DataLoader
 ..........
 
 DataLoader will reseed workers following :ref:`data-loading-randomness` algorithm.
-Use :meth:`worker_init_fn` to preserve reproducibility::
+Use :meth:`worker_init_fn` and `generator` to preserve reproducibility::
 
     def seed_worker(worker_id):
         worker_seed = torch.initial_seed() % 2**32
         numpy.random.seed(worker_seed)
         random.seed(worker_seed)
 
+    g = torch.Generator()
+    g.manual_seed(0)
+
     DataLoader(
         train_dataset,
         batch_size=batch_size,
         num_workers=num_workers,
-        worker_init_fn=seed_worker
+        worker_init_fn=seed_worker,
+        generator=g,
     )
-
-

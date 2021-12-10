@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/DimVector.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorGeometry.h>
 #include <ATen/Utils.h>
@@ -13,11 +14,13 @@ namespace at {
 // which do NO argument checking by default.
 
 struct TORCH_API TensorArg {
-  Tensor tensor;
+  const Tensor& tensor;
   const char* name;
   int pos; // 1-indexed
-  TensorArg(Tensor tensor, const char* name, int pos)
-    : tensor(std::move(tensor)), name(name), pos(pos) {}
+  TensorArg(const Tensor& tensor, const char* name, int pos)
+    : tensor(tensor), name(name), pos(pos) {}
+  // Try to mitigate any possibility of dangling reference to temporaries.
+  TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
   const Tensor* operator->() const { return &tensor; }
   const Tensor& operator*() const { return tensor; }
 };
@@ -141,7 +144,6 @@ TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 // on whether a subgeometry is contiguous.
 TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
-// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
 TORCH_API void check_dim_size(
     const Tensor& tensor,
     int64_t dim,
@@ -152,9 +154,16 @@ namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 TORCH_API size_t
 computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
+
 TORCH_API c10::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
+
+TORCH_API c10::optional<DimVector> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    const DimVector& newshape);
+
 } // namespace detail
 } // namespace at

@@ -1,16 +1,21 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/impl/SizesAndStrides.h>
+#include <c10/util/irange.h>
 
 using namespace c10;
 using namespace c10::impl;
 
-static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef strides) {
-  EXPECT_EQ(sizes.size(), strides.size()) << "bad test case: size() of sizes and strides don't match";
+static void checkData(
+    const SizesAndStrides& sz,
+    IntArrayRef sizes,
+    IntArrayRef strides) {
+  EXPECT_EQ(sizes.size(), strides.size())
+      << "bad test case: size() of sizes and strides don't match";
   EXPECT_EQ(sz.size(), sizes.size());
 
   int idx = 0;
-  for (auto x: sizes) {
+  for (auto x : sizes) {
     EXPECT_EQ(sz.size_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.size_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.sizes_data()[idx], x) << "index: " << idx;
@@ -20,7 +25,7 @@ static void checkData(const SizesAndStrides& sz, IntArrayRef sizes, IntArrayRef 
   EXPECT_EQ(sz.sizes_arrayref(), sizes);
 
   idx = 0;
-  for (auto x: strides) {
+  for (auto x : strides) {
     EXPECT_EQ(sz.stride_at_unchecked(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.stride_at(idx), x) << "index: " << idx;
     EXPECT_EQ(sz.strides_data()[idx], x) << "index: " << idx;
@@ -55,7 +60,7 @@ TEST(SizesAndStridesTest, Resize) {
   sz.resize(5);
   checkData(sz, {0, 0, 0, 0, 0}, {1, 0, 0, 0, 0});
 
-  for (int ii = 0; ii < sz.size(); ++ii) {
+  for (const auto ii : c10::irange(sz.size())) {
     sz.size_at_unchecked(ii) = ii + 1;
     sz.stride_at_unchecked(ii) = 2 * (ii + 1);
   }
@@ -113,7 +118,7 @@ TEST(SizesAndStridesTest, Resize) {
   // Give it different data than it had when it was small to avoid
   // getting it right by accident (i.e., because of leftover inline
   // storage when going small to big).
-  for (int ii = 0; ii < sz.size(); ++ii) {
+  for (const auto ii : c10::irange(sz.size())) {
     sz.size_at_unchecked(ii) = ii - 1;
     sz.stride_at_unchecked(ii) = 2 * (ii - 1);
   }
@@ -175,7 +180,7 @@ TEST(SizesAndStridesTest, SetViaData) {
 static SizesAndStrides makeSmall(int offset = 0) {
   SizesAndStrides small;
   small.resize(3);
-  for (int ii = 0; ii < small.size(); ++ii) {
+  for (const auto ii : c10::irange(small.size())) {
     small.size_at_unchecked(ii) = ii + 1 + offset;
     small.stride_at_unchecked(ii) = 2 * (ii + 1 + offset);
   }
@@ -186,7 +191,7 @@ static SizesAndStrides makeSmall(int offset = 0) {
 static SizesAndStrides makeBig(int offset = 0) {
   SizesAndStrides big;
   big.resize(8);
-  for (int ii = 0; ii < big.size(); ++ii) {
+  for (const auto ii : c10::irange(big.size())) {
     big.size_at_unchecked(ii) = ii - 1 + offset;
     big.stride_at_unchecked(ii) = 2 * (ii - 1 + offset);
   }
@@ -217,6 +222,7 @@ TEST(SizesAndStridesTest, MoveConstructor) {
 
   SizesAndStrides movedEmpty(std::move(empty));
 
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(empty.size(), 0);
   EXPECT_EQ(movedEmpty.size(), 1);
   checkData(movedEmpty, {0}, {1});
@@ -226,6 +232,7 @@ TEST(SizesAndStridesTest, MoveConstructor) {
 
   SizesAndStrides movedSmall(std::move(small));
   checkSmall(movedSmall);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(small.size(), 0);
 
   SizesAndStrides big = makeBig();
@@ -233,12 +240,14 @@ TEST(SizesAndStridesTest, MoveConstructor) {
 
   SizesAndStrides movedBig(std::move(big));
   checkBig(movedBig);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(big.size(), 0);
 }
 
 TEST(SizesAndStridesTest, CopyConstructor) {
   SizesAndStrides empty;
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   SizesAndStrides copiedEmpty(empty);
 
   EXPECT_EQ(empty.size(), 1);
@@ -249,6 +258,7 @@ TEST(SizesAndStridesTest, CopyConstructor) {
   SizesAndStrides small = makeSmall();
   checkSmall(small);
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   SizesAndStrides copiedSmall(small);
   checkSmall(copiedSmall);
   checkSmall(small);
@@ -256,6 +266,7 @@ TEST(SizesAndStridesTest, CopyConstructor) {
   SizesAndStrides big = makeBig();
   checkBig(big);
 
+  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   SizesAndStrides copiedBig(big);
   checkBig(big);
   checkBig(copiedBig);
@@ -284,6 +295,7 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToSmall) {
   smallTarget = std::move(smallMoveFrom);
 
   checkSmall(smallTarget, 1);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
@@ -310,6 +322,7 @@ TEST(SizesAndStridesTest, MoveAssignmentSmallToBig) {
   bigTarget = std::move(smallMoveFrom);
 
   checkSmall(bigTarget);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(smallMoveFrom.size(), 0);
 }
 
@@ -336,6 +349,7 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToBig) {
   bigTarget = std::move(bigMoveFrom);
 
   checkBig(bigTarget, 1);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
@@ -362,6 +376,7 @@ TEST(SizesAndStridesTest, MoveAssignmentBigToSmall) {
   smallTarget = std::move(bigMoveFrom);
 
   checkBig(smallTarget);
+  // NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
   EXPECT_EQ(bigMoveFrom.size(), 0);
 }
 
@@ -372,9 +387,11 @@ TEST(SizesAndStridesTest, CopyAssignmentSelf) {
   checkSmall(small);
   checkBig(big);
 
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   small = small;
   checkSmall(small);
 
+  // NOLINTNEXTLINE(clang-diagnostic-self-assign-overloaded)
   big = big;
   checkBig(big);
 }

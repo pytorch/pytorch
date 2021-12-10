@@ -10,6 +10,7 @@ void TimeObserver::Start() {
 
 void TimeObserver::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   total_time_ += current_run;
   VLOG(1) << "This net iteration took " << current_run << " ms to complete.\n";
 }
@@ -21,6 +22,7 @@ void TimeOperatorObserver::Start() {
 
 void TimeOperatorObserver::Stop() {
   double current_run = timer_.MilliSeconds() - start_time_;
+  // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
   total_time_ += current_run;
   VLOG(1) << "This operator iteration took " << current_run
           << " ms to complete.\n";

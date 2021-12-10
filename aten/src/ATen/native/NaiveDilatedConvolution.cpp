@@ -1,5 +1,3 @@
-
-
 #include <ATen/ATen.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/DilatedConvolutionUtils.h>
@@ -7,6 +5,7 @@
 #include <ATen/native/vol2col.h>
 #include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 #include <tuple>
 
@@ -204,7 +203,7 @@ void slow_conv_dilated_all_cpu_template(
 
     AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long, input.scalar_type(), "slow_conv_dilated<>", [&] {
     // For each elt in batch, do:
-    for (int elt = 0; elt < batchSize; elt++) {
+    for (const auto elt : c10::irange(batchSize)) {
       // Matrix multiply per output:
       Tensor input_n = input.select(0, elt);
 
@@ -234,7 +233,7 @@ void slow_conv_dilated_all_cpu_template(
           */
           // The following for-loop is equivalent to the above
           // gemm setup but avoids allocation of ones tensor:
-          for (int n = 0; n < nOutputPlane; n++) {
+          for (const auto n : c10::irange(nOutputPlane)) {
             output_n.select(0, n).fill_(bias[n]);
           }
         }
@@ -272,8 +271,8 @@ void slow_conv_dilated_all_cpu_template(
             op(A) = 'n', op(B) = 'n', alpha=1, beta=1
         */
         cpublas::gemm(
-            /*transa=*/cpublas::NoTranspose,
-            /*transb=*/cpublas::NoTranspose,
+            /*transa=*/TransposeType::NoTranspose,
+            /*transb=*/TransposeType::NoTranspose,
             /*     m=*/columns.size(1),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(0),
@@ -316,8 +315,8 @@ void slow_conv_dilated_all_cpu_template(
             op(A) = 'n', op(B) = 't', alpha=1, beta=0
          */
         cpublas::gemm(
-            /*transa=*/cpublas::NoTranspose,
-            /*transb=*/cpublas::Transpose,
+            /*transa=*/TransposeType::NoTranspose,
+            /*transb=*/TransposeType::Transpose,
             /*     m=*/columns.size(1),
             /*     n=*/columns.size(0),
             /*     k=*/nOutputPlane,
@@ -381,8 +380,8 @@ void slow_conv_dilated_all_cpu_template(
           op(B) = 'n', alpha=scale, beta=1
         */
         cpublas::gemm(
-            /*transa=*/cpublas::Transpose,
-            /*transb=*/cpublas::NoTranspose,
+            /*transa=*/TransposeType::Transpose,
+            /*transb=*/TransposeType::NoTranspose,
             /*     m=*/columns.size(0),
             /*     n=*/nOutputPlane,
             /*     k=*/columns.size(1),
@@ -435,11 +434,14 @@ void slow_conv_dilated_all_cpu_template(
 Tensor slow_conv_dilated2d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<2>(
       input,
@@ -538,11 +540,14 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_dilated2d_backward_cpu(
 Tensor slow_conv_dilated3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size,
-    const Tensor& bias,
+    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride_size,
     IntArrayRef pad_size,
     IntArrayRef dilation_size) {
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  const Tensor& bias = *bias_maybe_owned;
+
   Tensor undefined;
   internal::slow_conv_dilated_shape_check<3>(
       input,

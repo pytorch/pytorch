@@ -5,6 +5,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel
 
 from . import (
+    debugging_hooks as debugging,
     default_hooks as default,
     powerSGD_hook as powerSGD,
     quantization_hooks as quantization,
@@ -20,8 +21,7 @@ def _powerSGD_comm_hook_wrapper(
     model,
     state,
     matrix_approximation_rank,
-    use_error_feedback=True,
-    random_seed=0,
+    start_powerSGD_iter,
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,
@@ -30,8 +30,7 @@ def _powerSGD_comm_hook_wrapper(
     powerSGD_state = powerSGD.PowerSGDState(
         process_group=state,
         matrix_approximation_rank=matrix_approximation_rank,
-        use_error_feedback=use_error_feedback,
-        random_seed=random_seed,
+        start_powerSGD_iter=start_powerSGD_iter,
     )
     model.register_comm_hook(powerSGD_state, comm_hook)
 
@@ -47,6 +46,9 @@ class DDPCommHookType(Enum):
     ALLREDUCE = partial(_ddp_comm_hook_wrapper, comm_hook=default.allreduce_hook)
     FP16_COMPRESS = partial(
         _ddp_comm_hook_wrapper, comm_hook=default.fp16_compress_hook
+    )
+    BF16_COMPRESS = partial(
+        _ddp_comm_hook_wrapper, comm_hook=default.bf16_compress_hook
     )
     QUANTIZE_PER_TENSOR = partial(
         _ddp_comm_hook_wrapper, comm_hook=quantization.quantization_pertensor_hook
@@ -76,6 +78,9 @@ class DDPCommHookType(Enum):
         _powerSGD_comm_hook_wrapper,
         comm_hook=powerSGD.batched_powerSGD_hook,
         matrix_approximation_rank=2,
+    )
+    NOOP = partial(
+        _ddp_comm_hook_wrapper, comm_hook=debugging.noop_hook,
     )
 
 

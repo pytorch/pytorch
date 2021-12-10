@@ -34,6 +34,10 @@ class TORCH_API DeprecatedTypeProperties {
     return layout_from_backend(backend()) == kSparse;
   }
 
+  bool is_sparse_csr() const {
+    return layout_from_backend(backend()) == kSparseCsr;
+  }
+
   DeviceType device_type() const {
     return backendToDeviceType(backend_);
   }
@@ -93,7 +97,7 @@ class TORCH_API DeprecatedTypeProperties {
   /// Constructs the `TensorOptions` from a type and a `device_index`.
   TensorOptions options(int16_t device_index = -1) const {
     return TensorOptions().dtype(typeMeta())
-                          .device(device_type(), device_index)
+                          .device(device_type(), static_cast<c10::DeviceIndex>(device_index))
                           .layout(layout());
   }
 

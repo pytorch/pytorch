@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/tensorexpr/mem_arena.h>
 #include <torch/csrc/jit/testing/file_check.h>
 #include <sstream>
 
@@ -106,12 +105,13 @@ TEST(TEFuserPass, FuserPass_3) {
 }
 
 TEST(TEFuserPass, FuserPass_0DimInput) {
+  WithCPUFuser cf;
   const auto graph_string = R"IR(
-    graph(%x : Float(device=cuda),
-          %y : Float(device=cuda)):
+    graph(%x : Float(device=cpu),
+          %y : Float(device=cpu)):
       %one : int = prim::Constant[value=1]()
-      %a : Float(device=cuda) = aten::mul(%x, %y)
-      %b : Float(device=cuda) = aten::add(%x, %a, %one)
+      %a : Float(device=cpu) = aten::mul(%x, %y)
+      %b : Float(device=cpu) = aten::add(%x, %a, %one)
       return (%b))IR";
   auto g = std::make_shared<Graph>();
   torch::jit::parseIR(graph_string, g.get());
@@ -119,8 +119,8 @@ TEST(TEFuserPass, FuserPass_0DimInput) {
   g->lint();
   FuseTensorExprs(g);
 
-  // We should not fuse 0-dim tensors
-  testing::FileCheck().check_not("prim::TensorExprGroup")->run(*g);
+  // We should fuse 0-dim tensors too
+  testing::FileCheck().check("prim::TensorExprGroup")->run(*g);
 }
 
 TEST(TEFuserPass, FuserPass_UnfusibleDevice) {
