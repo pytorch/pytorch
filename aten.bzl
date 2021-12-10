@@ -56,6 +56,7 @@ def generate_aten_impl(ctx):
         inputs=ctx.files.srcs,
         command=ctx.executable.generator.path + " $@",
         arguments=["--source-path", "aten/src/ATen",
+                   "--per-operator-headers",
                    "--install_dir", install_dir],
         tools=tool_inputs,
         input_manifests=tool_inputs_manifest,
