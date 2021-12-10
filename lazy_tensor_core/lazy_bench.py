@@ -339,7 +339,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     overhead = median[1] / median[0]
     results.append(overhead)
     output_csv(
-        "lazy_overheads.csv",
+        f"lazy_overheads_{args.test}.csv",
         ("dev", "name", "overhead", "pvalue"),
     ).writerow([current_device, current_name, f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
@@ -379,7 +379,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
     speedup = median[0] / median[1]
     results.append(speedup)
     output_csv(
-        "lazy_compute.csv",
+        f"lazy_compute_{args.test}.csv",
         ("name", "dev", "experiment", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.2e}"])
     print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
