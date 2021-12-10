@@ -104,6 +104,7 @@ supported:
   - mul.Scalar
   - native_batch_norm
   - native_batch_norm_backward
+  - normal_
   - max_pool2d_with_indices
   - max_pool2d_with_indices_backward
   - max_pool3d_with_indices
