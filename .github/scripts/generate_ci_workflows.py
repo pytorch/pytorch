@@ -460,23 +460,25 @@ LINUX_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="linux-bionic-cuda11.5-py3.6-gcc7",
+        build_environment="periodic-linux-bionic-cuda11.5-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         num_test_shards=2,
+        is_scheduled="45 4,10,16,22 * * *",
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
     CIWorkflow(
         arch="linux",
-        build_environment="libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
+        build_environment="periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7",
         test_runner_type=LINUX_CUDA_TEST_RUNNER,
         build_generates_artifacts=False,
+        is_scheduled="45 4,10,16,22 * * *",
         exclude_test=True,
         ciflow_config=CIFlowConfig(
-            labels=set([LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+            labels=set([LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_LIBTORCH, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
     CIWorkflow(
