@@ -76,6 +76,7 @@ std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 bool isOpSupportedInMobile(OpCode op);
 char const* toString(OpCode op);
+std::ostream& operator<<(std::ostream& out, Instruction inst);
 
 } // namespace jit
 } // namespace torch
