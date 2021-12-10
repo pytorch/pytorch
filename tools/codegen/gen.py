@@ -1072,6 +1072,7 @@ def gen_per_operator_headers(
             ('NativeFunctions', '_native'),
     ]:
         cpu_fm.write(f'{category}.h', lambda: {
+            'static_dispatch_extra_headers': [],
             f'{category}_includes': [
                 f'#include <ATen/ops/{name}{suffix}.h>'
                 for name in sorted(functions_by_base_name.keys())
