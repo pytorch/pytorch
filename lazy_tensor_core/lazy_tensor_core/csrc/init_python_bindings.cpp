@@ -449,10 +449,6 @@ void InitLtcModuleBindings(py::module m) {
         [](const std::vector<at::Tensor>& tensors) -> std::string {
           return GetTensorsBackendGraph(tensors);
         });
-  m.def("_print_text",
-        [](const std::string& s) {
-          std::cerr << s << std::endl;
-        });
   m.def("_ltc_tensors_from_aten", [](const std::vector<at::Tensor>& tensors,
                                      const std::vector<std::string>& devices) {
     std::vector<at::Tensor> result;
