@@ -672,18 +672,46 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     return {};
   }
 
-  template <typename T>
-  void check_bounds(T v) {
-    const std::vector<ExprPtr>& dims = v->buf()->dims();
-    const std::vector<ExprPtr>& indices = v->indices();
-    if (v->buf()->is_flattened() || (indices.size() == 1 && dims.size() != 1)) {
-      // indices are already flattened
-      return;
-    }
+  void check_bounds_throw(int64_t idx, int64_t bound, const BufPtr& buf) {
+    std::stringstream ss;
+    ss << "Index out of bounds in check_bounds. Index: " << idx
+       << "; bounds: [0, " << bound << ").";
+    throw malformed_input(ss.str(), buf);
+  }
 
+  void check_bounds(const BufPtr& buf, const std::vector<ExprPtr>& indices) {
+    const std::vector<ExprPtr>& dims = buf->dims();
     if (dims.size() != indices.size()) {
+      if (indices.size() == 1) {
+        // indices are flattened, but not buffer
+        int64_t buf_size = 1;
+        if (dims.size() > 0) {
+          TORCH_INTERNAL_ASSERT(dims.size() == buf->strides().size());
+          ExprPtr buf_size_expr = immLike(dims[0], 1);
+          ExprPtr negative_one = immLike(dims[0], -1);
+          for (const auto& i : c10::irange(dims.size())) {
+            buf_size_expr = alloc<Add>(
+                buf_size_expr,
+                alloc<Mul>(
+                    alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+          }
+          buf_size_expr->accept(this);
+          buf_size = value().intValue();
+        }
+        indices[0]->accept(this);
+        const auto& index_values = indexVec(value());
+        for (auto& j : index_values) {
+          if (j < 0 || j >= buf_size) {
+            check_bounds_throw(j, buf_size, buf);
+          }
+        }
+        return;
+      }
       throw malformed_input(
-          "dimensions and indices mismatch in check_bounds", v);
+          "dimensions and indices mismatch in check_bounds. Buf has " +
+              std::to_string(dims.size()) + " dimensions and indices has " +
+              std::to_string(indices.size()) + " dimensions.",
+          buf);
     }
     for (const auto& i : c10::irange(dims.size())) {
       auto opt_dim = intValue(dims[i]);
@@ -695,10 +723,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       const auto& ithDimIndices = indexVec(value());
       for (auto& j : ithDimIndices) {
         if (j < 0 || j >= dim_bound) {
-          std::stringstream ss;
-          ss << "Index out of bounds in check_bounds. Index: " << j
-             << "; bounds: [0, " << dim_bound << ").";
-          throw malformed_input(ss.str(), v);
+          check_bounds_throw(j, dim_bound, buf);
         }
       }
     }
@@ -711,7 +736,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     }
     void* ptr = iter->second;
 
-    check_bounds(v);
+    check_bounds(v->buf(), v->indices());
 
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
@@ -756,7 +781,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
     void* ptr = iter->second;
 
-    check_bounds(v);
+    check_bounds(v->buf(), v->indices());
 
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());

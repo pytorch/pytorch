@@ -421,8 +421,7 @@ Buf::Buf(
               : make_contiguous_strides(ExprVectorToExprHandleVector(dims_))),
       initializer_(std::move(initializer)),
       qscale_(std::move(qscale)),
-      qzero_(std::move(qzero)),
-      is_flattened_(false) {
+      qzero_(std::move(qzero)) {
   TORCH_CHECK(var);
 }
 
