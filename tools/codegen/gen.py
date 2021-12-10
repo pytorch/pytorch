@@ -951,50 +951,66 @@ def get_grouped_native_functions(
     pre_grouped_native_functions = pre_group_native_functions(native_functions)
     return list(concatMap(flatten_pre_group, list(pre_grouped_native_functions.values())))
 
-def gen_headers(
+def gen_aggregated_headers(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         static_dispatch_idx: Optional[BackendIndex],
-        selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
-        core_fm: FileManager,
         cpu_fm: FileManager,
-        cuda_fm: FileManager,
+):
+    # Buck doesn't support dynamic output files, so we aggregate all operator
+    # headers into a single file
+    structured_native_functions = [g for g in grouped_native_functions
+                                   if isinstance(g, NativeFunctionsGroup)]
+    cpu_fm.write('NativeMetaFunctions.h', lambda: {
+        'NativeMetaFunctions_includes': [],
+        'NativeMetaFunctions_declarations': list(
+            mapMaybe(compute_meta_function_declaration, structured_native_functions)),
+    })
+    method_native_functions = [fn for fn in native_functions
+                               if Variant.method in fn.variants]
+    non_method_native_functions = [fn for fn in native_functions
+                                   if fn not in method_native_functions]
+    cpu_fm.write('MethodOperators.h', lambda: {
+        'MethodOperators_includes': [],
+        'MethodOperators_declarations': list(mapMaybe(ComputeOperators(
+            Target.DECLARATION), method_native_functions)),
+    })
+    cpu_fm.write('Operators.h', lambda: {
+        'Operators_includes': ['#include <ATen/MethodOperators.h>'],
+        'Operators_declarations': list(mapMaybe(ComputeOperators(
+            Target.DECLARATION), non_method_native_functions)),
+    })
+    cpu_fm.write('Functions.h', lambda: {
+        'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx),
+        'Functions_includes': ['#include <ATen/Operators.h>'],
+        'Functions_declarations': list(mapMaybe(ComputeFunction(
+            static_dispatch_backend_index=static_dispatch_idx), native_functions)),
+    })
+    cpu_fm.write('NativeFunctions.h', lambda: {
+        'NativeFunctions_includes': ['#include <ATen/NativeMetaFunctions.h>'],
+        'NativeFunctions_declarations': list(concatMap(
+            # Convert to a set first to remove duplicate kernel names.
+            # Backends are allowed to repeat kernel names; only generate the declaration once!
+            lambda f: list(OrderedDict.fromkeys(concatMap(
+                lambda backend_idx:
+                    dest.compute_native_function_declaration(f, backend_idx),
+                backend_indices.values()))),
+            grouped_native_functions)),
+    })
+
+def gen_per_operator_headers(
+        *,
+        native_functions: Sequence[NativeFunction],
+        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        static_dispatch_idx: Optional[BackendIndex],
+        backend_indices: Dict[DispatchKey, BackendIndex],
+        cpu_fm: FileManager,
         ops_fm: FileManager,
-        dispatch_keys: Sequence[DispatchKey],
-        functions_keys: Set[DispatchKey],
-        rocm: bool,
-) -> None:
-    for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-        if dispatch_key in functions_keys:
-            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
-                # See Note [Avoiding Include Cycles In Static Dispatch]
-                inl_headers = ''
-            else:
-                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
-
-            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
-                'dispatch_key': str(dispatch_key),
-                'inline_headers_for_nonstatic_build': inl_headers,
-            })
-            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
-                'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_namespaced_declarations': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
-                        Target.NAMESPACED_DECLARATION,
-                        selector,
-                        rocm=rocm,
-                        cpp_namespace='at::native',
-                        class_method_name=None),
-                    grouped_native_functions
-                )),
-            })
-
-        del fm
-
+):
+    # For CMake builds, split operator declarations into separate headers in
+    # the ATen/ops folder to split up header dependencies
     functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
     for fn in native_functions:
         functions_by_root_name[fn.root_name].append(fn)
@@ -1051,6 +1067,7 @@ def gen_headers(
     for category, suffix in [
             ('Functions', ''),
             ('Operators', '_ops'),
+            ('NativeMetaFunctions', '_meta'),
             ('NativeFunctions', '_native'),
     ]:
         cpu_fm.write(f'{category}.h', lambda: {
@@ -1058,14 +1075,83 @@ def gen_headers(
                 f'#include <ATen/ops/{name}{suffix}.h>'
                 for name in sorted(functions_by_root_name.keys())
             ],
+            f'{category}_declarations': [],
         })
 
-    core_fm.write('TensorBody.h', lambda: {
-        'operator_includes': [
+    cpu_fm.write('MethodOperators.h', lambda: {
+        'MethodOperators_includes': sorted(
             f'#include <ATen/ops/{name}_ops.h>'
             for name, functions in functions_by_root_name.items()
             if any(Variant.method in fn.variants for fn in functions)
-        ],
+        ),
+        'MethodOperators_declarations': [],
+    })
+
+def gen_headers(
+        *,
+        native_functions: Sequence[NativeFunction],
+        grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        static_dispatch_idx: Optional[BackendIndex],
+        selector: SelectiveBuilder,
+        backend_indices: Dict[DispatchKey, BackendIndex],
+        core_fm: FileManager,
+        cpu_fm: FileManager,
+        cuda_fm: FileManager,
+        ops_fm: FileManager,
+        dispatch_keys: Sequence[DispatchKey],
+        functions_keys: Set[DispatchKey],
+        rocm: bool,
+        per_operator_headers: bool,
+) -> None:
+    for dispatch_key in dispatch_keys:
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        if dispatch_key in functions_keys:
+            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+                # See Note [Avoiding Include Cycles In Static Dispatch]
+                inl_headers = ''
+            else:
+                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
+            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_key': str(dispatch_key),
+                'inline_headers_for_nonstatic_build': inl_headers,
+            })
+            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+                'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_namespaced_declarations': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        backend_indices[dispatch_key],
+                        Target.NAMESPACED_DECLARATION,
+                        selector,
+                        rocm=rocm,
+                        cpp_namespace='at::native',
+                        class_method_name=None),
+                    grouped_native_functions
+                )),
+            })
+
+        del fm
+
+    if per_operator_headers:
+        gen_per_operator_headers(
+            native_functions=native_functions,
+            grouped_native_functions=grouped_native_functions,
+            static_dispatch_idx=static_dispatch_idx,
+            backend_indices=backend_indices,
+            cpu_fm=cpu_fm,
+            ops_fm=ops_fm,
+        )
+    else:
+        gen_aggregated_headers(
+            native_functions=native_functions,
+            grouped_native_functions=grouped_native_functions,
+            static_dispatch_idx=static_dispatch_idx,
+            backend_indices=backend_indices,
+            cpu_fm=cpu_fm,
+        )
+
+
+    core_fm.write('TensorBody.h', lambda: {
         'static_dispatch_extra_headers': static_dispatch_extra_headers(static_dispatch_idx, skip_tensor_include=True),
         'tensor_method_declarations': list(mapMaybe(ComputeTensorMethod(
             target=Target.DECLARATION, static_dispatch_backend_index=static_dispatch_idx), native_functions)),
@@ -1241,6 +1327,9 @@ def main() -> None:
         '--dry-run', action='store_true',
         help='run without writing any files (still updates outputs)')
     parser.add_argument(
+        '--per-operator-headers', action='store_true',
+        help='generate separate headers per operator in ATen/ops')
+    parser.add_argument(
         '-d', '--install_dir', help='output directory',
         default='build/aten/src/ATen')
     parser.add_argument(
@@ -1347,6 +1436,7 @@ def main() -> None:
         # Meta is a magic key: it is automatically generated for structured
         # kernels
         DispatchKey.Meta,
+        DispatchKey.ZeroTensor,
     ]
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -1392,7 +1482,9 @@ def main() -> None:
             ops_fm=ops_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
-            rocm=options.rocm)
+            rocm=options.rocm,
+            per_operator_headers=options.per_operator_headers,
+        )
 
     if 'declarations_yaml' in options.generate:
         gen_declarations_yaml(
