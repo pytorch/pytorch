@@ -28,7 +28,7 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   profiler::prepareProfiler(config, {profiler::ActivityType::CPU});
   if (with_modules || with_stack) {
     auto post_processing = [this, with_stack, with_modules](
-                               std::vector<profiler::KinetoEvent>& events) {
+                               std::deque<profiler::KinetoEvent>& events) {
       std::string no_debug_info("Model was not saved with debug information");
       for (auto& e : events) {
         if (with_modules) {

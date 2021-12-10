@@ -317,10 +317,10 @@ struct TORCH_API ProfilerResult {
 #ifdef USE_KINETO
   ProfilerResult(
       uint64_t start_time,
-      std::vector<KinetoEvent> events,
+      std::deque<KinetoEvent> events,
       std::unique_ptr<libkineto::ActivityTraceInterface> trace);
 #else
-  ProfilerResult(std::vector<KinetoEvent> events);
+  ProfilerResult(std::deque<KinetoEvent> events);
 #endif // USE_KINETO
   ~ProfilerResult();
 
@@ -328,7 +328,7 @@ struct TORCH_API ProfilerResult {
     return trace_start_us_;
   }
 
-  const std::vector<KinetoEvent>& events() const {
+  const std::deque<KinetoEvent>& events() const {
     return events_;
   }
 
@@ -338,7 +338,7 @@ struct TORCH_API ProfilerResult {
 
  private:
   uint64_t trace_start_us_ = 0;
-  std::vector<KinetoEvent> events_;
+  std::deque<KinetoEvent> events_;
 #ifdef USE_KINETO
   std::unique_ptr<libkineto::ActivityTraceInterface> trace_;
   bool saved_ = false;
@@ -398,7 +398,7 @@ TORCH_API void enableProfiler(
 TORCH_API void enableProfilerWithEventPostProcess(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
-    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    std::function<void(std::deque<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();

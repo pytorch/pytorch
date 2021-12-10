@@ -234,11 +234,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
     }
   }
 
-  const std::function<void(std::vector<KinetoEvent>&)>& getEventPostProcessingCallback() const {
+  const std::function<void(std::deque<KinetoEvent>&)>& getEventPostProcessingCallback() const {
     return event_post_process_cb_;
   }
 
-  void setEventPostProcessingCallback(std::function<void(std::vector<KinetoEvent>&)>&& cb) {
+  void setEventPostProcessingCallback(std::function<void(std::deque<KinetoEvent>&)>&& cb) {
     event_post_process_cb_ = std::move(cb);
   }
 
@@ -527,9 +527,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalState {
   std::unique_ptr<libkineto::CpuTraceBuffer> cpu_trace;
 #endif // USE_KINETO
   uint64_t start_time_;
-  std::vector<KinetoEvent> kineto_events_;
+  std::deque<KinetoEvent> kineto_events_;
   // Optional, if event post-processing is enabled.
-  std::function<void(std::vector<KinetoEvent>&)> event_post_process_cb_;
+  std::function<void(std::deque<KinetoEvent>&)> event_post_process_cb_;
 };
 
 std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
@@ -803,7 +803,7 @@ void prepareProfiler(
 void enableProfilerWithEventPostProcess(
     const ProfilerConfig& config,
     const std::set<ActivityType>& activities,
-    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    std::function<void(std::deque<KinetoEvent>&)>&& cb,
     const std::unordered_set<at::RecordScope>& scopes) {
   enableProfiler(config, activities, scopes);
   auto state_ptr = getProfilerTLSState();
@@ -909,13 +909,13 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 #ifdef USE_KINETO
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
-    std::vector<KinetoEvent> events,
+    std::deque<KinetoEvent> events,
     std::unique_ptr<libkineto::ActivityTraceInterface> trace)
   : trace_start_us_(start_time),
     events_(std::move(events)),
     trace_(std::move(trace)) {}
 #else
-ProfilerResult::ProfilerResult(std::vector<KinetoEvent> events)
+ProfilerResult::ProfilerResult(std::deque<KinetoEvent> events)
   : events_(std::move(events)) {}
 #endif // USE_KINETO
 ProfilerResult::ProfilerResult() = default;
