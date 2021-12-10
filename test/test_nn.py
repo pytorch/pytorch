@@ -12622,14 +12622,25 @@ class TestNNDeviceType(NNTestCase):
                         self.assertNotEqual(permuted_inp, out)
 
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
+        self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.contiguous_format)
+        if input.ndim == 3:
+            return    # placeholder for future torch.channels_last_1d
+        elif input.ndim == 4:
+            self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.channels_last)
+        elif input.ndim == 5:
+            self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.channels_last_3d)
+
+    def _test_InstanceNorm_general_memory_format(self, cls, input, device, dtype=torch.float,
+                                                 memory_format=torch.contiguous_format):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
-        input_var = input.to(device=device, dtype=dtype).requires_grad_()
+        input_var = input.to(device=device, dtype=dtype, memory_format=memory_format).requires_grad_()
 
-        IN = cls(c, eps=0).to(device, dtype)
+        IN = cls(c, eps=0).to(device=device, dtype=dtype, memory_format=memory_format)
 
         output = IN(input_var)
-        out_reshaped = output.view(b * c, -1)
+        self.assertTrue(output.is_contiguous(memory_format=memory_format))
+        out_reshaped = output.contiguous().view(b * c, -1)
 
         mean = out_reshaped.mean(1)
         var = out_reshaped.var(1, unbiased=False)
@@ -12641,6 +12652,7 @@ class TestNNDeviceType(NNTestCase):
         grad_out = torch.randn_like(output)
         res1 = output.data.clone()
         output.backward(grad_out)
+        self.assertTrue(input_var.grad.is_contiguous(memory_format=memory_format))
         grad1 = input_var.grad.data.clone()
 
         IN.eval()
@@ -12676,11 +12688,22 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(output.transpose(0, 1).reshape(c, -1).mean(1), torch.arange(c, dtype=dtype))
 
     def _test_InstanceNorm_cuda_half(self, cls, input, device):
+        self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.contiguous_format)
+        if input.ndim == 3:
+            return    # placeholder for future torch.channels_last_1d
+        elif input.ndim == 4:
+            self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.channels_last)
+        elif input.ndim == 5:
+            self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.channels_last_3d)
+
+    def _test_InstanceNorm_cuda_half_memory_format(self, cls, input, device, memory_format):
         # THNN
-        input = input.to(device=device, dtype=torch.half).random_(1, 10).requires_grad_(True)
-        m = cls(input.size(1), affine=True, track_running_stats=True).to(device, torch.half)
+        input = input.to(device=device, dtype=torch.half, memory_format=memory_format).random_(1, 10).requires_grad_(True)
+        m = cls(input.size(1), affine=True, track_running_stats=True).to(device, torch.half, memory_format=memory_format)
         thnn_output = m(input)
+        self.assertTrue(thnn_output.is_contiguous(memory_format=memory_format))
         thnn_output.sum().backward()
+        self.assertTrue(input.grad.is_contiguous(memory_format=memory_format))
         thnn_input_grad = input.grad.data.clone()
         self.assertEqualTypeString(thnn_output, input)
         # cuDNN

@@ -605,9 +605,37 @@ Tensor instance_norm(
   Tensor running_mean_ = repeat_if_defined(running_mean, b);
   Tensor running_var_ = repeat_if_defined(running_var, b);
 
-  auto input_reshaped = input.contiguous().view(shape);
-  auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
-                            use_input_stats, momentum, eps, cudnn_enabled);
+  auto memory_format = input.suggest_memory_format();
+  at::Tensor out;
+
+  switch (memory_format) {
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d: {
+      auto get_batch_if_defined = [&](const at::Tensor& t, int64_t i) -> at::Tensor {
+        return t.defined() ? t.view({b, c})[i] : t;
+      };
+      auto input_cont = input.contiguous(memory_format);
+      out = at::empty_like(input_cont);
+      at::Tensor buffer;
+      for (int64_t i = 0; i < b; i++) {
+        buffer = at::batch_norm(input_cont[i].unsqueeze(0),
+                                get_batch_if_defined(weight_, i),
+                                get_batch_if_defined(bias_, i),
+                                get_batch_if_defined(running_mean_, i),
+                                get_batch_if_defined(running_var_, i),
+                                use_input_stats, momentum, eps, cudnn_enabled).squeeze(0);
+        out[i].copy_(buffer, /* non_blocking= */ true);
+      }
+    } break;
+    case at::MemoryFormat::Contiguous: {
+      auto input_reshaped = input.contiguous().view(shape);
+      out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
+                                use_input_stats, momentum, eps, cudnn_enabled);
+      out = out.view(input.sizes());
+    } break;
+    default:
+      TORCH_CHECK(false, "instance_norm: unknown memory_format of the input tensor, ", memory_format);
+  }
 
   // we alias running_mean and running_var because they are const but we want to modify their data
   if (running_mean.defined()) {
@@ -617,7 +645,7 @@ Tensor instance_norm(
     at::alias(running_var).copy_(running_var_.view({ b, c }).mean(0, false));
   }
 
-  return out.view(input.sizes());
+  return out;
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
