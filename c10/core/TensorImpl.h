@@ -928,7 +928,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //   Inference tensor has version_counter_.enabled() == false
   bool is_inference() {
     bool no_ADInplaceOrView = !key_set_.has(c10::DispatchKey::ADInplaceOrView);
-    bool no_Autograd = (key_set_ & c10::autograd_dispatch_keyset).empty();
+    bool no_Autograd = !key_set_.has(c10::DispatchKey::AutogradFunctionality)
+                    && !key_set_.has(c10::DispatchKey::AutogradOther);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         no_ADInplaceOrView == no_Autograd,
         "ADInplaceOrView and Autograd keys must be on/off at the same time.");
