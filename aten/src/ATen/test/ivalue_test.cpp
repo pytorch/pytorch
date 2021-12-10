@@ -692,19 +692,19 @@ TEST(IValueTest, IdentityAndHashing_SparseCOO) {
   EXPECT_FALSE(tv1.isAliasOf(tv2));
   EXPECT_FALSE(tv1.isAliasOf(tv3));
 
-  int64_t idx_array1[6] = {0, 1, 1, 0, 0, 1};
+  std::vector<int64_t> idx_array1 = {0, 1, 1, 0, 0, 1};
   at::Tensor idx1 = torch::from_blob(
-      idx_array1,
+      idx_array1.data(),
       {2, 3},
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
-  int64_t idx_array2[6] = {1, 1, 2, 0, 1, 2};
+  std::vector<int64_t> idx_array2 = {1, 1, 2, 0, 1, 2};
   at::Tensor idx2 = torch::from_blob(
-      idx_array2,
+      idx_array2.data(),
       {2, 3},
       torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
-  int val_array[3] = {3, -5, 7};
+  std::vector<int32_t> val_array = {3, -5, 7};
   at::Tensor val = torch::from_blob(
-      val_array,
+      val_array.data(),
       {3},
       torch::TensorOptions().dtype(torch::kInt32).device(torch::kCPU));
   at::Tensor sparse1 = torch::sparse_coo_tensor(
