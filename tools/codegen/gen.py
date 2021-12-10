@@ -979,7 +979,7 @@ def gen_aggregated_headers(
         functions_keys: Set[DispatchKey],
         dispatch_keys: Sequence[DispatchKey],
         rocm: bool,
-):
+) -> None:
     # Buck doesn't support dynamic output files, so we aggregate all operator
     # headers into a single file
     structured_native_functions = [g for g in grouped_native_functions
@@ -1064,7 +1064,7 @@ def gen_per_operator_headers(
         functions_keys: Set[DispatchKey],
         dispatch_keys: Sequence[DispatchKey],
         rocm: bool,
-):
+) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
     functions_by_root_name: Dict[str, List[NativeFunction]] = defaultdict(lambda: [])
@@ -1241,7 +1241,7 @@ def gen_headers(
             rocm=rocm,
         )
 
-    def static_dispatch_method_headers():
+    def static_dispatch_method_headers() -> List[str]:
         return list(mapMaybe(
             lambda fn: static_dispatch_ops_header(fn, backend_index=static_dispatch_idx),
             [fn for fn in native_functions if Variant.method in fn.variants]))
@@ -1301,7 +1301,7 @@ def gen_source_files(
         fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
 
         if per_operator_headers:
-            def operator_headers():
+            def operator_headers() -> List[str]:
                 return list(set(
                     (f"""
 #include <ATen/ops/{fn.root_name}_native.h>
@@ -1316,7 +1316,7 @@ def gen_source_files(
                         (DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd))
                 ))
         else:
-            def operator_headers():
+            def operator_headers() -> List[str]:
                 headers = ["#include <ATen/NativeFunctions.h>"]
                 if dispatch_key == DispatchKey.CompositeExplicitAutograd:
                     headers.append("#include <ATen/Functions.h>")
