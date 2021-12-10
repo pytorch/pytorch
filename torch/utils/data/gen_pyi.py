@@ -1,4 +1,5 @@
 import os
+import pathlib
 from typing import Dict, List, Set, Tuple
 from tools.codegen.gen import FileManager
 
@@ -144,6 +145,7 @@ def main() -> None:
     files_to_exclude = {"__init__.py", "utils.py"}
     deprecated_files = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
 
+    os.chdir(str(pathlib.Path(__file__).parent.resolve()))
     iter_datapipes_file_path = "datapipes/iter"
     file_paths = find_file_paths([iter_datapipes_file_path], files_to_exclude=files_to_exclude.union(deprecated_files))
     methods_and_signatures, methods_and_class_names = parse_datapipe_files(file_paths)
@@ -152,7 +154,7 @@ def main() -> None:
     for method_name, signature in methods_and_signatures.items():
         class_name = methods_and_class_names[method_name]
         method_definitions.append(f"# Functional form of '{class_name}'\ndef {method_name}({signature}): ...")
-    method_definitions.sort()
+    method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
 
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
     fm.write_with_template(filename="dataset.pyi",

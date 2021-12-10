@@ -192,10 +192,16 @@ if(INTERN_BUILD_ATEN_OPS)
       --static_dispatch_backend ${STATIC_DISPATCH_BACKEND})
   endif()
 
+  set(GEN_PER_OPERATOR_FLAG)
+  if(USE_PER_OPERATOR_HEADERS)
+    list(APPEND GEN_PER_OPERATOR_FLAG "--per-operator-headers")
+  endif()
+
   set(GEN_COMMAND
       "${PYTHON_EXECUTABLE}" -m tools.codegen.gen
       --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
       --install_dir ${CMAKE_BINARY_DIR}/aten/src/ATen
+      ${GEN_PER_OPERATOR_FLAG}
       ${GEN_ROCM_FLAG}
       ${CUSTOM_BUILD_FLAGS}
       ${GEN_VULKAN_FLAGS}
@@ -269,6 +275,11 @@ if(INTERN_BUILD_ATEN_OPS)
   add_library(ATEN_CUDA_FILES_GEN_LIB INTERFACE)
   add_dependencies(ATEN_CPU_FILES_GEN_LIB ATEN_CPU_FILES_GEN_TARGET)
   add_dependencies(ATEN_CUDA_FILES_GEN_LIB ATEN_CUDA_FILES_GEN_TARGET)
+
+  if(USE_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CPU_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+    target_compile_definitions(ATEN_CUDA_FILES_GEN_LIB INTERFACE AT_PER_OPERATOR_HEADERS)
+  endif()
 endif()
 
 function(append_filelist name outputvar)
