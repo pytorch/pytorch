@@ -298,6 +298,8 @@ namespace c10 {
   _(attr, transB)                    \
   _(attr, name)                      \
   _(attr, module)                    \
+  _(attr, a)                         \
+  _(attr, b)                         \
   _(attr, beg)                       \
   _(attr, idx)                       \
   _(attr, split)                     \
