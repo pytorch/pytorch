@@ -2273,6 +2273,36 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_wishart_sample(self):
+        def _check_wishart_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
+                                   circular=False, num_samples=10000, failure_rate=1e-3):
+            # Checks that the .sample() method matches a reference function.
+            torch_samples = torch_dist.sample((num_samples,)).squeeze()
+            torch_samples = torch_samples.cpu().numpy()
+            ref_samples = ref_dist.rvs(num_samples).astype(np.float64)
+            if multivariate:
+                # Project onto a random axis.
+                axis = np.random.normal(size=torch_samples.shape[1:])
+                axis /= np.linalg.norm(axis)
+                torch_samples = np.dot(torch_samples, axis)
+                ref_samples = np.dot(ref_samples, axis)
+            samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
+            if circular:
+                samples = [(np.cos(x), v) for (x, v) in samples]
+            shuffle(samples)  # necessary to prevent stable sort from making uneven bins for discrete
+            samples.sort(key=lambda x: x[0])
+            samples = np.array(samples)[:, 1]
+
+            # Aggregate into bins filled with roughly zero-mean unit-variance RVs.
+            num_bins = 10
+            samples_per_bin = len(samples) // num_bins
+            bins = samples.reshape((num_bins, samples_per_bin)).mean(axis=1)
+            stddev = samples_per_bin ** -0.5
+            threshold = stddev * scipy.special.erfinv(1 - 2 * failure_rate / num_bins)
+            message = '{}.sample() is biased:\n{}'.format(message, bins)
+            for bias in bins:
+                self.assertLess(-threshold, bias, message)
+                self.assertLess(bias, threshold, message)
+
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         df = (torch.rand([], requires_grad=True) + 1) * 3
         tmp = torch.randn(3, 10)
@@ -2280,18 +2310,18 @@ class TestDistributions(TestCase):
         prec = cov.inverse().requires_grad_()
         scale_tril = torch.linalg.cholesky(cov).requires_grad_()
 
-        self._check_sampler_sampler(Wishart(df, cov),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
-                                    'Wishart(df={}, covariance_matrix={})'.format(df, cov),
-                                    multivariate=True)
-        self._check_sampler_sampler(Wishart(df, precision_matrix=prec),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
-                                    'Wishart(df={}, precision_matrix={})'.format(df, prec),
-                                    multivariate=True)
-        self._check_sampler_sampler(Wishart(df, scale_tril=scale_tril),
-                                    scipy.stats.wishart(df.item(), cov.detach().numpy()),
-                                    'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
-                                    multivariate=True)
+        _check_wishart_sampler_sampler(Wishart(df, cov),
+                                       scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                       'Wishart(df={}, covariance_matrix={})'.format(df, cov),
+                                       multivariate=True)
+        _check_wishart_sampler_sampler(Wishart(df, precision_matrix=prec),
+                                       scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                       'Wishart(df={}, precision_matrix={})'.format(df, prec),
+                                       multivariate=True)
+        _check_wishart_sampler_sampler(Wishart(df, scale_tril=scale_tril),
+                                       scipy.stats.wishart(df.item(), cov.detach().numpy()),
+                                       'Wishart(df={}, scale_tril={})'.format(df, scale_tril),
+                                       multivariate=True)
 
     def test_wishart_properties(self):
         df = (torch.rand([]) + 1) * 5
