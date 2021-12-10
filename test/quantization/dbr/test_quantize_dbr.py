@@ -1039,8 +1039,6 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x
 
         m = M()
-        # TODO(future PR): also implement global qconfig being None
-        # and individual functions having qconfigs
         qconfig_dict = {
             '': torch.quantization.default_qconfig,
             'object_type': [
@@ -1057,6 +1055,36 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             NodeSpec.call_function(torch.add): 1,
             NodeSpec.call_function(toq.add): 0,
             NodeSpec.call_function(toq.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_object_type_function_global_none(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types when global qconfig is None.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': None,
+            'object_type': [
+                (torch.add, torch.quantization.default_qconfig),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 0,
+            NodeSpec.call_function(toq.add): 1,
         }
         self.checkGraphModuleNodes(
             rewritten, expected_node_occurrence=expected_occurrence)
