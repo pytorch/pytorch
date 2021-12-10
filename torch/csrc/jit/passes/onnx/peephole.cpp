@@ -11,6 +11,7 @@
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/full.h>
