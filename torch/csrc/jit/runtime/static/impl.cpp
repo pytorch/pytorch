@@ -97,12 +97,16 @@ namespace {
 
 void OptimizeGraph(
     std::shared_ptr<torch::jit::Graph>& graph,
-    std::vector<IValue> sample_inputs,
-    const StaticModuleOptions& opts) {
+    const StaticModuleOptions& opts,
+    std::vector<IValue> sample_inputs) {
   GRAPH_DUMP("Before optimizations: ", graph);
-  if (!sample_inputs.empty() && opts.enable_tensorexpr_fusion) {
-    VLOG(1) << "Performing TensorExpr fusion";
-    performTensorExprFusion(graph, std::move(sample_inputs));
+  if (opts.enable_tensorexpr_fusion) {
+    if (sample_inputs.empty()) {
+      VLOG(1) << "Cannot perform TensorExpr fusion - sample_inputs is empty";
+    } else {
+      VLOG(1) << "Performing TensorExpr fusion";
+      performTensorExprFusion(graph, std::move(sample_inputs));
+    }
   }
   Inline(*graph);
   ConstantPropagation(graph);
@@ -191,7 +195,7 @@ void PrepareGraphForStaticModule(
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
-  OptimizeGraph(graph, sample_inputs, opts);
+  OptimizeGraph(graph, opts, sample_inputs);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
@@ -215,10 +219,8 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  if (!sample_inputs.empty()) {
-    if (IsSelfInGraphInput(graph)) {
-      sample_inputs.insert(sample_inputs.begin(), m._ivalue());
-    }
+  if (!sample_inputs.empty() && IsSelfInGraphInput(graph)) {
+    sample_inputs.insert(sample_inputs.begin(), m._ivalue());
   }
   PrepareGraphForStaticModule(graph, opts, std::move(sample_inputs));
 
@@ -1039,7 +1041,7 @@ StaticRuntime::Deallocator::~Deallocator() {
   // Assume cleanup cannot throw.
   cleanupImpl();
 #ifndef NDEBUG
-  runtime_.check_for_memory_leak(false);
+  runtime_.check_for_memory_leak(/*output_returned*/ false);
 #endif
 }
 
@@ -1100,8 +1102,11 @@ c10::IValue StaticRuntime::run_impl(
   if (static_module_.num_outputs() > 1) {
     return move_outputs_to_tuple(static_module_.num_outputs());
   }
+
+  DCHECK(check_for_memory_leak(/*output_returned*/ false));
   // The exact output tensor should never be managed.
   DCHECK(!isManagedOutputTensor(*outputs_[0]));
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -1463,9 +1468,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
-#ifndef NDEBUG
-      check_for_memory_leak(false);
-#endif
+      DCHECK(check_for_memory_leak(/*output_returned*/ false));
 
       // use move here. Otherwise, clean up outputs_[0] explicitly
       output = std::move(*outputs_[0]);
@@ -1504,9 +1507,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
-void StaticRuntime::check_for_memory_leak(bool output_returned) {
+bool StaticRuntime::check_for_memory_leak(bool output_returned) {
   if (!static_module_.opts().cleanup_activations) {
-    return;
+    return true;
   }
 
   // check for inputs
@@ -1557,6 +1560,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     }
   }
   VLOG(1) << "Finished checking for memory leak";
+  return true;
 }
 
 void StaticRuntime::deallocateOutputTensors() {
@@ -1726,12 +1730,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_->f()(this);
+    fn_->run(this);
   } else {
-    fn_->f()(this);
+    fn_->run(this);
   }
 #else
-  fn_->f()(this);
+  fn_->run(this);
 #endif
 #ifndef NDEBUG
   if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
