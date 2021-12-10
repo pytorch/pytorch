@@ -130,7 +130,7 @@ def get_registered_op(opname, domain, version):
 class UnsupportedOperatorError(RuntimeError):
     def __init__(self, domain, opname, version):
         supported_version = get_op_supported_version(opname, domain, version)
-        if domain in ["", "aten", "prim"]:
+        if domain in ["", "aten", "prim", "quantized"]:
             msg = "Exporting the operator " + opname + " to ONNX opset version " + str(version) + " is not supported. "
             if supported_version is not None:
                 msg += "Support for this operator was added in version " + str(supported_version) + \
