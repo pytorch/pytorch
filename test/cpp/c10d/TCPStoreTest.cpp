@@ -105,8 +105,7 @@ void testHelper(const std::string& prefix = "") {
                                       &sem2,
                                       &clientStores,
                                       &expectedCounterRes] {
-      for (const auto j : c10::irange(numIterations)) {
-        (void)j;
+      for (C10_UNUSED const auto j : c10::irange(numIterations)) {
         clientStores[i]->add("counter", 1);
       }
       // Let each thread set and get key on its client store
