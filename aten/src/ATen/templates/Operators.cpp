@@ -4,7 +4,11 @@
 // ${generated_comment}
 // NOTE See [Sharded File] comment in VariableType
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Operators.h>
+#else
 ${operator_headers}
+#endif
 
 namespace at { namespace _ops {
 
