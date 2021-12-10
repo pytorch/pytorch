@@ -16,8 +16,13 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros.h>
+#endif
 
 #include <c10/core/DeviceGuard.h>
 #include <c10/cuda/CUDAFunctions.h>

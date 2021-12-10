@@ -8,8 +8,13 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/ones_like_native.h>
 #include <ATen/ops/full.h>
+#endif
 
 #include <c10/util/Optional.h>
 
