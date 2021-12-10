@@ -1406,6 +1406,14 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_chained_lr2_get_last_lr_before_step(self):
+        schedulers = [
+            LinearLR(self.opt, start_factor=0.4, total_iters=3),
+            MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
+        ]
+        scheduler = ChainedScheduler(schedulers)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
+
     def test_chained_lr1(self):
         epochs = 10
         schedulers = [None] * 1
@@ -1413,6 +1421,7 @@ class TestLRScheduler(TestCase):
         schedulers[0] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr2(self):
         epochs = 10
@@ -1421,6 +1430,7 @@ class TestLRScheduler(TestCase):
         schedulers[0] = LinearLR(self.opt, start_factor=0.4, total_iters=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr3(self):
         epochs = 10
@@ -1430,6 +1440,7 @@ class TestLRScheduler(TestCase):
         schedulers[1] = MultiStepLR(self.opt, milestones=[4, 8, 10], gamma=0.1)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_chained_lr4(self):
         epochs = 9
@@ -1443,6 +1454,7 @@ class TestLRScheduler(TestCase):
         schedulers[2] = StepLR(self.opt, gamma=0.1, step_size=3)
         scheduler = ChainedScheduler(schedulers)
         self._test([scheduler], targets, epochs)
+        self.assertEqual(scheduler.get_last_lr(), schedulers[-1].get_last_lr())
 
     def test_compound_step_and_multistep_lr(self):
         epochs = 10
