@@ -88,11 +88,7 @@ class LazyGraphExecutor {
   torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
                                          const torch::lazy::BackendDevice& device);
   torch::lazy::Value GetIrValueForScalarFromCodegen(const at::Scalar& value);
-  torch::lazy::Value GetIrValueForScalar(const at::Scalar& value,
-                                         c10::ScalarType type,
-                                         c10::ArrayRef<int64_t> dimensions,
-                                         const torch::lazy::BackendDevice& device);
-  torch::lazy::Value GetIrValueForScalar(
+  torch::lazy::Value GetIrValueForExpandedScalar(
       const at::Scalar& value, const torch::lazy::Shape& shape,
       const torch::lazy::BackendDevice& device);
 
