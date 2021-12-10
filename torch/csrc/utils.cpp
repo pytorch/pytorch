@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <cstdarg>
