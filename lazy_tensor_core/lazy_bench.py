@@ -136,9 +136,10 @@ class DivAddMul(nn.Module):
     def __init__(self, dims, device='cuda', jit=False):
         super(DivAddMul, self).__init__()
         self.attention_head_size = dims[1]
+        self.W = torch.ones(*dims[-2:], device=device, dtype=torch.float32)
         self.name = "DivAddMul[" + ','.join([str(d) for d in dims]) + ']'
         self.example_inputs = (
-            torch.randn(*dims, device=device, dtype=torch.float32),
+            torch.ones(*dims, device=device, dtype=torch.float32),
             torch.randn(*dims, device=device, dtype=torch.float32),
         )
 
@@ -149,10 +150,11 @@ class DivAddMul(nn.Module):
         return self.name
 
     def forward(self, inputs, mask):
-        out1 = inputs / math.sqrt(self.attention_head_size)
-        out2 = out1 + mask
-        out3 = out2 * 5.0
-        return out3
+        out3 = ((inputs / 0.1) + mask) * 2.0
+        out5 = out3.matmul(self.W)
+        out8 = ((out5 / 0.1) + mask) * 2.00
+        return out8
+
 toy_models = [
     HardSwishBenchmark,
     DivAddMulBenchmark,
