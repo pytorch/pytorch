@@ -40,11 +40,11 @@ def extract_class_name(line: str) -> str:
     return line[start:end]
 
 
-def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
     """
     Given a path to file, parses the file and returns a dictionary of method names to function signatures.
     """
-    method_to_signature, method_to_class_name = {}, {}
+    method_to_signature, method_to_class_name, special_output_type = {}, {}, set()
     with open(file_path) as f:
         open_paren_count = 0
         method_name, class_name, signature = "", "", ""
@@ -61,6 +61,8 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str]]
                 class_name = extract_class_name(line)
                 continue
             if method_name and ("def __init__(" in line or "def __new__(" in line):
+                if "def __new__(" in line:
+                    special_output_type.add(method_name)
                 open_paren_count += 1
                 start = line.find("(") + len("(")
                 line = line[start:]
@@ -77,16 +79,17 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str]]
                     raise RuntimeError("open parenthesis count < 0. This shouldn't be possible.")
                 else:
                     signature += line.strip('\n').strip(' ')
-    return method_to_signature, method_to_class_name
+    return method_to_signature, method_to_class_name, special_output_type
 
 
-def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str]]:
-    methods_and_signatures, methods_and_class_names = {}, {}
+def parse_datapipe_files(file_paths: Set[str]) -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
+    methods_and_signatures, methods_and_class_names, methods_with_special_output_types = {}, {}, set()
     for path in file_paths:
-        method_to_signature, method_to_class_name = parse_datapipe_file(path)
+        method_to_signature, method_to_class_name, methods_needing_special_output_types = parse_datapipe_file(path)
         methods_and_signatures.update(method_to_signature)
         methods_and_class_names.update(method_to_class_name)
-    return methods_and_signatures, methods_and_class_names
+        methods_with_special_output_types.update(methods_needing_special_output_types)
+    return methods_and_signatures, methods_and_class_names, methods_with_special_output_types
 
 
 def split_outside_bracket(line: str, delimiter: str = ",") -> List[str]:
@@ -145,21 +148,29 @@ def main() -> None:
     files_to_exclude = {"__init__.py", "utils.py"}
     deprecated_files = {"httpreader.py", "linereader.py", "tararchivereader.py", "ziparchivereader.py"}
 
+    method_to_special_output_type = {"demux": "List[IterDataPipe]", "fork": "List[IterDataPipe]"}
+
     os.chdir(str(pathlib.Path(__file__).parent.resolve()))
     iter_datapipes_file_path = "datapipes/iter"
     file_paths = find_file_paths([iter_datapipes_file_path], files_to_exclude=files_to_exclude.union(deprecated_files))
-    methods_and_signatures, methods_and_class_names = parse_datapipe_files(file_paths)
+    methods_and_signatures, methods_and_class_names, methods_w_special_output_types = parse_datapipe_files(file_paths)
 
     method_definitions = []
-    for method_name, signature in methods_and_signatures.items():
+    for method_name, arguments in methods_and_signatures.items():
         class_name = methods_and_class_names[method_name]
-        method_definitions.append(f"# Functional form of '{class_name}'\ndef {method_name}({signature}): ...")
+        if method_name in methods_w_special_output_types:
+            output_type = method_to_special_output_type[method_name]
+        else:
+            output_type = "IterDataPipe"
+        method_definitions.append(f"# Functional form of '{class_name}'\n"
+                                  f"def {method_name}({arguments}) -> {output_type}: ...")
     method_definitions.sort(key=lambda s: s.split('\n')[1])  # sorting based on method_name
 
     fm = FileManager(install_dir='.', template_dir='.', dry_run=False)
     fm.write_with_template(filename="dataset.pyi",
                            template_fn="dataset.pyi.in",
                            env_callable=lambda: {'IterableDataPipeMethods': method_definitions})
+
 
 if __name__ == '__main__':
     main()  # TODO: Run this script automatically within the build and CI process
