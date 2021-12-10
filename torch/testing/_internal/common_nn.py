@@ -4352,6 +4352,22 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return losses_tensor
 
 
+def gaussiannllloss_reference(input, target, var, full=True, eps=1e-6, reduction='mean'):
+    print ("Testing!", "*" * 50)
+    print(input.shape, target.shape, var.shape)
+    print("Done!", "*"*50)
+    loss = 0.5 * ((max(var, eps)).log() + (input - target) ** 2 / max(var, eps))
+    if full:
+        loss += 0.5 * math.log(2 * math.pi)
+    
+    if reduction == 'mean':
+        return loss.mean()
+    elif reduction == 'sum':
+        return loss.sum()
+    else:
+        return loss
+
+
 def smoothl1loss_reference(input, target, reduction='mean', beta=1.0):
     abs_diff = (input - target).abs()
     ge_beta_mask = (abs_diff >= beta).type_as(abs_diff)
@@ -4631,6 +4647,7 @@ loss_reference_fns: Dict['str', Callable] = {
     'KLDivLoss': kldivloss_reference,
     'KLDivLoss_log_target': kldivloss_log_target_reference,
     'NLLLoss': nllloss_reference,
+    'GaussianNLLLoss': gaussiannllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
     'HuberLoss': huberloss_reference,
