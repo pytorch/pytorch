@@ -918,7 +918,7 @@ class optional<T&&> {
 // 20.5.8, Relational operators
 template <class T>
 constexpr bool operator==(const optional<T>& x, const optional<T>& y) {
-  return bool(x) != bool(y) ? false : bool(x) == false ? true : *x == *y;
+  return bool(x) == bool(y) && (bool(x) == false || *x == *y);
 }
 
 template <class T>
