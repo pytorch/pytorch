@@ -612,13 +612,13 @@ Tensor instance_norm(
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
       auto get_batch_if_defined = [&](const at::Tensor& t, int64_t i) -> at::Tensor {
-        return t.defined() ? t.view({b, c})[i] : t;
+        return t.defined() ? t.slice(0, i * c, i * c + c) : t;
       };
       auto input_cont = input.contiguous(memory_format);
       out = at::empty_like(input_cont);
       at::Tensor buffer;
       for (int64_t i = 0; i < b; i++) {
-        buffer = at::batch_norm(input_cont[i].unsqueeze(0),
+        buffer = at::batch_norm(input_cont.slice(0, i, i+1),
                                 get_batch_if_defined(weight_, i),
                                 get_batch_if_defined(bias_, i),
                                 get_batch_if_defined(running_mean_, i),

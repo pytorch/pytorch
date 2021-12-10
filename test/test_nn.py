@@ -12623,11 +12623,11 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.contiguous_format)
-        if input.ndim == 3:
+        if input.dim() == 3:
             return    # placeholder for future torch.channels_last_1d
-        elif input.ndim == 4:
+        elif input.dim() == 4:
             self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.channels_last)
-        elif input.ndim == 5:
+        elif input.dim() == 5:
             self._test_InstanceNorm_general_memory_format(cls, input, device, dtype, torch.channels_last_3d)
 
     def _test_InstanceNorm_general_memory_format(self, cls, input, device, dtype=torch.float,
@@ -12689,11 +12689,11 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_InstanceNorm_cuda_half(self, cls, input, device):
         self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.contiguous_format)
-        if input.ndim == 3:
+        if input.dim() == 3:
             return    # placeholder for future torch.channels_last_1d
-        elif input.ndim == 4:
+        elif input.dim() == 4:
             self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.channels_last)
-        elif input.ndim == 5:
+        elif input.dim() == 5:
             self._test_InstanceNorm_cuda_half_memory_format(cls, input, device, torch.channels_last_3d)
 
     def _test_InstanceNorm_cuda_half_memory_format(self, cls, input, device, memory_format):
