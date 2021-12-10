@@ -207,7 +207,7 @@ def gen_dispatchkey_nativefunc_headers(
         grouped_native_functions))))
     autograd_declarations = list(sorted(set(concatMap(
         lambda f: [] if autograd_dispatch_key is None else
-            dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
+        dest.compute_native_function_declaration(f, backend_indices[autograd_dispatch_key]),
         grouped_native_functions))))
 
     fm.write_with_template(f'{backend_dispatch_key}NativeFunctions.h', 'DispatchKeyNativeFunctions.h', lambda: {
