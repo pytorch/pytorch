@@ -282,7 +282,7 @@ class TestDtypeAnalysis(TestDtypeBase):
         ):
             for dtype in (torch.int8, torch.float64):
                 # Gets default version for conv2d
-                sample_input: SampleInput = inputs_fn(None, "cpu", dtype, False)[-1]
+                sample_input: SampleInput = list(inputs_fn(None, "cpu", dtype, False))[-1]
                 input_args = [sample_input.input, *sample_input.args]
                 self.assert_dtype_equal_custom_args(fn, input_args)
 
@@ -292,7 +292,7 @@ class TestDtypeAnalysis(TestDtypeBase):
 
         # Now make sure that conv2d doesn't support mixed args
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.float, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         weight, bias = conv_in.args
         weight = weight.type(torch.long)
 
@@ -316,7 +316,7 @@ class TestDtypeAnalysis(TestDtypeBase):
             return add_res
 
         conv_ins = sample_inputs_conv2d(None, "cpu", torch.int8, False)
-        conv_in = conv_ins[-1]
+        conv_in = list(conv_ins)[-1]
         y_val = torch.rand((1,), dtype=torch.float32)
         input_args = [conv_in.input, *conv_in.args, y_val]
         self.assert_dtype_equal_custom_args(func, input_args)
