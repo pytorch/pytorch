@@ -592,7 +592,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-
+#ifdef USE_NCCL_WITH_UCC
   static std::once_flag initialize_ucc_lib_flag;
   std::call_once(initialize_ucc_lib_flag, [&]{
     uccLib_ = loadTorchUCC();
@@ -600,6 +600,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     }
   });
+#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2212,7 +2213,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
+#ifdef USE_NCCL_WITH_UCC
 std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
+#endif
 
 } // namespace c10d
 
