@@ -489,6 +489,7 @@ namespace c10 {
   _(attr, transA)                    \
   _(attr, transB)                    \
   _(attr, name)                      \
+  _(attr, module)                    \
   _(attr, a)                         \
   _(attr, b)                         \
   _(attr, beg)                       \
