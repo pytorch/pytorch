@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 
@@ -1015,11 +1016,13 @@ TEST(ManagedTensorRanges, NoAliases) {
 
   EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[1]));
   EXPECT_EQ(
-      ranges.availableTensorsAfterNode(nodes[1]), std::vector<const Value*>{y});
+      ranges.availableTensorValuesAfterNode(nodes[1]),
+      std::vector<const Value*>{y});
 
   EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[2]));
   EXPECT_EQ(
-      ranges.availableTensorsAfterNode(nodes[2]), std::vector<const Value*>{z});
+      ranges.availableTensorValuesAfterNode(nodes[2]),
+      std::vector<const Value*>{z});
 }
 
 TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
@@ -1054,35 +1057,18 @@ TEST(ManagedTensorRanges, AliasExtendingLifetimes) {
 
   EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[4]));
   EXPECT_EQ(
-      ranges.availableTensorsAfterNode(nodes[4]), std::vector<const Value*>{y});
+      ranges.availableTensorValuesAfterNode(nodes[4]),
+      std::vector<const Value*>{y});
 
   EXPECT_TRUE(ranges.nodeFreesManagedTensors(nodes[5]));
-  const auto& available_after_5 = ranges.availableTensorsAfterNode(nodes[5]);
+  const auto& available_after_5 =
+      ranges.availableTensorValuesAfterNode(nodes[5]);
   // We don't care about the order, so convert to set. But make sure
   // there are no duplicates.
   FastSet<const Value*> available_after_5_set(
       available_after_5.begin(), available_after_5.end());
   EXPECT_EQ(available_after_5_set.size(), available_after_5.size());
   EXPECT_EQ(available_after_5_set, FastSet<const Value*>({z1, z2}));
-}
-
-TEST(ManagedTensorRanges, UnusedTensor) {
-  const std::string src = R"IR(
-    graph(%x : Tensor):
-        %y : Tensor = aten::mul(%x, %x)
-        %z : Tensor = aten::mul(%x, %x)
-        %output : Tensor = aten::mul(%z, %z)
-        return (%output)
-  )IR";
-  auto graph = std::make_shared<Graph>();
-  std::unordered_map<std::string, Value*> vmap;
-  parseIR(src, graph.get(), vmap);
-  auto* y = vmap["y"];
-  auto* z = vmap["z"];
-
-  ManagedTensorRanges ranges(graph, {y});
-  EXPECT_TRUE(ranges.isUnusedValue(y));
-  EXPECT_FALSE(ranges.isUnusedValue(z));
 }
 
 TEST(ManagedTensorRanges, LifetimeOverlap) {
@@ -1162,4 +1148,163 @@ TEST(ManagedTensorRanges, OverlappingLifetimesOutputs) {
   ManagedTensorRanges ranges(graph, {b, output});
 
   EXPECT_TRUE(ranges.lifetimesOverlap(b, output));
+}
+
+namespace {
+
+// For checking the correctness of assignStorageToManageTensors, the following
+// conditions must hold
+// 1. All managed tensors are assigned to some storage group, and a tensor
+//    may not be assigned to more than 1 storage group.
+// 2. Managed tensors with overlapping lifetimes should not be in the same
+//    storage group.
+// 3. The number of reused tensors is >= min_reused_tensors.
+void checkStorageGroups(
+    const std::vector<StorageGroup>& storage_groups,
+    const ManagedTensorRanges& ranges,
+    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor,
+    size_t min_reused_tensors) {
+  // Some extra bookkeeping; construct the set of managed Tensor* and
+  // invert the tensor_value_to_tensor map. StorageGroup stores
+  // Tensor*, so this will make everything a little easier.
+  FastMap<at::Tensor*, const Value*> tensor_to_tensor_value;
+  FastSet<at::Tensor*> managed_tensors;
+  for (auto& key_value : tensor_value_to_tensor) {
+    ASSERT_EQ(
+        tensor_to_tensor_value.find(key_value.second),
+        tensor_to_tensor_value.end());
+    tensor_to_tensor_value.emplace(key_value.second, key_value.first);
+    managed_tensors.insert(key_value.second);
+  }
+
+  // Condition (1)
+  FastSet<at::Tensor*> actual_assigned_tensors;
+  for (const auto& storage_group : storage_groups) {
+    for (auto* tensor : storage_group.group()) {
+      ASSERT_EQ(
+          actual_assigned_tensors.find(tensor), actual_assigned_tensors.end());
+      actual_assigned_tensors.insert(tensor);
+    }
+  }
+  ASSERT_EQ(actual_assigned_tensors, managed_tensors);
+
+  // Condition (2)
+  size_t num_reused = 0;
+  for (const auto& storage_group : storage_groups) {
+    const auto& group = storage_group.group();
+    num_reused += group.size() - 1;
+    for (const auto i : c10::irange(group.size() - 1)) {
+      for (const auto j : c10::irange(i + 1, group.size())) {
+        const auto* v1 = tensor_to_tensor_value.at(group[i]);
+        const auto* v2 = tensor_to_tensor_value.at(group[j]);
+        EXPECT_FALSE(ranges.lifetimesOverlap(v1, v2));
+      }
+    }
+  }
+
+  // Condition (3)
+  EXPECT_GE(num_reused, min_reused_tensors);
+}
+
+// A convenience function for testing assignStorageToManagedTensors. It
+// takes in an IR graph as well as a map from managed tensor name to tensor
+// value. It constructs all of the necessary data structures, invokes
+// assignStorageToManageTensors, and verifies correctness with
+// checkStorageGroups.
+void testAssignStorageToManagedTensors(
+    const std::string& src,
+    FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor,
+    size_t min_reused_tensors) {
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  parseIR(src, graph.get(), vmap);
+
+  FastSet<const Value*> managed_tensor_values;
+  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+
+  for (auto& key_value : managed_tensor_name_to_tensor) {
+    const auto& tensor_name = key_value.first;
+    auto vmap_it = vmap.find(tensor_name);
+    ASSERT_TRUE(vmap_it != vmap.end());
+    managed_tensor_values.insert(vmap_it->second);
+    tensor_value_to_tensor.emplace(vmap_it->second, &key_value.second);
+  }
+  ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
+
+  auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
+  std::vector<StorageGroup> groups;
+  assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor, groups);
+
+  checkStorageGroups(
+      groups, ranges, tensor_value_to_tensor, min_reused_tensors);
+}
+
+} // namespace
+
+TEST(AssignStorageToManagedTensors, NoAliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %e : Tensor = aten::mul(%b, %d)
+      %output : Tensor = aten::mul(%e, %e)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({1})},
+      {"d", at::randn({1})},
+      {"e", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+TEST(AssignStorageToManagedTensors, Aliases) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+      %b : Tensor = aten::mul(%a, %a)
+      %c : Tensor = aten::mul(%b, %b)
+      %d : Tensor = aten::mul(%c, %c)
+      %c_size : int[] = aten::size(%c)
+      %c_alias : Tensor = aten::view(%c, %c_size)
+      %e : Tensor = aten::mul(%b, %d)
+      %f : Tensor = aten::mul(%c_alias, %c_alias)
+      %output : Tensor = aten::mul(%e, %f)
+      return (%output)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"b", at::randn({1})},
+      {"c", at::randn({1})},
+      {"d", at::randn({1})},
+      {"e", at::randn({1})},
+      {"f", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
+}
+
+namespace {
+TORCH_LIBRARY_FRAGMENT(static_runtime_tests, m) {
+  m.def(torch::schema(
+      "static_runtime_tests::variadic_outputs(Tensor a) -> ...",
+      at::AliasAnalysisKind::PURE_FUNCTION));
+}
+} // namespace
+
+TEST(AssignStorageToManagedTensors, MultipleUnused) {
+  const auto src = R"IR(
+    graph(%a : Tensor):
+        %z : Tensor = aten::mul(%a, %a)
+        %out: Tensor = aten::mul(%z, %z)
+        %x : Tensor, %y : Tensor = static_runtime_tests::variadic_outputs(%a)
+        return (%out)
+  )IR";
+  FastMap<std::string, at::Tensor> managed_tensor_name_to_tensor{
+      {"z", at::randn({1})}, {"x", at::randn({1})}, {"y", at::randn({1})}};
+  const size_t min_reused_tensors = 1;
+  testAssignStorageToManagedTensors(
+      src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
 }

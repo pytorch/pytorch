@@ -4,8 +4,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ScalarOps.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/tensor.h>
+#endif
 
 #include <initializer_list>
 

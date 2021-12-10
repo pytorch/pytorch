@@ -6,9 +6,13 @@
 #include <ATen/FunctionalInverses.h>
 #include <torch/library.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/empty_strided_native.h>
-
 $ops_headers
+#endif
 
 namespace at {
 namespace functionalization {
