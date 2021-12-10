@@ -767,18 +767,18 @@ REGISTER_OPERATOR_FUNCTOR(
     [](Node* n) -> SROperator {
       return [](ProcessedNode* p_node) {
         auto graph = p_node->node()->g(attr::Subgraph);
-        auto num_outputs = p_node->outputs().size();
+        auto num_outputs = p_node->num_outputs();
         Stack stack;
         if (p_node->Output(0).isNone()) {
           stack.reserve(p_node->num_inputs());
         } else {
           stack.reserve(p_node->num_inputs() + num_outputs);
           for (const auto& o : p_node->outputs()) {
-            stack.push_back(o);
+            stack.emplace_back(o);
           }
         }
         for (auto i : c10::irange(p_node->num_inputs())) {
-          stack.push_back(p_node->Input(i));
+          stack.emplace_back(p_node->Input(i));
         }
         runTensorExprDynamicGroup(graph, stack);
         if (p_node->Output(0).isNone()) {
