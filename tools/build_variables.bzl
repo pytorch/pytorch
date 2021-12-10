@@ -71,6 +71,7 @@ def libtorch_generated_sources(gencode_pattern):
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
     "torch/csrc/utils/memory.h",
+    "torch/csrc/Export.h",
     "torch/csrc/WindowsTorchApiMacro.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
@@ -374,13 +375,14 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
     "torch/csrc/lazy/core/helpers.cpp",
-    "torch/csrc/lazy/core/internal_ops/ltc_ops.cpp",
     "torch/csrc/lazy/core/ir.cpp",
     "torch/csrc/lazy/core/ir_dump_util.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/lazy_view.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/core/tensor_util.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal.cpp",
@@ -392,8 +394,6 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/select.cpp",
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
-    "torch/csrc/lazy/core/tensor_util.cpp",
-    "torch/csrc/lazy/core/lazy_view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
@@ -655,6 +655,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]

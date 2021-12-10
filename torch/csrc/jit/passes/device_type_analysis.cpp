@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/library.h>
 #include <memory>
-#include "ATen/core/List.h"
 
 namespace torch {
 namespace jit {
@@ -27,27 +26,15 @@ of the Node (based on the rule itself)
 Returns: Bool indicating if anything was changed
 */
 
-bool setDeviceType(Value* value, Device device, bool can_overwrite = false) {
+bool setDeviceType(Value* value, c10::optional<Device> device) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
-  if (!tensor_type->device().has_value()) {
-    value->setType(tensor_type->withDevice(device));
-    return true;
-  }
-  if (tensor_type->device().value() != device) {
-    TORCH_INTERNAL_ASSERT(
-        can_overwrite,
-        "Expected device to be ",
-        device,
-        " but found ",
-        tensor_type->device().value());
-    value->setType(tensor_type->withDevice(device));
-    return true;
-  }
-  return false;
+  bool changed = tensor_type->device() != device;
+  value->setType(tensor_type->withDevice(device));
+  return changed;
 }
 
-bool setReturnsToDevice(Node* n, Device device) {
+bool setReturnsToDevice(Node* n, c10::optional<Device> device) {
   bool changed = false;
   for (Value* out : n->outputs()) {
     auto tensor_type = out->type()->cast<TensorType>();
@@ -62,49 +49,55 @@ bool setReturnsToDevice(Node* n, Device device) {
 bool propWithNoDevice(Node* n) {
   // Figure out what the common device to propagate is
   c10::optional<Device> device;
+  bool device_is_zerodim = false;
+
   for (Value* inp : n->inputs()) {
     auto tensor_type = inp->type()->cast<TensorType>();
     if (!tensor_type) {
       continue;
     }
+
+    bool tensor_is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
     if (device) {
       if (tensor_type->device().has_value()) {
         auto cur_device = tensor_type->device().value();
-        TORCH_INTERNAL_ASSERT(
-            device == cur_device,
-            "Expected device to be ",
-            device.value(),
-            " but found ",
-            cur_device);
+        if (device != cur_device){
+          if (device_is_zerodim && tensor_is_zerodim){
+            // Bail on the both is zero_dim case
+            return setReturnsToDevice(n, c10::nullopt);
+          }
+          if (!device_is_zerodim && !tensor_is_zerodim){
+            // Bail on the type not match case
+            return setReturnsToDevice(n, c10::nullopt);
+          }
+          if (device_is_zerodim && !tensor_is_zerodim){
+            device = tensor_type->device();
+            device_is_zerodim = false;
+          }
+          // If tensor_is_zerodim  && !device_is_zerodim, do nothing
+        }
       }
-      continue;
-    } else {
+    } else if(tensor_type->device()) {
       device = tensor_type->device();
+      device_is_zerodim = tensor_is_zerodim;
     }
   }
 
-  return device.has_value() && setReturnsToDevice(n, device.value());
-}
-
-
-bool isDeviceArgumentType(const TypePtr type) {
-  // Have to deal with Union Types (and Optional Types are treated as a Union type)
-  for (auto& subtype: type->containedTypes()){
-    if (isDeviceArgumentType(subtype)){
-      return true;
-    }
-  }
-  return DeviceObjType::get() == type;
+  return setReturnsToDevice(n, device);
 }
 
 bool defaultDeviceProp(Node* n) {
   // Detecting of the op has a device object argument
   // as there is implicit string conversion to device
-  auto arguments = n->getOperator().schema().arguments();
+  auto schema = n->maybeSchema();
+  if (!schema) {
+    return false;
+  }
+  auto arguments = schema->arguments();
   auto input_vec = n->inputs();
   for (int i = 0; i < arguments.size(); i++) {
     Argument& argument = arguments[i];
-    if (isDeviceArgumentType(argument.type())) {
+    if (DeviceObjType::get()->isSubtypeOf(argument.type())) {
       // Optional args are filled in by torchscript with default val
       auto input_val = toIValue(n->inputs().at(i));
       if (!input_val.has_value()) {
@@ -134,25 +127,22 @@ struct DeviceTypePropagationPass {
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    bool changed = false;
     at::ArrayRef<Block*> blocks = graph_->block();
     for (auto block : blocks) {
-      changed |= processBlock(block);
+      processBlock(block);
     }
-    return changed;
+    return changed_;
   }
 
  private:
-  bool processBlock(Block* block) {
+  void processBlock(Block* block) {
     GRAPH_DEBUG("processBlock");
-    bool changed = false;
     for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
-      changed |= processNode(*it);
+      processNode(*it);
     }
-    return changed;
   }
 
-  bool processNode(Node* n) {
+  void processNode(Node* n) {
     GRAPH_DEBUG("processNode");
     switch (n->kind()) {
       case prim::If:
@@ -160,7 +150,7 @@ struct DeviceTypePropagationPass {
       case prim::Loop:
       case prim::CallMethod:
       case prim::CallFunction:
-        TORCH_INTERNAL_ASSERT(false, "Loop/Call not handled now");
+        return; // Not handled for now
       default:
         break;
     }
@@ -172,37 +162,40 @@ struct DeviceTypePropagationPass {
 
     if (!has_tensor_output) {
       // if output contains no tensor, nothing to propagate
-      return false;
+      return;
     }
 
     switch (n->kind()) {
       case prim::Constant:
         // This is already been propagated by something else in freezing
-        return false;
       case prim::ListConstruct:
       case prim::ListUnpack:
-        TORCH_INTERNAL_ASSERT(false, "not supported IR");
-        break;
+        return;  // Not handled for now
       default:
         if (n->kind().is_aten()) {
           return processAtenOps(n);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "not supported IR");
+          return;  // Not handled for now
         }
     }
-    return false;
   }
 
   // for efficiency
-  bool processAtenOps(Node* n) {
+  void processAtenOps(Node* n) {
     GRAPH_DEBUG("processAtenOps");
     GRAPH_DEBUG("case = ", n->kind(), " ", *n);
     // Custom Rule Matching
-    if (auto prop_fn = device_prop_registry_->find(n->getOperator())) {
-      PropRule rule = *prop_fn;
-      return rule(n);
+    auto op = n->maybeOperator();
+    if (!op) {
+      return;
     }
-    return defaultDeviceProp(n);
+    auto prop_fn = device_prop_registry_->find(*op);
+    if (prop_fn) {
+      PropRule rule = *prop_fn;
+      changed_ |= rule(n);
+      return;
+    }
+    changed_ |= defaultDeviceProp(n);
   }
 
   void buildRuleRegistry() {
@@ -218,6 +211,7 @@ struct DeviceTypePropagationPass {
   }
   std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
   std::shared_ptr<Graph> graph_;
+  bool changed_ = false;
 };
 
 } // anonymous namespace
