@@ -3,8 +3,8 @@ torch.testing
 
 .. warning::
 
-    This module is in beta, and its interfaces and functionality may change without warning in future
-    PyTorch releases. 
+    This module is a beta release, and its interfaces and functionality may change without warning in future
+    PyTorch releases.
 
 .. automodule:: torch.testing
 
