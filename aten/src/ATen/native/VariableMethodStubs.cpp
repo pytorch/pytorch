@@ -44,8 +44,15 @@ bool retains_grad(const Tensor& self) {
   return self.retains_grad();
 }
 
+// We expect this code to only be reached in inference mode and when all inputs are inference tensors
 Tensor _fw_primal(const Tensor& self, int64_t level) {
-  AT_ERROR("_fw_primal is not implemented for Tensor");
+  TORCH_INTERNAL_ASSERT(
+    InferenceMode::is_enabled() && self.is_inference(),
+    "Expected this method to only be reached in inference mode and when all the "
+    "inputs are inference tensors. You should NOT call this method directly as "
+    "native::_fw_primal. Please use the dispatcher, i.e., at::_fw_primal. Please "
+    "file an issue if you come across this error otherwise.");
+  return at::alias(self);
 }
 
 } // namespace native

@@ -2,6 +2,9 @@
 #include <c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/quantization/quantization_gpu.h>
 #include <torch/csrc/distributed/c10d/quantization/quantization_utils.h>
+#include <torch/library.h>
+
+// TODO: The kernels are copied from fbgemm_gpu, we should dedup them later
 
 // FP32 -> BF16 kernel
 __global__ void _float_to_bfloat16_cuda_kernel(
@@ -140,6 +143,14 @@ at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 
   return output;
+}
+
+#define DISPATCH_TO_CUDA(name, function) \
+    m.impl(name, torch::dispatch(c10::DispatchKey::CUDA, TORCH_FN(function)))
+
+TORCH_LIBRARY_IMPL(quantization, CUDA, m) {
+    DISPATCH_TO_CUDA("_Bfloat16QuantizedToFloat", _bfloat16_to_float_cuda);
+    DISPATCH_TO_CUDA("_FloatToBfloat16Quantized", _float_to_bfloat16_cuda);
 }
 
 } // namespace quantization

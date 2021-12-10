@@ -151,6 +151,7 @@ static void _fft_fill_with_conjugate_symmetry_cpu_(
 REGISTER_ARCH_DISPATCH(fft_fill_with_conjugate_symmetry_stub, DEFAULT, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX2_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 REGISTER_AVX512_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
+REGISTER_VSX_DISPATCH(fft_fill_with_conjugate_symmetry_stub, &_fft_fill_with_conjugate_symmetry_cpu_)
 
 // _out variants can be shared between PocketFFT and MKL
 Tensor& _fft_r2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalization,
@@ -210,12 +211,12 @@ inline shape_t shape_from_tensor(const Tensor& t) {
 
 template<typename T>
 inline std::complex<T> *tensor_cdata(Tensor& t) {
-  return reinterpret_cast<std::complex<T>*>(t.data<c10::complex<T>>());
+  return reinterpret_cast<std::complex<T>*>(t.data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
 inline const std::complex<T> *tensor_cdata(const Tensor& t) {
-  return reinterpret_cast<const std::complex<T>*>(t.data<c10::complex<T>>());
+  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -253,11 +254,11 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<float>(self),
-                   out.data<float>(), compute_fct<float>(out, dim, normalization));
+                   out.data_ptr<float>(), compute_fct<float>(out, dim, normalization));
   } else {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<double>(self),
-                   out.data<double>(), compute_fct<double>(out, dim, normalization));
+                   out.data_ptr<double>(), compute_fct<double>(out, dim, normalization));
     }
   return out;
 }
@@ -277,11 +278,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data<float>(),
+                   self.data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data<double>(),
+                   self.data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 

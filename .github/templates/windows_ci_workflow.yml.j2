@@ -29,6 +29,7 @@ on:
     branches:
       - master
       - release/*
+      - fbsync
 {%- endif %}
   workflow_dispatch:
 
@@ -41,6 +42,7 @@ env:
   IS_GHA: 1
   INSTALL_WINDOWS_SDK: 1
   PYTHON_VERSION: "3.8"
+  PYTORCH_RETRY_TEST_CASES: 1
   PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   SCCACHE_BUCKET: "ossci-compiler-cache"
   VC_PRODUCT: "BuildTools"
@@ -50,8 +52,11 @@ env:
   ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
   no_proxy: !{{ common.squid_no_proxy }}
   AWS_DEFAULT_REGION: us-east-1
-  CIRCLE_PR_NUMBER: ${{ github.event.pull_request.number }}
-  CIRCLE_SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+{%- if build_with_debug %}
+  DEBUG: 1
+{%- endif %}
 {%- if cuda_version != "cpu" %}
   TORCH_CUDA_ARCH_LIST: "7.0"
 {%- endif %}
@@ -95,7 +100,7 @@ jobs:
         shell: bash
         env:
           PYTORCH_FINAL_PACKAGE_DIR: /c/${{ github.run_id }}/build-results/
-          CIRCLE_BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
         run: |
           .jenkins/pytorch/win-build.sh
       # Upload to github so that people can click and download artifacts
@@ -204,6 +209,7 @@ jobs:
         timeout-minutes: 210
         run: |
             .jenkins/pytorch/win-test.sh
+      !{{ common.upload_downloaded_files(name='windows') }}
       !{{ common.upload_test_reports(name='windows') }}
       !{{ common.render_test_results() }}
       !{{ wait_and_kill_ssh() }}
