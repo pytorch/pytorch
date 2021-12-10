@@ -5,7 +5,7 @@ import yaml
 from collections import namedtuple
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey, FunctionSchema,
+from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader, FileManager
@@ -143,18 +143,18 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
     if impl_path is not None:
         error_on_missing_kernels(native_functions, backend_indices, backend_key,
-                                    autograd_key, impl_path, full_codegen)
+                                 autograd_key, impl_path, full_codegen)
 
     assert class_name is not None
 
     # Generate nativefunction declarations
     gen_dispatchkey_nativefunc_headers(fm, class_name, cpp_namespace, backend_indices,
-                                        grouped_native_functions, backend_key, autograd_key)
+                                       grouped_native_functions, backend_key, autograd_key)
 
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
         gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                        dispatch_key, selector)
+                                     dispatch_key, selector)
 
     # Generate native function impls that build IR nodes
     fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
@@ -173,8 +173,8 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'native_function_definitions':
         list(concat_map_codegen(
             dest.GenLazyNativeFuncDefinition(f'{backend_key}NativeFunctions',
-                                                backend_indices[backend_key],
-                                                tensor_class),
+                                             backend_indices[backend_key],
+                                             tensor_class),
             grouped_native_functions,
             codegenInplaceVariant=True
         )),
@@ -194,7 +194,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'dispatch_namespace': backend_key.lower(),
         'func_declarations': list(concat_map_codegen(
             dest.GenLazyShapeInferenceDefinition(backend_indices[backend_key],
-                                                    tensor_class),
+                                                 tensor_class),
             grouped_native_functions
         )),
     })
