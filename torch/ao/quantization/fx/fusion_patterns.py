@@ -4,14 +4,16 @@ from .pattern_utils import (
     register_fusion_pattern,
 )
 from .utils import _parent_name
-from .quantization_types import QuantizerCls
+from .quantization_types import QuantizerCls, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method
+from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Optional, Union
+from .match_utils import MatchAllNode
 
-# ---------------------
+# ----------------------------
 # Fusion Pattern Registrations
-# ---------------------
+# ----------------------------
 
 # Base Pattern Handler
 class FuseHandler(ABC):
@@ -21,8 +23,13 @@ class FuseHandler(ABC):
         pass
 
     @abstractmethod
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any]) -> Node:
+    def fuse(self,
+             quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
+             fuse_custom_config_dict: Dict[str, Any],
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
         pass
 
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
@@ -61,8 +68,13 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
         self.conv_or_linear_node = node
         self.conv_or_linear = quantizer.modules[self.conv_or_linear_node.target]
 
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any]) -> Node:
+    def fuse(self,
+             quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
+             fuse_custom_config_dict: Dict[str, Any],
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
         op_list = []
         if self.relu_node is not None:
@@ -107,7 +119,10 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
 class ModuleReLUFusion(FuseHandler):
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(
+            self,
+            quantizer: QuantizerCls,
+            node: Node):
         super().__init__(quantizer, node)
         self.relu_node = node
         assert isinstance(node.args[0], Node)
@@ -116,23 +131,37 @@ class ModuleReLUFusion(FuseHandler):
         self.module_node = node
         self.module = quantizer.modules[self.module_node.target]
 
-    def fuse(self, quantizer: QuantizerCls, load_arg: Callable,
-             fuse_custom_config_dict: Dict[str, Any]) -> Node:
+    def fuse(self, quantizer: QuantizerCls,
+             load_arg: Callable,
+             root_node: Node,
+             matched_node_pattern: NodePattern,
+             fuse_custom_config_dict: Dict[str, Any],
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
         additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
-        op_list = []
-        # since relu can be used multiple times, we'll need to create a relu module for each match
-        if self.relu_node.op == 'call_module':
-            relu = torch.nn.ReLU(quantizer.modules[self.relu_node.target].inplace)
-        else:
-            # TODO: get inplace argument from functional
-            relu = torch.nn.ReLU()
-        relu.training = self.module.training
-        op_list.append(relu)
-        op_list.append(self.module)
+        assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
+        root_module = quantizer.modules[root_node.target]
+        assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
+        "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
+        def get_module(n):
+            if n.op == "call_module":
+                return quantizer.modules[n.target]
+            elif n.op == "call_function" and n.target == torch.nn.functional.relu:
+                relu = torch.nn.ReLU()
+                relu.training = root_module.training
+                return relu
+            return MatchAllNode
 
-        op_list.reverse()
-        op_type_list = tuple(type(m) for m in op_list)
-        module_parent_name, module_name = _parent_name(self.module_node.target)
-        fuser_method = get_fuser_method(op_type_list, additional_fuser_method_mapping)
-        setattr(quantizer.modules[module_parent_name], module_name, fuser_method(*op_list))
-        return quantizer.fused_graph.node_copy(self.module_node, load_arg)
+        matched_modules = tuple(map(get_module, matched_node_pattern))
+        # since relu can be used multiple times, we'll need to create a relu module for each match
+
+        def get_type(m):
+            return type(m)
+
+        matched_module_types = tuple(map(get_type, matched_modules))
+        module_parent_name, module_name = _parent_name(root_node.target)
+        fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
+        # TODO: change the signature for fuser_method to take matched module patterns
+        # as input
+        fused_module = fuser_method(*matched_modules)
+        setattr(quantizer.modules[module_parent_name], module_name, fused_module)
+        return quantizer.fused_graph.node_copy(root_node, load_arg)
