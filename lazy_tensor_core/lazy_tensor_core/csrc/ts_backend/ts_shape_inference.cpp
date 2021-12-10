@@ -3,10 +3,10 @@
 #include <ATen/native/ConvUtils.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/internal_ops/cast.h>
-#include <torch/csrc/lazy/core/internal_ops/device_data.h>
-#include <torch/csrc/lazy/core/internal_ops/expand.h>
-#include <torch/csrc/lazy/core/internal_ops/scalar.h>
+#include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/ts_backend/ops/expand.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/shape.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>

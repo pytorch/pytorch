@@ -1,11 +1,11 @@
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/internal_ops/cast.h>
-#include <torch/csrc/lazy/core/internal_ops/device_data.h>
-#include <torch/csrc/lazy/core/internal_ops/expand.h>
+#include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
-#include <torch/csrc/lazy/core/internal_ops/scalar.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided.h>
 #include <torch/csrc/lazy/core/view_ops/as_strided_view_update.h>

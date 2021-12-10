@@ -1,9 +1,9 @@
 #include "lazy_tensor_core/csrc/tensor.h"
 
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/internal_ops/cast.h>
-#include <torch/csrc/lazy/core/internal_ops/device_data.h>
-#include <torch/csrc/lazy/core/internal_ops/scalar.h>
+#include <torch/csrc/lazy/ts_backend/ops/cast.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 #include <torch/csrc/lazy/core/ir_dump_util.h>
 #include <torch/csrc/lazy/core/metrics.h>
 #include <torch/csrc/lazy/core/tensor_util.h>

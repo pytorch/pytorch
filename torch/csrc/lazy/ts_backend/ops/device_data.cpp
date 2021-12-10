@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/internal_ops/device_data.h>
+#include <torch/csrc/lazy/ts_backend/ops/device_data.h>
 
 #include <torch/csrc/lazy/core/internal_ops/ltc_ops.h>
 
