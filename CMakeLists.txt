@@ -328,6 +328,7 @@ cmake_dependent_option(
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
+option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 
 
 if(USE_CCACHE)
