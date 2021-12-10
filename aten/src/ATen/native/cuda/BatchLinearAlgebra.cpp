@@ -5,6 +5,8 @@
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
+#include <c10/util/Exception.h>
+
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
 #include <ATen/native/Resize.h>
@@ -1851,6 +1853,10 @@ REGISTER_CUDA_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl);
 */
 template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+#if !AT_MAGMA_ENABLED()
+  // This should never be thrown if the calling functions are correct.
+  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.")
+#else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
   Tensor infos_cpu = at::empty_like(infos, infos.options().device(kCPU).pinned_memory(true));
@@ -1882,6 +1888,7 @@ static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivo
     }
   }
   infos.copy_(infos_cpu);
+#endif
 }
 
 /*
@@ -1960,7 +1967,7 @@ static void lu_factor_batched_magma(const Tensor& input, const Tensor& pivots, c
   });
 }
 
-static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+static void lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
   auto batch_size = batchCount(input);
   // MAGMA does not work with batch_size == 0.
   // CuSolver does not work when the matrices have no elements
@@ -2039,7 +2046,7 @@ static void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Ten
   }
 }
 
-REGISTER_CUDA_DISPATCH(lu_factor_stub, &apply_lu_factor);
+REGISTER_CUDA_DISPATCH(lu_factor_stub, &lu_factor);
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ triangular_solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
