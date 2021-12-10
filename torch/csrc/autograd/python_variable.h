@@ -5,7 +5,8 @@
 #include <ATen/ATen.h>
 
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
+#include <torch/csrc/Exceptions.h>
 
 // Python object that backs torch.autograd.Variable
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -20,11 +21,11 @@ struct THPVariable {
 
 TORCH_API void registerPythonTensorClass(const std::string& device, PyObject* python_tensor_class);
 
-THP_API PyObject *THPVariableClass;
-THP_API PyObject *ParameterClass;
+TORCH_PYTHON_API extern PyObject *THPVariableClass;
+TORCH_PYTHON_API extern PyObject *ParameterClass;
 
 bool THPVariable_initModule(PyObject *module);
-THP_API PyObject * THPVariable_Wrap(at::TensorBase var);
+TORCH_PYTHON_API PyObject * THPVariable_Wrap(at::TensorBase var);
 
 static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
@@ -43,7 +44,13 @@ static inline bool THPVariable_CheckExact(PyObject *obj) {
 
 inline bool THPVariable_Check(PyObject *obj)
 {
-  return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
+  if (!THPVariableClass)
+      return false;
+
+  const auto result = PyObject_IsInstance(obj, THPVariableClass);
+  if (result == -1)
+      throw python_error();
+  return result;
 }
 
 inline const at::Tensor& THPVariable_Unpack(THPVariable* var) {
@@ -54,4 +61,4 @@ inline const at::Tensor& THPVariable_Unpack(PyObject* obj) {
   return THPVariable_Unpack(reinterpret_cast<THPVariable*>(obj));
 }
 
-THP_API c10::impl::PyInterpreter* getPyInterpreter();
+TORCH_PYTHON_API c10::impl::PyInterpreter* getPyInterpreter();

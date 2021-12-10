@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/flatbuffers/include
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -187,8 +188,6 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
 )
-# For Declarations.yaml dependency
-add_dependencies(torch_python_stubs ATEN_CPU_FILES_GEN_TARGET)
 add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
@@ -203,6 +202,8 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi.in"
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
+    "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -343,6 +344,8 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+add_dependencies(torch_python flatbuffers)
+
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE

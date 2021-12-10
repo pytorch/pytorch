@@ -1,15 +1,16 @@
 #version 450 core
 #define PRECISION $precision
+#define FORMAT    $format
 
 layout(std430) buffer;
 
 /* Qualifiers: layout - storage - precision - memory */
 
-layout(set = 0, binding = 0) uniform PRECISION restrict writeonly image3D   uOutput;
-layout(set = 0, binding = 1) uniform PRECISION                    sampler3D uInput;
-layout(set = 0, binding = 2) uniform PRECISION                    sampler2D uKernel;
-layout(set = 0, binding = 3) uniform PRECISION                    sampler1D uBias;
-layout(set = 0, binding = 4) uniform PRECISION restrict           Block {
+layout(set = 0, binding = 0, FORMAT) uniform PRECISION restrict writeonly image3D   uOutput;
+layout(set = 0, binding = 1)         uniform PRECISION                    sampler3D uInput;
+layout(set = 0, binding = 2)         uniform PRECISION                    sampler3D uKernel;
+layout(set = 0, binding = 3)         uniform PRECISION                    sampler3D uBias;
+layout(set = 0, binding = 4)         uniform PRECISION restrict           Block {
   ivec4 size;
   ivec4 kernel;
   ivec2 ikernel;
@@ -35,15 +36,15 @@ void main() {
     const ivec2 ipos01 = pos01.xy * uBlock.stride - uBlock.padding;
     const ivec2 ipos11 = pos11.xy * uBlock.stride - uBlock.padding;
 
-    vec4 sum00 = texelFetch(uBias, pos.z, 0);
+    vec4 sum00 = texelFetch(uBias, ivec3(pos.z, 0, 0), 0);
     vec4 sum10 = sum00;
     vec4 sum01 = sum00;
     vec4 sum11 = sum00;
 
-    vec4 k1_0 = texelFetch(uKernel, ivec2(0, pos.z), 0);
-    vec4 k2_0 = texelFetch(uKernel, ivec2(1, pos.z), 0);
-    vec4 k3_0 = texelFetch(uKernel, ivec2(2, pos.z), 0);
-    vec4 k4_0 = texelFetch(uKernel, ivec2(3, pos.z), 0);
+    vec4 k1_0 = texelFetch(uKernel, ivec3(0, pos.z, 0), 0);
+    vec4 k2_0 = texelFetch(uKernel, ivec3(1, pos.z, 0), 0);
+    vec4 k3_0 = texelFetch(uKernel, ivec3(2, pos.z, 0), 0);
+    vec4 k4_0 = texelFetch(uKernel, ivec3(3, pos.z, 0), 0);
 
     vec4 k1_1;
     vec4 k2_1;
@@ -63,10 +64,10 @@ void main() {
     for (int z = 0, z4 = 0; z < uBlock.size.w; z += 8, z4+=2) {
       ivec4 kxs = z + ivec4(4, 5, 6, 7);
 
-      k1_1 = texelFetch(uKernel, ivec2(kxs.x, pos.z), 0);
-      k2_1 = texelFetch(uKernel, ivec2(kxs.y, pos.z), 0);
-      k3_1 = texelFetch(uKernel, ivec2(kxs.z, pos.z), 0);
-      k4_1 = texelFetch(uKernel, ivec2(kxs.w, pos.z), 0);
+      k1_1 = texelFetch(uKernel, ivec3(kxs.x, pos.z, 0), 0);
+      k2_1 = texelFetch(uKernel, ivec3(kxs.y, pos.z, 0), 0);
+      k3_1 = texelFetch(uKernel, ivec3(kxs.z, pos.z, 0), 0);
+      k4_1 = texelFetch(uKernel, ivec3(kxs.w, pos.z, 0), 0);
 
       In00_1 = texelFetch(uInput, ivec3(ipos00, z4+1), 0);
       In10_1 = texelFetch(uInput, ivec3(ipos10, z4+1), 0);
@@ -96,10 +97,10 @@ void main() {
       // Next iteration
       kxs += 4;
 
-      k1_0 = texelFetch(uKernel, ivec2(kxs.x, pos.z), 0);
-      k2_0 = texelFetch(uKernel, ivec2(kxs.y, pos.z), 0);
-      k3_0 = texelFetch(uKernel, ivec2(kxs.z, pos.z), 0);
-      k4_0 = texelFetch(uKernel, ivec2(kxs.w, pos.z), 0);
+      k1_0 = texelFetch(uKernel, ivec3(kxs.x, pos.z, 0), 0);
+      k2_0 = texelFetch(uKernel, ivec3(kxs.y, pos.z, 0), 0);
+      k3_0 = texelFetch(uKernel, ivec3(kxs.z, pos.z, 0), 0);
+      k4_0 = texelFetch(uKernel, ivec3(kxs.w, pos.z, 0), 0);
 
       In00_0 = texelFetch(uInput, ivec3(ipos00, z4+2), 0);
       In10_0 = texelFetch(uInput, ivec3(ipos10, z4+2), 0);

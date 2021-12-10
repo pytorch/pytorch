@@ -423,7 +423,15 @@ Tensor computeReshape(
           dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
-        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+
+        auto ndim = dims.size();
+        std::vector<ExprPtr> strides(ndim);
+        strides[ndim - 1] = immLike(dims[ndim - 1], 1);
+        for (size_t i = 1; i < ndim; i++) {
+          strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
+        }
+
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices, strides));
         std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
         ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
         for (size_t idx = 0; idx < A.ndim(); idx++) {
@@ -445,6 +453,21 @@ Tensor computeReshape(
       });
 }
 
+Tensor computeFlatten(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  std::vector<int64_t> outputShapeVec;
+  for (const auto dim : c10::irange(outputShape.size())) {
+    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  }
+  std::vector<ArgValue> reshapeInputs;
+  reshapeInputs.push_back(inputs[0]);
+  reshapeInputs.emplace_back(outputShapeVec);
+  return computeReshape(reshapeInputs, outputShape, outputType, device);
+}
+
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     const std::vector<BufHandle>& bufList) {
   if (bufList.size() == 0) {
@@ -456,11 +479,17 @@ static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
     bufInputs.push_back(buf);
     TORCH_INTERNAL_ASSERT(
         buf.node()->dims().size() > 0, buildErrorMessage("Invalid buf rank"));
-    if (buf.node()->dims().size() == 1 &&
-        immediateAs<int>(buf.node()->dim(0)) == 0) {
-      continue;
+    // Ignore buffers that are 0-sized on any dimension.
+    bool hasEmptyDims = false;
+    for (const auto& dim : buf.dims()) {
+      if (dim.AsNode<LongImm>() && immediateAs<int64_t>(dim) == 0ll) {
+        hasEmptyDims = true;
+        break;
+      }
     }
-    nonEmptyInputs.push_back(buf);
+    if (!hasEmptyDims) {
+      nonEmptyInputs.push_back(buf);
+    }
   }
   ScalarType highType = bufInputs[0].dtype().scalar_type();
   for (const auto& input : bufInputs) {
@@ -610,6 +639,25 @@ Tensor computeCat(
 
         return load;
       });
+}
+
+Tensor computeEmbedding(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  Dtype dtype = kFloat;
+  if (outputType) {
+    dtype = Dtype(*outputType);
+  }
+
+  BufHandle ResultBuf("emb", outputShape, dtype);
+  const BufHandle& w = c10::get<BufHandle>(inputs[0]);
+  const BufHandle& indices = c10::get<BufHandle>(inputs[1]);
+
+  StmtPtr s =
+      ExternalCall::make(ResultBuf, "nnc_aten_embedding", {w, indices}, {});
+  return Tensor(ResultBuf.node(), s);
 }
 
 } // namespace tensorexpr

@@ -41,6 +41,11 @@ class SelectiveBuilder:
     # as a list to yamls
     custom_classes: Set[str]
 
+    # A set of all the build features used by the selected models
+    # Stored as a set internally to remove duplicates proactively, but written
+    # as a list to yamls
+    build_features: Set[str]
+
     # If true, then fragments for all dtypes for all kernel functions
     # are included as well as all custom classes. This is typically set when any one of the
     # operator lists is generated from a mechanism other than
@@ -60,6 +65,7 @@ class SelectiveBuilder:
             'operators',
             'kernel_metadata',
             'custom_classes',
+            'build_features',
         }
         top_level_keys = set(data.keys())
         if len(top_level_keys - valid_top_level_keys) > 0:
@@ -93,6 +99,9 @@ class SelectiveBuilder:
         custom_classes = data.get('custom_classes', [])
         custom_classes = set(custom_classes)  # type: ignore[arg-type]
 
+        build_features = data.get('build_features', [])
+        build_features = set(build_features)  # type: ignore[arg-type]
+
         include_all_non_op_selectives = data.get('include_all_non_op_selectives', False)
         assert isinstance(include_all_non_op_selectives, bool)
 
@@ -102,6 +111,7 @@ class SelectiveBuilder:
             operators,
             kernel_metadata,
             custom_classes,  # type: ignore[arg-type]
+            build_features,  # type: ignore[arg-type]
             include_all_non_op_selectives,
         )
 
@@ -216,6 +226,8 @@ class SelectiveBuilder:
 
         ret['custom_classes'] = sorted(self.custom_classes)
 
+        ret['build_features'] = sorted(self.build_features)
+
         return ret
 
 
@@ -240,12 +252,14 @@ def combine_selective_builders(lhs: SelectiveBuilder, rhs: SelectiveBuilder) -> 
     kernel_metadata = merge_kernel_metadata(lhs.kernel_metadata, rhs.kernel_metadata)
     include_all_non_op_selectives = lhs.include_all_non_op_selectives or rhs.include_all_non_op_selectives
     custom_classes = lhs.custom_classes.union(rhs.custom_classes)
+    build_features = lhs.build_features.union(rhs.build_features)
     return SelectiveBuilder(
         include_all_operators,
         debug_info,
         operators,
         kernel_metadata,
         custom_classes,
+        build_features,
         include_all_non_op_selectives,
     )
 

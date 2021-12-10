@@ -7,6 +7,7 @@ load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sou
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
 load("//:aten.bzl", "intern_build_aten_ops")
+load("@com_github_google_flatbuffers//:build_defs.bzl", "flatbuffer_cc_library")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -136,6 +137,7 @@ genrule(
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
         "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+        "aten/src/ATen/RegisterZeroTensor.cpp",
         "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
         "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
         "aten/src/ATen/RegisterMeta.cpp",
@@ -236,17 +238,18 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
     name = "all_generated_code",
     srcs = [
-        "aten/src/ATen/Declarations.yaml",
         "aten/src/ATen/native/native_functions.yaml",
     ],
     outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --declarations-path $(location aten/src/ATen/Declarations.yaml) --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
+    cmd = "$(location :generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --nn-path aten/src",
     tools = [":generate_code"],
 )
 
@@ -349,8 +352,6 @@ filegroup(
     name = "th_srcs",
     srcs = [
         "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THStorageFunctions.cpp",
-        "aten/src/TH/THTensor.cpp",
     ],
 )
 
@@ -385,39 +386,13 @@ filegroup(
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
-        "aten/src/THC/THCStorage.cpp",
-        "aten/src/THC/THCStorageCopy.cpp",
-        "aten/src/THC/THCTensor.cpp",
-    ],
-)
-
-filegroup(
-    name = "thc_srcs_cu",
-    srcs = [
-        "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
-        "aten/src/THC/THCSortUtils.cu.cc",
-        "aten/src/THC/THCStorage.cu.cc",
-        "aten/src/THC/THCStorageCopy.cu.cc",
-        "aten/src/THC/THCTensor.cu.cc",
-        "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorScatterGather.cu.cc",
-        "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/generated/THCTensorSortByte.cu.cc",
-        "aten/src/THC/generated/THCTensorSortChar.cu.cc",
-        "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorSortFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorSortHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorSortInt.cu.cc",
-        "aten/src/THC/generated/THCTensorSortLong.cu.cc",
-        "aten/src/THC/generated/THCTensorSortShort.cu.cc",
     ],
 )
 
 filegroup(
     name = "aten_srcs_cu",
     srcs = [
+        "aten/src/ATen/cuda/cub.cu.cc",
         "aten/src/ATen/cuda/detail/IndexUtils.cu.cc",
         "aten/src/ATen/cuda/detail/CUDAGraphsUtils.cu.cc",
         "aten/src/ATen/native/cuda/Activation.cu.cc",
@@ -547,15 +522,13 @@ header_template_rule(
 cc_library(
     name = "aten_headers",
     hdrs = [
-        "torch/csrc/WindowsTorchApiMacro.h",
+        "torch/csrc/Export.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
         "aten/src/TH/**/*.cpp",
-        "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -695,7 +668,6 @@ cu_library(
     name = "aten_cuda",
     srcs = [
         ":aten_srcs_cu",
-        ":thc_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],
@@ -1838,6 +1810,14 @@ genrule(
     tools = [':gen_version_header']
 )
 
+flatbuffer_cc_library(
+    name = "mobile_bytecode_header",
+    srcs = ["torch/csrc/jit/serialization/mobile_bytecode.fbs"],
+    out_prefix = "torch/csrc/jit/serialization/",
+    flatc_args=["--gen-mutable", "--scoped-enums",],
+)
+
+
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1869,6 +1849,7 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
+        ":mobile_bytecode_header",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1909,6 +1890,32 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
+)
+
+cc_library(
+    name = "flatbuffer_loader",
+    srcs = [
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+    ],
+    hdrs = [
+        "torch/csrc/jit/mobile/flatbuffer_loader.h"
+    ],
+    deps = [
+        ":torch"
+    ]
+)
+
+cc_library(
+    name = "flatbuffer_serializer",
+    srcs = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp"
+    ],
+    hdrs = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.h"
+    ],
+    deps = [
+        ":torch"
+    ]
 )
 
 cc_library(
@@ -2061,6 +2068,8 @@ cc_test(
     ],
     deps = [
         ":torch",
+        ":flatbuffer_serializer",
+        ":flatbuffer_loader",
         "@com_google_googletest//:gtest_main",
     ],
 )

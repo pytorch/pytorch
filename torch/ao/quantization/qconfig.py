@@ -5,7 +5,9 @@ import torch
 import torch.nn as nn
 from torch.ao.quantization.fake_quantize import (
     FakeQuantize,
+    FakeQuantizeBase,
     default_fake_quant,
+    default_dynamic_fake_quant,
     default_per_channel_weight_fake_quant,
     default_weight_fake_quant,
     default_fused_act_fake_quant,
@@ -21,6 +23,7 @@ from .observer import (
     MovingAverageMinMaxObserver,
     NoopObserver,
     PlaceholderObserver,
+    ReuseInputObserver,
     default_debug_observer,
     default_dynamic_quant_observer,
     default_float_qparams_observer,
@@ -29,6 +32,7 @@ from .observer import (
     default_per_channel_weight_observer,
     default_placeholder_observer,
     default_weight_observer,
+    default_reuse_input_observer,
 )
 
 class QConfig(namedtuple('QConfig', ['activation', 'weight'])):
@@ -143,6 +147,12 @@ default_qat_qconfig = QConfig(activation=default_fake_quant,
 Default qconfig for QAT.
 """
 
+default_dynamic_qat_qconfig = QConfig(activation=default_dynamic_fake_quant,
+                                      weight=default_weight_fake_quant)
+"""
+Default qconfig for dynamic QAT.
+"""
+
 default_weight_only_qconfig = QConfig(activation=torch.nn.Identity,
                                       weight=default_weight_fake_quant)
 """
@@ -160,6 +170,12 @@ Default qconfig for quantizing activations only.
 default_qat_qconfig_v2 = QConfig(activation=default_fused_act_fake_quant, weight=default_fused_wt_fake_quant)
 """
 Fused version of `default_qat_config`, has performance benefits.
+"""
+
+default_reuse_input_qconfig = QConfig(activation=default_reuse_input_observer,
+                                      weight=NoopObserver)
+"""
+Default qconfig for operators that reuse the observers from input Tensor, e.g. reshape
 """
 
 def get_default_qconfig(backend='fbgemm'):
@@ -184,10 +200,10 @@ def get_default_qconfig(backend='fbgemm'):
         qconfig = default_qconfig
     return qconfig
 
-default_embedding_qat_qconfig = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                         weight=default_embedding_fake_quant)
 
-default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver,
+default_embedding_qat_qconfig_4bit = QConfig(activation=NoopObserver.with_args(dtype=torch.float32),
                                              weight=default_embedding_fake_quant_4bit)
 
 def get_default_qat_qconfig(backend='fbgemm', version=1):
@@ -236,6 +252,20 @@ def get_default_qat_qconfig(backend='fbgemm', version=1):
             qconfig = default_qat_qconfig_v2
     return qconfig
 
+def get_default_qconfig_dict(backend='fbgemm', version=0):
+    qconfig = get_default_qconfig(backend)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
+def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
+    qconfig = get_default_qat_qconfig(backend, version=version)
+    return {
+        "": qconfig,
+        "object_type": [("reshape", default_reuse_input_qconfig)]
+    }
+
 def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
                          mod: torch.nn.Module) -> None:
     """
@@ -248,6 +278,9 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         isinstance(mod, torch.nn.ConvTranspose2d) or
         isinstance(mod, torch.nn.ConvTranspose3d))
     if is_conv_transpose_mod:
+        if qconfig.weight is None:
+            # for now, we assume that any qconfig for ConvTranspose without a weight is valid
+            return
         example_observer = qconfig.weight()
         is_per_channel = (
             isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
@@ -320,6 +353,35 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     else:
         assert q1 is not None and q2 is not None
         try:
-            return partial_equals(q1.activation.p, q2.activation.p) and partial_equals(q1.weight.p, q2.weight.p)
+            # Qconfig weight and activation can be either a partial wrapper,
+            # or an observer class. Special handling is required (above) for
+            # comparing partial wrappers.
+            if(isinstance(q1.activation, torch.ao.quantization.observer._PartialWrapper)):
+                activation_same = partial_equals(q1.activation.p, q2.activation.p)
+            else:
+                activation_same = q1.activation == q2.activation
+            if(isinstance(q1.weight, torch.ao.quantization.observer._PartialWrapper)):
+                weight_same = partial_equals(q1.weight.p, q2.weight.p)
+            else:
+                weight_same = q1.weight == q2.weight
+
+            return activation_same and weight_same
         except AttributeError:
             return q1 == q2
+
+def activation_is_memoryless(qconfig: QConfig):
+    """
+    Return whether the observer for activations defined in the given QConfig is memoryless.
+    """
+    def _is_memoryless(observer):
+        return hasattr(observer, "memoryless") and observer.memoryless
+    act = qconfig.activation()
+    if isinstance(act, FakeQuantizeBase) and hasattr(act, "activation_post_process"):
+        return _is_memoryless(act.activation_post_process)
+    else:
+        return _is_memoryless(act)
+
+def is_reuse_input_qconfig(qconfig: Union[QConfig, QConfigDynamic, None]):
+    return qconfig is not None and \
+        isinstance(qconfig.activation(), ReuseInputObserver) and \
+        isinstance(qconfig.weight(), NoopObserver)

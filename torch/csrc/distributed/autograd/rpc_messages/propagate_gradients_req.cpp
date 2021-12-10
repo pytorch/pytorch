@@ -55,7 +55,7 @@ std::unique_ptr<PropagateGradientsReq> PropagateGradientsReq::fromMessage(
       payload_size,
       *rpc::RpcAgent::getCurrentRpcAgent()->getTypeResolver(),
       message.tensors());
-  const auto& tupleElements = tuple.toTuple()->elements();
+  const auto& tupleElements = tuple.toTupleRef().elements();
 
   // Build PropagateGradientsReq.
   TORCH_INTERNAL_ASSERT(tupleElements.size() >= 3);

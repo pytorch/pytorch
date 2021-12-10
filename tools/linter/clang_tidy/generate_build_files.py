@@ -48,8 +48,6 @@ def run_autogen() -> None:
         [
             sys.executable,
             "tools/setup_helpers/generate_code.py",
-            "--declarations-path",
-            "build/aten/src/ATen/Declarations.yaml",
             "--native-functions-path",
             "aten/src/ATen/native/native_functions.yaml",
             "--nn-path",
@@ -58,10 +56,19 @@ def run_autogen() -> None:
     )
 
 
+def gen_flatbuffers() -> None:
+    run_timed_cmd(
+        [
+            "bash", "scripts/gen_flatbuffer.sh"
+        ]
+    )
+
+
 def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
+    gen_flatbuffers()
 
 
 if __name__ == "__main__":
