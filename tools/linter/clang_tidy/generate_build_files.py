@@ -56,10 +56,19 @@ def run_autogen() -> None:
     )
 
 
+def gen_flatbuffers() -> None:
+    run_timed_cmd(
+        [
+            "bash", "scripts/gen_flatbuffer.sh"
+        ]
+    )
+
+
 def generate_build_files() -> None:
     update_submodules()
     gen_compile_commands()
     run_autogen()
+    gen_flatbuffers()
 
 
 if __name__ == "__main__":
