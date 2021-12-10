@@ -28,7 +28,31 @@ lazy_tensor_core._LAZYC._ltc_init_ts_backend()
 os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
 
 log = logging.getLogger(__name__)
-SKIP = {}
+
+# Models that are known to crash or otherwise not work with lazy tensor are
+# disabled, but should be removed from these lists once fixed
+SKIP = {
+    "fastNLP_Bert",
+    "vision_maskrcnn",
+    "speech_trasformer",
+    "nvidia_deeprecommender",
+    "pytorch_struct",
+    "dlrm",
+    "LearningToPaint",
+    "vision_maskrcnn",
+    "drq",
+    "moco",
+}
+SKIP_TRAIN_ONLY = {
+    "squeezenet1_1",
+    "mobilenet_v2_quantized_qat"
+    "hf_Reformer",
+    "hf_GPT2",
+    "hf_BigBird",
+    "pyhpc_equation_of_state",
+    "pyhpc_isoneutral_mixing",
+}
+
 current_name = ""
 current_device = ""
 
@@ -100,18 +124,22 @@ class DivAddMul(nn.Module):
         out2 = out1 + mask
         out3 = out2 * 5.0
         return out3
-
+toy_models = [
+    HardSwishBenchmark,
+    DivAddMulBenchmark,
+]
+toy_dims = [
+    [1, 1, 1, 1],
+    [32, 16, 128, 128],
+    [128, 16, 128, 128],
+    [256, 16, 128, 128],
+]
+for dims in toy_dims:
+    # The toy benchmarks don't support training..
+    # and it's too late to add it inside the generator func below...
+    SKIP_TRAIN_ONLY.add("DivAddMul[" + ','.join([str(d) for d in dims]) + ']')
+    SKIP_TRAIN_ONLY.add("HardSwish[" + ','.join([str(d) for d in dims]) + ']')
 def list_toy_models():
-    toy_models = [
-        HardSwishBenchmark,
-        DivAddMulBenchmark,
-    ]
-    toy_dims = [
-        [1, 1, 1, 1],
-        [32, 16, 128, 128],
-        [128, 16, 128, 128],
-        [256, 16, 128, 128],
-    ]
     for dims in toy_dims:
         for model in toy_models:
             yield model(dims=dims)
@@ -141,6 +169,7 @@ def iter_models(args):
             (len(args.filter) and (not re.search("|".join(args.filter), name, re.I)))
             or (len(args.exclude) and re.search("|".join(args.exclude), name, re.I))
             or name in SKIP
+            or (name in SKIP_TRAIN_ONLY and args.test == "train")
         ):
             continue
         # TODO(whc) better to support list of devices;
@@ -393,7 +422,7 @@ def run_tracing_execute_noops(test, lazy_benchmark):
 
 if __name__ == "__main__" :
     parser = argparse.ArgumentParser()
-    parser.add_argument("--filter", "-k", action="append", default=["HardSwish", "DivAddMul", "hf_Bert", "hf_Bart"], help="filter benchmarks")
+    parser.add_argument("--filter", "-k", action="append", default=[], help="filter benchmarks")
     parser.add_argument("--exclude", "-x", action="append", default=[], help="filter benchmarks")
     parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
@@ -457,17 +486,4 @@ if __name__ == "__main__" :
                 lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                 lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
 
-
-                """Alternate ways of synchronizing for timing- calling .to() on output tensors -
-                   Used initially to corroborate the results of timing via mark_step.  Should be debuged further as calling .to() appears
-                   to penalize lazy more than cuda, possibly due to ineffiencies in how we implement the .to operator.
-                """
-                # using to_cpu sync
-                # lazy_compute_experiment(args, "to_cpu amortized", results, benchmark, lazy_benchmark, to_dev_sync='cpu')
-                # lazy_compute_experiment(args, "to_cpu unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True, to_dev_sync='cpu')
-
-                # if device == 'cuda':
-                    # using to_cuda sync
-                    # lazy_compute_experiment(args, "to_cuda amortized", results,benchmark, lazy_benchmark, to_dev_sync='cuda')
-                    # lazy_compute_experiment(args, "to_cuda unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True, to_dev_sync='cuda')
         print()
