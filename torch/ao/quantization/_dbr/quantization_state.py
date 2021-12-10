@@ -306,8 +306,7 @@ class AutoQuantizationState(torch.nn.Module):
         * observe the output, if needed
         """
         seen_op_info = self._get_cur_seen_op_info()
-        qconfig = get_cur_qconfig(self.qconfig_dict, seen_op_info.fqn, op)
-        func_output_obs_type = get_func_output_obs_type(seen_op_info, qconfig)
+        func_output_obs_type = get_func_output_obs_type(seen_op_info)
         if first_call:
             self._first_call_op_prepare_after_hook_adjust_subgraphs(
                 op, output, args, first_call, qtensor_id, root_module,
@@ -722,11 +721,12 @@ class AutoQuantizationState(torch.nn.Module):
         if self.idx not in self.idx_to_seen_op_infos:
             op_type_is_module = isinstance(op, torch.nn.Module)
             op_type = type(op) if op_type_is_module else op
+            qconfig = get_cur_qconfig(self.qconfig_dict, fqn, op)
             self.idx_to_seen_op_infos[self.idx] = SeenOpInfo(
                 self.idx, op_type, op_type_is_module, fqn, arg_tensor_infos, [],
                 packable_tensor_idx_to_name, packable_nontensor_idx_to_arg,
                 packable_tensor_kwarg_name_to_name,
-                op_packing_only_uses_module_attributes)
+                op_packing_only_uses_module_attributes, qconfig)
 
         return args, kwargs
 

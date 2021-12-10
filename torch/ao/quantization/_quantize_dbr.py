@@ -2,6 +2,7 @@ import torch
 
 from ._dbr.auto_trace import add_auto_observation, add_auto_convert
 from ._dbr.fusion import get_module_fusion_fqns
+from ._dbr.qconfig_dict_utils import normalize_object_types
 
 from .qconfig_dict_utils import (
     get_flattened_qconfig_dict,
@@ -30,8 +31,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         assert qconfig_dict_option not in qconfig_dict, \
             f'{qconfig_dict_option} option of qconfig_dict is not ' + \
             'implemented yet in define-by-run quantization'
-    # TODO: assert for object_type + function non-existence
 
+    normalize_object_types(qconfig_dict)
     convert_dict_to_ordered_dict(qconfig_dict)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
