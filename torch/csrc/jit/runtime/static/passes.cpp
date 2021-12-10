@@ -571,7 +571,7 @@ void ReplaceWithMaybeCopy(
     if (!match_schema(n, new_symbol)) {
       continue;
     }
-    DCHECK(n->outputs().size() == 1);
+    TORCH_CHECK(n->outputs().size() == 1);
 
     // Duplicate in-place ops guard from ReplaceWithCopy below.
     auto* in = n->input(0);
@@ -658,7 +658,7 @@ void ReplaceWithCopy(
     } else if (!match_schema(n, new_symbol)) {
       continue;
     }
-    DCHECK(n->outputs().size() == 1);
+    TORCH_CHECK(n->outputs().size() == 1);
 
     // In cases of having in-place ops in the graph, only replace the op with
     // the copy version for ops with input with number of use == 1. Example:
