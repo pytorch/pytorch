@@ -887,7 +887,7 @@ ConvBackend select_conv_backend(
     }
   } else if (params.use_mkldnn(input, weight)) {
     return ConvBackend::Mkldnn;
-  } else if (params.use_xnnpack(input, weight, bias_sizes_opt)) {
+  } else if (!need_backward && params.use_xnnpack(input, weight, bias_sizes_opt)) {
     // Using prepacked conv is preferred, but XNNPACK is still the fastest
     // option for NHWC.
     return ConvBackend::Xnnpack2d;
