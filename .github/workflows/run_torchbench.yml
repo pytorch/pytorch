@@ -28,6 +28,8 @@ jobs:
         with:
           repository: pytorch/benchmark
           path: benchmark
+          # deep clone, user may request to run on a branch
+          fetch-depth: 0
       - name: Create conda environment
         run: |
           conda create -y -n pr-ci python="${PYTHON_VERSION}"
