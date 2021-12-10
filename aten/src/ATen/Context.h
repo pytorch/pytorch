@@ -91,27 +91,18 @@ class TORCH_API Context {
   }
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
-  THCState* lazyInitCUDA() {
+  void lazyInitCUDA() {
     std::call_once(thc_init,[&] {
-      thc_state = detail::getCUDAHooks().initCUDA();
+      detail::getCUDAHooks().initCUDA();
     });
-    return thc_state.get();
   }
-  THHState* lazyInitHIP() {
+  void lazyInitHIP() {
     std::call_once(thh_init,[&] {
-      thh_state = detail::getHIPHooks().initHIP();
+      detail::getHIPHooks().initHIP();
     });
-    return thh_state.get();
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
-  }
-  THCState* getTHCState() {
-    // AT_ASSERT(thc_state);
-    return thc_state.get();
-  }
-  THHState* getTHHState() {
-    return thh_state.get();
   }
 
   static bool setFlushDenormal(bool on);
@@ -261,8 +252,6 @@ class TORCH_API Context {
   #endif
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
-  std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
-  std::unique_ptr<THHState, void(*)(THHState*)> thh_state;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
