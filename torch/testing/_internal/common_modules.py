@@ -6,7 +6,9 @@ import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
+    _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf, 
+    toleranceOverride, tol)
+from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
@@ -193,8 +195,7 @@ def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, *
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     
     def bilinear_reference_fn(m, p, x1, x2, bias=True):
-        intermediate = torch.einsum('bk,ikj->bij', x1, p[0])
-        result = torch.einsum('bij,bj->bi', intermediate, x2)
+        result = torch.einsum('bn,anm,bm->ba', x1, p[0], x2)
         if bias:
             if x1.shape[0] == 1:
                 result = result.view(-1) + p[1]
@@ -415,7 +416,11 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Linear,
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.Bilinear,
-               module_inputs_func=module_inputs_torch_nn_Bilinear),
+               module_inputs_func=module_inputs_torch_nn_Bilinear,
+               decorators=(
+                    DecorateInfo(
+                        toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)})),
+               )),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
     ModuleInfo(torch.nn.Hardswish,
