@@ -3,6 +3,8 @@ on:
   pull_request:
 
 env:
+  PYTHON_VERSION: "3.8"
+  CUDA_VERSION: "11.3"
   PR_NUM: ${{ github.event.number }}
   PR_BODY: ${{ github.event.pull_request.body }}
   PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -28,12 +30,13 @@ jobs:
           path: benchmark
       - name: Create conda environment
         run: |
-          conda create -y -n pr-ci python=3.7
+          conda create -y -n pr-ci python="${PYTHON_VERSION}"
           # shellcheck disable=SC1091
           . "${HOME}"/anaconda3/etc/profile.d/conda.sh
           conda activate pr-ci
-          conda install -y numpy=1.17 requests=2.22 ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six dataclasses pillow pytest tabulate gitpython
-          conda install -y -c pytorch-nightly torchtext torchvision
+          conda install -y numpy requests ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions \
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs
+          conda install -y pytorch torchvision torchtext cudatoolkit="${CUDA_VERSION}" -c pytorch-nightly
       - name: Update self-hosted PyTorch
         run: |
           pushd "${HOME}"/pytorch
