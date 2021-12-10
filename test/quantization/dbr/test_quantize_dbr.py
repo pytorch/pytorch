@@ -1025,6 +1025,33 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(isinstance(mq[1], nn.Hardswish))
         self.assertTrue(isinstance(mq[2], nnq.Conv2d))
 
+    def test_qconfig_dict_object_type_function(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                # x = x * x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                # TODO(this PR): make this work as well
+                # (torch.add, None),
+                (torch.Tensor.add, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        print(mp)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+
     def test_qconfig_dict_module_name(self):
         """
         Verifies that the 'module_name' option of qconfig_dict works

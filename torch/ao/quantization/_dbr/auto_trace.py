@@ -101,6 +101,7 @@ def add_auto_observation(
             hook_type = get_torch_function_hook_type(parent_module, func)
 
             if hook_type is HookType.OP_HOOKS:
+                print('PREPARE func', func)
                 qstate = parent_module._auto_quant_state  # type: ignore[attr-defined]
                 fqn = module_id_to_fqn[id(parent_module)] if parent_module else None
                 if not first_call:
@@ -345,6 +346,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         @classmethod
         def __torch_function__(cls, func, types, args=(), kwargs=None):
+            print('func', func)
             nonlocal global_disable_torch_function_override
             if global_disable_torch_function_override:
                 return super().__torch_function__(func, types, args, kwargs)
@@ -357,6 +359,7 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
             # if we are in a function, the current module is always a parent
             parent_module = cur_module
             hook_type = get_torch_function_hook_type(parent_module, func)
+            print('hook_type', hook_type)
 
             if enable_logging:
                 with torch._C.DisableTorchFunction():
@@ -370,11 +373,14 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate: AutoQuantizationState = parent_module._auto_quant_state  # type: ignore[union-attr]
                 # before hooks
                 qstate.validate_cur_op(func)
+                print('f1', func, args)
                 func, args, kwargs = qstate.op_convert_before_hook(
                     func, args, kwargs, parent_module)  # type: ignore[arg-type]
+                print('f2', func, args)
 
                 # forward
                 output = super().__torch_function__(func, types, args, kwargs)
+                print('out', output)
                 # after hooks
                 output = qstate.op_convert_after_hook(
                     func, output, global_op_idx)
@@ -414,6 +420,16 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
 
         def __repr__(self):
             return f'QuantizationConvertTensorProxy({super().__repr__()})'
+
+        def __add__(self, other):
+            print('HERE')
+            try:
+                res = self.__torch_function__(torch.add, [type(self), type(other)], (self, other), {})
+                print('res')
+                return res
+            except TypeError:
+                print('NNNN')
+                return NotImplemented
 
     cur_module = None
     module_stack : List[torch.nn.Module] = []

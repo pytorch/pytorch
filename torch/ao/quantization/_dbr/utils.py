@@ -183,10 +183,14 @@ class FuncOutputObsType(enum.Enum):
 
 def get_func_output_obs_type(
     seen_op_info: SeenOpInfo,
+    qconfig: QConfigAny,
 ) -> FuncOutputObsType:
     op_type = seen_op_info.type
     is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
+        return FuncOutputObsType.NONE
+
+    if qconfig is None:
         return FuncOutputObsType.NONE
 
     # check for ops which need packed weights but the weights are

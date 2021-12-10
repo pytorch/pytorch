@@ -306,7 +306,8 @@ class AutoQuantizationState(torch.nn.Module):
         * observe the output, if needed
         """
         seen_op_info = self._get_cur_seen_op_info()
-        func_output_obs_type = get_func_output_obs_type(seen_op_info)
+        qconfig = get_cur_qconfig(self.qconfig_dict, seen_op_info.fqn, op)
+        func_output_obs_type = get_func_output_obs_type(seen_op_info, qconfig)
         if first_call:
             self._first_call_op_prepare_after_hook_adjust_subgraphs(
                 op, output, args, first_call, qtensor_id, root_module,
@@ -807,8 +808,12 @@ class AutoQuantizationState(torch.nn.Module):
                 else:
                     dtype_to_use = torch.float
             else:
-                dtype_to_use = torch.quint8
-                # TODO(future PR): handle functions
+                qconfig = get_cur_qconfig(self.qconfig_dict, seen_op_info.fqn, op)
+                if qconfig is None:
+                    dtype_to_use = torch.float
+                else:
+                    dtype_to_use = qconfig.activation().dtype
+
         elif func_output_dtype_type == FuncOutputDTypeType.DTYPE_DEFAULT_BC_UNSUPPORTED_SYNTAX:
             dtype_to_use = torch.float
         else:
