@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/DynamicTypes.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <algorithm>
 #include <cstdarg>
@@ -179,7 +179,7 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 template<>
 void THPPointer<THTensor>::free() {
   if (ptr) {
-    THTensor_free(LIBRARY_STATE ptr);
+    c10::raw::intrusive_ptr::decref(ptr);
   }
 }
 
