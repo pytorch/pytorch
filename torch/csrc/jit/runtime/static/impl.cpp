@@ -894,7 +894,7 @@ c10::IValue StaticRuntime::move_outputs_to_tuple(uint32_t num_outputs) {
       outputs.reserve(num_outputs);
       for (const auto i : c10::irange(num_outputs)) {
         // use move here. Otherwise, clean up outputs_[i] explicitly
-        outputs.emplace_back(IValue(std::move(*outputs_[i])));
+        outputs.emplace_back(std::move(*outputs_[i]));
       }
       return c10::ivalue::Tuple::create(std::move(outputs));
     }
