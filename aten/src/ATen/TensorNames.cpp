@@ -64,12 +64,12 @@ TensorNames::TensorNames(ArrayRef<Dimname> names, int64_t start, int64_t end) {
 TensorNames& TensorNames::unifyFromRightInplace(const TensorNames& other, const char* op_name) {
 
   if (names_.size() > other.names_.size()) {
-    auto size_diff = names_.size() - other.names_.size();
+    const auto size_diff = names_.size() - other.names_.size();
     for (const auto idx : c10::irange(size_diff, names_.size())) {
       names_[idx] = names_[idx].unify(other.names_[idx - size_diff], op_name);
     }
   } else {
-    auto size_diff = other.names_.size() - names_.size();
+    const auto size_diff = other.names_.size() - names_.size();
     // pad names_ to the same length as other.names_ before unification
     names_.insert(
         names_.begin(),
