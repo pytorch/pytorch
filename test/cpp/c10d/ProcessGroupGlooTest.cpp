@@ -126,9 +126,8 @@ class CollectiveTest {
       int num,
       bool delayed = false) {
     std::vector<CollectiveTest> tests;
-    for (const auto i : c10::irange(num)) {
-      (void)i;
-      tests.push_back(CollectiveTest(path));
+    for (C10_UNUSED const auto i : c10::irange(num)) {
+      tests.emplace_back(CollectiveTest(path));
     }
 
     std::vector<std::thread> threads;
@@ -143,7 +142,7 @@ class CollectiveTest {
     return tests;
   }
 
-  CollectiveTest(const std::string path) : path_(std::move(path)) {}
+  CollectiveTest(std::string path) : path_(std::move(path)) {}
 
   CollectiveTest(CollectiveTest&& other) {
     path_ = std::move(other.path_);
