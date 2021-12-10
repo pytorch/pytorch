@@ -2,7 +2,7 @@
 
 #include <ATen/core/Formatting.h>
 #include <torch/csrc/lazy/core/helpers.h>
-#include <torch/csrc/lazy/core/internal_ops/scalar.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 

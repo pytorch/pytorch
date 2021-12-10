@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/internal_ops/scalar.h>
+#include <torch/csrc/lazy/ts_backend/ops/scalar.h>
 
 #include <functional>
 #include <sstream>

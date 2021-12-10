@@ -1,4 +1,4 @@
-#include <torch/csrc/lazy/core/internal_ops/expand.h>
+#include <torch/csrc/lazy/ts_backend/ops/expand.h>
 
 namespace torch {
 namespace lazy {
