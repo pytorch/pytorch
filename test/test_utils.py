@@ -688,7 +688,7 @@ class TestHub(TestCase):
         with tempfile.TemporaryDirectory('hub_dir') as dirname:
             torch.hub.set_dir(dirname)
             self.assertEqual(torch.hub.get_dir(), dirname)
-    
+
     def test_hub_dir_expand(self):
         with tempfile.TemporaryDirectory('cur_dir') as dirname:
             home_dir = os.path.join("~", "hub")
