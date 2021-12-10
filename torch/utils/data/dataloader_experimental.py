@@ -64,7 +64,7 @@ class DataLoader2:
     def __new__(cls,
                 dataset,
                 batch_size=1,
-                shuffle=False,
+                shuffle=None,
                 sampler=None,
                 batch_sampler=None,
                 num_workers=0,
@@ -88,6 +88,7 @@ class DataLoader2:
                     'sampler is not yet supported by DataPipes')
             datapipe = dataset
             if shuffle:
+                # Enforce at least one shuffle in the graph
                 datapipe = datapipe.shuffle()
             if batch_outside_worker and pin_memory:
                 raise Exception(
