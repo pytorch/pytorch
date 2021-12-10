@@ -5,6 +5,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_fft_functions.h"
+#include "torch/csrc/autograd/python_return_types.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/autograd/utils/python_arg_parsing.h"
@@ -17,7 +18,11 @@
 
 #include <ATen/core/Tensor.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 $ops_headers
+#endif
 
 using at::Tensor;
 using at::Device;

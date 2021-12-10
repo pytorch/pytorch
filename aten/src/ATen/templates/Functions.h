@@ -10,12 +10,27 @@
   See NOTE: [Tensor vs. TensorBase]
 #endif
 
-#ifdef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#if defined(AT_PER_OPERATOR_HEADERS) && defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
 #error This change adds a dependency on all pytorch operators, meaning the     \
   file will need to be re-compiled every time an operator is changed or added. \
   Consider including a specific operator from <ATen/ops/{my_operator}.h> and   \
   see NOTE [TORCH_ASSERT_ONLY_METHOD_OPERATORS].
 #endif
+
+#include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/TracerMode.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Reduction.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Deprecated.h>
+#include <c10/util/Optional.h>
+
+${static_dispatch_extra_headers}
 
 // NOTE: [TORCH_ASSERT_ONLY_METHOD_OPERATORS]
 //
@@ -52,6 +67,8 @@
 ${Functions_includes}
 
 namespace at {
+
+${Functions_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
@@ -95,6 +112,10 @@ inline bool is_signed(const Tensor& tensor) {
 
 inline bool is_inference(const Tensor& tensor) {
   return tensor.is_inference();
+}
+
+inline bool _is_zerotensor(const Tensor& tensor) {
+  return tensor._is_zerotensor();
 }
 
 inline bool is_conj(const Tensor& tensor) {

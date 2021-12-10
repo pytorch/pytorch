@@ -10,8 +10,12 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/quantize_per_tensor.h>
 #include <ATen/ops/zeros.h>
+#endif
 
 #include <stack>
 

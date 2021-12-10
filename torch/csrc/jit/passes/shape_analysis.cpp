@@ -16,7 +16,11 @@
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/empty_strided.h>
+#endif
 
 #include <exception>
 #include <iostream>

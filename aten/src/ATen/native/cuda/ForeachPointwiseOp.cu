@@ -4,6 +4,9 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/NumericUtils.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/_foreach_add_native.h>
 #include <ATen/ops/_foreach_addcdiv_native.h>
 #include <ATen/ops/_foreach_addcmul_native.h>
@@ -14,6 +17,7 @@
 #include <ATen/ops/_foreach_sub_native.h>
 
 #include <ATen/ops/empty_like_native.h>
+#endif
 
 namespace at { namespace native {
 

@@ -7,10 +7,15 @@
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/_foreach_norm_native.h>
 
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/empty.h>
+#endif
 
 
 namespace at {

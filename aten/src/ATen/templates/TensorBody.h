@@ -34,7 +34,7 @@
 #include <ATen/core/TensorBase.h>
 #include <torch/csrc/WindowsTorchApiMacro.h>
 
-${operator_includes}
+#include <ATen/MethodOperators.h>
 
 namespace c10{
 template<class T> class List;
