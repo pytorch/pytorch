@@ -449,6 +449,16 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         self.assertEqual(list(output_shape[0:4]), list(tensor.size()))
         self.assertEqual(list(output_shape[4:]), output_tensor[2:])
 
+    def test_sym_ir_parsing(self):
+        graph_str1 = """graph(%x.1 : Float(SS(-2), SS(-3))):
+                        %3 : int = prim::Constant[value=1]()
+                        %4 : Tensor = aten::add(%x.1, %x.1, %3)
+                        return (%4)"""
+        g = torch._C.parse_ir(graph_str1)
+        inp = next(g.inputs())
+        out = inp.type().symbolic_sizes()
+        self.assertEqual(out, [-2, -3])
+
     def test_stitching_concat(self):
         @torch.jit.script
         def foo(a, b, x, y):
