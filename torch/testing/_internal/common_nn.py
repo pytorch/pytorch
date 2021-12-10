@@ -1345,8 +1345,7 @@ def fractional_max_pool3d_no_batch_dim_test(test_case, use_random_samples):
                 constructor=lambda: nn.FractionalMaxPool3d(
                     2, output_ratio=0.5),
                 cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions(2)
-                                        .output_ratio(0.5)
-                                        ._random_samples(random_samples)''',
+                                        .output_ratio(0.5)''',
                 input_size=(4, 5, 5, 5),
                 reference_fn=single_batch_reference_fn,
                 test_cuda=False,
@@ -1354,10 +1353,9 @@ def fractional_max_pool3d_no_batch_dim_test(test_case, use_random_samples):
         elif test_case == 'size':
             return dict(
                 constructor=lambda: nn.FractionalMaxPool3d((2, 2, 2), output_size=(
-                    4, 4, 4), _random_samples=random_samples),
+                    4, 4, 4)),
                 cpp_constructor_args='''torch::nn::FractionalMaxPool3dOptions({2, 2, 2})
-                                        .output_size(std::vector<int64_t>({4, 4, 4}))
-                                        ._random_samples(random_samples)''',
+                                        .output_size(std::vector<int64_t>({4, 4, 4}))''',
                 input_size=(4, 7, 7, 7),
                 reference_fn=single_batch_reference_fn,
                 test_cuda=False,
