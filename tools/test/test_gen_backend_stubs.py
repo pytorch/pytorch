@@ -2,12 +2,11 @@
 
 import os
 import tempfile
-import importlib
 import unittest
 import expecttest
 
 from tools.codegen.gen_backend_stubs import run
-from tools.codegen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE
+from tools.codegen.gen import _GLOBAL_PARSE_NATIVE_YAML_CACHE  # noqa: F401
 
 path = os.path.dirname(os.path.realpath(__file__))
 gen_backend_stubs_path = os.path.join(path, '../tools/codegen/gen_backend_stubs.py')
