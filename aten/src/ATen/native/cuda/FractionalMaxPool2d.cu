@@ -220,7 +220,7 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   int outputH = output_size[0];
   int outputW = output_size[1];
 
-  gradInput.resize_as(input)
+  gradInput.resize_as_(input)
   if (gradInput.numel() == 0) {
     return;
   }
