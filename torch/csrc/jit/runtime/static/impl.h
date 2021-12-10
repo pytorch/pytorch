@@ -450,7 +450,7 @@ class TORCH_API StaticRuntime {
     return planner_.get();
   }
 
-  void check_for_memory_leak(bool output_returned = true);
+  bool check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
     return static_module_.is_optimizable_container_type(n);
@@ -572,8 +572,8 @@ class TORCH_API ProcessedFunction {
     kInterpreterFallback,
   };
 
-  const std::function<void(ProcessedNode*)>& f() const {
-    return f_;
+  void run(ProcessedNode* pnode) const {
+    return f_(pnode);
   }
 
   Kind kind() const {
