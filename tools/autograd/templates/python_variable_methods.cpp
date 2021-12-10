@@ -34,6 +34,7 @@
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/utils/tensor_types.h"
 #include "torch/csrc/utils/structseq.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 #include "c10/util/Optional.h"
@@ -41,7 +42,11 @@
 
 #include <stdexcept>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 $ops_headers
+#endif
 
 using at::DeviceGuard;
 using at::device_of;

@@ -32,10 +32,15 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/utils/structseq.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/autograd/python_return_types.h"
 
 #include <ATen/core/Tensor.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 $ops_headers
+#endif
 
 #include <functional>
 #include <initializer_list>

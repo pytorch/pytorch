@@ -7,7 +7,11 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/transpose.h>
+#endif
 
 #include <iostream>
 

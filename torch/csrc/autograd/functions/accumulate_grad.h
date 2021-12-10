@@ -7,7 +7,11 @@
 #include <ATen/BatchedTensorImpl.h>
 #include <ATen/TensorOperators.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
+#endif
 
 #include <mutex>
 

@@ -3,7 +3,12 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 
 #include <ATen/ScalarOps.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
 #include <ATen/ops/unsqueeze.h>
+#endif
 
 #include <onnx/onnx_pb.h>
 
