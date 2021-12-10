@@ -1700,12 +1700,12 @@ void ProcessedNode::run() {
         guard.before(get_op_name());
       }
     }
-    fn_->f()(this);
+    fn_->run(this);
   } else {
-    fn_->f()(this);
+    fn_->run(this);
   }
 #else
-  fn_->f()(this);
+  fn_->run(this);
 #endif
 #ifndef NDEBUG
   if (FLAGS_static_runtime_disable_debug_memory_overlap_check) {
