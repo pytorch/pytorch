@@ -39,7 +39,6 @@ _gate_torchscript_serialization = True
 
 ActionHook = Callable[["PackageExporter", str], None]
 
-
 class _ModuleProviderAction(Enum):
     """Represents one of the actions that :class:`PackageExporter` can take on a module.
 
@@ -550,7 +549,10 @@ class PackageExporter:
                 self.add_dependency(dep)
 
     def save_pickle(
-        self, package: str, resource: str, obj: Any, dependencies: bool = True
+        self, package: str,
+        resource: str, obj: Any,
+        dependencies: bool = True,
+        save_mocked_and_used: bool = False
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -592,12 +594,23 @@ class PackageExporter:
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
+                    if not save_mocked_and_used:
+                        for pattern, pattern_info in self.patterns.items():
+                            if pattern_info.action == _ModuleProviderAction.MOCK:
+                                if pattern.matches(module):
+                                    raise NotImplementedError(
+                                        f"Object '{field}' from module {module} was mocked out during packaging "
+                                        f"but is being used in resource - {resource} in package {package}"
+                                        "If this error is happening during 'save_pickle', please ensure that your "
+                                        "pickled object doesn't contain any mocked objects."
+                                    )
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
                 self.add_dependency(module_name)
 
         self._write(filename, data_value)
+
 
     def save_text(self, package: str, resource: str, text: str):
         """Save text data to the package.
