@@ -535,6 +535,11 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type,
     c10::ArrayRef<int64_t> dimensions, const torch::lazy::BackendDevice& device) {
   torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
+  if (!dimensions.empty()) {
+      ir_value = torch::lazy::MakeNode<ir::ops::Expand>(
+          ir_value, dimensions.vec(),
+          /*is_scalar_expand=*/true);
+  }
   return ir_value;
 }
 
