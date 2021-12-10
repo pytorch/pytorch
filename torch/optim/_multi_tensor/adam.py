@@ -75,14 +75,16 @@ class Adam(Optimizer):
             max_exp_avg_sq = []
             params_with_grad = []
 
+
             for p in group['params']:
                 if p.grad is not None:
                     if p.grad.is_sparse:
                         raise RuntimeError('Adam does not support sparse gradients, please consider SparseAdam instead')
-                    if group['maximize']:
-                        p.grad = -p.grad
                     params_with_grad.append(p)
                     grads.append(p.grad)
+
+            if group['maximize']:
+                grads = torch._foreach_neg(tuple(grads))
 
             for p in params_with_grad:
                 state = self.state[p]
