@@ -9,6 +9,8 @@ full_codegen:
   - addcdiv
   - addcmul
   - addmm
+  - avg_pool2d
+  - avg_pool2d_backward
   - baddbmm
   - bitwise_and.Tensor
   - bmm
