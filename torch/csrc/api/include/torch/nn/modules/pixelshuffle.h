@@ -4,7 +4,7 @@
 #include <torch/nn/functional/pixelshuffle.h>
 #include <torch/nn/options/pixelshuffle.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace nn {
