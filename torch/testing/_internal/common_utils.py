@@ -40,7 +40,7 @@ import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List
+from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, TypeVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -60,6 +60,7 @@ import torch.backends.mkl
 from enum import Enum
 from statistics import mean
 import functools
+from .composite_compliance import no_dispatch
 
 torch.backends.disable_global_flags()
 
@@ -1126,13 +1127,21 @@ def set_rng_seed(seed):
 
 @contextlib.contextmanager
 def freeze_rng_state():
-    rng_state = torch.get_rng_state()
-    if torch.cuda.is_available():
-        cuda_rng_state = torch.cuda.get_rng_state()
-    yield
-    if torch.cuda.is_available():
-        torch.cuda.set_rng_state(cuda_rng_state)
-    torch.set_rng_state(rng_state)
+    # no_dispatch needed for test_composite_compliance
+    # Some OpInfos use freeze_rng_state for rng determinism, but
+    # test_composite_compliance overrides dispatch for all torch functions
+    # which we need to disable to get and set rng state
+    with no_dispatch():
+        rng_state = torch.get_rng_state()
+        if torch.cuda.is_available():
+            cuda_rng_state = torch.cuda.get_rng_state()
+    try:
+        yield
+    finally:
+        with no_dispatch():
+            if torch.cuda.is_available():
+                torch.cuda.set_rng_state(cuda_rng_state)
+            torch.set_rng_state(rng_state)
 
 @contextlib.contextmanager
 def set_default_dtype(dtype):
@@ -3119,3 +3128,15 @@ def get_cycles_per_ms() -> float:
         vals.append(measure())
     vals = sorted(vals)
     return mean(vals[2 : num - 2])
+
+
+T = TypeVar('T')
+def first_sample(self: unittest.TestCase, samples: Iterable[T]) -> T:
+    """
+    Returns the first sample from an iterable of samples, like those returned by OpInfo.
+    The test will be skipped if no samples are available.
+    """
+    try:
+        return next(iter(samples))
+    except StopIteration:
+        raise unittest.SkipTest('Skipped! Need at least 1 sample input')
