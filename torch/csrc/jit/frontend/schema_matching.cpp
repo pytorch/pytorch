@@ -644,11 +644,12 @@ Value* emitBuiltinCall(
   schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
     bool found_upgrader = false;
-    auto op_name =
-        op->schema().operator_name().name + "." + op->schema().overload_name();
+    auto op_name = op->schema().operator_name().name +
+        ((op->schema().overload_name() != "")
+        ? "." + op->schema().overload_name() : "");
     if (graph_version.has_value()) {
-      auto version_entry = operator_version_map.find(op_name);
-      if (version_entry != operator_version_map.end()) {
+      auto version_entry = kOperatorVersionMap.find(op_name);
+      if (version_entry != kOperatorVersionMap.end()) {
         auto old_schema_entry =
             findUpgrader(version_entry->second, graph_version.value());
         if (old_schema_entry.has_value()) {

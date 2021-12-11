@@ -648,7 +648,6 @@ struct GraphExecutorImpl : public GraphExecutorImplBase {
     auto opt_graph = graph->copy();
     GRAPH_DUMP("Optimizing the following function:", opt_graph);
     arg_spec_creator_.specializeTypes(*opt_graph, spec);
-    ApplyOldOpsUpgraders(opt_graph);
 
     // Phase 0. Inline functions, then clean up any artifacts that the inliner
     //          left in that may inhibit optimization
