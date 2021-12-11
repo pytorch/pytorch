@@ -12,7 +12,7 @@ struct UpgraderEntry {
   std::string old_schema;
 };
 
-static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperatorVersionMap(
+static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
     {{"aten::div.Tensor",
       {{4,
         "div_Tensor_0_3",
@@ -42,17 +42,17 @@ static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperatorVers
         "full_out_0_4",
         "aten::full.out(int{} size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
 
-std::unordered_map<std::string, std::vector<UpgraderEntry>>
+const std::unordered_map<std::string, std::vector<UpgraderEntry>>&
 get_operator_version_map() {
-  return kOperatorVersionMap;
+  return operatorVersionMap;
 }
 
 void test_only_add_entry(std::string op_name, UpgraderEntry entry) {
-  kOperatorVersionMap[op_name].push_back(entry);
+  operatorVersionMap[op_name].push_back(entry);
 }
 
 void test_only_remove_entry(std::string op_name) {
-  kOperatorVersionMap.erase(op_name);
+  operatorVersionMap.erase(op_name);
 }
 
 } // namespace jit
