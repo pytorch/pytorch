@@ -933,8 +933,10 @@ class ReduceLROnPlateau(object):
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
                 if self.verbose:
-                    print('Epoch {:5f}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+                    epoch_str = ("%.2f" if isinstance(epoch, float) else
+                                 "%.5d") % epoch
+                    print('Epoch {}: reducing learning rate'
+                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
 
     @property
     def in_cooldown(self):
