@@ -81,5 +81,9 @@ bool isInplaceOp(const c10::FunctionSchema& schema);
 void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
     std::function<Tensor(const Tensor&)> func);
 
+// Pretty printers
+std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
+std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
+
 }
 } // namespace at
