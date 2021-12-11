@@ -12639,11 +12639,15 @@ op_db: List[OpInfo] = [
                                                   torch.bfloat16: 1e-2}),),
                    safe_casts_outputs=True,
                    supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
                    supports_sparse_csr=True,
                    supports_complex_to_float=True,
                    skips=(
                        # The complex formula might be wrong
                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
+                                    dtypes=complex_types()),
+                       # The complex formula might be wrong
+                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                                     dtypes=complex_types()),
                    )),
     UnaryUfuncInfo('isfinite',
@@ -14374,6 +14378,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
         sample_inputs_func=partial(sample_inputs_dropout, min_input_dim=2),
         inplace_variant=lambda input, *args, **kwargs:
@@ -14399,6 +14404,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
         sample_inputs_func=partial(sample_inputs_dropout, train=True, min_input_dim=2),
         inplace_variant=lambda input, *args, **kwargs:
@@ -15289,6 +15295,7 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     )
 ]
 
