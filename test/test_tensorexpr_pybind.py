@@ -67,31 +67,6 @@ class TestTensorExprPyBind(JitTestCase):
         codegen.call([tA, tB, tC])
         torch.testing.assert_close(torch.matmul(tA, tB), tC)
 
-    def test_dynamic_shape(self):
-        dN = te.VarHandle(torch.int32)
-        A = te.BufHandle(torch.float64)
-        B = te.BufHandle(torch.float64)
-
-        def compute(i):
-            return A.load(i) - B.load(i)
-
-        C = te.Compute("C", [dN], compute)
-
-        loopnest = te.LoopNest([C])
-        loopnest.prepare_for_codegen()
-
-        cg = te.construct_codegen("ir_eval", loopnest.simplify(), [A, B, C, dN])
-
-        def test_with_shape(n):
-            tA = torch.randn(n, dtype=torch.double)
-            tB = torch.randn(n, dtype=torch.double)
-            tC = torch.empty(n, dtype=torch.double)
-            cg.call([tA, tB, tC, n])
-            torch.testing.assert_close(tA - tB, tC)
-
-        test_with_shape(8)
-        test_with_shape(31)
-
     def test_dtype_error(self):
         te.BufHandle("a", [1], torch.float32)  # ok
         self.assertRaises(TypeError, lambda: te.BufHandle("a", [1], "float55"))

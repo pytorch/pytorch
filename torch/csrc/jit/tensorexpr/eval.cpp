@@ -684,18 +684,16 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (dims.size() != indices.size()) {
       // indices are flattened, but not buffer
       if (indices.size() == 1) {
-        if (dims.size() == 0) {
-          // dim size is unknown
-          return;
+        if (dims.size() != buf->strides().size()) {
+          malformed_input(
+              "Number of dimensions did not match number of strides", buf);
         }
-        TORCH_INTERNAL_ASSERT(dims.size() == buf->strides().size());
         ExprPtr buf_size_expr = immLike(dims[0], 1);
         ExprPtr negative_one = immLike(dims[0], -1);
         for (const auto& i : c10::irange(dims.size())) {
           buf_size_expr = alloc<Add>(
               buf_size_expr,
-              alloc<Mul>(
-                  alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+              alloc<Mul>(alloc<Add>(dims[i], negative_one), buf->strides()[i]));
         }
         buf_size_expr->accept(this);
         int64_t buf_size = value().intValue();
