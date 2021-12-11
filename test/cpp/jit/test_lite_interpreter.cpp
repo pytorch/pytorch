@@ -2048,7 +2048,7 @@ TEST(LiteInterpreterUpgraderTest, DivScalarScalarV2) {
   auto output = m_module.forward(inputs);
   auto output_list = output.toTupleRef().elements();
   auto expect_output =
-      std::vector({IValue(2.0), IValue(10.0), IValue(5.0), IValue(2.0)});
+      std::vector<IValue>({IValue(2.0), IValue(10.0), IValue(5.0), IValue(2.0)});
   // auto actual_output = output.toTensor();
   for (size_t i = 0; i < expect_output.size(); i++) {
     ASSERT_EQ(output_list[i], expect_output[i]);
