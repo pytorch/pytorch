@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace native {
@@ -1642,6 +1643,159 @@ Tensor& dstack_out(TensorList tensors, Tensor& result) {
            "dstack expects a non-empty TensorList");
   auto rep = at::atleast_3d(tensors);
   return at::cat_out(result, rep, 2);
+}
+
+Tensor block(TensorList tensors, IntArrayRef indices, int64_t idx_stride) {
+  TORCH_CHECK(tensors.size() > 0,
+           "block expects a non-empty TensorList");
+  typedef c10::SmallVector<int64_t, 8> LowDimIdx;
+
+  const int64_t ten_dim = tensors[0].ndimension();
+  const int64_t result_dim = std::max(ten_dim, idx_stride);
+  for(auto tensor: tensors.slice(1)) {
+    TORCH_CHECK(tensor.ndimension() == ten_dim, 
+                "Dimension of tensor didn't match! ",
+                "Expecting: ", ten_dim, ", but getting: ", tensor.ndimension());
+  }
+  // std::cout << "line: 1621 tensors: " << tensors.size() << ", indices len: " << indices.size() << ", idx_strid: " << idx_stride << std::endl;
+
+  std::vector<LowDimIdx> padded_idx;
+  const int64_t pad_size = result_dim - idx_stride;
+  for(int64_t i = 0; i < indices.size(); i += idx_stride) {
+    LowDimIdx paded(idx_stride + pad_size);
+    for(auto offset: c10::irange(pad_size)) {
+      paded[offset] = 0;
+    }
+    for(auto offset: c10::irange(pad_size, pad_size + idx_stride)) {
+      paded[offset] = indices[i + offset - pad_size];
+    }
+    padded_idx.push_back(paded);
+  }
+
+  LowDimIdx cursor(result_dim, 0);
+  LowDimIdx result_size(result_dim, 0);
+  std::vector<LowDimIdx> slices_a;
+  std::vector<LowDimIdx> slices_b;
+  // std::cout << "line: 1635 " << result_dim << ", " << result_size << std::endl;
+  
+  auto cat_shape = [](const LowDimIdx& a, const LowDimIdx& b, int64_t dim) -> LowDimIdx {
+    LowDimIdx cated;
+    for(int64_t i: c10::irange(a.size())) {
+      if (i != dim) {
+        TORCH_CHECK(a[i] == b[i], "Tensor size should match along dim: ", i,
+          ". Expecting size ", a[i], " but getting ", b[i], " instead.");
+        cated.push_back(a[i]);
+      } else {
+        cated.push_back(a[i] + b[i]);
+      }
+    }
+    return cated;
+  };
+  const int64_t unsuq_size = result_dim - ten_dim;
+  std::vector<LowDimIdx> ten_shapes;
+  std::vector<std::vector<LowDimIdx>> hierar_shapes(result_dim, std::vector<LowDimIdx>());
+
+  for(auto i: c10::irange(tensors.size())) {
+    Tensor tensor = tensors[i];
+    LowDimIdx unsuq_sizes;
+    for(auto j: c10::irange(unsuq_size)) {
+      unsuq_sizes.push_back(1);
+    }
+    for(auto j: c10::irange(unsuq_size, result_dim)) {
+      unsuq_sizes.push_back(tensor.size(j - unsuq_size));
+    }
+    tensor = tensor.view(unsuq_sizes);
+    ten_shapes.push_back(unsuq_sizes);
+    
+    auto ten_ndim = tensor.ndimension();
+    auto idx = padded_idx[i];
+    auto next_idx = padded_idx[std::min(i + 1, padded_idx.size() - 1)];
+    LowDimIdx slice_a;
+    LowDimIdx slice_b;
+
+    // std::cout << "cursor: " << cursor << std::endl;
+    // std::cout << "idx: " << idx << std::endl;
+    // std::cout << "next_idx: " << next_idx << std::endl;
+
+    // compute the slice in the result tensor that tensor_i will go, and
+    // update the cursor to the next position
+    for (auto j : c10::irange(result_dim)) {
+      slice_a.push_back(cursor[j]);
+
+      if (result_dim - j > ten_ndim)
+        slice_b.push_back(cursor[j] + 1);
+      else
+        slice_b.push_back(cursor[j] + tensor.size(j - (result_dim - ten_ndim)));
+      result_size[j] = (std::max(result_size[j], slice_b[j]));
+      
+      if (next_idx[j] - idx[j] < 0)
+        cursor[j] = 0;
+      else
+        cursor[j] = cursor[j] + tensor.size(j) * (next_idx[j] - idx[j]);
+      // std::cout << "cursor update: " << (next_idx[j] - idx[j]) << " "
+      //           << next_idx[j] << ", " << idx[j]
+      //           << ", next i: " << std::min(i + 1, padded_idx.size() - 1)
+      //           << ", i" << i
+      //           << std::endl;
+    }
+    slices_a.push_back(slice_a);
+    slices_b.push_back(slice_b);
+
+    // check is each "row" of tensors is concatable at dimension "j"
+    // and store the resulting tensor shape for next check at dimension "j + 1"
+    for(int64_t j = result_dim - 1; j >= 0; j--) {
+      const bool single_ele_carry = next_idx[j] - idx[j] == 0 &&
+          next_idx[std::max((int64_t)0, j - 1)] - idx[std::max((int64_t)0, j - 1)] > 0;
+      const bool id_carry = next_idx[j] - idx[j] < 0 || single_ele_carry;
+      const bool last_ten = i == tensors.size() - 1;
+      if (id_carry || last_ten) {
+        // std::cout << "line: 1701 [" << i << "," << j << "] size: " 
+        //           << ten_shapes.size() << " rid: " << idx[j] + 1 << std::endl;
+        
+        if (j == result_dim - 1) {
+          auto itr = ten_shapes.end() - (idx[j] + 1);
+          auto cated_shape = LowDimIdx(*itr);
+          // std::cout << "line: 1707  init_shape: " << cated_shape << std::endl;
+          for(auto a = itr + 1; a < ten_shapes.end(); a++) {
+            // std::cout << "line: 1707  cat(" << cated_shape << ", " << *a << ")" << std::endl;
+            cated_shape = cat_shape(cated_shape, *a, j);
+          }
+          hierar_shapes[j].push_back(cated_shape);
+        } else {
+          auto itr = hierar_shapes[j + 1].end() - (idx[j] + 1);
+          // std::cout << "line: 1715  hierar_shapes[j + 1].size(): " << hierar_shapes[j + 1].size() << std::endl;
+          auto cated_shape = LowDimIdx(*itr);
+          // std::cout << "line: 1715  init_shape: " << cated_shape << std::endl;
+          for (auto a = itr + 1; a < hierar_shapes[j + 1].end(); a++) {
+            // std::cout << "line: 1715  cat(" << cated_shape << ", " << *a << ")" << std::endl;
+            cated_shape = cat_shape(cated_shape, *a, j);
+          }
+          hierar_shapes[j].push_back(cated_shape);
+        }
+      }
+    }
+
+    // std::cout << "-----------------------[" << i << "]-------------------------- " << std::endl;
+  }
+
+  // std::cout << "result_size: " << result_size << std::endl;
+
+  ScalarType output_scalar_type = native::result_type(tensors);
+  Tensor result = at::zeros(
+      result_size,
+      tensors[0].options().dtype(output_scalar_type));
+
+  for (auto i : c10::irange(tensors.size())) {
+    auto slice_a = slices_a[i];
+    auto slice_b = slices_b[i];
+    Tensor tensor = tensors[i];
+    Tensor ten_slic = result;
+    for (auto j: c10::irange(result_dim))
+      ten_slic = ten_slic.slice(j, slice_a[j], slice_b[j]);
+    ten_slic.copy_(tensor);
+  }
+
+  return result;
 }
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {

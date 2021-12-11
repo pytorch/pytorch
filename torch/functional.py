@@ -5,6 +5,7 @@ from collections import namedtuple
 import itertools
 
 import torch
+from torch._C import Value
 import torch.nn.functional as F
 from ._lowrank import svd_lowrank, pca_lowrank
 from .overrides import (
@@ -25,6 +26,7 @@ __all__ = [
     'broadcast_tensors',
     'cartesian_prod',
     'block_diag',
+    'block',
     'cdist',
     'chain_matmul',
     'einsum',
@@ -1227,6 +1229,39 @@ def block_diag(*tensors):
     if has_torch_function(tensors):
         return handle_torch_function(block_diag, tensors, *tensors)
     return torch._C._VariableFunctions.block_diag(tensors)  # type: ignore[attr-defined]
+
+
+def block(nested_tensor_list):
+    """
+    """
+    tensors = []
+    indices = []
+    list_dim = 0
+    ten_dim = 0
+    
+    que = [(nested_tensor_list, [])]
+    while que:
+        list_or_ten, idx = que.pop(0)
+        if isinstance(list_or_ten, torch.Tensor):
+            tensors.append(list_or_ten)
+            indices.append(idx)
+            list_dim = max(len(idx), list_dim)
+            ten_dim = max(list_or_ten.ndim, ten_dim)
+        elif isinstance(list_or_ten, list):
+            que += [(e, idx + [i]) for i, e in enumerate(list_or_ten)]
+        else:
+            raise ValueError("")
+    
+    flat_idx = []
+    for idx in indices:
+        assert len(idx) == list_dim, f"{idx}"
+        flat_idx += idx
+
+    # tensors = nested_tensor_list
+    # print('hello world ', indices)
+    if has_torch_function(tensors):
+        return handle_torch_function(block, tensors, flat_idx, list_dim, *tensors)
+    return torch._C._VariableFunctions.block(tensors, flat_idx, list_dim)  # type: ignore[attr-defined]
 
 
 def cdist(x1, x2, p=2., compute_mode='use_mm_for_euclid_dist_if_necessary'):
