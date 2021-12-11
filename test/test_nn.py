@@ -1846,10 +1846,11 @@ class TestNN(NNTestCase):
         # Check copy works
         copy = parameter_dict.copy()
 
-        # Check all keys are present and have equal values
+        # Check all keys are present and have shallow copied values
         for key in parameter_dict:
             self.assertTrue(key in copy)
             self.assertEqual(parameter_dict[key], copy[key])
+            self.assertIs(parameter_dict[key], copy[key])
         check()
 
         parameter_dict["p20"] = Parameter(torch.randn(10, 10))
