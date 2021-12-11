@@ -502,6 +502,7 @@ std::string generate_code(
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
     bool vectorized,
     int vec_size) {
   TemplateEnv env;

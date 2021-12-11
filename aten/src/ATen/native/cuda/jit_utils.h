@@ -263,6 +263,8 @@ static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
+enum class BinaryFuncVariant {NoScalar, RhsScalar, LhsScalar};
+
 struct NvrtcFunction {
   CUmodule module = CUmodule();
   CUfunction function = nullptr;
@@ -276,6 +278,7 @@ std::string generate_code(
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0);
 
@@ -285,7 +288,7 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 6>& args,
+    std::array<void*, 7>& args,
     const int nBlocks,
     const int kBlockSize);
 
