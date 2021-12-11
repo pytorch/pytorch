@@ -665,7 +665,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.huber_loss'),
         xfail('nn.functional.instance_norm'),
         xfail('nn.functional.poisson_nll_loss'),
-        xfail('nn.functional.conv_transpose3d'),
         xfail('_masked.norm'),
         xfail('_masked.normalize'),
         xfail('nn.functional.bilinear'),
