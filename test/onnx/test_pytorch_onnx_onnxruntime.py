@@ -1027,6 +1027,8 @@ class TestONNXRuntime(unittest.TestCase):
         # Setting any input to None in tracing means that
         # input doesn't exist at all in the exported model, so input_names doesn't match.
         # Thus the remaining tests only work in scripting.
+        # In tracing we'll provide the user with a reasonable error message:
+        # "number of input names provided (3) exceeded number of inputs (2)"
         script_model = torch.jit.script(model)
         self.run_test(script_model, (x, {"y": y, "z": None}), input_names=("x", "y", "z"))
         self.run_test(script_model, (x, {"y": None, "z": z}), input_names=("x", "y", "z"))
@@ -1104,15 +1106,54 @@ class TestONNXRuntime(unittest.TestCase):
     def test_tuple_of_optional_default_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
-                if y[0] is not None:
-                    return x + y[0]
-                if y[1] is not None:
-                    return x + y[1]
+                y0, y1 = y
+                if y0 is not None:
+                    return x + y0
+                if y1 is not None:
+                    return x + y1
                 return x
 
         x = torch.randn(2, 3)
-        y_1 = torch.randn(2, 3)
-        self.run_test(Model(), (x, (None, y_1)))
+        y1 = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y1)))
+
+    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Loop to take optional input
+    def test_loop_none_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, z, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
+                assert x is not None
+                for i in range(z.size(0)):
+                    x = x + 1
+                    y = None
+                return y
+
+        # Need scripting to preserve control flow for this test to be meaningful.
+        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3), None))
+
+    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Loop to take optional input
+    def test_loop_none_input(self):
+        class Model(torch.nn.Module):
+            def forward(self, z, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
+                assert x is not None
+                y: Optional[Tensor] = None
+                for i in range(z.size(0)):
+                    x = x + 1
+                    y = x
+                return y
+
+        # Need scripting to preserve control flow for this test to be meaningful.
+        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3), None))
+
+    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Identity to take optional input
+    def test_control_flow_optional_output(self):
+        class Model(torch.nn.Module):
+            def forward(self, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+                if x is None:
+                    return y, y
+                else:
+                    return x, x
+
+        self.run_test(Model(), (torch.randn(2, 3), None))
 
     def test_primitive_input_integer(self):
         class Model(torch.nn.Module):

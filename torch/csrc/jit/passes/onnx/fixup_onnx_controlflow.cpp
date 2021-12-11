@@ -185,34 +185,57 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   return new_outputs;
 }
 
+// Replaces block output i with an empty onnx::Optional
+// with `type` taken from opt_type.
+// Needed when control flow has multiple branches, one of which
+// is defined by `block` and returns a None and another branch
+// returns not-None since ONNX doesn't have a bare None type, just
+// empty optionals. The passed-in opt_type should be from the other branch.
+void ReplaceBlockOutputWithOptional(
+    OptionalTypePtr opt_type,
+    Block* block,
+    size_t i) {
+  TORCH_INTERNAL_ASSERT(opt_type);
+  TypePtr output_type = opt_type->getElementType();
+  Node* optional = block->owningGraph()->create(::c10::onnx::Optional, 1);
+  optional->ty_(Symbol::attr("type"), output_type);
+  optional->output()->setType(OptionalType::create(output_type));
+  optional->insertBefore(block->return_node());
+  block->outputs().at(i)->replaceAllUsesWith(optional->output());
+}
+
 // Resolving limitation from ONNX that the block output can not be
 // a value from outside the block. Inserting an Identity node inside
 // the block, linking with the value outside as workaround.
 void FixupONNXSubblockOutputs(Node* n) {
   for (Block* block : n->blocks()) {
-    size_t index = 0;
     for (Value* output : block->outputs()) {
       if (output->node()->owningBlock() != block) {
-        if (auto none_output_type = output->type()->cast<NoneType>() &&
-                index + 1 < block->inputs().size()) {
-          auto t = block->inputs().at(index + 1)->type()->cast<OptionalType>();
-          TORCH_INTERNAL_ASSERT(t);
-          Node* opt_node = block->owningGraph()->create(onnx::Optional);
-          opt_node->ty_(Symbol::attr("type"), t->getElementType());
-          opt_node->output()->setType(t);
-          opt_node->insertBefore(block->return_node());
-          block->return_node()->replaceInputWith(output, opt_node->output());
-        } else {
-          Node* id_node = block->owningGraph()->create(onnx::Identity);
-          id_node->insertBefore(block->return_node());
-          id_node->addInput(output);
-          id_node->output()->copyMetadata(output);
-          id_node->copyMetadata(n);
-          block->return_node()->replaceInputWith(output, id_node->output());
-        }
+        Node* id_node = block->owningGraph()->create(onnx::Identity);
+        id_node->insertBefore(block->return_node());
+        id_node->addInput(output);
+        id_node->output()->copyMetadata(output);
+        id_node->copyMetadata(n);
+        block->return_node()->replaceInputWith(output, id_node->output());
       }
     }
   }
+}
+
+void FixupONNXLoopBlockOutputs(Node* n) {
+  for (Block* block : n->blocks()) {
+    for (const auto i : c10::irange(block->outputs().size())) {
+      if (block->outputs().at(i)->type()->cast<NoneType>()) {
+        ReplaceBlockOutputWithOptional(
+            // input i+1 corresponds to output i b/c input 0 is the iter
+            // condition.
+            block->inputs().at(i + 1)->type()->cast<OptionalType>(),
+            block,
+            i);
+      }
+    }
+  }
+  FixupONNXSubblockOutputs(n);
 }
 
 } // anonymous namespace
@@ -248,6 +271,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
     cast_node->copyMetadata(node);
   }
 
+  // ONNX Loop inputs cannot be None / null, so replace with Optional.
   size_t index = 0;
   for (auto input : node->inputs()) {
     if (auto none_input = input->type()->cast<NoneType>()) {
@@ -266,7 +290,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
   FixupONNXLoopNodeInputs(node);
-  FixupONNXSubblockOutputs(node);
+  FixupONNXLoopBlockOutputs(node);
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
@@ -563,30 +587,14 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
       }
     }
 
-    if (then_none_type || else_none_type) {
-      if (then_none_type) {
-        auto type_ = node->outputs().at(i)->type();
-        if (auto opt = type_->cast<OptionalType>())
-          type_ = opt->getElementType();
-        auto const_node =
-            then_block->owningGraph()->create(::c10::onnx::Optional, 1);
-        const_node->ty_(Symbol::attr("type"), type_);
-        const_node->output()->setType(OptionalType::create(type_));
-        const_node->insertBefore(then_block->return_node());
-        then_block->outputs().at(i)->replaceAllUsesWith(const_node->output());
-      }
+    if (then_none_type) {
+      ReplaceBlockOutputWithOptional(
+          node->output(i)->type()->cast<OptionalType>(), then_block, i);
+    }
 
-      if (else_none_type) {
-        auto type_ = node->outputs().at(i)->type();
-        if (auto opt = type_->cast<OptionalType>())
-          type_ = opt->getElementType();
-        auto const_node =
-            else_block->owningGraph()->create(::c10::onnx::Optional, 1);
-        const_node->ty_(Symbol::attr("type"), type_);
-        const_node->output()->setType(OptionalType::create(type_));
-        const_node->insertBefore(else_block->return_node());
-        else_block->outputs().at(i)->replaceAllUsesWith(const_node->output());
-      }
+    if (else_none_type) {
+      ReplaceBlockOutputWithOptional(
+          node->output(i)->type()->cast<OptionalType>(), else_block, i);
     }
   }
 }

@@ -2346,10 +2346,9 @@ size_t ONNXAssignOutputShape(
   } else if (THPUtils_checkString(output_obj)) {
     // Ignore string, since they are not supported as output in ONNX.
   } else if (PyNone_Check(output_obj)) {
-    // For cases with tracing, simply ignore NoneType outputs
-    // For cases with scripting, TODO: Add logic to handle NoneType outputs
-    // when such output types are supported. For now test cases with NoneType
-    // outputs have been disabled.
+    // We can't get any info from None, so just skip it.
+    // TODO: Discuss with Bowen.
+    outputs_index++;
   } else {
     std::string msg =
         ("Model output has unsupported type. See "

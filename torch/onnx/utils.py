@@ -329,7 +329,6 @@ def _decide_constant_folding(do_constant_folding, operator_export_type, training
 
 
 def _signature(model) -> inspect.Signature:
-    # Either model.forward or model itself should be callable.
     should_be_callable = getattr(model, "forward", model)
     if callable(should_be_callable):
         return inspect.signature(should_be_callable)
@@ -491,11 +490,11 @@ def _get_example_outputs(model, args):
         input_args = input_args[:-1]
 
     example_outputs = model(*input_args, **input_kwargs)
-    if isinstance(example_outputs, (torch.Tensor, int, float, bool)):
-        example_outputs = (example_outputs,)
-
     if isinstance(example_outputs, list):
         example_outputs = [example_outputs]
+    elif not isinstance(example_outputs, tuple):
+        example_outputs = (example_outputs,)
+
     return example_outputs
 
 
