@@ -498,7 +498,8 @@ std::string generate_code(
     int nTensors,
     const std::string& func,
     const std::string& name,
-    const std::string& common_type,
+    const std::string& f_inputs_type,
+    const std::string& compute_type,
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
@@ -509,14 +510,14 @@ std::string generate_code(
   env.s("index_type", "unsigned int");
   const int nInputs = nTensors - 1;
   env.s("nInputs", std::to_string(nInputs));
-  env.s("scalar_type", common_type);
+  env.s("scalar_type", f_inputs_type);
   env.s("functor", func);
   env.s("name", name);
   std::stringstream declare_load_arrays;
   for (int i = 0; i < nInputs; i++) {
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
-    declare_load_arrays << common_type << " arg" << std::to_string(i)
+    declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
                         << "[" << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
@@ -549,7 +550,7 @@ std::string generate_code(
     std::stringstream load_inputs;
     for (int i = 0; i < nInputs; i++) {
       auto i_string = std::to_string(i);
-      load_inputs << "arg" << i_string << "[j] = l.load<" << common_type
+      load_inputs << "arg" << i_string << "[j] = l.load<" << f_inputs_type
                   << ">(data[" << std::to_string(i + nOutputs)
                   << "], input_offsets[" << i_string << "], " << i_string
                   << ");\n";
@@ -588,7 +589,7 @@ std::string generate_code(
   std::stringstream load_unrolled_inputs;
   for (const auto i: c10::irange(nInputs)){
     auto i_string = std::to_string(i);
-    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << common_type
+    load_unrolled_inputs << "arg" << i_string << "[j] = load<" << f_inputs_type
       << ">(data[" << std::to_string(i + nOutputs) << "], linear_idx);\n";
   }
   env.s("load_unrolled_inputs", load_unrolled_inputs.str());

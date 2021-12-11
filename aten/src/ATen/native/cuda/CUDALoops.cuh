@@ -125,7 +125,7 @@ static inline void launch_vectorized_kernel(int64_t N, const func_t& f, array_t 
 
 template<char const *name,
          typename result_type,
-         typename compute_type,
+         typename f_inputs_type,
          at::cuda::jit::BinaryFuncVariant scalar_pos,
          typename array_t,
          typename inp_calc_t,
@@ -134,7 +134,7 @@ template<char const *name,
          typename storer_t>
 static inline void launch_jitted_unrolled_kernel(
   DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
-  inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous, at::opmath_type<compute_type> scalar_val) {
+  inp_calc_t ic, out_calc_t oc, loader_t l, storer_t s, bool contiguous, at::opmath_type<f_inputs_type> scalar_val) {
 
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
@@ -151,10 +151,11 @@ static inline void launch_jitted_unrolled_kernel(
                                                      memory::LoadWithoutCast>() || !std::is_same<decltype(s),
                                                      memory::StoreWithoutCast>();
       std::string string_name{name};
-      std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
+      std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
+      std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
-                                               compute_type_str, result_type_str,
+                                               f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting, scalar_pos);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
     }
@@ -178,15 +179,15 @@ static inline void launch_jitted_unrolled_kernel(
 template<
   char const *name,
   typename result_type,
-  typename compute_type,
+  typename f_inputs_type,
   int arity,
   at::cuda::jit::BinaryFuncVariant scalar_pos,
   typename array_t>
 static inline void launch_jitted_vectorized_kernel(DeviceIndex dev_idx, int64_t N, const std::string& f, array_t data,
-at::opmath_type<compute_type> scalar_val) {
+at::opmath_type<f_inputs_type> scalar_val) {
   TORCH_INTERNAL_ASSERT(N > 0 && N <= std::numeric_limits<int32_t>::max());
   const int64_t grid = (N + block_work_size() - 1) / block_work_size();
-  const int vec_size = memory::jitted_can_vectorize_up_to<result_type, compute_type, arity>(data);
+  const int vec_size = memory::jitted_can_vectorize_up_to<result_type, f_inputs_type, arity>(data);
 
   // Different kernels are compiled depending on what we're vectorizing up to (1, 2 or 4 elements)
   //   fn_ptr is set to the appropriate function based on the vec size and GPU used
@@ -216,10 +217,11 @@ at::opmath_type<compute_type> scalar_val) {
     if (!fn_ptr->function) {
       constexpr int nTensors = array_t::size();
       std::string string_name{name};
-      std::string compute_type_str = at::cuda::jit::typeName<compute_type>();
+      std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
+      std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
       auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
-                                               compute_type_str, result_type_str,
+                                               f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                scalar_pos,
                                                vectorized, vec_size);
