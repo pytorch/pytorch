@@ -337,6 +337,13 @@ const auto gcd_string = jiterator_stringify(
   }
 ); // gcd_string
 
+const auto zeta_string = jiterator_stringify(
+  template<typename T>
+  T zeta(const T a_in, const T b_in) {
+    return a_in + b_in;
+  }
+); //zeta_string
+
 // A jittable version of the i1 operation
 // See note [Jiterator]
 const auto i1_string = jiterator_stringify(
