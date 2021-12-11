@@ -185,6 +185,15 @@ std::vector<Value*> ConvertSequenceDependencies(Node* node, int opset_version) {
   return new_outputs;
 }
 
+Node* ONNXOptionalNode(OptionalTypePtr opt_type, Graph* g) {
+  TORCH_INTERNAL_ASSERT(opt_type);
+  TypePtr elem_type = opt_type->getElementType();
+  Node* opt_node = g->create(::c10::onnx::Optional, 1);
+  opt_node->ty_(Symbol::attr("type"), elem_type);
+  opt_node->output()->setType(OptionalType::create(elem_type));
+  return opt_node;
+}
+
 // Replaces block output i with an empty onnx::Optional
 // with `type` taken from opt_type.
 // Needed when control flow has multiple branches, one of which
@@ -195,13 +204,15 @@ void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
     size_t i) {
-  TORCH_INTERNAL_ASSERT(opt_type);
-  TypePtr output_type = opt_type->getElementType();
-  Node* optional = block->owningGraph()->create(::c10::onnx::Optional, 1);
-  optional->ty_(Symbol::attr("type"), output_type);
-  optional->output()->setType(OptionalType::create(output_type));
-  optional->insertBefore(block->return_node());
-  block->outputs().at(i)->replaceAllUsesWith(optional->output());
+  if (!opt_type) { // TODO: Remove debug output
+    std::cerr << "ReplaceBlockOutputWithOptional:" << std::endl;
+    std::cerr << "block->owningGraph = " << *(block->owningGraph())
+              << std::endl;
+    std::cerr << "i = " << i << std::endl;
+  }
+  Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
+  opt_node->insertBefore(block->return_node());
+  block->outputs().at(i)->replaceAllUsesWith(opt_node->output());
 }
 
 // Resolving limitation from ONNX that the block output can not be
@@ -223,12 +234,15 @@ void FixupONNXSubblockOutputs(Node* n) {
 }
 
 void FixupONNXLoopBlockOutputs(Node* n) {
+  bool printed = false;
   for (Block* block : n->blocks()) {
-    for (const auto i : c10::irange(block->outputs().size())) {
+    // output 0 is continue_condition, never None.
+    for (const auto i : c10::irange(1, block->outputs().size())) {
       if (block->outputs().at(i)->type()->cast<NoneType>()) {
         ReplaceBlockOutputWithOptional(
-            // input i+1 corresponds to output i b/c input 0 is the iter
-            // condition.
+            // input i+1 corresponds to output i b/c inputs 0 and 1
+            // are max_trip_count, start_condition and output 0 is
+            // continue_condition.
             block->inputs().at(i + 1)->type()->cast<OptionalType>(),
             block,
             i);
@@ -271,19 +285,27 @@ void FixupONNXLoopNodeInputs(Node* node) {
     cast_node->copyMetadata(node);
   }
 
-  // ONNX Loop inputs cannot be None / null, so replace with Optional.
-  size_t index = 0;
-  for (auto input : node->inputs()) {
+  // If loop input is None, infer optional type from sub block input.
+  // Happens when the loop takes in None and outputs not-None.
+  // Inputs 0 and 1 are max_trip_count, start_condition. Skip them
+  // since compiler should ensure they're never None.
+  for (const auto i : c10::irange(2, node->inputs().size())) {
+    Value* input = node->inputs().at(i);
     if (auto none_input = input->type()->cast<NoneType>()) {
-      auto t = sub_block->inputs().at(index)->type()->cast<OptionalType>();
-      TORCH_INTERNAL_ASSERT(t);
-      Node* opt_node = graph->create(onnx::Optional);
-      opt_node->ty_(Symbol::attr("type"), t->getElementType());
-      opt_node->output()->setType(t);
+      if (!sub_block->inputs()
+               .at(i)
+               ->type()
+               ->cast<OptionalType>()) { // TODO: Remove debug output
+        std::cerr << "FixupONNXLoopNodeInputs:" << std::endl;
+        std::cerr << "sub_block->owningGraph " << *(sub_block->owningGraph())
+                  << std::endl;
+        std::cerr << "i = " << i << std::endl;
+      }
+      Node* opt_node = ONNXOptionalNode(
+          sub_block->inputs().at(i)->type()->cast<OptionalType>(), graph);
       opt_node->insertBefore(node);
       node->replaceInputWith(input, opt_node->output());
     }
-    index++;
   }
 }
 
@@ -358,22 +380,14 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<NoneType>()) {
-    const TypePtr& t = TensorType::createContiguous(
-        at::kLong,
-        at::kCPU,
-        {
-            0,
-        });
-
+    const TypePtr& t = TensorType::createContiguous(at::kLong, at::kCPU, {0});
     const_node = graph->create(::c10::onnx::Optional, 1);
     const_node->ty_(Symbol::attr("type"), t);
     const_node->output()->setType(OptionalType::create(t));
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
-    const_node = graph->create(::c10::onnx::Optional, 1);
-    const_node->ty_(Symbol::attr("type"), output_type->getElementType());
-    const_node->output()->setType(OptionalType::create(output_type));
+    ONNXOptionalNode(output_type, graph);
   } else {
-    std::cerr << "Warning: Handling Uninitialized node of type "
+    std::cerr << "Warning: Inferring type for prim::Uninitialized node from "
               << other_output->type()->repr_str() << " not supported."
               << std::endl;
   }
@@ -632,13 +646,15 @@ void FixupONNXControlflowNodeOutputs(Node* n) {
       for (auto i : c10::irange(n->outputs().size())) {
         auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
         if (i < loop_carried_output_size) {
-          if (auto none_type = n->output(i)->type()->cast<NoneType>()) {
-            n->output(i)->setType(
-                n->blocks().at(0)->inputs().at(i + 2)->type());
-            n->blocks().at(0)->outputs().at(i + 1)->setType(
-                n->blocks().at(0)->inputs().at(i + 2)->type());
-          } else
-            n->output(i)->setType(type);
+          // TODO: Figure out if this is needed.
+          // Find a test that fails without it, then re-enable it.
+          // if (auto none_type = n->output(i)->type()->cast<NoneType>()) {
+          //   n->output(i)->setType(
+          //       n->blocks().at(0)->inputs().at(i + 2)->type());
+          //   n->blocks().at(0)->outputs().at(i + 1)->setType(
+          //       n->blocks().at(0)->inputs().at(i + 2)->type());
+          // } else
+          n->output(i)->setType(type);
         } else {
           if (auto t_type = type->cast<TensorType>()) {
             auto sizes = t_type->symbolic_sizes().sizes();

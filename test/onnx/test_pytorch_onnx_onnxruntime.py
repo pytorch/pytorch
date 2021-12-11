@@ -96,7 +96,8 @@ def convert_to_onnx(model, input=None, opset_version=9, do_constant_folding=True
                        dynamic_axes=dynamic_axes,
                        input_names=input_names, output_names=output_names,
                        fixed_batch_size=fixed_batch_size, training=training,
-                       onnx_shape_inference=onnx_shape_inference)
+                       onnx_shape_inference=onnx_shape_inference,
+                       verbose=True)
 
     # compute onnxruntime output prediction
     so = onnxruntime.SessionOptions()
@@ -1105,7 +1106,11 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional_default_tensor(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))):
+            def forward(
+                self,
+                x,
+                y: Tuple[Optional[Tensor], Optional[Tensor]] = (torch.zeros(2, 3), torch.zeros(2, 3))
+            ):
                 y0, y1 = y
                 if y0 is not None:
                     return x + y0
@@ -1117,11 +1122,10 @@ class TestONNXRuntime(unittest.TestCase):
         y1 = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y1)))
 
-    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Loop to take optional input
+    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Loop to take optional input
     def test_loop_none_output(self):
         class Model(torch.nn.Module):
-            def forward(self, z, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
-                assert x is not None
+            def forward(self, z, x, y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
                 for i in range(z.size(0)):
                     x = x + 1
                     y = None
@@ -1130,24 +1134,41 @@ class TestONNXRuntime(unittest.TestCase):
         # Need scripting to preserve control flow for this test to be meaningful.
         self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3), None))
 
-    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Loop to take optional input
+    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Loop to take optional input
     def test_loop_none_input(self):
+        # TODO: I think this is wrong right now.
+        # Produces ONNX:
+        # graph(%y.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+        #     %2 : Bool(device=cpu) = onnx::Constant[value={1}]()
+        #     %3 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={3}]() # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:31
+        #     %4 : Tensor? = onnx::Optional[type=Tensor]() # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:16
+        #     %z : Float(*, *, strides=[3, 1], device=cpu), %y.4 : Float(*, *, strides=[3, 1], device=cpu) = onnx::Loop(%3, %2, %4, %y.1) # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:16
+        #         block0(%i : Long(requires_grad=0, device=cpu), %cond : Bool(device=cpu), %z.7 : Tensor?, %y.11 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
+        #         %11 : Float(requires_grad=0, device=cpu) = onnx::Constant[value={1}]()
+        #         %y : Float(*, *, strides=[3, 1], device=cpu) = onnx::Add(%y.11, %11) # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1093:24
+        #         %13 : Bool(device=cpu) = onnx::Identity(%2)
+        #         -> (%13, %y, %y)
+        #     return (%z)
+        # I think the type of %z should be optional, but does not appear to be.
         class Model(torch.nn.Module):
-            def forward(self, z, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
-                assert x is not None
-                y: Optional[Tensor] = None
-                for i in range(z.size(0)):
-                    x = x + 1
-                    y = x
-                return y
+            def forward(self, x, y) -> Optional[Tensor]:
+                z: Optional[Tensor] = None
+                for i in range(x.size(0)):
+                    y = y + 1
+                    z = y
+                return z
 
         # Need scripting to preserve control flow for this test to be meaningful.
-        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3), None))
+        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3)))
 
     @skipIfUnsupportedMinOpsetVersion(16)  # Needs Identity to take optional input
-    def test_control_flow_optional_output(self):
+    def test_if_optional_output(self):
         class Model(torch.nn.Module):
-            def forward(self, x: Optional[Tensor] = torch.zeros(2, 3), y: Optional[Tensor] = torch.zeros(2, 3)) -> Tuple[Optional[Tensor], Optional[Tensor]]:
+            def forward(
+                self,
+                x: Optional[Tensor] = torch.zeros(2, 3),
+                y: Optional[Tensor] = torch.zeros(2, 3)
+            ) -> Tuple[Optional[Tensor], Optional[Tensor]]:
                 if x is None:
                     return y, y
                 else:
