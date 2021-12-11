@@ -855,7 +855,7 @@ class TestGradients(TestCase):
         self._skip_helper(op, device, dtype)
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
-        self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+        self._check_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), "bwgrad_bwgrad")
 
     def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
