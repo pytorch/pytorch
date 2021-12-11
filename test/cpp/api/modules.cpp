@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <c10/util/irange.h>
 #include <torch/torch.h>
 
 #include <test/cpp/api/support.h>
@@ -1148,7 +1149,7 @@ TEST_F(ModulesTest, LayerNorm) {
   s.backward();
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(y.size(i), 2);
   }
 
@@ -1166,7 +1167,7 @@ TEST_F(ModulesTest, GroupNorm) {
   s.backward();
   ASSERT_EQ(y.ndimension(), 2);
   ASSERT_EQ(s.ndimension(), 0);
-  for (auto i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     ASSERT_EQ(y.size(i), 2);
   }
 
@@ -2595,7 +2596,7 @@ TEST_F(ModulesTest, Softmax) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2607,7 +2608,7 @@ TEST_F(ModulesTest, Softmin) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(-input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::exp(-input[i]) / sum[i];
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2619,7 +2620,7 @@ TEST_F(ModulesTest, LogSoftmax) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 2; i++) {
+  for (const auto i : c10::irange(2)) {
     auto expected = torch::log(torch::exp(input[i]) / sum[i]);
     ASSERT_TRUE(torch::allclose(output[i], expected));
   }
@@ -2656,7 +2657,7 @@ TEST_F(ModulesTest, AdaptiveLogSoftmaxWithLoss) {
     auto logprob_out = asfm->log_prob(x);
     NLLLoss nll_loss;
 
-    for (int64_t v = 0; v < 4; ++v) {
+    for (const auto v : c10::irange(4)) {
       auto y = torch::full({4}, v, torch::kLong);
       auto asm_out = asfm(x, y);
       auto out = asm_out.output;
@@ -2675,10 +2676,10 @@ TEST_F(ModulesTest, Softmax2d) {
   auto output = m(input);
   auto sum = torch::sum(torch::exp(input), 1);
 
-  for (int i = 0; i < 1; i++) {
-    for (int j = 0; j < 2; j++) {
-      for (int k = 0; k < 3; k++) {
-        for (int l = 0; l < 4; l++) {
+  for (const auto i : c10::irange(1)) {
+    for (const auto j : c10::irange(2)) {
+      for (const auto k : c10::irange(3)) {
+        for (const auto l : c10::irange(4)) {
           auto expected = torch::exp(input[i][j][k][l]) / sum[i][k][l];
           ASSERT_TRUE(torch::allclose(output[i][j][k][l], expected));
         }
@@ -3389,8 +3390,8 @@ namespace detail {
     TORCH_INTERNAL_ASSERT(a.size(0) == b.size(0));
     TORCH_INTERNAL_ASSERT(a.size(1) == b.size(1));
     auto retval = torch::zeros({a.size(0), a.size(1), a.size(2), b.size(3)}, torch::kFloat32);
-    for (int i = 0; i < a.size(0); i++) {
-      for (int j = 0; j < a.size(1); j++) {
+    for (const auto i : c10::irange(a.size(0))) {
+      for (const auto j : c10::irange(a.size(1))) {
         retval[i][j] = torch::matmul(a[i][j], b[i][j]);
       }
     }
@@ -3399,9 +3400,9 @@ namespace detail {
 
   torch::Tensor _softmax(const torch::Tensor& x) {
     auto output = torch::zeros(x.sizes());
-    for (int i = 0; i < x.size(0); i++) {
-      for (int j = 0; j < x.size(1); j++) {
-        for (int k = 0; k < x.size(2); k++) {
+    for (const auto i : c10::irange(x.size(0))) {
+      for (const auto j : c10::irange(x.size(1))) {
+        for (const auto k : c10::irange(x.size(2))) {
           const auto& x_curr = x[i][j][k];
           const auto e_x = torch::exp(x_curr - torch::max(x_curr));
           output[i][j][k] = e_x / torch::sum(e_x);
@@ -3424,10 +3425,10 @@ namespace detail {
     const auto s1 = QKT.size(2);
     const auto s2 = QKT.size(3);
     if (unseen_mask.defined() || key_padding_mask.defined()) {
-      for (int i = 0; i < b1; i++) {
-        for (int j = 0; j < b2; j++) {
-          for (int m = 0; m < s1; m++) {
-            for (int n = 0; n < s2; n++) {
+      for (const auto i : c10::irange(b1)) {
+        for (const auto j : c10::irange(b2)) {
+          for (const auto m : c10::irange(s1)) {
+            for (const auto n : c10::irange(s2)) {
               if (unseen_mask.defined() && unseen_mask[m][n].item<double>() == 0) {
                 QKT[i][j][m][n] = -std::numeric_limits<double>::infinity();
               }
@@ -3475,7 +3476,8 @@ namespace detail {
     std::uniform_int_distribution<int> d_2_10(2, 10);
     std::uniform_int_distribution<int> d_3_10(3, 10);
     bool registration_checked = false;
-    for (int i = 0; i < 100; i++) {
+    for (const auto i : c10::irange(100)) {
+      (void)i; // Suppress unused variable warning
       const auto batch_sz = d_2_10(generator);
       const auto seq_len = d_2_10(generator);
       const auto d_head = d_3_10(generator);
