@@ -88,7 +88,11 @@ static DynamicLayer popDynamicLayer() {
   dynamicLayerStack.pop_back();
 
   if (dynamicLayerStack.size() == 0) {
-    // std::cout << "DynamicLayer off" << std::endl;
+#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
+    if (c10::show_dispatch_trace_enabled()) {
+      std::cout << "DynamicLayer off" << std::endl;
+    }
+#endif
     c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, false);
     c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, false);
   }
@@ -247,6 +251,19 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
   }
 }
 
+std::ostream& operator<< (std::ostream& os, const DynamicLayer& layer) {
+  os << layer.layerId() << ":" << layer.key();
+  return os;
+}
+std::ostream& operator<< (std::ostream& os, const std::vector<DynamicLayer>& dls) {
+  os << "DynamicLayerStack[ ";
+  for (const auto& layer : dls) {
+    os << layer << " ";
+  }
+  os << "]";
+  return os;
+}
+
 static bool allTensors(
     ArrayRef<IValue> args,
     std::function<bool(const Tensor&)> pred) {
@@ -376,7 +393,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   auto& dynamicLayerStack = dynamicLayerStackAccessor();
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
   if (c10::show_dispatch_trace_enabled()) {
-    std::cout << "DLS size: " << dynamicLayerStack.size() << std::endl;
+    std::cout << dynamicLayerStack << std::endl;
   }
 #endif
   if (dynamicLayerStack.size() == 0) {
