@@ -595,8 +595,8 @@ def acc_ops_sign(
 
     if trt.__version__ >= "8.2" and not network.has_implicit_batch_dimension:
         input_val = kwargs["input"]
-        operation_type = trt.ActivationType.SIGN
-        return add_activation_layer(network, input_val, operation_type, target, name)
+        operation_type = trt.UnaryOperation.SIGN
+        return add_unary_layer(network, input_val, operation_type, target, name)
 
     return sign(network, input_val, target, name)
 
