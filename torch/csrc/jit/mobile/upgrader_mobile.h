@@ -22,7 +22,7 @@ struct Upgrader {
 };
 
 // From operator_versions.yaml
-const std::unordered_map<std::string, std::vector<Upgrader>>
+TORCH_API const std::unordered_map<std::string, std::vector<Upgrader>>
 getOperatorVersionMapForMobile();
 
 struct OperatorString {
@@ -36,7 +36,7 @@ struct ByteCodeFunctionWithOperator {
   std::vector<OperatorString> operators;
 };
 
-std::vector<ByteCodeFunctionWithOperator> getUpgraderBytecodeList();
+TORCH_API std::vector<ByteCodeFunctionWithOperator> getUpgraderBytecodeList();
 
 } // namespace jit
 } // namespace torch
