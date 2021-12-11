@@ -685,7 +685,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       // indices are flattened, but not buffer
       if (indices.size() == 1) {
         if (dims.size() != buf->strides().size()) {
-          malformed_input(
+          throw malformed_input(
               "Number of dimensions did not match number of strides", buf);
         }
         ExprPtr buf_size_expr = immLike(dims[0], 1);
