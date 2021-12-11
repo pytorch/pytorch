@@ -688,15 +688,19 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           throw malformed_input(
               "Number of dimensions did not match number of strides", buf);
         }
-        ExprPtr buf_size_expr = immLike(dims[0], 1);
-        ExprPtr negative_one = immLike(dims[0], -1);
-        for (const auto& i : c10::irange(dims.size())) {
-          buf_size_expr = alloc<Add>(
-              buf_size_expr,
-              alloc<Mul>(alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+        size_t buf_size = 1;
+        if (dims.size() > 0) {
+          ExprPtr buf_size_expr = immLike(dims[0], 1);
+          ExprPtr negative_one = immLike(dims[0], -1);
+          for (const auto& i : c10::irange(dims.size())) {
+            buf_size_expr = alloc<Add>(
+                buf_size_expr,
+                alloc<Mul>(
+                    alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+          }
+          buf_size_expr->accept(this);
+          buf_size = value().intValue();
         }
-        buf_size_expr->accept(this);
-        int64_t buf_size = value().intValue();
         indices[0]->accept(this);
         const auto& index_values = indexVec(value());
         for (auto& j : index_values) {
