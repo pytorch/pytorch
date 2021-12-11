@@ -2,6 +2,7 @@ from itertools import product
 import unittest
 
 import torch
+from torch.testing._internal.common_utils import TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase
 from itertools import product
 
@@ -13,6 +14,7 @@ if __name__ == "__main__":
     )
 
 TEST_CUDA = torch.cuda.is_available()
+TEST_MKL
 
 
 class TestDeviceAnalysis(JitTestCase):
@@ -21,6 +23,7 @@ class TestDeviceAnalysis(JitTestCase):
         cls.cpu = torch.device("cpu")
         cls.cuda = torch.device("cuda")
         cls.vulkan = torch.device("vulkan")
+        cls.mkldnn = torch.device("mkldnn")
         cls.device_types = [cls.cpu, cls.cuda, cls.vulkan]
 
     @staticmethod
@@ -99,10 +102,10 @@ class TestDeviceAnalysis(JitTestCase):
         def mul(x, y):
             return x * y
 
-        def linear(x, y):
-            return torch.nn.functional.linear(x, y)
+        def add(x, y):
+            return x + y
 
-        fns = [mul, linear]
+        fns = [mul, add]
 
         input_shapes = [
             ((1, 2, 2), (2, 2)),  # Different dim, non-zerodim
@@ -114,19 +117,22 @@ class TestDeviceAnalysis(JitTestCase):
             with self.subTest(
                 f"{fn.__name__} \n shapes: {shapes}, \n devices: {devices}"
             ):
-                in0 = torch.random(shapes[0], device=devices[0])
-                in1 = torch.random(shapes[1], device=devices[1])
+                in0 = torch.rand(shapes[0], device=devices[0])
+                in1 = torch.rand(shapes[1], device=devices[1])
 
                 try:
                     out = fn(in0, in1)
-                except Exception:
-                    continue
+                except Exception as e:
+                    if devices[0] == devices[1]:
+                        raise e
+                    else:
+                        continue  # Ignore eager failures on different devices
 
                 self.assert_device_equal(fn, devices, out.device, shapes)
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
-        self.zerodim_test_core((self.cpu, self.cpu))
+        self.zerodim_test_core([(self.cpu, self.cpu)])
 
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_zerodim_gpu(self):
