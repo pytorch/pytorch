@@ -2174,28 +2174,6 @@ TEST(LiteInterpreterUpgraderTest, DivScalarInplaceIntV2) {
   ASSERT_TRUE(actual_output.equal(expect_output));
 }
 
-// TEST(LiteInterpreterUpgraderTest, DivTensorOutV2Bytecode) {
-//   auto& function_and_op = getUpgraderBytecodeList()[0];
-//   if (function_and_op.function.get_code()->operators_.empty()) {
-//     for (const auto& op : function_and_op.operators) {
-//       function_and_op.function.append_operator(
-//           op.name,
-//           op.overload_name,
-//           op.num_specified_args,
-//           caffe2::serialize::kMaxSupportedFileFormatVersion);
-//     }
-//   }
-
-//   std::vector<IValue> inputs{
-//       IValue(6 * torch::ones({1})),
-//       IValue(3 * torch::ones({1})),
-//       IValue(torch::empty({1}))};
-
-//   function_and_op.function.run(inputs);
-//   auto output = inputs[0];
-//   ASSERT_EQ(output, at::tensor(1));
-// }
-
 #endif // !defined(FB_XPLAT_BUILD)
 
 TEST(LiteInterpreterUpgraderTest, Upgrader) {
