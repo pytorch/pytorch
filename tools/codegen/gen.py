@@ -1302,19 +1302,22 @@ def gen_source_files(
 
         if per_operator_headers:
             def operator_headers() -> List[str]:
-                return list(set(
-                    (f"""
-#include <ATen/ops/{fn.root_name}_native.h>
-""" if dispatch_key != DispatchKey.CompositeExplicitAutograd else f"""\
-#include <ATen/ops/{fn.root_name}.h>
-#include <ATen/ops/{fn.root_name}_native.h>
-""") + (f"""\
-#include <ATen/ops/{fn.root_name}_{dispatch_namespace}_dispatch.h>
-""" if dispatch_key in functions_keys else "")
-                    for fn in native_functions if backend_index.has_kernel(fn) or (
+                headers = []
+                for fn in native_functions:
+                    is_registered = backend_index.has_kernel(fn) or (
                         fn.structured and dispatch_key in
                         (DispatchKey.Meta, DispatchKey.CompositeExplicitAutograd))
-                ))
+                    if not is_registered:
+                        continue
+
+                    headers.append(f"#include <ATen/ops/{fn.root_name}_native.h>")
+                    if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                        headers.append(f"#include <ATen/ops/{fn.root_name}.h>")
+                    if dispatch_key in functions_keys:
+                        headers.append(
+                            f"#include <ATen/ops/{fn.root_name}_{dispatch_namespace}_dispatch.h>")
+
+                return sorted(set(headers))
         else:
             def operator_headers() -> List[str]:
                 headers = ["#include <ATen/NativeFunctions.h>"]
