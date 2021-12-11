@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <unordered_map>
 
