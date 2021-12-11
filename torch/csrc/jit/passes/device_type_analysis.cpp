@@ -252,10 +252,12 @@ struct DeviceTypePropagationPass {
   void buildRuleRegistry() {
     // building a registry for all of the custom Device Type rules
     static const OperatorMap<PropRule> temp_registry{
-        {"aten::cpu(Tensor self) -> Tensor)",
+        {"aten::cpu(Tensor self) -> Tensor",
          setReturnstoDeviceRule(DeviceType::CPU)},
-        {"aten::cuda(Tensor self) -> Tensor)",
+        {"aten::cuda(Tensor self) -> Tensor",
          setReturnstoDeviceRule(DeviceType::CUDA)},
+        {"aten::to_mkldnn(Tensor self, ScalarType? dtype) -> Tensor",
+         setReturnstoDeviceRule(DeviceType::MKLDNN)},
     };
     device_prop_registry_ =
         std::make_unique<OperatorMap<PropRule>>(temp_registry);
