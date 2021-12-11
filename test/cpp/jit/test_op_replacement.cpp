@@ -23,6 +23,9 @@ TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
       ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
       ->check_count("aten::div(%2, %1, %4)", 1, /*exactly=*/true)
       ->run(*g);
+
+  EXPECT_TRUE(g->get_op_version().has_value());
+  EXPECT_EQ(g->get_op_version().value(), 4);
 }
 
 TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
@@ -54,6 +57,9 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
       .check("prim::If")
       ->check_count("aten::div", 2, false)
       ->run(*g);
+
+  EXPECT_TRUE(g->get_op_version().has_value());
+  EXPECT_EQ(g->get_op_version().value(), 4);
 }
 
 TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
@@ -74,6 +80,9 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
   testing::FileCheck()
       .check_count("aten::sub", 1, false)
       ->run(*g);
+
+  EXPECT_TRUE(g->get_op_version().has_value());
+  EXPECT_EQ(g->get_op_version().value(), 3);
 }
 
 } // namespace jit

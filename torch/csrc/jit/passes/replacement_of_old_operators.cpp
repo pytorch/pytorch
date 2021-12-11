@@ -24,12 +24,15 @@ struct OldOpsReplacer {
     auto current_version = graph_->get_op_version().value();
     DepthFirstGraphNodeIterator graph_it(graph_);
     Node* node = graph_it.next();
+    int updated_version = 0;
     while (node) {
       if (auto schema = node->maybeSchema()) {
         auto schema_name = schema->name() + (schema->overload_name() != "" ? "." + schema->overload_name() : "");
         // this implies there was a version bump because of this operator
-        auto version_entry = operator_version_map.find(schema_name);
-        if (version_entry != operator_version_map.end()) {
+        auto version_entry = kOperatorVersionMap.find(schema_name);
+        if (version_entry != kOperatorVersionMap.end()) {
+          const auto& entry = version_entry->second;
+          updated_version = std::max(updated_version, entry[entry.size() - 1].bumped_at_version);
           auto upgrader_entry =
               findUpgrader(version_entry->second, current_version);
           if (!upgrader_entry.has_value()) {
@@ -64,7 +67,7 @@ struct OldOpsReplacer {
 
     // now that we updated the graph, we want to bump the
     // graph version too.
-    graph_->set_op_version(caffe2::serialize::kProducedFileFormatVersion);
+    graph_->set_op_version(updated_version);
   }
 
   std::shared_ptr<Graph> graph_;
