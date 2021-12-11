@@ -9,7 +9,7 @@
 #include <sstream>
 #include <forward_list>
 #include <tuple>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32
 #include <ctime>
