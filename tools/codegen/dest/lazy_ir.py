@@ -246,7 +246,6 @@ class GenLazyShapeInferenceDefinition:
     tensor_class: str
 
     @method_with_native_function
-    # def gen_lazy_shape_inference_decl(f: NativeFunction, backend_index: BackendIndex, tensor_class: str) -> List[str]:
     def __call__(self, f: NativeFunction) -> List[str]:
         sig = kernel_signature(f, self.backend_index)
 
