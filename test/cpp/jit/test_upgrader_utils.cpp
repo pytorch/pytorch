@@ -3,7 +3,6 @@
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 
 #include <test/cpp/jit/test_utils.h>
-#include <torch/csrc/jit/operator_upgraders/utils.h>
 
 namespace torch {
 namespace jit {

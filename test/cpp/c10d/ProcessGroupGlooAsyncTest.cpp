@@ -68,9 +68,9 @@ class AsyncInputIsOutputTest : public AsyncTest {
   AsyncInputIsOutputTest(const std::string& path, int numTensors)
       : AsyncTest(path),
         numTensors_(numTensors),
-        numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()) {
+        numDevices_(cudaNumDevices()) {
     // Allocate inputs on available devices in a round robin fashion.
+    ::at::globalContext().lazyInitCUDA();
     inputs_.resize(numTensors_);
     for (const auto i : c10::irange(numTensors_)) {
       inputs_[i] = at::empty(
@@ -121,7 +121,6 @@ class AsyncInputIsOutputTest : public AsyncTest {
  protected:
   const int numTensors_;
   const int numDevices_;
-  THCState* state_;
   std::vector<at::Tensor> inputs_;
   std::vector<CUDAStream> streams_;
 };

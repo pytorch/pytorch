@@ -51,17 +51,14 @@ class TestUpgraders(JitTestCase):
         loaded_model = torch.jit.load(model_path)
         FileCheck().check("prim::If").run(loaded_model.graph)
         FileCheck().check_count("aten::div", 2).run(loaded_model.graph)
-        torch._C._jit_pass_dce(loaded_model.graph)
-        print(loaded_model.graph)
 
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
         buffer.seek(0)
         loaded_model_twice = torch.jit.load(buffer)
-        print(loaded_model_twice.code)
-        # we check by its' code because graph variable names
-        # can be different every time
-        self.assertEqual(loaded_model.code, loaded_model_twice.code)
+
+        self.assertEqual(loaded_model(torch.Tensor([5.0, 3.0]), 2.0),
+                         loaded_model_twice(torch.Tensor([5.0, 3.0]), 2.0))
 
     def test_aten_div_tensor_out_at_3(self):
         model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_out_v3.pt"

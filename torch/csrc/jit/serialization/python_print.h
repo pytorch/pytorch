@@ -1,5 +1,5 @@
 #pragma once
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <iostream>
 #include <vector>
@@ -40,6 +40,7 @@ struct TORCH_API PythonPrint {
 
   std::string str() const;
   const SourceRangeRecords& ranges() const;
+  uint64_t minVersion() const;
 
   ~PythonPrint();
 

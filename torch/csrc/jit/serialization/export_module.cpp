@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/serialization/export.h>
 
-#include <caffe2/serialize/versions.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
@@ -443,7 +442,10 @@ void ScriptModuleSerializer::serialize(
         /*archive_dir=*/"",
         /*tensor_dir=*/"constants/");
   }
-  writer_.setVersion(caffe2::serialize::kProducedFileFormatVersion);
+  // Acquires and sets minimum (dynamic) version
+  for (auto& item : file_streams_) {
+    writer_.setMinVersion(item.value().minVersion());
+  }
 }
 
 void ScriptModuleSerializer::writeArchive(
