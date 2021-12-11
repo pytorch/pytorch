@@ -203,6 +203,36 @@ static int64_t maybe_get_bdim(const Tensor& tensor) {
   return -1;
 }
 
+static int64_t currentLevel() {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t current_level = maybe_layer->layerId();
+  return current_level;
+}
+
+static std::tuple<Tensor, int64_t> unwrapTensorAtCurrentLevel(const Tensor& tensor) {
+  auto maybe_layer = maybeCurrentDynamicLayer();
+  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+  int64_t current_level = maybe_layer->layerId();
+  auto result = unwrapTensorAtLevel(tensor, current_level);
+  auto value = std::get<0>(result);
+  auto bdim = std::get<1>(result);
+  value = moveBatchDimToFront(value, bdim);
+  return std::make_tuple(value, bdim.has_value() ? 0 : -1);
+}
+
+static void tls_set_vmap_excluded(bool excluded) {
+  c10::impl::tls_set_dispatch_key_excluded(kBatchedKey, excluded);
+}
+
+static bool tls_set_is_included() {
+  return c10::impl::tls_is_dispatch_key_included(kDynamicLayerFrontModeKey);
+}
+
+static void dump_dls() {
+  std::cout << getDynamicLayerStack() << std::endl;
+}
+
 } // namespace functorch
 }
 
@@ -233,6 +263,11 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_unwrapped", &at::functorch::get_unwrapped);
   m.def("maybe_get_level", &at::functorch::maybe_get_level);
   m.def("maybe_get_bdim", &at::functorch::maybe_get_bdim);
+  m.def("current_level", &at::functorch::currentLevel);
+  m.def("unwrap_batchedtensor", &at::functorch::unwrapTensorAtCurrentLevel);
+  m.def("tls_set_vmap_excluded", &at::functorch::tls_set_vmap_excluded);
+  m.def("tls_set_is_included", &at::functorch::tls_set_is_included);
+  m.def("dump_dls", &at::functorch::dump_dls);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
   at::functorch::initCompileCacheBindings(m.ptr());
   initDispatchBindings(m.ptr());
