@@ -10,10 +10,4 @@
 
 template <typename T> struct THPTypeInfo {};
 
-namespace torch {
-
-typedef THTensor THVoidTensor;
-
-}  // namespace torch
-
 #endif
