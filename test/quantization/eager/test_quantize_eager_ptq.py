@@ -17,7 +17,7 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
-    float_qparams_weight_only_qconfig,
+    float_qparams_weight_only_qconfig_4bit,
     PerChannelMinMaxObserver,
     QConfigDynamic,
     default_dynamic_quant_observer,
@@ -508,7 +508,7 @@ class TestPostTrainingStatic(QuantizationTestCase):
         model = EmbeddingModule().eval()
         indices = torch.tensor([9, 6, 5, 7, 8, 8, 9, 2, 8, 6, 6, 9, 1, 6, 8, 8, 3, 2, 3, 6, 3, 6, 5, 7, 0, 8, 4, 6, 5, 8, 2, 3])
         weights = torch.randn(10, 12, dtype=torch.float32)
-        model.qconfig = float_qparams_weight_only_qconfig
+        model.qconfig = float_qparams_weight_only_qconfig_4bit
         prepare(model, inplace=True)
         convert(model, inplace=True)
         self.assertTrue('QuantizedEmbedding' in str(model))
