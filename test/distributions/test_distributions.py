@@ -2257,7 +2257,7 @@ class TestDistributions(TestCase):
         self.assertEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), atol=1e-3, rtol=0)
 
         # Double-check that batched versions behave the same as unbatched
-        df = (torch.rand(5, 3, requires_grad=True) + 1) * 3
+        df = (torch.rand(5, requires_grad=True) + 1) * 3
         tmp = torch.randn(5, 3, 10)
         cov = (tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1).requires_grad_()
 
