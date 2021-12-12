@@ -597,7 +597,6 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
     std::stringstream cu;
     cu << log.data();
-    //std::cout << code << "\n";
     throw std::runtime_error(cu.str() + code);
   }
   size_t ptx_size = 0;
@@ -637,7 +636,7 @@ void launch_jitted_pwise_function(
     std::array<void*, 7>& args,
     const int nBlocks,
     const int kBlockSize) {
-
+  cudaFree(0); //FIXME
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
