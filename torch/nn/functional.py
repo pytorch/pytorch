@@ -2933,7 +2933,7 @@ def cross_entropy(
         >>>
         >>> # Example of target with class probabilities
         >>> input = torch.randn(3, 5, requires_grad=True)
-        >>> target = torch.randn(3, 5).softmax(dim=1)
+        >>> target = torch.randn(3, 5).softmax(dim=1).argmax(dim=1)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -2991,9 +2991,9 @@ def binary_cross_entropy(
 
     Examples::
 
-        >>> input = torch.randn((3, 2), requires_grad=True)
-        >>> target = torch.rand((3, 2), requires_grad=False)
-        >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
+        >>> input = torch.randn(3, 2, requires_grad=True)
+        >>> target = torch.rand(3, 2, requires_grad=False)
+        >>> loss = F.binary_cross_entropy(torch.sigmoid(input), target)
         >>> loss.backward()
     """
     if has_torch_function_variadic(input, target, weight):
