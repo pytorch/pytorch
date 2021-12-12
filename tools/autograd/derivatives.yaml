@@ -299,6 +299,11 @@
 
 - name: as_strided(Tensor(a) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a)
   self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
+  result: auto_linear
+
+- name: as_strided_(Tensor(a!) self, int[] size, int[] stride, int? storage_offset=None) -> Tensor(a!)
+  self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
+  result: auto_linear
 
 - name: asin(Tensor self) -> Tensor
   self: grad * (-self * self + 1).rsqrt().conj()
@@ -553,15 +558,19 @@
 
 - name: erf(Tensor self) -> Tensor
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  result: auto_element_wise
 
 - name: erfc(Tensor self) -> Tensor
   self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  result: auto_element_wise
 
 - name: special_erfcx(Tensor self) -> Tensor
   self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
+  result: auto_element_wise
 
 - name: erfinv(Tensor self) -> Tensor
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
+  result: auto_element_wise
 
 - name: exp(Tensor self) -> Tensor
   self: grad * result.conj()
@@ -673,7 +682,7 @@
   self: hardsigmoid_backward(grad, self)
 
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
-  self: not_implemented("histc")
+  output_differentiability: [False]
 
 - name: hardswish(Tensor self) -> Tensor
   self: hardswish_backward(grad, self)
@@ -686,15 +695,19 @@
 
 - name: i0(Tensor self) -> Tensor
   self: grad * at::special_i1(self)
+  result: auto_element_wise
 
 - name: special_i0e(Tensor self) -> Tensor
   self: grad * (at::special_i1e(self) - self.sgn() * result)
+  result: auto_element_wise
 
 - name: special_i1(Tensor self) -> Tensor
   self: i1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_i1e(Tensor self) -> Tensor
   self: i1e_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: igamma(Tensor self, Tensor other) -> Tensor
   self: 'not_implemented("igamma: input")'
@@ -957,9 +970,11 @@
 
 - name: median(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
+  result: evenly_read_jvp(self_t, self_p, result)
 
 - name: nanmedian(Tensor self) -> Tensor
   self: evenly_distribute_backward(grad, self, result)
+  result: evenly_read_jvp(self_t, self_p, result)
 
 # This is in theory incorrect in the following case:
 #   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
@@ -977,9 +992,11 @@
 # subgradient on one side.
 - name: median.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: nanmedian.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
+  values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
 - name: min.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), keepdim)
@@ -1166,6 +1183,7 @@
 
 - name: rad2deg(Tensor self) -> Tensor
   self: rad2deg_backward(grad)
+  result: auto_element_wise
 
 - name: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
@@ -1202,6 +1220,7 @@
 
 - name: special_ndtri(Tensor self) -> Tensor
   self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
+  result: auto_element_wise
 
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and sometimes not.
@@ -1226,10 +1245,12 @@
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
   src: grad.gather(dim, index)
+  result: self_t.scatter(dim, index, src_t)
 
 - name: scatter.value(Tensor self, int dim, Tensor index, Scalar value) -> Tensor
   self: grad.scatter(dim, index, 0)
   index: non_differentiable
+  result: self_t.scatter(dim, index, 0)
 
 - name: scatter_add(Tensor self, int dim, Tensor index, Tensor src) -> Tensor
   self: grad
@@ -1314,10 +1335,12 @@
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
+  values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
 - name: sort.stable(Tensor self, *, bool? stable, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
+  values: gather_with_keepdimed_indices(self_t, dim, indices, true)
 
 - name: split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]
   self: split_backward(grads, split_size, dim, self.sizes(), self.options())
@@ -1447,6 +1470,7 @@
 - name: topk(Tensor self, int k, int dim=-1, bool largest=True, bool sorted=True) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
   output_differentiability: [True, False]
+  values: gather(self_t, dim, indices)
 
 - name: trace(Tensor self) -> Tensor
   self: trace_backward(grad, self.sizes())
@@ -1685,27 +1709,34 @@
 
 - name: silu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_silu_backward(grad, self) : silu_backward(grad, self)"
+  result: auto_element_wise
 
 - name: mish(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_mish_backward(grad, self) : mish_backward(grad, self)"
+  result: auto_element_wise
 
 - name: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ false, self)
+  result: auto_element_wise
 
 - name: elu_(Tensor(a!) self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor(a!)
   self: elu_backward(grad, alpha, scale, input_scale, /* is_result */ true, result)
 
 - name: celu(Tensor self, Scalar alpha=1.0) -> Tensor
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ false, self)
+  result: auto_element_wise
 
 - name: celu_(Tensor(a!) self, Scalar alpha=1.0) -> Tensor(a!)
   self: elu_backward(grad, alpha, 1, 1.0/alpha.toFloat(), /* is_result */ true, result)
 
 - name: gelu(Tensor self) -> Tensor
   self: "GradMode::is_enabled() ? infinitely_differentiable_gelu_backward(grad, self) : gelu_backward(grad, self)"
+  result: auto_element_wise
 
 - name: glu(Tensor self, int dim=-1) -> Tensor
   self: glu_backward(grad, self, dim)
+  # RuntimeError: output with shape [1] doesn't match the broadcast shape [2]
+  # result: auto_element_wise
 
 - name: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
   self: hardshrink_backward(grad, self, lambd)
@@ -2342,6 +2373,7 @@
 
 - name: unbind.int(Tensor(a -> *) self, int dim=0) -> Tensor(a)[]
   self: unbind_backward(grads, dim)
+  result: auto_linear
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
   tensors: "grad.defined() ? unbind(grad, dim) : std::vector<Tensor>(tensors.size())"
