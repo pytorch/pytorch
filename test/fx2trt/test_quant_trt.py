@@ -412,13 +412,9 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
         }
 
         m = M().eval()
-        # modified_backend_config_dict = copy.deepcopy(self.trt_backend_config_dict)
-        # modified_backend_config_dict["configs"].insert(0, conv_add_config)
-        modified_backend_config_dict = {
-            "configs": [conv_add_config]
-        }
+        modified_backend_config_dict = copy.deepcopy(self.trt_backend_config_dict)
+        modified_backend_config_dict["configs"].insert(0, conv_add_config)
         m = prepare_fx(m, {"": self.qconfig}, backend_config_dict=modified_backend_config_dict)
-        print(m)
         node_occurrence = {
             ns.call_module(torch.ao.quantization.HistogramObserver): 3,
         }
@@ -429,8 +425,6 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
-        print(m)
-
 
 if __name__ == "__main__":
     run_tests()
