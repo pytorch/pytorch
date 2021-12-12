@@ -64,11 +64,12 @@ std::tuple<Tensor, Tensor> fake_quantize_per_channel_affine_cachemask(
       "`quant_min` should be less than or \
         equal to `quant_max`.");
 
-  TORCH_CHECK(
-      at::min(zero_point).item().toInt() >= quant_min &&
-          at::max(zero_point).item().toInt() <= quant_max,
-      "`zero_point` must be between `quant_min` and `quant_max`.");
-
+  if(!at::isFloatingType(zero_point.scalar_type())){
+      TORCH_CHECK(
+          at::min(zero_point).item().toInt() >= quant_min &&
+              at::max(zero_point).item().toInt() <= quant_max,
+          "`zero_point` must be between `quant_min` and `quant_max`.");
+  }
   TORCH_CHECK(
       axis >= 0 && axis <= self.dim(),
       "`axis` must be between 0 and number of dimensions of input");
@@ -217,7 +218,7 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_channel_affine_b
   // into the same shapes as X along the channel axis.
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   int64_t* axis_mask = (int64_t *) calloc(numDimensions, sizeof(int64_t));
-  for (int i = 0; i < numDimensions; ++i) {
+  for (const auto i : c10::irange(numDimensions)) {
     axis_mask[i] = (i == axis) ? X.size(axis) : 1;
   }
   auto X_shape = X.sizes();
