@@ -580,7 +580,9 @@ class OpInfo(object):
                  check_batched_gradgrad=None,  # whether to check batched grad grad when doing gradgradcheck
                                                # default's to support_gradgrad's value
                  check_batched_forward_grad=None,  # whether to check batched forward grad when doing gradcheck
-                                                   # defaults to the value of `supports_forward_ad and check_batched_grad`
+                                                   # defaults to the value of `supports_forward_ad`
+                 check_inplace_batched_forward_grad=None,   # whether to check batched forward grad when doing gradcheck
+                                                            # defaults to the value of `check_batched_forward_grad`
                  gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  gradcheck_fast_mode=None,  # Whether to use the fast implmentation for gradcheck/gradgradcheck.
                                             # When set to None, defers to the default value provided by the wrapper
@@ -720,13 +722,23 @@ class OpInfo(object):
             assert not (check_batched_forward_grad and not supports_forward_ad), (
                 "check_batched_forward_grad should only be used when supports_forward_ad "
                 "is True. It is used to disable the test in the specific cases "
-                "where the op supports both forward ad but fails to compute "
+                "where the op supports forward ad but fails to compute "
                 "batched forward grad.")
+
+        if check_inplace_batched_forward_grad is None:
+            check_inplace_batched_forward_grad = check_batched_forward_grad
+        else:
+            assert not (check_inplace_batched_forward_grad and not check_batched_forward_grad), (
+                "check_batched_forward_grad should only be used when check_batched_forward_grad "
+                "is True. It is used to disable the test in the specific cases "
+                "where the op supports batched forward grad but fails to compute batched forward "
+                "grad for the inplace variant of the op.")
 
         self.supports_gradgrad = supports_gradgrad
         self.check_batched_grad = check_batched_grad
         self.check_batched_gradgrad = check_batched_gradgrad
         self.check_batched_forward_grad = check_batched_forward_grad
+        self.check_inplace_batched_forward_grad = check_inplace_batched_forward_grad
 
         # Autograd flags that depend on both forward AD and backward AD
         if supports_inplace_autograd is None:
@@ -13455,6 +13467,8 @@ op_db: List[OpInfo] = [
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
            assert_jit_shape_analysis=True,
            supports_forward_ad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_squeeze),
@@ -13542,8 +13556,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
            assert_autodiffed=True,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
@@ -13615,8 +13629,8 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
            supports_out=False,
            supports_forward_ad=True,
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_transpose_swapdims),
     OpInfo('T',
            op=lambda x: x.T,
@@ -13966,10 +13980,10 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_t,
            supports_out=False,
            supports_forward_ad=True,
+           # vmap does not support inplace views
+           check_inplace_batched_forward_grad=False,
            autodiff_fusible_nodes=[],  # aliases inputs, shouldn't be fused
            autodiff_nonfusible_nodes=[],  # aliases inputs, shouldn't be fused
-           # https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            assert_autodiffed=True,),
     UnaryUfuncInfo('special.erfcx',
