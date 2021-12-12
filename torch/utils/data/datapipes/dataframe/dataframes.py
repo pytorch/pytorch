@@ -87,9 +87,9 @@ class Capture(object):
     def __iter__(self):
         return iter(self._dataframes_as_tuples())
 
-    def batch(self, batch_size=10):
+    def batch(self, batch_size=10, drop_last: bool = False, wrapper_class=DataChunkDF):
         dp = self._dataframes_per_row()._dataframes_concat(batch_size)
-        dp = dp.as_datapipe().batch(1, wrapper_class=DataChunkDF)
+        dp = dp.as_datapipe().batch(1, drop_last=drop_last, wrapper_class=wrapper_class)
         dp._dp_contains_dataframe = True
         return dp
 

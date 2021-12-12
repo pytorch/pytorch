@@ -1,5 +1,6 @@
 #include "caffe2/operators/affine_channel_op.h"
 
+#include "caffe2/utils/cub_namespace.cuh"
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"

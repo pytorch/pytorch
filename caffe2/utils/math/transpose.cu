@@ -38,7 +38,7 @@ __global__ void BatchTranspose2DCUDAKernel(
   int y = r * kTileDim + threadIdx.y;
   if (x < W) {
     for (int i = 0; threadIdx.y + i < kTileDim && y + i < H; i += kBlockRows) {
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
       tile[threadIdx.y + i][threadIdx.x] = __ldg(X + offset + (y + i) * W + x);
 #else
       tile[threadIdx.y + i][threadIdx.x] = X[offset + (y + i) * W + x];
@@ -132,7 +132,7 @@ __global__ void TransposeCUDAKernel(
       X_index += v % Y_dims.data[i] * X_strides.data[i];
       v /= Y_dims.data[i];
     }
-#if __CUDA_ARCH__ >= 350 || defined(__HIP_PLATFORM_HCC__)
+#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
     Y[Y_index] = __ldg(X + X_index);
 #else
     Y[Y_index] = X[X_index];

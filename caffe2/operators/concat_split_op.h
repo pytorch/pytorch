@@ -6,6 +6,8 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/string_utils.h"
+#include <c10/util/accumulate.h>
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 
@@ -160,7 +162,7 @@ bool SplitOp<Context>::RunOnDevice() {
       input_channels);
   vector<int64_t> output_dims(input.sizes().vec());
   int before = 1, after = 1;
-  for (int i = 0; i < canonical_axis; ++i) {
+  for (const auto i : c10::irange(canonical_axis)) {
     before *= input.dim32(i);
   }
   for (int i = canonical_axis + 1; i < input.dim(); ++i) {
@@ -169,21 +171,33 @@ bool SplitOp<Context>::RunOnDevice() {
   if (add_axis_) {
     output_dims.erase(output_dims.begin() + canonical_axis);
   }
+
+  const auto *const input_ptr = static_cast<const char*>(input.raw_data());
+
   size_t input_offset = 0;
-  for (int i = 0; i < OutputSize(); ++i) {
-    auto* output = Output(i);
-    auto axis_dim = add_axis_ ? 1 : axis_data[i];
+  for (const auto i : c10::irange(OutputSize())) {
+    auto *const output = Output(i);
+    const auto axis_dim = add_axis_ ? 1 : axis_data[i];
     if (!add_axis_) {
       output_dims[canonical_axis] = axis_data[i];
     }
     output->Resize(output_dims);
+
+    // We need `output_ptr` before the early exit since
+    // `raw_mutable_data` sets the output's data type
+    auto *const output_ptr = output->raw_mutable_data(input.dtype());
+
+    if (input_ptr == nullptr || output_ptr == nullptr) {
+      continue;
+    }
+
     math::CopyMatrix<Context>(
         input.itemsize(),
         before,
         axis_dim * after,
-        static_cast<const char*>(input.raw_data()) + input_offset,
+        input_ptr + input_offset,
         input.dim32(canonical_axis) * after,
-        output->raw_mutable_data(input.dtype()),
+        output_ptr,
         axis_dim * after,
         &context_,
         input.dtype().copy());
@@ -251,7 +265,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
     dim_multiplier = 1;
   }
 
-  for (int i = 0; i < OutputSize(); ++i) {
+  for (const auto i : c10::irange(OutputSize())) {
     auto* output = Output(i);
     const auto* axis_offset = axis_data + lengths_length / OutputSize() * i;
     auto axis_dim =
@@ -277,18 +291,18 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
-  auto* output = Output(0);
+  auto *const output = Output(0);
 
   // We can override default options(Context::GetDeviceType())
   // by explicitly passing in device type we want
-  Tensor* split = Output(
+  Tensor *const split = Output(
       1, at::IntArrayRef({InputSize()}), at::dtype<int>().device(CPU));
-  int* axis_data = split->template mutable_data<int>();
+  int *const axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);
   int adj_size = input_zero.dim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
   CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
-  for (int i = 1; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(1, InputSize())) {
     CAFFE_ENFORCE_EQ(
         Input(i).dtype(),
         input_zero.dtype(),
@@ -302,7 +316,7 @@ bool ConcatOp<Context>::RunOnDevice() {
 
   int before = 1, after = 1;
   vector<int64_t> output_dims(input_zero.sizes().vec());
-  for (int i = 0; i < input_zero.dim(); ++i) {
+  for (const auto i : c10::irange(input_zero.dim())) {
     if (i == canonical_axis && !add_axis_) {
       continue;
     }
@@ -313,7 +327,7 @@ bool ConcatOp<Context>::RunOnDevice() {
       after *= dim;
     }
     // check the input dims are compatible.
-    for (int j = 1; j < InputSize(); ++j) {
+    for (const auto j : c10::irange(1, InputSize())) {
       int dim_j = Input(j).dim32(i);
       CAFFE_ENFORCE_EQ(
           dim,
@@ -338,7 +352,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   }
 
   int output_channels = 0;
-  for (int i = 0; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(InputSize())) {
     axis_data[i] = add_axis_ ? 1 : Input(i).dim32(canonical_axis);
     output_channels += axis_data[i];
   }
@@ -347,9 +361,15 @@ bool ConcatOp<Context>::RunOnDevice() {
   } else {
     output_dims[canonical_axis] = output_channels;
   }
+
   output->Resize(output_dims);
+  auto *const output_ptr = static_cast<char*>(output->raw_mutable_data(input_zero.dtype()));
+  if(output_ptr == nullptr){
+    return true;
+  }
+
   size_t output_offset = 0;
-  for (int i = 0; i < InputSize(); ++i) {
+  for (const auto i : c10::irange(InputSize())) {
     auto& input = Input(i);
     auto axis_dim = add_axis_ ? 1 : input.dim32(canonical_axis);
     math::CopyMatrix<Context>(
@@ -358,8 +378,7 @@ bool ConcatOp<Context>::RunOnDevice() {
         axis_dim * after,
         input.raw_data(),
         axis_dim * after,
-        static_cast<char*>(output->raw_mutable_data(input_zero.dtype())) +
-            output_offset,
+        output_ptr + output_offset,
         output_channels * after,
         &context_,
         input_zero.dtype().copy());

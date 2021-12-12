@@ -17,9 +17,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/TensorIterator.h>
 
-#include <THC/THCGeneral.h>
-#include <THC/THCDeviceUtils.cuh>
-
 #include <cstdint>
 #include <limits>
 #include <utility>

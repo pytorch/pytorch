@@ -1,3 +1,5 @@
+# Owner(s): ["module: cpp-extensions"]
+
 import os
 import shutil
 import sys
@@ -420,8 +422,6 @@ class TestCppExtensionJIT(common.TestCase):
         for the corresponding issue.
         """
         cuda_source = """
-        #include <THC/THCNumerics.cuh>
-
         template<typename T, typename U>
         __global__ void half_test_kernel(const T* input, U* output) {
             if (input[0] < input[1] || input[0] >= input[1]) {
@@ -921,6 +921,7 @@ class TestCppExtensionJIT(common.TestCase):
 
     @unittest.skipIf(TEST_WITH_ASAN, "ASAN disables the crash handler's signal handler")
     @unittest.skipIf(not has_breakpad(), "Built without breakpad")
+    @unittest.skipIf(os.environ.get("TEST_CONFIG") == "force_on_cpu", "fails on force_on_cpu config, tracked w/ #65253")
     def test_crash_handler(self):
         with tempfile.TemporaryDirectory() as temp_dir, tempfile.NamedTemporaryFile(delete=not sys.platform == "win32") as stderr:
             # Use multiprocessing to spin up a separate process to make catching

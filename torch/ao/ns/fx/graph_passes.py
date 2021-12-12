@@ -1,7 +1,7 @@
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-from torch.quantization.fx.utils import get_new_attr_name_with_prefix
+from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 
 from .utils import (
     get_node_first_input_and_output_type,
@@ -22,7 +22,7 @@ from .ns_types import (
 from torch.ao.ns.fx.mappings import (
     get_node_type_to_io_type_map,
 )
-from torch.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.quantize import is_activation_post_process
 
 from typing import Dict, Tuple, Callable, List, Any, Union, Optional, Set
 

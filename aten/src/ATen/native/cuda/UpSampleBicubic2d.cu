@@ -1,10 +1,10 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/native/cuda/UpSample.cuh>
 
 namespace at {
@@ -198,7 +198,7 @@ static void upsample_bicubic2d_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_output_elements, max_threads),
+            <<<ceil_div(num_output_elements, max_threads),
                max_threads,
                0,
                stream>>>(
@@ -254,7 +254,7 @@ static void upsample_bicubic2d_backward_out_cuda_template(
             input_width, output_width, align_corners, scales_w);
 
         upsample_bicubic2d_backward_out_frame<scalar_t, accscalar_t>
-            <<<cuda::ATenCeilDiv(num_kernels, num_threads),
+            <<<ceil_div(num_kernels, num_threads),
                num_threads,
                0,
                stream>>>(
