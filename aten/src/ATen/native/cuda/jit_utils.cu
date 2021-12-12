@@ -259,7 +259,9 @@ const std::string jit_code_template = R"ESCAPE(
 
     #pragma unroll
     for (int j = 0; j < thread_work_size; j++) {
+      if ((threadIdx.x  + j*num_threads) < remaining) {
         out[j] = ${name}<${compute_type}>(${args});
+      }
     }
 
     thread_idx = threadIdx.x;
@@ -328,7 +330,9 @@ const std::string jit_vectorized_code_template = R"ESCAPE(
         }
         #pragma unroll
         for (int j = 0; j < thread_work_size; j++) {
-          out[j] = ${name}<${compute_type}>(${args});
+          if ((threadIdx.x  + j*num_threads) < remaining) {
+            out[j] = ${name}<${compute_type}>(${args});
+          }
         }
         thread_idx = threadIdx.x;
         #pragma unroll
