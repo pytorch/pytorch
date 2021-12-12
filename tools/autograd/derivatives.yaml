@@ -551,10 +551,12 @@
 
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: eq_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: erf(Tensor self) -> Tensor
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
@@ -644,10 +646,12 @@
 
 - name: ge_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: ge_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: geometric_(Tensor(a!) self, float p, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
@@ -673,10 +677,12 @@
 
 - name: gt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: gt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: hardsigmoid(Tensor self) -> Tensor
   self: hardsigmoid_backward(grad, self)
@@ -785,10 +791,12 @@
 
 - name: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: le_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: lerp.Scalar(Tensor self, Tensor end, Scalar weight) -> Tensor
   self: "weight.isComplex() ? grad * (1 - weight.conj().toComplexDouble()) : grad * (1 - weight.toDouble())"
@@ -899,10 +907,12 @@
 
 - name: lt_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: lt_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: _lu_with_info(Tensor self, bool pivot=True, bool check_errors=True) -> (Tensor LU, Tensor pivots, Tensor info)
   self: _lu_with_info_backward(grad, self, LU, pivots)
@@ -1074,10 +1084,12 @@
 
 - name: ne_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
+  result: self_t.zero_()
 
 - name: ne_.Tensor(Tensor(a!) self, Tensor other) -> Tensor(a!)
   self: zeros_like(self)
   other: zeros_like(other)
+  result: self_t.zero_()
 
 - name: neg(Tensor self) -> Tensor
   self: grad.neg()
