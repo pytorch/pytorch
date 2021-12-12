@@ -97,8 +97,6 @@ class Wishart(ExponentialFamily):
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
 
-        self._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
-
         # Chi2 distribution is needed for Bartlett decomposition sampling
         self._dist_chi2 = torch.distributions.chi2.Chi2(
             df=(
@@ -126,6 +124,7 @@ class Wishart(ExponentialFamily):
         if 'precision_matrix' in self.__dict__:
             new.precision_matrix = self.precision_matrix.expand(cov_shape)
 
+        # Chi2 distribution is needed for Bartlett decomposition sampling
         new._dist_chi2 = torch.distributions.chi2.Chi2(
             df=(
                 new.df.unsqueeze(-1)
@@ -194,7 +193,8 @@ class Wishart(ExponentialFamily):
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample).logical_not()
         if len(self._batch_shape):
-            is_singular = is_singular.amax(self._reduced_batch_dims)
+            reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
+            is_singular = is_singular.amax(reduced_batch_dims)
 
         if is_singular.any():
             warnings.warn("Singular sample detected.")
@@ -205,7 +205,7 @@ class Wishart(ExponentialFamily):
 
                 is_singular = self.support.check(new_sample).logical_not()
                 if len(self._batch_shape):
-                    is_singular = is_singular.amax(self._reduced_batch_dims)
+                    is_singular = is_singular.amax(reduced_batch_dims)
 
                 sample = torch.cat(
                     (sample, new_sample[is_singular.logical_not()]),
@@ -219,7 +219,7 @@ class Wishart(ExponentialFamily):
             self._validate_sample(value)
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        log_prob_vals = (
+        return (
             - nu * p * _log_2 / 2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             - torch.mvlgamma(nu / 2, p=p)
@@ -227,27 +227,17 @@ class Wishart(ExponentialFamily):
             - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
         )
 
-        if len(self._batch_shape):
-            return log_prob_vals.sum(self._reduced_batch_dims)
-        else:
-            return log_prob_vals
-
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
-        entropy_val = (
+        return (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * _log_2 / 2
             + torch.mvlgamma(nu / 2, p=p)
             - _mvdigamma(nu / 2, p=p) * (nu - p - 1) / 2
             + nu * p / 2
         )
-
-        if len(self._batch_shape):
-            return entropy_val.sum(self._reduced_batch_dims)
-        else:
-            return entropy_val
 
     @property
     def _natural_params(self):
