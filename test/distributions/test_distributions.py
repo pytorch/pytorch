@@ -815,10 +815,10 @@ class TestDistributions(TestCase):
         ref_samples = ref_dist.rvs(num_samples).astype(np.float64)
         if multivariate:
             # Project onto a random axis.
-            axis = np.random.normal(size=torch_samples.shape[1:])
+            axis = np.random.normal(size=torch_samples.shape[1:]).expand_dims(axis=0)
             axis /= np.linalg.norm(axis)
-            torch_samples = np.dot(torch_samples, axis)
-            ref_samples = np.dot(ref_samples, axis)
+            torch_samples = (axis * torch_samples).reshape(num_samples, -1).sum(-1)
+            ref_samples = np.dot(ref_samples, axis).reshape(num_samples, -1).sum(-1)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         if circular:
             samples = [(np.cos(x), v) for (x, v) in samples]
