@@ -12307,7 +12307,7 @@ dedent """
             return ten // ten_or_scalar, torch.floor_divide(ten, ten_or_scalar)
         ''')
 
-        lhs = ["torch.tensor([5.5, 3.2])", "torch.tensor([2, 2])", "torch.tensor([3, 2])"]
+        lhs = ["torch.tensor([5.6, 3.2])", "torch.tensor([2, 2])", "torch.tensor([3, 2])"]
         rhs = ["1.5", "2", "4", "1.1"] + lhs
         for tensor in lhs:
             for tensor_or_scalar in rhs:
