@@ -110,7 +110,7 @@ bool isPredicated(TensorView* tv, GpuLower& gpulw) {
 // (These tests exercise IrGraphGenerator through a non-trivial IR,
 //  to make sure that it runs w/o crashing. The actual output is not
 //  validated)
-TEST(NVFuserTest, IrGraphGenerator_CUDA) {
+TEST_F(NVFuserTest, IrGraphGenerator_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -162,7 +162,7 @@ TEST(NVFuserTest, IrGraphGenerator_CUDA) {
                    .empty());
 }
 
-TEST(NVFuserTest, FusionDispatch_CUDA) {
+TEST_F(NVFuserTest, FusionDispatch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -177,7 +177,7 @@ TEST(NVFuserTest, FusionDispatch_CUDA) {
 }
 
 // Evaluate basic scalar operations with constant values
-TEST(NVFuserTest, FusionExprEvalConstants_CUDA) {
+TEST_F(NVFuserTest, FusionExprEvalConstants_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -195,7 +195,7 @@ TEST(NVFuserTest, FusionExprEvalConstants_CUDA) {
 }
 
 // Evaluate basic scalar operations with bound values
-TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
+TEST_F(NVFuserTest, FusionExprEvalBindings_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -240,7 +240,7 @@ TEST(NVFuserTest, FusionExprEvalBindings_CUDA) {
 }
 
 // Evaluate expressions in a simple IR
-TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
+TEST_F(NVFuserTest, FusionExprEvalBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -296,7 +296,7 @@ TEST(NVFuserTest, FusionExprEvalBasic_CUDA) {
 }
 
 // Evaluate expressions in a more complex IR
-TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
+TEST_F(NVFuserTest, FusionExprEvalComplex_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -348,7 +348,7 @@ TEST(NVFuserTest, FusionExprEvalComplex_CUDA) {
 }
 
 // Evaluate expressions post lowering
-TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
+TEST_F(NVFuserTest, FusionExprEvalPostLower_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -406,7 +406,7 @@ TEST(NVFuserTest, FusionExprEvalPostLower_CUDA) {
 }
 
 // Kernel IR: Evaluate basic scalar operations with constant values
-TEST(NVFuserTest, FusionKernelExprEvalConstants_CUDA) {
+TEST_F(NVFuserTest, FusionKernelExprEvalConstants_CUDA) {
   kir::Kernel kernel;
   kir::IrBuilder ir_builder(&kernel);
 
@@ -426,7 +426,7 @@ TEST(NVFuserTest, FusionKernelExprEvalConstants_CUDA) {
 }
 
 // Kernel IR: Evaluate basic scalar operations with bound values
-TEST(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
+TEST_F(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   kir::Kernel kernel;
   kir::IrBuilder ir_builder(&kernel);
 
@@ -470,7 +470,7 @@ TEST(NVFuserTest, FusionKernelExprEvalBindings_CUDA) {
   checkIntValue(evaluator, d, -2);
 }
 
-TEST(NVFuserTest, FusionClear_CUDA) {
+TEST_F(NVFuserTest, FusionClear_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -548,7 +548,7 @@ TEST(NVFuserTest, FusionClear_CUDA) {
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionCopy_CUDA) {
+TEST_F(NVFuserTest, FusionCopy_CUDA) {
   Fusion original_fusion;
 
   // Create the test IR
@@ -622,7 +622,7 @@ TEST(NVFuserTest, FusionCopy_CUDA) {
   ASSERT_EQ(original_kernel, clone_kernel);
 }
 
-TEST(NVFuserTest, FusionMove_CUDA) {
+TEST_F(NVFuserTest, FusionMove_CUDA) {
   Fusion fusion;
 
   // Create the test IR
@@ -692,7 +692,7 @@ TEST(NVFuserTest, FusionMove_CUDA) {
   ASSERT_EQ(lowered_ir.str(), moved_lowered_ir.str());
 }
 
-TEST(NVFuserTest, FusionSimpleArith_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleArith_CUDA) {
   std::stringstream ss1, ss2;
 
   Fusion fusion;
@@ -721,7 +721,7 @@ TEST(NVFuserTest, FusionSimpleArith_CUDA) {
       "Error where explicit add nodes don't match implicit add nodes.");
 }
 
-TEST(NVFuserTest, FusionSimpleTypePromote_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleTypePromote_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -732,7 +732,7 @@ TEST(NVFuserTest, FusionSimpleTypePromote_CUDA) {
   TORCH_CHECK(d5->getDataType() == DataType::Double);
 }
 
-TEST(NVFuserTest, FusionRegister_CUDA) {
+TEST_F(NVFuserTest, FusionRegister_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   Double* v1 = new Double{1.f};
@@ -763,7 +763,7 @@ struct DummyExpr : public Expr {
   DummyExpr& operator=(DummyExpr&& other) = delete;
 };
 
-TEST(NVFuserTest, FusionTopoSort_CUDA) {
+TEST_F(NVFuserTest, FusionTopoSort_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -824,7 +824,7 @@ TEST(NVFuserTest, FusionTopoSort_CUDA) {
   TORCH_CHECK(v6->definition()->name() == 3);
 }
 
-TEST(NVFuserTest, FusionTensor_CUDA) {
+TEST_F(NVFuserTest, FusionTensor_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
   Fusion fusion;
@@ -888,7 +888,7 @@ TEST(NVFuserTest, FusionTensor_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionFilterVals_CUDA) {
+TEST_F(NVFuserTest, FusionFilterVals_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -926,7 +926,7 @@ TEST(NVFuserTest, FusionFilterVals_CUDA) {
       "Not expecting any results");
 }
 
-TEST(NVFuserTest, FusionTVSplit_CUDA) {
+TEST_F(NVFuserTest, FusionTVSplit_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -952,7 +952,7 @@ TEST(NVFuserTest, FusionTVSplit_CUDA) {
       static_cast<Int*>(inner->extent())->value().value() == 2);
 }
 
-TEST(NVFuserTest, FusionTVMerge_CUDA) {
+TEST_F(NVFuserTest, FusionTVMerge_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -970,7 +970,7 @@ TEST(NVFuserTest, FusionTVMerge_CUDA) {
           tv->getRootDomain()[2]->extent());
 }
 
-TEST(NVFuserTest, FusionTVReorder_CUDA) {
+TEST_F(NVFuserTest, FusionTVReorder_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1020,7 +1020,7 @@ TEST(NVFuserTest, FusionTVReorder_CUDA) {
   TORCH_CHECK(ref[1]->sameAs(tv->axis(1)));
 }
 
-TEST(NVFuserTest, FusionEquality_CUDA) {
+TEST_F(NVFuserTest, FusionEquality_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1061,7 +1061,7 @@ TEST(NVFuserTest, FusionEquality_CUDA) {
   TORCH_CHECK(!neg1->sameAs(neg2));
 }
 
-TEST(NVFuserTest, FusionDependency_CUDA) {
+TEST_F(NVFuserTest, FusionDependency_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1131,7 +1131,7 @@ TEST(NVFuserTest, FusionDependency_CUDA) {
   TORCH_CHECK(dep_chain.empty());
 }
 
-TEST(NVFuserTest, FusionParser_CUDA) {
+TEST_F(NVFuserTest, FusionParser_CUDA) {
   // This test may not pass if using a custom block sync as there may
   // be additional calls. Skip the test as it's not specifically
   // relevant with block synchronizatin.
@@ -1233,7 +1233,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionForLoop_CUDA) {
+TEST_F(NVFuserTest, FusionForLoop_CUDA) {
 // TODO(kir): re-enable this test
 //  due to the current "GpuLower guard" approach, we can only create
 //  kernel IR during GpuLower::lower()
@@ -1274,7 +1274,7 @@ TEST(NVFuserTest, FusionForLoop_CUDA) {
 #endif
 }
 
-TEST(NVFuserTest, FusionOuterSplit_CUDA) {
+TEST_F(NVFuserTest, FusionOuterSplit_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1312,7 +1312,7 @@ TEST(NVFuserTest, FusionOuterSplit_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST(NVFuserTest, FusionCodeGen_CUDA) {
+TEST_F(NVFuserTest, FusionCodeGen_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1349,7 +1349,7 @@ TEST(NVFuserTest, FusionCodeGen_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST(NVFuserTest, FusionCodeGen2_CUDA) {
+TEST_F(NVFuserTest, FusionCodeGen2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1391,7 +1391,7 @@ TEST(NVFuserTest, FusionCodeGen2_CUDA) {
   TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionSimplePWise_CUDA) {
+TEST_F(NVFuserTest, FusionSimplePWise_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   // dimensionality of the problem
@@ -1448,7 +1448,7 @@ TEST(NVFuserTest, FusionSimplePWise_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST(NVFuserTest, FusionExecKernel_CUDA) {
+TEST_F(NVFuserTest, FusionExecKernel_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1502,7 +1502,7 @@ int ceilDiv_(int a, int b) {
   return (a + b - 1) / b;
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -1586,7 +1586,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt2_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt2_CUDA) {
   // Case 2
   // tv1 = tv0 * -1
   // tv2 = tv0 + 3
@@ -1649,7 +1649,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt2_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
   // Case 3
   // T2 = T1 * 0.979361
   // T3 = T2 * T0
@@ -1707,7 +1707,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt3_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt4_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt4_CUDA) {
   // Case 4
   // T4 = T2 - T3
   // T5 = T1 + T4
@@ -1776,7 +1776,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
   // Case 5
   // tv2 = tv0 + 2.0
   // tv3 = tv1 * tv2
@@ -1816,7 +1816,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt5_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1855,7 +1855,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt7_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt7_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1925,7 +1925,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt7_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAt8_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAt8_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -1990,7 +1990,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAt8_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -2075,7 +2075,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith2_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith2_CUDA) {
   // Case 2
   // tv1 = tv0 * -1
   // tv2 = tv0 + 3
@@ -2138,7 +2138,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith2_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith3_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith3_CUDA) {
   // Case 3
   // T2 = T1 * 0.979361
   // T3 = T2 * T0
@@ -2201,7 +2201,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith3_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith4_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith4_CUDA) {
   // Case 4
   // T4 = T2 - T3
   // T5 = T1 + T4
@@ -2269,7 +2269,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith5_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith5_CUDA) {
   // Case 5
   // tv2 = tv0 + 2.0
   // tv3 = tv1 * tv2
@@ -2309,7 +2309,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith5_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeWith6_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeWith6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2348,7 +2348,7 @@ TEST(NVFuserTest, FusionAdvancedComputeWith6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -2
@@ -2422,7 +2422,7 @@ TEST(NVFuserTest, FusionComputeAtMultiConsumers_CUDA) {
 }
 
 // Similar to ComputeAtMultiConsumers, but with a common consumer.
-TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -2
@@ -2499,7 +2499,7 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -1
@@ -2583,7 +2583,7 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer2_CUDA) {
 
 // Similar to the above common consumer test but adds an additional
 // tensor that has no common consumer with the other tensors.
-TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv2 * -1
@@ -2673,7 +2673,7 @@ TEST(NVFuserTest, FusionComputeAtCommonConsumer3_CUDA) {
 
 // Similar to ComputeAtCommonConsumer1 but with an addtiona ltensor
 // that does not have data dependency with the consumer.
-TEST(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtNoCommonConsumer_CUDA) {
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
   // tv3 = tv1 * -2
@@ -2822,7 +2822,7 @@ void checkIdMapped(
 
 } // namespace
 
-TEST(NVFuserTest, FusionRootMappingBasic_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2876,7 +2876,7 @@ TEST(NVFuserTest, FusionRootMappingBasic_CUDA) {
   checkIdMapped(tv4, tv4->getRootDomain(), tv5, tv5->getRootDomain());
 }
 
-TEST(NVFuserTest, FusionRootMappingRfactor_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingRfactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2960,7 +2960,7 @@ TEST(NVFuserTest, FusionRootMappingRfactor_CUDA) {
       {true, true, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingReductionDependency1_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2987,7 +2987,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency1_CUDA) {
       {true, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingReductionDependency2_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3021,7 +3021,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency2_CUDA) {
   checkIdMapped(tv2, tv2->getRootDomain(), tv3, tv3->getRootDomain());
 }
 
-TEST(NVFuserTest, FusionRootMappingReductionDependency3_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3050,7 +3050,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency3_CUDA) {
       {true, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingReductionDependency4_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3095,7 +3095,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency4_CUDA) {
 }
 
 // Reproducer of issue #749
-TEST(NVFuserTest, FusionRootMappingReductionDependency5_CUDA_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency5_CUDA_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3153,7 +3153,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency5_CUDA_CUDA) {
 }
 
 // Similar to RootMappingReductionDependency5 but with rFactor
-TEST(NVFuserTest, FusionRootMappingReductionDependency6_CUDA_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingReductionDependency6_CUDA_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3227,7 +3227,7 @@ TEST(NVFuserTest, FusionRootMappingReductionDependency6_CUDA_CUDA) {
       {true, true});
 }
 
-TEST(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3265,7 +3265,9 @@ TEST(NVFuserTest, FusionRootMappingMultipleBroadcast_CUDA) {
       {false, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingMultipleBroadcastWithNoCommonConsumer_CUDA) {
+TEST_F(
+    NVFuserTest,
+    FusionRootMappingMultipleBroadcastWithNoCommonConsumer_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3299,7 +3301,7 @@ TEST(NVFuserTest, FusionRootMappingMultipleBroadcastWithNoCommonConsumer_CUDA) {
       {false, true});
 }
 
-TEST(NVFuserTest, FusionRootMappingBroadcastNonUniqueSize_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingBroadcastNonUniqueSize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3386,7 +3388,7 @@ TEST(NVFuserTest, FusionRootMappingBroadcastNonUniqueSize_CUDA) {
       {true, false});
 }
 
-TEST(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3426,7 +3428,7 @@ TEST(NVFuserTest, FusionRootMappingBroadcast_CUDA) {
 }
 
 // Reproducer of issue #723
-TEST(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
+TEST_F(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3470,7 +3472,7 @@ TEST(NVFuserTest, FusionRootMappingTrivialReduction_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {t3, t4}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3486,7 +3488,7 @@ TEST(NVFuserTest, FusionComputeAtFailDueToRootMapping_CUDA) {
   ASSERT_ANY_THROW(tv1->computeAt(tv4, 1));
 }
 
-TEST(NVFuserTest, FusionScalarInputs_CUDA) {
+TEST_F(NVFuserTest, FusionScalarInputs_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3575,7 +3577,7 @@ TEST(NVFuserTest, FusionScalarInputs_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionLoopUnroll_CUDA) {
+TEST_F(NVFuserTest, FusionLoopUnroll_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -3809,7 +3811,7 @@ void test_op(
       std::make_index_sequence<size>{});
 }
 
-TEST(NVFuserTest, FusionUnaryOps_CUDA) {
+TEST_F(NVFuserTest, FusionUnaryOps_CUDA) {
   using OpTuple =
       std::tuple<at::Tensor (*)(const at::Tensor&), UnaryOpType, std::string>;
 
@@ -3904,7 +3906,7 @@ TEST(NVFuserTest, FusionUnaryOps_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionBinaryOps_CUDA) {
+TEST_F(NVFuserTest, FusionBinaryOps_CUDA) {
   using AtenFuncSig = at::Tensor (*)(const at::Tensor&, const at::Tensor&);
   using OpTuple = std::tuple<AtenFuncSig, BinaryOpType, std::string>;
 
@@ -4009,7 +4011,7 @@ TEST(NVFuserTest, FusionBinaryOps_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionTernaryOps_CUDA) {
+TEST_F(NVFuserTest, FusionTernaryOps_CUDA) {
   std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
 
   for (auto dtype : dtypes) {
@@ -4070,7 +4072,7 @@ TEST(NVFuserTest, FusionTernaryOps_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionCompoundOps_CUDA) {
+TEST_F(NVFuserTest, FusionCompoundOps_CUDA) {
   std::vector<DataType> dtypes = {DataType::Double, DataType::Float};
 
   for (auto dtype : dtypes) {
@@ -4114,7 +4116,7 @@ TEST(NVFuserTest, FusionCompoundOps_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionCastOps_CUDA) {
+TEST_F(NVFuserTest, FusionCastOps_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4156,7 +4158,7 @@ TEST(NVFuserTest, FusionCastOps_CUDA) {
 
 // Start off simple, block on the outer dim
 // block stride + thread all reduce + unrolling on inner dim
-TEST(NVFuserTest, FusionReduction1_CUDA) {
+TEST_F(NVFuserTest, FusionReduction1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4216,7 +4218,7 @@ TEST(NVFuserTest, FusionReduction1_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionReduction2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4285,7 +4287,7 @@ TEST(NVFuserTest, FusionReduction2_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduction3_CUDA) {
+TEST_F(NVFuserTest, FusionReduction3_CUDA) {
   // What if Z participates in the reduction with X?
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -4337,7 +4339,7 @@ TEST(NVFuserTest, FusionReduction3_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduction4_CUDA) {
+TEST_F(NVFuserTest, FusionReduction4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4404,7 +4406,7 @@ TEST(NVFuserTest, FusionReduction4_CUDA) {
       &fusion, cg_outputs, {t0, t1, t4}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduction5_CUDA) {
+TEST_F(NVFuserTest, FusionReduction5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4454,7 +4456,7 @@ TEST(NVFuserTest, FusionReduction5_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduction6_CUDA) {
+TEST_F(NVFuserTest, FusionReduction6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4515,7 +4517,7 @@ TEST(NVFuserTest, FusionReduction6_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionMultiGridReduction_CUDA) {
+TEST_F(NVFuserTest, FusionMultiGridReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4548,7 +4550,7 @@ TEST(NVFuserTest, FusionMultiGridReduction_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionMultiGridReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionMultiGridReduction2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4566,7 +4568,7 @@ TEST(NVFuserTest, FusionMultiGridReduction2_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionReductionTFT_CUDA) {
+TEST_F(NVFuserTest, FusionReductionTFT_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4621,7 +4623,7 @@ TEST(NVFuserTest, FusionReductionTFT_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReductionOuterSplit_CUDA) {
+TEST_F(NVFuserTest, FusionReductionOuterSplit_CUDA) {
   // based off FusionReduction4
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -4687,7 +4689,7 @@ TEST(NVFuserTest, FusionReductionOuterSplit_CUDA) {
       &fusion, cg_outputs, {t0, t1, t4}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBranches_CUDA) {
+TEST_F(NVFuserTest, FusionBranches_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4747,7 +4749,7 @@ TEST(NVFuserTest, FusionBranches_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleBCast1_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleBCast1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4804,7 +4806,7 @@ TEST(NVFuserTest, FusionSimpleBCast1_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleBCast2_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleBCast2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4863,7 +4865,7 @@ TEST(NVFuserTest, FusionSimpleBCast2_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleBCast3_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleBCast3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4915,7 +4917,7 @@ TEST(NVFuserTest, FusionSimpleBCast3_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleBCast4_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleBCast4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4970,7 +4972,7 @@ TEST(NVFuserTest, FusionSimpleBCast4_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleBCast5_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5025,7 +5027,7 @@ TEST(NVFuserTest, FusionSimpleBCast5_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComplexBCast1_CUDA) {
+TEST_F(NVFuserTest, FusionComplexBCast1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5081,7 +5083,7 @@ TEST(NVFuserTest, FusionComplexBCast1_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComplexBCast2_CUDA) {
+TEST_F(NVFuserTest, FusionComplexBCast2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5131,7 +5133,7 @@ TEST(NVFuserTest, FusionComplexBCast2_CUDA) {
       &fusion, {cg_outputs}, {t0, t4}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing1_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5185,7 +5187,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing1_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing2_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5239,7 +5241,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing2_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5273,7 +5275,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing3_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5305,7 +5307,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing5_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5343,7 +5345,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing5_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5388,7 +5390,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing6_CUDA) {
       reduction_params.value().lparams);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing7_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing7_CUDA) {
   // Might be able to use this one without 6 as the heuristics in 6 may change
   // and this test is to cover the same issue.
   Fusion fusion;
@@ -5436,7 +5438,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing7_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing8_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing8_CUDA) {
   // Same as 7 but with outer splits instead of inner
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5483,7 +5485,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing8_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing9_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing9_CUDA) {
   // Same as 7 but with outer splits instead of inner
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -5525,7 +5527,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing9_CUDA) {
       &fusion, cg_outputs, aten_inputs, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing10_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing10_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5584,7 +5586,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing10_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST(NVFuserTest, FusionAdvancedIndexing11_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedIndexing11_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5639,7 +5641,7 @@ TEST(NVFuserTest, FusionAdvancedIndexing11_CUDA) {
 }
 
 // Intended to stress the lowering of our code generator
-TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5679,7 +5681,7 @@ TEST(NVFuserTest, FusionAdvancedLowering1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedLowering2_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5736,7 +5738,7 @@ TEST(NVFuserTest, FusionAdvancedLowering2_CUDA) {
 }
 
 // TODO: Complete test
-TEST(NVFuserTest, FusionAdvancedLowering3_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5787,7 +5789,7 @@ TEST(NVFuserTest, FusionAdvancedLowering3_CUDA) {
 // This excercises indexing with broadcast root axes. Non-broadcast
 // axes need to be preferred when propagating index exprs to root
 // axes. See, e.g., Index::getConsumerIndex_impl.
-TEST(NVFuserTest, FusionAdvancedLowering4_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5824,7 +5826,7 @@ TEST(NVFuserTest, FusionAdvancedLowering4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedLowering5_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5862,7 +5864,7 @@ TEST(NVFuserTest, FusionAdvancedLowering5_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedLowering6_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedLowering6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5911,7 +5913,7 @@ TEST(NVFuserTest, FusionAdvancedLowering6_CUDA) {
 }
 
 // Test a simple Gemm but also play around with fusion executor features
-TEST(NVFuserTest, FusionSimpleGemm_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -5996,7 +5998,7 @@ TEST(NVFuserTest, FusionSimpleGemm_CUDA) {
 }
 
 // Softmax with a 1D tensor. Parallelized only with a single thread block.
-TEST(NVFuserTest, FusionSoftmax1D_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmax1D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6051,7 +6053,7 @@ TEST(NVFuserTest, FusionSoftmax1D_CUDA) {
 }
 
 // Softmax with a 1D tensor with input normalization.
-TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6121,7 +6123,7 @@ TEST(NVFuserTest, FusionSoftmax1DNormalized_CUDA) {
 
 // Softmax with a 3D tensor, where the inner-most 3rd dimension is
 // normalized. Pallelized with multiple thread blocks.
-TEST(NVFuserTest, FusionSoftmax3D_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmax3D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6181,7 +6183,7 @@ TEST(NVFuserTest, FusionSoftmax3D_CUDA) {
 }
 
 // Softmax with a 3D tensor with input normalization.
-TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6254,7 +6256,7 @@ TEST(NVFuserTest, FusionSoftmax3DNormalized_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6280,7 +6282,7 @@ TEST(NVFuserTest, FusionSoftmaxComputeAt_CUDA) {
 }
 
 // Similar to FusionReduction but uses grid reduction
-TEST(NVFuserTest, FusionGridReduction1_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction1_CUDA) {
   const int gdimx = 32;
   const int bdimx = 128;
 
@@ -6338,7 +6340,7 @@ TEST(NVFuserTest, FusionGridReduction1_CUDA) {
 }
 
 // Same test as the above but uses BIDy and TIDx for reduction
-TEST(NVFuserTest, FusionGridReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction2_CUDA) {
   const int gdimy = 32;
   const int bdimx = 128;
 
@@ -6394,7 +6396,7 @@ TEST(NVFuserTest, FusionGridReduction2_CUDA) {
 }
 
 // Same test but uses BIDy and BIDz for reduction. No TID used.
-TEST(NVFuserTest, FusionGridReduction3dim1_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction3dim1_CUDA) {
   // Grid reductions when there aren't any threads are serial reductions
   // keep these numbers low so our error isn't too high compared to normal cuda
   // reductions
@@ -6453,7 +6455,7 @@ TEST(NVFuserTest, FusionGridReduction3dim1_CUDA) {
 }
 
 // Same as testGPU_FusionGridReduction3dim1 but reduces dimension 0
-TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction3dim0_CUDA) {
   // Grid reductions when there aren't any threads are serial reductions
   // keep these numbers low so our error isn't too high compared to normal cuda
   // reductions
@@ -6510,7 +6512,7 @@ TEST(NVFuserTest, FusionGridReduction3dim0_CUDA) {
 }
 
 // This is similar to the FusionReduction, but swaps BIDx and TIDx
-TEST(NVFuserTest, FusionGridReduction4_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6574,7 +6576,7 @@ TEST(NVFuserTest, FusionGridReduction4_CUDA) {
 
 // Grid reduction with 2D thread blocks but only TIDx and BIDx are
 // mapped to a reduction dim
-TEST(NVFuserTest, FusionGridReduction5_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6626,7 +6628,7 @@ TEST(NVFuserTest, FusionGridReduction5_CUDA) {
 }
 
 // Similar to FusionGridReduction1 but with 3D tensors
-TEST(NVFuserTest, FusionGridReduction6_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6690,7 +6692,7 @@ TEST(NVFuserTest, FusionGridReduction6_CUDA) {
 }
 
 // See issue #1049
-TEST(NVFuserTest, FusionGridReduction7_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction7_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6720,7 +6722,7 @@ TEST(NVFuserTest, FusionGridReduction7_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridReduction8_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction8_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6748,7 +6750,7 @@ TEST(NVFuserTest, FusionGridReduction8_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridReduction9_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction9_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6787,7 +6789,7 @@ TEST(NVFuserTest, FusionGridReduction9_CUDA) {
   testValidate(&fusion, cg_output, {t0, t2}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridReduction10_CUDA) {
+TEST_F(NVFuserTest, FusionGridReduction10_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6830,7 +6832,7 @@ TEST(NVFuserTest, FusionGridReduction10_CUDA) {
   testValidate(&fusion, cg_output, {t0}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
+TEST_F(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   int bid_x = 3;
   int tid_x = 2;
   int red_dim = 0;
@@ -6862,7 +6864,7 @@ TEST(NVFuserTest, FusionNonRedAxisBind_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSplitBCast_CUDA) {
+TEST_F(NVFuserTest, FusionSplitBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6910,7 +6912,7 @@ TEST(NVFuserTest, FusionSplitBCast_CUDA) {
   fe.runFusion({t0, t1}, {cg_output});
 }
 
-TEST(NVFuserTest, FusionBCastInnerDim_CUDA) {
+TEST_F(NVFuserTest, FusionBCastInnerDim_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6924,7 +6926,7 @@ TEST(NVFuserTest, FusionBCastInnerDim_CUDA) {
   TORCH_CHECK(!tv2->axis(0)->isReduction() && tv2->axis(1)->isBroadcast());
 }
 
-TEST(NVFuserTest, FusionBCastReduce_CUDA) {
+TEST_F(NVFuserTest, FusionBCastReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -6940,7 +6942,7 @@ TEST(NVFuserTest, FusionBCastReduce_CUDA) {
 
 // Multiple consumer reduction with computeAt
 // https://github.com/csarofeen/pytorch/issues/110
-TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
+TEST_F(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   TensorView* tv0 = makeSymbolicTensor(2);
@@ -6955,7 +6957,7 @@ TEST(NVFuserTest, FusionReductionMultiConsumer_CUDA) {
   TORCH_CHECK(tv1->getComputeAtPosition() == 2);
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
   for (const auto i : c10::irange(2)) {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -6995,7 +6997,7 @@ TEST(NVFuserTest, FusionComputeAtExprOrder1_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7027,7 +7029,7 @@ TEST(NVFuserTest, FusionComputeAtExprOrder2_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7063,7 +7065,7 @@ TEST(NVFuserTest, FusionComputeAtExprOrder3_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
+TEST_F(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7088,7 +7090,7 @@ TEST(NVFuserTest, FusionZeroDimComputeAt_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7128,7 +7130,7 @@ TEST(NVFuserTest, FusionZeroDimBroadcast_CUDA) {
       &fusion, {cg_output}, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionZeroDimReduction_CUDA) {
+TEST_F(NVFuserTest, FusionZeroDimReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7164,7 +7166,7 @@ TEST(NVFuserTest, FusionZeroDimReduction_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBCastAfterReduce_CUDA) {
+TEST_F(NVFuserTest, FusionBCastAfterReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   const int tidx = 128;
@@ -7216,7 +7218,7 @@ TEST(NVFuserTest, FusionBCastAfterReduce_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionOutputBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionOutputBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7242,7 +7244,7 @@ TEST(NVFuserTest, FusionOutputBroadcast_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
+TEST_F(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7269,7 +7271,7 @@ TEST(NVFuserTest, FusionReductionKeepDimBasic_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
+TEST_F(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -7316,7 +7318,7 @@ TEST(NVFuserTest, FusionReductionKeepDimScheduler_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionSumTo_CUDA) {
+TEST_F(NVFuserTest, FusionSumTo_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7358,7 +7360,7 @@ TEST(NVFuserTest, FusionSumTo_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSumToNoop_CUDA) {
+TEST_F(NVFuserTest, FusionSumToNoop_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7403,7 +7405,7 @@ TEST(NVFuserTest, FusionSumToNoop_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReductionScheduler_CUDA) {
+TEST_F(NVFuserTest, FusionReductionScheduler_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -7449,7 +7451,7 @@ TEST(NVFuserTest, FusionReductionScheduler_CUDA) {
 }
 
 // Simple reduction parallelized on a symbolic size.
-TEST(NVFuserTest, FusionSymbolicReduction_CUDA) {
+TEST_F(NVFuserTest, FusionSymbolicReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7506,7 +7508,7 @@ TEST(NVFuserTest, FusionSymbolicReduction_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
+TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
   const std::vector<int> red_dims = {0, 2};
   // Copy is because CodeGen requires int and Pytorch requires int64_t
   // for a vector of reduction dimensions
@@ -7552,7 +7554,7 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimNonFastest_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
+TEST_F(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
   const std::vector<int> red_dims = {1, 3};
   // Copy is because CodeGen requires int and Pytorch requires int64_t
   // for a vector of reduction dimensions
@@ -7595,7 +7597,7 @@ TEST(NVFuserTest, FusionReductionSchedulerMultiDimFastest_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
+TEST_F(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
@@ -7669,7 +7671,7 @@ TEST(NVFuserTest, FusionReductionSchedulerNoODimShmoo_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
+TEST_F(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
@@ -7750,7 +7752,7 @@ TEST(NVFuserTest, FusionReductionSchedulerDimShmoo_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionCacheBefore_CUDA) {
+TEST_F(NVFuserTest, FusionCacheBefore_CUDA) {
   // TVM Cache Write
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -7788,7 +7790,7 @@ TEST(NVFuserTest, FusionCacheBefore_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheAfter_CUDA) {
+TEST_F(NVFuserTest, FusionCacheAfter_CUDA) {
   // TVM Cache Read
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -7826,7 +7828,7 @@ TEST(NVFuserTest, FusionCacheAfter_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheFork_CUDA) {
+TEST_F(NVFuserTest, FusionCacheFork_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7876,7 +7878,7 @@ TEST(NVFuserTest, FusionCacheFork_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheIndirect_CUDA) {
+TEST_F(NVFuserTest, FusionCacheIndirect_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7925,7 +7927,7 @@ TEST(NVFuserTest, FusionCacheIndirect_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheBcast_CUDA) {
+TEST_F(NVFuserTest, FusionCacheBcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -7984,7 +7986,7 @@ TEST(NVFuserTest, FusionCacheBcast_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
+TEST_F(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8028,7 +8030,7 @@ TEST(NVFuserTest, FusionCacheMultiConsumer_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmem_CUDA) {
+TEST_F(NVFuserTest, FusionSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8084,7 +8086,7 @@ TEST(NVFuserTest, FusionSmem_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
-TEST(NVFuserTest, FusionSmemReduce_CUDA) {
+TEST_F(NVFuserTest, FusionSmemReduce_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8132,7 +8134,7 @@ TEST(NVFuserTest, FusionSmemReduce_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
-TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
+TEST_F(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8202,7 +8204,7 @@ TEST(NVFuserTest, FusionSmemBlockGemm_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
-TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
+TEST_F(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8291,7 +8293,7 @@ TEST(NVFuserTest, FusionSmemBlockGemmCache_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8366,7 +8368,7 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentSoftmax2D_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
+TEST_F(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8406,7 +8408,7 @@ TEST(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, TestMaskSoftmax_CUDA) {
+TEST_F(NVFuserTest, TestMaskSoftmax_CUDA) {
   // This test is testing the usage of all padding tokens
   // with softmax like Bert might might use in a full padding
   // sequence.
@@ -8461,7 +8463,7 @@ TEST(NVFuserTest, TestMaskSoftmax_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
+TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -8549,7 +8551,7 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormBackward_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
+TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -8601,7 +8603,7 @@ TEST(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
+TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -8669,7 +8671,7 @@ TEST(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
       "");
 }
 
-TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8805,7 +8807,7 @@ TEST(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8991,7 +8993,7 @@ TEST(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9100,7 +9102,7 @@ TEST(NVFuserTest, FusionSmemDynamicPersistentNorm_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9153,7 +9155,7 @@ TEST(NVFuserTest, FusionSmemDynamicReductionSymbolic_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 0);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9217,7 +9219,7 @@ TEST(NVFuserTest, FusionSmemDynamicReductionSymbolicArg_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9282,7 +9284,7 @@ TEST(NVFuserTest, FusionSmemDynamicPwiseMulSymbolicArgWAR_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
-TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
+TEST_F(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9406,7 +9408,7 @@ TEST(NVFuserTest, FusionSmemDynamicTiledGemm_CUDA) {
   TORCH_CHECK(fe.kernel()->summary().war_hazard_syncs_count == 1);
 }
 
-TEST(NVFuserTest, FusionGlobalIntermediate_CUDA) {
+TEST_F(NVFuserTest, FusionGlobalIntermediate_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9458,7 +9460,7 @@ TEST(NVFuserTest, FusionGlobalIntermediate_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionGlobalIntermediateDefaultSchedule_CUDA) {
+TEST_F(NVFuserTest, FusionGlobalIntermediateDefaultSchedule_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9499,7 +9501,7 @@ TEST(NVFuserTest, FusionGlobalIntermediateDefaultSchedule_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionConstCheck_CUDA) {
+TEST_F(NVFuserTest, FusionConstCheck_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9516,7 +9518,7 @@ TEST(NVFuserTest, FusionConstCheck_CUDA) {
   TORCH_CHECK(one_x4->isConstScalar());
 }
 
-TEST(NVFuserTest, FusionUnrollWithAlloc_CUDA) {
+TEST_F(NVFuserTest, FusionUnrollWithAlloc_CUDA) {
   const std::vector<int64_t> tensor_dims_in = {128, 128};
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -9559,7 +9561,7 @@ TEST(NVFuserTest, FusionUnrollWithAlloc_CUDA) {
 }
 
 // Test isZeroInt
-TEST(NVFuserTest, FusionIsZeroInt_CUDA) {
+TEST_F(NVFuserTest, FusionIsZeroInt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9572,7 +9574,7 @@ TEST(NVFuserTest, FusionIsZeroInt_CUDA) {
 }
 
 // Test isOneInt
-TEST(NVFuserTest, FusionIsOneInt_CUDA) {
+TEST_F(NVFuserTest, FusionIsOneInt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9587,7 +9589,7 @@ TEST(NVFuserTest, FusionIsOneInt_CUDA) {
 // This is to verify no cycle of computeAt is created. A more complex
 // variation of this pattern appears in one of the Python tests
 // (test_random_topo).
-TEST(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9635,7 +9637,7 @@ TEST(NVFuserTest, FusionComputeAtNonterminatingOutput_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder1_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9677,7 +9679,7 @@ TEST(NVFuserTest, FusionTraversalOrder1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder2_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9725,7 +9727,7 @@ TEST(NVFuserTest, FusionTraversalOrder2_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder3_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder3_CUDA) {
   for (const auto i : c10::irange(2)) {
     Fusion fusion;
     FusionGuard fg(&fusion);
@@ -9787,7 +9789,7 @@ TEST(NVFuserTest, FusionTraversalOrder3_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionTraversalOrder4_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9839,7 +9841,7 @@ TEST(NVFuserTest, FusionTraversalOrder4_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder5_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9882,7 +9884,7 @@ TEST(NVFuserTest, FusionTraversalOrder5_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder6_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9923,7 +9925,7 @@ TEST(NVFuserTest, FusionTraversalOrder6_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTraversalOrder7_CUDA) {
+TEST_F(NVFuserTest, FusionTraversalOrder7_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -9971,7 +9973,7 @@ TEST(NVFuserTest, FusionTraversalOrder7_CUDA) {
 }
 
 // Test predication of grid reduction
-TEST(NVFuserTest, FusionThreadPredicate_CUDA) {
+TEST_F(NVFuserTest, FusionThreadPredicate_CUDA) {
   const int gdimx = 4;
   const int bdimx = 128;
 
@@ -10031,7 +10033,7 @@ TEST(NVFuserTest, FusionThreadPredicate_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionLSTMCell_CUDA) {
+TEST_F(NVFuserTest, FusionLSTMCell_CUDA) {
   const int hidden_features = 512;
   const int batch_size = 64;
 
@@ -10111,7 +10113,7 @@ TEST(NVFuserTest, FusionLSTMCell_CUDA) {
       &fusion, cg_outputs, aten_inputs, {at_cy, at_hy}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
+TEST_F(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10130,7 +10132,7 @@ TEST(NVFuserTest, FusionComputeAtMultiBCast_CUDA) {
   ASSERT_ANY_THROW(tv1->computeAt(tv3, -1));
 }
 
-TEST(NVFuserTest, FusionReductionHalf_CUDA) {
+TEST_F(NVFuserTest, FusionReductionHalf_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10177,7 +10179,7 @@ TEST(NVFuserTest, FusionReductionHalf_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReduceSingle_CUDA) {
+TEST_F(NVFuserTest, FusionReduceSingle_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10202,7 +10204,7 @@ TEST(NVFuserTest, FusionReduceSingle_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -10245,7 +10247,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -10291,7 +10293,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast2_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
+TEST_F(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
   constexpr int bid_x = 80;
   constexpr int tid_x = 4096;
   constexpr int red_dim = 1;
@@ -10336,7 +10338,7 @@ TEST(NVFuserTest, FusionReduceImplicitBroadcast3_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionTrivialReduction_CUDA) {
+TEST_F(NVFuserTest, FusionTrivialReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10361,7 +10363,7 @@ TEST(NVFuserTest, FusionTrivialReduction_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTrivialReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionTrivialReduction2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10395,7 +10397,7 @@ TEST(NVFuserTest, FusionTrivialReduction2_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTrivialReduction3_CUDA) {
+TEST_F(NVFuserTest, FusionTrivialReduction3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10430,7 +10432,7 @@ TEST(NVFuserTest, FusionTrivialReduction3_CUDA) {
 
 // Make sure trivial reductions are correctly detected even with
 // scheduling applied.
-TEST(NVFuserTest, FusionDetectTrivialReduction1_CUDA) {
+TEST_F(NVFuserTest, FusionDetectTrivialReduction1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10490,7 +10492,7 @@ TEST(NVFuserTest, FusionDetectTrivialReduction1_CUDA) {
 }
 
 // Test detection of partially trivial reduction
-TEST(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10523,7 +10525,7 @@ TEST(NVFuserTest, FusionDetectTrivialReduction2_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
+TEST_F(NVFuserTest, FusionInputsIdLookup_CUDA) {
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({16, 8, 8}, options);
   at::Tensor t1 = at::randn({8, 8}, options);
@@ -10561,7 +10563,7 @@ TEST(NVFuserTest, FusionInputsIdLookup_CUDA) {
   TORCH_CHECK(id_1_relook.eviction == false);
 }
 
-TEST(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
+TEST_F(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({64, 8, 1});
   auto tensor_type = TensorType::create(
@@ -10598,7 +10600,7 @@ TEST(NVFuserTest, FusionGroupGuardSimpleTensor_CUDA) {
   TORCH_CHECK(complyWith(t6, TensorType::create(t6)));
 }
 
-TEST(NVFuserTest, FusionGroupGuardBroadcastTensor_CUDA) {
+TEST_F(NVFuserTest, FusionGroupGuardBroadcastTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 1, 8});
   std::vector<int64_t> strides_vec({8, 8, 1});
   auto tensor_type = TensorType::create(
@@ -10622,7 +10624,7 @@ TEST(NVFuserTest, FusionGroupGuardBroadcastTensor_CUDA) {
   TORCH_CHECK(complyWith(t3, tensor_type));
 }
 
-TEST(NVFuserTest, FusionGroupGuardPermutedTensor_CUDA) {
+TEST_F(NVFuserTest, FusionGroupGuardPermutedTensor_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({64, 1, 8});
   auto tensor_type = TensorType::create(
@@ -10638,7 +10640,7 @@ TEST(NVFuserTest, FusionGroupGuardPermutedTensor_CUDA) {
   TORCH_CHECK(complyWith(t1, tensor_type));
 }
 
-TEST(NVFuserTest, FusionGroupGuardRelaxedCheck_CUDA) {
+TEST_F(NVFuserTest, FusionGroupGuardRelaxedCheck_CUDA) {
   std::vector<int64_t> sizes_vec({16, 8, 8});
   std::vector<int64_t> strides_vec({128, 16, 1});
   auto tensor_type = TensorType::create(
@@ -10654,7 +10656,7 @@ TEST(NVFuserTest, FusionGroupGuardRelaxedCheck_CUDA) {
   TORCH_CHECK(complyWith(t1, tensor_type));
 }
 
-TEST(NVFuserTest, FusionDisjointSet_CUDA) {
+TEST_F(NVFuserTest, FusionDisjointSet_CUDA) {
   DisjointSet<int> set;
 
   const std::set<int> group_x({0, 1, 2});
@@ -10767,7 +10769,7 @@ TEST(NVFuserTest, FusionDisjointSet_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
+TEST_F(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10790,7 +10792,7 @@ TEST(NVFuserTest, FusionNonUniqueBroadcastSize_CUDA) {
   ASSERT_ANY_THROW(tv3->computeAt(tv4, -1));
 }
 
-TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
+TEST_F(NVFuserTest, FusionBiasGeluFwd_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10845,7 +10847,7 @@ TEST(NVFuserTest, FusionBiasGeluFwd_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
+TEST_F(NVFuserTest, FusionBiasGeluBwd_CUDA) {
   if (at::cuda::getDeviceProperties(0)->major < 6) {
     return;
   }
@@ -10926,7 +10928,7 @@ TEST(NVFuserTest, FusionBiasGeluBwd_CUDA) {
 }
 
 // Reproducer of issue #459
-TEST(NVFuserTest, FusionIssue459_CUDA) {
+TEST_F(NVFuserTest, FusionIssue459_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -10982,7 +10984,7 @@ TEST(NVFuserTest, FusionIssue459_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
+TEST_F(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11015,7 +11017,7 @@ TEST(NVFuserTest, FusionSmemIndexingSimple_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
+TEST_F(NVFuserTest, FusionSmemIndexing_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11129,7 +11131,7 @@ TEST(NVFuserTest, FusionSmemIndexing_CUDA) {
 }
 
 // Reproducer of issue 408
-TEST(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
+TEST_F(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11166,7 +11168,7 @@ TEST(NVFuserTest, FusionCacheBeforeReduction_CUDA) {
       &fusion, {cg_output}, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
+TEST_F(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11208,7 +11210,7 @@ TEST(NVFuserTest, FusionCacheBeforeReduction2_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue367_CUDA) {
+TEST_F(NVFuserTest, FusionIssue367_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11315,7 +11317,7 @@ TEST(NVFuserTest, FusionIssue367_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue468_CUDA) {
+TEST_F(NVFuserTest, FusionIssue468_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11342,7 +11344,7 @@ TEST(NVFuserTest, FusionIssue468_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue363_CUDA) {
+TEST_F(NVFuserTest, FusionIssue363_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11397,7 +11399,7 @@ TEST(NVFuserTest, FusionIssue363_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue484_CUDA) {
+TEST_F(NVFuserTest, FusionIssue484_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11425,7 +11427,7 @@ TEST(NVFuserTest, FusionIssue484_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue329_CUDA) {
+TEST_F(NVFuserTest, FusionIssue329_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11456,7 +11458,7 @@ TEST(NVFuserTest, FusionIssue329_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue382_CUDA) {
+TEST_F(NVFuserTest, FusionIssue382_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11501,7 +11503,7 @@ TEST(NVFuserTest, FusionIssue382_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue507_CUDA) {
+TEST_F(NVFuserTest, FusionIssue507_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11534,7 +11536,7 @@ TEST(NVFuserTest, FusionIssue507_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue532_CUDA) {
+TEST_F(NVFuserTest, FusionIssue532_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11576,7 +11578,7 @@ TEST(NVFuserTest, FusionIssue532_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionLoopUnswitch_CUDA) {
+TEST_F(NVFuserTest, FusionLoopUnswitch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11609,7 +11611,7 @@ TEST(NVFuserTest, FusionLoopUnswitch_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue549_CUDA) {
+TEST_F(NVFuserTest, FusionIssue549_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -11695,7 +11697,7 @@ TEST(NVFuserTest, FusionIssue549_CUDA) {
       &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, simplecompileRtc_CUDA) {
+TEST_F(NVFuserTest, simplecompileRtc_CUDA) {
   FusionExecutor fe;
   std::string kernel = R"(
 __global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {
@@ -11727,7 +11729,7 @@ __global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {
   TORCH_CHECK(out_ref.allclose(out0));
 }
 
-TEST(NVFuserTest, FusionSerialWelford_CUDA) {
+TEST_F(NVFuserTest, FusionSerialWelford_CUDA) {
   FusionExecutor fe;
   int x = 128, y = 64, z = 64;
 
@@ -11784,7 +11786,7 @@ __global__ void kernel1(
   TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, FusionBlockWelford_CUDA) {
+TEST_F(NVFuserTest, FusionBlockWelford_CUDA) {
   FusionExecutor fe;
   int x = 7, y = 8, z = 9;
 
@@ -11872,7 +11874,7 @@ __global__ void kernel1(
       cat_tensor.mean({1}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, FusionBlockWelfordNoInit_CUDA) {
+TEST_F(NVFuserTest, FusionBlockWelfordNoInit_CUDA) {
   FusionExecutor fe;
   int x = 7, y = 8, z = 9;
 
@@ -11938,7 +11940,7 @@ __global__ void kernel1(
   TORCH_CHECK(in0.mean({1, 2}).allclose(out_avg, /*rtol*/ 1e-5, /*atol*/ 1e-6));
 }
 
-TEST(NVFuserTest, FusionGridWelfordNoInit_CUDA) {
+TEST_F(NVFuserTest, FusionGridWelfordNoInit_CUDA) {
   FusionExecutor fe;
   int x = 128, y = 64, z = 128;
 
@@ -12028,7 +12030,7 @@ __global__ void kernel1(
   TORCH_CHECK(in0.var(dims, false).allclose(out_var));
 }
 
-TEST(NVFuserTest, FusionWelfordOp_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordOp_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12072,7 +12074,7 @@ TEST(NVFuserTest, FusionWelfordOp_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionBlockWelfordOp_CUDA) {
+TEST_F(NVFuserTest, FusionBlockWelfordOp_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12118,7 +12120,7 @@ TEST(NVFuserTest, FusionBlockWelfordOp_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridWelfordOp_CUDA) {
+TEST_F(NVFuserTest, FusionGridWelfordOp_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12164,7 +12166,7 @@ TEST(NVFuserTest, FusionGridWelfordOp_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
+TEST_F(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12209,7 +12211,7 @@ TEST(NVFuserTest, FusionRfactorWelfordOp_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionWelfordSchedule_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordSchedule_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12339,7 +12341,7 @@ void testWelford(DataType dtype, int red_axis, int odim, int rdim) {
 }
 } // namespace
 
-TEST(NVFuserTest, FusionWelfordShmoo_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordShmoo_CUDA) {
   std::vector<DataType> dtypes = {
       DataType::Double, DataType::Float, DataType::Half};
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
@@ -12381,7 +12383,7 @@ TEST(NVFuserTest, FusionWelfordShmoo_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionTranspose1_CUDA) {
+TEST_F(NVFuserTest, FusionTranspose1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12411,7 +12413,7 @@ TEST(NVFuserTest, FusionTranspose1_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTranspose2_CUDA) {
+TEST_F(NVFuserTest, FusionTranspose2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12444,7 +12446,7 @@ TEST(NVFuserTest, FusionTranspose2_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12528,7 +12530,7 @@ TEST(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
       &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
+TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12591,7 +12593,7 @@ TEST(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
   // Case 1
   // tv1 = tv0 * 0.5
   // tv2 = tv1 * -1
@@ -12674,7 +12676,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
       &fusion, cg_outputs, {aten_input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
   // Case 2
   // tv1 = tv0 * -1
   // tv2 = tv0 + 3
@@ -12740,7 +12742,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
   testValidate(&fusion, cg_outputs, {input}, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
   // Case 3
   // T2 = T1 * 0.979361
   // T3 = T2 * T0
@@ -12802,7 +12804,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
   // Case 4
   // T4 = T2 - T3
   // T5 = T1 + T4
@@ -12883,7 +12885,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
   // Case 5
   // tv2 = tv0 + 2.0
   // tv3 = tv1 * tv2
@@ -12926,7 +12928,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
+TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -12968,7 +12970,7 @@ TEST(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -13017,7 +13019,7 @@ TEST(NVFuserTest, FusionSegmentReducePointwise_CUDA) {
       executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionMultipleVectorize_CUDA) {
+TEST_F(NVFuserTest, FusionMultipleVectorize_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -13077,7 +13079,7 @@ TEST(NVFuserTest, FusionMultipleVectorize_CUDA) {
   TORCH_CHECK(runtime1 != runtime3);
 }
 
-TEST(NVFuserTest, FusionVectorizeSimple_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeSimple_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13120,7 +13122,7 @@ TEST(NVFuserTest, FusionVectorizeSimple_CUDA) {
       &fusion, cg_outputs, {aten_input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
   // dimensionality of the problem
@@ -13194,7 +13196,7 @@ TEST(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
   TORCH_CHECK(output_ref.equal(output));
 }
 
-TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -13235,7 +13237,7 @@ TEST(NVFuserTest, FusionSegmentReduceSoftmax_CUDA) {
       executor_cache.fusion(), outputs, {at_x}, {t3}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSwizzle1_CUDA) {
+TEST_F(NVFuserTest, FusionSwizzle1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13276,7 +13278,7 @@ TEST(NVFuserTest, FusionSwizzle1_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSwizzle2_CUDA) {
+TEST_F(NVFuserTest, FusionSwizzle2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13320,7 +13322,7 @@ TEST(NVFuserTest, FusionSwizzle2_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
+TEST_F(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13383,7 +13385,7 @@ TEST(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
+TEST_F(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13450,7 +13452,7 @@ TEST(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridPersistence_CUDA) {
+TEST_F(NVFuserTest, FusionGridPersistence_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13483,7 +13485,7 @@ TEST(NVFuserTest, FusionGridPersistence_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
+TEST_F(NVFuserTest, FusionGridPersistence2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13518,7 +13520,7 @@ TEST(NVFuserTest, FusionGridPersistence2_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordPersistence_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13556,7 +13558,7 @@ TEST(NVFuserTest, FusionWelfordPersistence_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWelfordPersistence2_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordPersistence2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13596,7 +13598,7 @@ TEST(NVFuserTest, FusionWelfordPersistence2_CUDA) {
   testValidate(&fusion, out, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue633_CUDA) {
+TEST_F(NVFuserTest, FusionIssue633_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13634,7 +13636,7 @@ TEST(NVFuserTest, FusionIssue633_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionKirScoping_CUDA) {
+TEST_F(NVFuserTest, FusionKirScoping_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13675,7 +13677,7 @@ TEST(NVFuserTest, FusionKirScoping_CUDA) {
   TORCH_CHECK(top_level_scope == nullptr);
 }
 
-TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
+TEST_F(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13710,7 +13712,7 @@ TEST(NVFuserTest, FusionBroadcastAcrossComputeAt_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t3}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13761,7 +13763,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwise_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13819,7 +13821,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeContig_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13880,7 +13882,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13939,7 +13941,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -13997,7 +13999,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedRFactor_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14035,7 +14037,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedWrongDimFail_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedStride_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedStride_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14084,7 +14086,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedStride_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14133,7 +14135,7 @@ TEST(NVFuserTest, FusionVectorizeMisalignedStrideFail_CUDA) {
   ASSERT_ANY_THROW(fe.runFusion(aten_inputs));
 }
 
-TEST(NVFuserTest, FusionViewOutput_CUDA) {
+TEST_F(NVFuserTest, FusionViewOutput_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14166,7 +14168,7 @@ TEST(NVFuserTest, FusionViewOutput_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {at_x_view}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
+TEST_F(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14186,7 +14188,7 @@ TEST(NVFuserTest, FusionViewFailMismatchSize_CUDA) {
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
-TEST(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
+TEST_F(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14204,7 +14206,7 @@ TEST(NVFuserTest, FusionViewFailMulitDimInference_CUDA) {
   ASSERT_ANY_THROW(view(x_add_bias, input_shape, output_shape));
 }
 
-TEST(NVFuserTest, FusionViewFailReduction_CUDA) {
+TEST_F(NVFuserTest, FusionViewFailReduction_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -14235,7 +14237,7 @@ TEST(NVFuserTest, FusionViewFailReduction_CUDA) {
   ASSERT_ANY_THROW(fusion_executor_cache.runFusionWithInputs({at_x, at_bias}));
 }
 
-TEST(NVFuserTest, FusionViewFailPersistent_CUDA) {
+TEST_F(NVFuserTest, FusionViewFailPersistent_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -14252,7 +14254,7 @@ TEST(NVFuserTest, FusionViewFailPersistent_CUDA) {
 
   auto x_add_bias = add(x, bias);
   auto x_view = view(x_add_bias, input_shape, output_shape);
-  auto x_softmax = softmax(x_view, {-1});
+  auto x_softmax = softmax(x_view, -1);
 
   fusion.addOutput(x_softmax);
 
@@ -14306,25 +14308,25 @@ void addViewGeluFusion(
   }
 }
 
-TEST(NVFuserTest, FusionViewSplit_CUDA) {
+TEST_F(NVFuserTest, FusionViewSplit_CUDA) {
   std::vector<int64_t> input_shape{80};
   std::vector<int64_t> output_shape{2, 4, 10};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST(NVFuserTest, FusionViewBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionViewBroadcast_CUDA) {
   std::vector<int64_t> input_shape{80};
   std::vector<int64_t> output_shape{1, 80};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST(NVFuserTest, FusionViewMerge_CUDA) {
+TEST_F(NVFuserTest, FusionViewMerge_CUDA) {
   std::vector<int64_t> input_shape{2, 40, 7};
   std::vector<int64_t> output_shape{560};
   addViewGeluFusion(input_shape, output_shape);
 }
 
-TEST(NVFuserTest, FusionViewAllShmoo_CUDA) {
+TEST_F(NVFuserTest, FusionViewAllShmoo_CUDA) {
   typedef std::vector<int64_t> shape;
   typedef std::pair<shape, shape> view_example;
 
@@ -14349,7 +14351,7 @@ TEST(NVFuserTest, FusionViewAllShmoo_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionViewInferShmoo_CUDA) {
+TEST_F(NVFuserTest, FusionViewInferShmoo_CUDA) {
   typedef std::vector<int64_t> shape;
   typedef std::pair<shape, shape> view_example;
 
@@ -14414,7 +14416,7 @@ void geluViewAddFusion(
   }
 }
 
-TEST(NVFuserTest, FusionViewStride_CUDA) {
+TEST_F(NVFuserTest, FusionViewStride_CUDA) {
   typedef std::vector<int64_t> shape;
   typedef std::pair<shape, shape> view_example;
 
@@ -14471,11 +14473,11 @@ void geluViewBinaryAddFusion(
   }
 }
 
-TEST(NVFuserTest, FusionViewBinary_CUDA) {
+TEST_F(NVFuserTest, FusionViewBinary_CUDA) {
   geluViewBinaryAddFusion({27454, 2}, {54908}, {7844, 7});
 }
 
-TEST(NVFuserTest, FusionVectorization1_CUDA) {
+TEST_F(NVFuserTest, FusionVectorization1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14524,7 +14526,7 @@ TEST(NVFuserTest, FusionVectorization1_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorization2_CUDA) {
+TEST_F(NVFuserTest, FusionVectorization2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14562,7 +14564,7 @@ TEST(NVFuserTest, FusionVectorization2_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionVectorization3_CUDA) {
+TEST_F(NVFuserTest, FusionVectorization3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14620,7 +14622,7 @@ TEST(NVFuserTest, FusionVectorization3_CUDA) {
       &fusion, cg_outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
+TEST_F(NVFuserTest, FusionVectorizationRFactor_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14681,7 +14683,7 @@ TEST(NVFuserTest, FusionVectorizationRFactor_CUDA) {
 }
 
 // Unswitched loops with extent one may omit else clause.
-TEST(NVFuserTest, FusionSizeOneLoop1_CUDA) {
+TEST_F(NVFuserTest, FusionSizeOneLoop1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14748,7 +14750,7 @@ TEST(NVFuserTest, FusionSizeOneLoop1_CUDA) {
 
 // The unswitched loop has extent one but inner loops don't. The else
 // part should not be omitted.
-TEST(NVFuserTest, FusionSizeOneLoop2_CUDA) {
+TEST_F(NVFuserTest, FusionSizeOneLoop2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14789,7 +14791,7 @@ TEST(NVFuserTest, FusionSizeOneLoop2_CUDA) {
   testValidate(&fusion, cg_outputs, aten_inputs, {t1}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionValidateParallelize1_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14808,7 +14810,7 @@ TEST(NVFuserTest, FusionValidateParallelize1_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionValidateParallelize2_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14829,7 +14831,7 @@ TEST(NVFuserTest, FusionValidateParallelize2_CUDA) {
   fe.compileFusion(&fusion);
 }
 
-TEST(NVFuserTest, FusionValidateParallelize3_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14852,7 +14854,7 @@ TEST(NVFuserTest, FusionValidateParallelize3_CUDA) {
   fe.compileFusion(&fusion);
 }
 
-TEST(NVFuserTest, FusionValidateParallelize4_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14875,7 +14877,7 @@ TEST(NVFuserTest, FusionValidateParallelize4_CUDA) {
   ASSERT_ANY_THROW(fe.compileFusion(&fusion));
 }
 
-TEST(NVFuserTest, FusionValidateParallelize5_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14900,7 +14902,7 @@ TEST(NVFuserTest, FusionValidateParallelize5_CUDA) {
 }
 
 // See issue #995
-TEST(NVFuserTest, FusionValidateParallelize6_CUDA) {
+TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14936,7 +14938,7 @@ TEST(NVFuserTest, FusionValidateParallelize6_CUDA) {
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
-TEST(NVFuserTest, FusionDAGMerging_CUDA) {
+TEST_F(NVFuserTest, FusionDAGMerging_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -14971,7 +14973,7 @@ TEST(NVFuserTest, FusionDAGMerging_CUDA) {
   TORCH_CHECK(fusion_segments->groups().size() <= 4);
 }
 
-TEST(NVFuserTest, FusionDAGScalarMerging_CUDA) {
+TEST_F(NVFuserTest, FusionDAGScalarMerging_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15027,7 +15029,7 @@ TEST(NVFuserTest, FusionDAGScalarMerging_CUDA) {
       executor_cache.fusion(), outputs, {t0, s0}, {t5}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBlockReduceInSerialLoop_CUDA) {
+TEST_F(NVFuserTest, FusionBlockReduceInSerialLoop_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15056,7 +15058,7 @@ TEST(NVFuserTest, FusionBlockReduceInSerialLoop_CUDA) {
       &fusion, outputs, aten_inputs, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
+TEST_F(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15091,7 +15093,7 @@ TEST(NVFuserTest, FusionBlockWelfordInSerialLoop_CUDA) {
 }
 
 // See Issue #716
-TEST(NVFuserTest, FusionIOTensorTrivialReductionRepro_CUDA) {
+TEST_F(NVFuserTest, FusionIOTensorTrivialReductionRepro_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15129,7 +15131,7 @@ TEST(NVFuserTest, FusionIOTensorTrivialReductionRepro_CUDA) {
   TORCH_CHECK(outputs[0].allclose(t0_ref.add(1)));
 }
 
-TEST(NVFuserTest, FusionReductionPredicate_CUDA) {
+TEST_F(NVFuserTest, FusionReductionPredicate_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15169,7 +15171,7 @@ TEST(NVFuserTest, FusionReductionPredicate_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue728_CUDA) {
+TEST_F(NVFuserTest, FusionIssue728_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15229,7 +15231,7 @@ TEST(NVFuserTest, FusionIssue728_CUDA) {
       "Only tv3 should be included");
 }
 
-TEST(NVFuserTest, FusionIssue757_CUDA) {
+TEST_F(NVFuserTest, FusionIssue757_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15268,7 +15270,7 @@ TEST(NVFuserTest, FusionIssue757_CUDA) {
 }
 
 // See issue #759
-TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15309,7 +15311,7 @@ TEST(NVFuserTest, FusionPredicatedBlockBroadcast_CUDA) {
   testValidate(&fusion, outputs, inputs, {t4}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15343,7 +15345,7 @@ TEST(NVFuserTest, FusionSegmentVerticalMerge_CUDA) {
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
 
-TEST(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15383,7 +15385,7 @@ TEST(NVFuserTest, FusionSegmentHorizontalMerge_CUDA) {
   TORCH_CHECK(segmented_fusion->groups().size() == 2);
 }
 
-TEST(NVFuserTest, FusionSegmentMixReduction_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentMixReduction_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15422,7 +15424,7 @@ TEST(NVFuserTest, FusionSegmentMixReduction_CUDA) {
   TORCH_CHECK(segmented_fusion->groups().size() <= 2);
 }
 
-TEST(NVFuserTest, FusionSBAR_CUDA) {
+TEST_F(NVFuserTest, FusionSBAR_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15483,7 +15485,7 @@ TEST(NVFuserTest, FusionSBAR_CUDA) {
   testValidate(&fusion, outputs, inputs, {output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSingleElement_CUDA) {
+TEST_F(NVFuserTest, FusionSingleElement_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15512,7 +15514,7 @@ TEST(NVFuserTest, FusionSingleElement_CUDA) {
       &fusion, {cg_output}, {input}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBNBackwardRepro_CUDA) {
+TEST_F(NVFuserTest, FusionBNBackwardRepro_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -15582,7 +15584,7 @@ TEST(NVFuserTest, FusionBNBackwardRepro_CUDA) {
 }
 
 // TODO: We only changed inputs, merge this with the test above.
-TEST(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
+TEST_F(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -15654,7 +15656,7 @@ TEST(NVFuserTest, FusionBNBackwardRepro2_CUDA) {
   auto outputs = fec.runFusionWithInputs(inputs);
 }
 
-TEST(NVFuserTest, FusionBNRepro_CUDA) {
+TEST_F(NVFuserTest, FusionBNRepro_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -15735,7 +15737,7 @@ TEST(NVFuserTest, FusionBNRepro_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBNRepro2_CUDA) {
+TEST_F(NVFuserTest, FusionBNRepro2_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -15796,7 +15798,7 @@ TEST(NVFuserTest, FusionBNRepro2_CUDA) {
       &fusion, cg_outputs, aten_inputs, aten_outputs, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
+TEST_F(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15837,7 +15839,7 @@ TEST(NVFuserTest, FusionZeroSizeTensorPW_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
+TEST_F(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15883,7 +15885,7 @@ TEST(NVFuserTest, FusionZeroSizeTensorReduction_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
+TEST_F(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -15930,7 +15932,7 @@ TEST(NVFuserTest, FusionZeroSizeTensorNormalization_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionSegmentIoAlias_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentIoAlias_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -15984,7 +15986,7 @@ TEST(NVFuserTest, FusionSegmentIoAlias_CUDA) {
       executor_cache.fusion(), outputs, {t0, t1, t2}, {t6}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWelford1Output_CUDA) {
+TEST_F(NVFuserTest, FusionWelford1Output_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16004,7 +16006,7 @@ TEST(NVFuserTest, FusionWelford1Output_CUDA) {
   testValidate(fusion, outputs, {t0}, {t1}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
+TEST_F(NVFuserTest, FusionTranslate1Welford_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16056,7 +16058,7 @@ TEST(NVFuserTest, FusionTranslate1Welford_CUDA) {
   TORCH_CHECK(found_welford);
 }
 
-TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
+TEST_F(NVFuserTest, FusionTranslate2Welford_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16109,7 +16111,7 @@ TEST(NVFuserTest, FusionTranslate2Welford_CUDA) {
   TORCH_CHECK(found_welford);
 }
 
-TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
+TEST_F(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16142,7 +16144,7 @@ TEST(NVFuserTest, FusionLargeWelfordNormalization_CUDA) {
   TORCH_CHECK(!runtime->isSegmented());
 }
 
-TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
+TEST_F(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16183,7 +16185,7 @@ TEST(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionSegmentIslands_CUDA) {
+TEST_F(NVFuserTest, FusionSegmentIslands_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16205,7 +16207,7 @@ TEST(NVFuserTest, FusionSegmentIslands_CUDA) {
   fusion_executor_cache.runFusionWithInputs({t0, t1});
 }
 
-TEST(NVFuserTest, FusionBackOffInnerBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionBackOffInnerBroadcast_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16241,7 +16243,7 @@ TEST(NVFuserTest, FusionBackOffInnerBroadcast_CUDA) {
   TORCH_CHECK(tv8->getMaxProducerPosition() == 2);
 }
 
-TEST(NVFuserTest, FusionBackOffInnerBroadcast2_CUDA) {
+TEST_F(NVFuserTest, FusionBackOffInnerBroadcast2_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16261,7 +16263,7 @@ TEST(NVFuserTest, FusionBackOffInnerBroadcast2_CUDA) {
   TORCH_CHECK(tv3->getMaxProducerPosition() == 2);
 }
 
-TEST(NVFuserTest, FusionBackOffInnerBroadcast3_CUDA) {
+TEST_F(NVFuserTest, FusionBackOffInnerBroadcast3_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16280,7 +16282,7 @@ TEST(NVFuserTest, FusionBackOffInnerBroadcast3_CUDA) {
   TORCH_CHECK(tv3->getMaxProducerPosition() == 3);
 }
 
-TEST(NVFuserTest, FusionSimpleWarp_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleWarp_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16318,7 +16320,7 @@ TEST(NVFuserTest, FusionSimpleWarp_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleWarpPad_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleWarpPad_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16365,7 +16367,7 @@ TEST(NVFuserTest, FusionSimpleWarpPad_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
+TEST_F(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16409,7 +16411,7 @@ TEST(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSerialWarpReduction_CUDA) {
+TEST_F(NVFuserTest, FusionSerialWarpReduction_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16450,7 +16452,7 @@ TEST(NVFuserTest, FusionSerialWarpReduction_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
+TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16494,7 +16496,7 @@ TEST(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionMultipleDimBinding_CUDA) {
+TEST_F(NVFuserTest, FusionMultipleDimBinding_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16553,7 +16555,7 @@ TEST(NVFuserTest, FusionMultipleDimBinding_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionPadNoWarpReduce_CUDA) {
+TEST_F(NVFuserTest, FusionPadNoWarpReduce_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16588,7 +16590,7 @@ TEST(NVFuserTest, FusionPadNoWarpReduce_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
+TEST_F(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16623,7 +16625,7 @@ TEST(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
+TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -16673,7 +16675,7 @@ TEST(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
       fusion.get(), outputs, {input1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
+TEST_F(NVFuserTest, FusionSegfaultReduction_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -16722,7 +16724,7 @@ TEST(NVFuserTest, FusionSegfaultReduction_CUDA) {
       &fusion, outputs, inputs, {at_output0, at_output1}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionPredicateElimination_CUDA) {
+TEST_F(NVFuserTest, FusionPredicateElimination_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -16754,7 +16756,7 @@ TEST(NVFuserTest, FusionPredicateElimination_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionForceFp16Simple_CUDA) {
+TEST_F(NVFuserTest, FusionForceFp16Simple_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16792,53 +16794,55 @@ TEST(NVFuserTest, FusionForceFp16Simple_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionForceBf16Simple_CUDA) {
+TEST_F(NVFuserTest, FusionForceBf16Simple_CUDA) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  if (at::cuda::getDeviceProperties(0)->major >= 8) {
-    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-    auto fusion = fusion_ptr.get();
-    FusionGuard fg(fusion);
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+    return;
+  }
 
-    auto tv0 = makeSymbolicTensor(2);
-    auto tv1 = makeSymbolicTensor(2);
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
 
-    fusion->addInput(tv0);
-    fusion->addInput(tv1);
+  auto tv0 = makeSymbolicTensor(2);
+  auto tv1 = makeSymbolicTensor(2);
 
-    // Group 1
-    auto tv2 = sum(tv0, {1});
-    auto tv3 = broadcast(tv2, {false, true});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
-    // Group 2
-    auto tv4 = add(tv3, tv1); // Edge: tv3: expect cast
-    auto tv5 = castOp(DataType::BFloat16, tv4);
+  // Group 1
+  auto tv2 = sum(tv0, {1});
+  auto tv3 = broadcast(tv2, {false, true});
 
-    fusion->addOutput(tv5);
+  // Group 2
+  auto tv4 = add(tv3, tv1); // Edge: tv3: expect cast
+  auto tv5 = castOp(DataType::BFloat16, tv4);
 
-    FusionExecutorCache fec(std::move(fusion_ptr));
+  fusion->addOutput(tv5);
 
-    std::vector<int64_t> shape{15, 16};
+  FusionExecutorCache fec(std::move(fusion_ptr));
 
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    auto in0 = at::randn(shape, options);
-    auto in1 = at::randn(shape, options);
-    fec.runFusionWithInputs({in0, in1});
+  std::vector<int64_t> shape{15, 16};
 
-    // Check the segmented edge is bf16
-    auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
-    for (auto edge : segmented_fusion->edges()) {
-      auto edge_tv = edge->val->as<TensorView>();
-      TORCH_CHECK(edge_tv->getDataType() == DataType::BFloat16);
-    }
-  } else {
-    GTEST_SKIP();
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn(shape, options);
+  auto in1 = at::randn(shape, options);
+  fec.runFusionWithInputs({in0, in1});
+
+  // Check the segmented edge is bf16
+  auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+  for (auto edge : segmented_fusion->edges()) {
+    auto edge_tv = edge->val->as<TensorView>();
+    TORCH_CHECK(edge_tv->getDataType() == DataType::BFloat16);
   }
 #else
-  GTEST_SKIP();
+  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit;
 #endif
 }
 
-TEST(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
+TEST_F(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16887,64 +16891,66 @@ TEST(NVFuserTest, FusionForceFp16NotAllCast_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionForceBf16NotAllCast_CUDA) {
+TEST_F(NVFuserTest, FusionForceBf16NotAllCast_CUDA) {
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
-  if (at::cuda::getDeviceProperties(0)->major >= 8) {
-    std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
-    auto fusion = fusion_ptr.get();
-    FusionGuard fg(fusion);
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+    return;
+  }
 
-    auto tv0 = makeSymbolicTensor(3);
-    auto tv1 = makeSymbolicTensor(3);
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  auto fusion = fusion_ptr.get();
+  FusionGuard fg(fusion);
 
-    fusion->addInput(tv0);
-    fusion->addInput(tv1);
+  auto tv0 = makeSymbolicTensor(3);
+  auto tv1 = makeSymbolicTensor(3);
 
-    // Group 1
-    auto tv3 = sum(tv0, {1});
-    auto tv4 = broadcast(tv3, {false, true, false});
-    auto tv5 = sum(tv0, {1});
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
 
-    // Group 2
-    auto tv6 = add(tv4, tv1); // edge tv4, expect cast
-    auto tv7 = castOp(DataType::BFloat16, tv6);
+  // Group 1
+  auto tv3 = sum(tv0, {1});
+  auto tv4 = broadcast(tv3, {false, true, false});
+  auto tv5 = sum(tv0, {1});
 
-    // Group 3
-    auto tv8 = sum(tv5, {1}); // edge tv5, don't expect cast
+  // Group 2
+  auto tv6 = add(tv4, tv1); // edge tv4, expect cast
+  auto tv7 = castOp(DataType::BFloat16, tv6);
 
-    fusion->addOutput(tv7);
-    fusion->addOutput(tv8);
+  // Group 3
+  auto tv8 = sum(tv5, {1}); // edge tv5, don't expect cast
 
-    FusionExecutorCache fec(std::move(fusion_ptr));
+  fusion->addOutput(tv7);
+  fusion->addOutput(tv8);
 
-    std::vector<int64_t> shape{16, 16, 16};
+  FusionExecutorCache fec(std::move(fusion_ptr));
 
-    auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-    auto in0 = at::randn(shape, options);
-    auto in1 = at::randn(shape, options);
-    fec.runFusionWithInputs({in0, in1});
+  std::vector<int64_t> shape{16, 16, 16};
 
-    auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
-    auto complete_fusion = segmented_fusion->completeFusion();
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto in0 = at::randn(shape, options);
+  auto in1 = at::randn(shape, options);
+  fec.runFusionWithInputs({in0, in1});
 
-    // Check that the edge that wasn't fp16 is the producer of the
-    //  reduction op, i.e. tv8 = sum(tv5,{1});.
-    for (auto edge : segmented_fusion->edges()) {
-      auto edge_tv = edge->val->as<TensorView>();
-      if (edge_tv->getDataType() == DataType::Float) {
-        auto consumer = *(complete_fusion->unordered_uses(edge_tv).begin());
-        TORCH_CHECK(consumer->isA<ReductionOp>());
-      }
+  auto segmented_fusion = fec.getMostRecentKernelRuntime()->fusionSegments();
+  auto complete_fusion = segmented_fusion->completeFusion();
+
+  // Check that the edge that wasn't fp16 is the producer of the
+  //  reduction op, i.e. tv8 = sum(tv5,{1});.
+  for (auto edge : segmented_fusion->edges()) {
+    auto edge_tv = edge->val->as<TensorView>();
+    if (edge_tv->getDataType() == DataType::Float) {
+      auto consumer = *(complete_fusion->unordered_uses(edge_tv).begin());
+      TORCH_CHECK(consumer->isA<ReductionOp>());
     }
-  } else {
-    GTEST_SKIP();
   }
 #else
-  GTEST_SKIP();
+  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit;
 #endif
 }
 
-TEST(NVFuserTest, FusionBufferReuseBroadCastMultiVisit_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseBroadCastMultiVisit_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -16978,7 +16984,7 @@ TEST(NVFuserTest, FusionBufferReuseBroadCastMultiVisit_CUDA) {
   testValidate(fusion, outputs, {in0, in1}, {at_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseStressTest_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseStressTest_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17033,7 +17039,7 @@ TEST(NVFuserTest, FusionBufferReuseStressTest_CUDA) {
   testValidate(fusion, outputs, {in0, in1}, {t7, t11}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseLargeBuffer_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseLargeBuffer_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17066,7 +17072,7 @@ TEST(NVFuserTest, FusionBufferReuseLargeBuffer_CUDA) {
   testValidate(fusion, outputs, {in0}, {at_out}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseNo2hop_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseNo2hop_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17100,7 +17106,7 @@ TEST(NVFuserTest, FusionBufferReuseNo2hop_CUDA) {
   testValidate(fusion, outputs, {in0, in1}, {at_out}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseAllocationOrder_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseAllocationOrder_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17136,7 +17142,7 @@ TEST(NVFuserTest, FusionBufferReuseAllocationOrder_CUDA) {
   testValidate(fusion, outputs, {in0}, {at_out}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseLiveInterval_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseLiveInterval_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17168,7 +17174,7 @@ TEST(NVFuserTest, FusionBufferReuseLiveInterval_CUDA) {
   testValidate(fusion, cg_outputs, {in0}, {at_out}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionBufferReuseNoAcrossBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionBufferReuseNoAcrossBroadcast_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   auto fusion = fusion_ptr.get();
   FusionGuard fg(fusion);
@@ -17208,7 +17214,7 @@ TEST(NVFuserTest, FusionBufferReuseNoAcrossBroadcast_CUDA) {
   testValidate(fusion, outputs, {in0, in1}, {t7}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue970_CUDA) {
+TEST_F(NVFuserTest, FusionIssue970_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17240,7 +17246,7 @@ TEST(NVFuserTest, FusionIssue970_CUDA) {
 }
 
 // Reproducer of #1016
-TEST(NVFuserTest, FusionIssue1016_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1016_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17273,7 +17279,7 @@ TEST(NVFuserTest, FusionIssue1016_CUDA) {
 }
 
 // Reproducer of #1021
-TEST(NVFuserTest, FusionIssue1021_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1021_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17306,7 +17312,7 @@ TEST(NVFuserTest, FusionIssue1021_CUDA) {
 }
 
 // Reproducer of issue #1053
-TEST(NVFuserTest, FusionNonUniqueThreadDim_CUDA) {
+TEST_F(NVFuserTest, FusionNonUniqueThreadDim_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -17340,7 +17346,7 @@ TEST(NVFuserTest, FusionNonUniqueThreadDim_CUDA) {
       fusion.get(), outputs, {input1}, {at_tv1, at_tv2}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionParallelDimensionMap1_CUDA) {
+TEST_F(NVFuserTest, FusionParallelDimensionMap1_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -17390,7 +17396,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap1_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionParallelDimensionMap2_CUDA) {
+TEST_F(NVFuserTest, FusionParallelDimensionMap2_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -17431,7 +17437,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap2_CUDA) {
 }
 
 // Mix symbolic and concrete tensors
-TEST(NVFuserTest, FusionParallelDimensionMap3_CUDA) {
+TEST_F(NVFuserTest, FusionParallelDimensionMap3_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -17490,7 +17496,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap3_CUDA) {
 }
 
 // Parallelizing merged broadcast domains
-TEST(NVFuserTest, FusionParallelDimensionMap4_CUDA) {
+TEST_F(NVFuserTest, FusionParallelDimensionMap4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17537,7 +17543,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap4_CUDA) {
   testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
+TEST_F(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17583,7 +17589,7 @@ TEST(NVFuserTest, FusionParallelDimensionMap5_CUDA) {
   testValidate(&fusion, outputs, {input1, input2}, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
+TEST_F(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
   auto fusion_ptr = std::make_unique<Fusion>();
   auto& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -17688,7 +17694,7 @@ TEST(NVFuserTest, FusionSegmenterCombineReductionsCycleRepro_CUDA) {
   }
 }
 
-TEST(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
+TEST_F(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17742,7 +17748,7 @@ TEST(NVFuserTest, FusionSerialAndParallelIndexing_CUDA) {
 }
 
 // Repro of issue #1105
-TEST(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
+TEST_F(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17790,7 +17796,7 @@ TEST(NVFuserTest, FusionWARSyncAliasedSmem_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref1}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1099_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1099_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17846,7 +17852,7 @@ TEST(NVFuserTest, FusionIssue1099_CUDA) {
 }
 
 // Repro of issue #1080
-TEST(NVFuserTest, FusionUnswitchPredicate_CUDA) {
+TEST_F(NVFuserTest, FusionUnswitchPredicate_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17889,7 +17895,7 @@ TEST(NVFuserTest, FusionUnswitchPredicate_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1189_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1189_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17930,7 +17936,7 @@ TEST(NVFuserTest, FusionIssue1189_CUDA) {
   testValidate(&fusion, outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1052_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1052_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -17968,7 +17974,7 @@ TEST(NVFuserTest, FusionIssue1052_CUDA) {
 }
 
 // Repro of issue #1115
-TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
+TEST_F(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18003,7 +18009,7 @@ TEST(NVFuserTest, FusionPointwiseBroadcast_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {aten_y}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSmemAliasSerial_CUDA) {
+TEST_F(NVFuserTest, FusionSmemAliasSerial_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18047,7 +18053,7 @@ TEST(NVFuserTest, FusionSmemAliasSerial_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions_CUDA) {
+TEST_F(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18080,7 +18086,7 @@ TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions_CUDA) {
+TEST_F(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18113,7 +18119,7 @@ TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref1, ref2}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions2_CUDA) {
+TEST_F(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18166,7 +18172,7 @@ TEST(NVFuserTest, FusionGridReductionWithNonExactParallelDimensions2_CUDA) {
 #endif
 }
 
-TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
+TEST_F(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18220,7 +18226,7 @@ TEST(NVFuserTest, FusionGridWelfordWithNonExactParallelDimensions2_CUDA) {
 }
 
 // Repro of issue #1102
-TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
+TEST_F(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18281,7 +18287,7 @@ TEST(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
 }
 
 // Repro of #1102 and #1129
-TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
+TEST_F(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18339,7 +18345,7 @@ TEST(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
 }
 
 // Repro of issue #1136
-TEST(NVFuserTest, FusionFloatPow_CUDA) {
+TEST_F(NVFuserTest, FusionFloatPow_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18394,7 +18400,7 @@ TEST(NVFuserTest, FusionFloatPow_CUDA) {
       __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1127_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1127_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18423,7 +18429,7 @@ TEST(NVFuserTest, FusionIssue1127_CUDA) {
   ASSERT_ANY_THROW(fusion.printKernel());
 }
 
-TEST(NVFuserTest, FusionChannelsLastParser_CUDA) {
+TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // This test may not pass if using a custom block sync as there may
   // be additional calls. Skip the test as it's not specifically
   // relevant with block synchronizatin.
@@ -18546,7 +18552,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
   // TORCH_CHECK(output_ref.equal(outputs[0]));
 }
 
-TEST(NVFuserTest, FusionThreadPredicateUnswitch_CUDA) {
+TEST_F(NVFuserTest, FusionThreadPredicateUnswitch_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18576,7 +18582,7 @@ TEST(NVFuserTest, FusionThreadPredicateUnswitch_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
+TEST_F(NVFuserTest, FusionNonContigOutputs_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18607,7 +18613,7 @@ TEST(NVFuserTest, FusionNonContigOutputs_CUDA) {
   testValidate(&fusion, {at_output}, {at_input}, {at_ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
+TEST_F(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18648,7 +18654,7 @@ TEST(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1133_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1133_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18722,7 +18728,7 @@ TEST(NVFuserTest, FusionIssue1133_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
+TEST_F(NVFuserTest, FusionRfactorContigIDs_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18754,7 +18760,7 @@ TEST(NVFuserTest, FusionRfactorContigIDs_CUDA) {
   testValidate(&fusion, outputs, aten_inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18816,7 +18822,7 @@ TEST(NVFuserTest, FusionPersistentBufferCalculation1_CUDA) {
       aten_t0.size(1) * dataTypeSize(DataType::Float));
 }
 
-TEST(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18879,7 +18885,7 @@ TEST(NVFuserTest, FusionPersistentBufferCalculation2_CUDA) {
       aten_t0.size(1) * dataTypeSize(DataType::Half));
 }
 
-TEST(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18964,7 +18970,7 @@ TEST(NVFuserTest, FusionPersistentBufferCalculation3_CUDA) {
           (dataTypeSize(DataType::Half) + dataTypeSize(DataType::Float)));
 }
 
-TEST(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19041,7 +19047,7 @@ TEST(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
       aten_t0.size(1) * dataTypeSize(DataType::Half));
 }
 
-TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
+TEST_F(NVFuserTest, PersistentBufferProjection_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -19089,7 +19095,7 @@ TEST(NVFuserTest, PersistentBufferProjection_CUDA) {
   testValidate(&fusion, cg_outputs, {aten_t0}, {aten_t7}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1223_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1223_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19142,7 +19148,7 @@ TEST(NVFuserTest, FusionIssue1223_CUDA) {
 }
 
 // See #1247 and #1250
-TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
+TEST_F(NVFuserTest, FusionRfactorPredication1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19186,7 +19192,7 @@ TEST(NVFuserTest, FusionRfactorPredication1_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionRfactorPredication2_CUDA) {
+TEST_F(NVFuserTest, FusionRfactorPredication2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19239,7 +19245,7 @@ TEST(NVFuserTest, FusionRfactorPredication2_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19297,7 +19303,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
 }
 
 // Repro of issue #1074
-TEST(NVFuserTest, FusionNonDivisibleSplit2_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplit2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19351,7 +19357,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplit2_CUDA) {
 }
 
 // Similar to FusionNonDivisibleSplit1 but with unswitch
-TEST(NVFuserTest, FusionNonDivisibleSplit3_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplit3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19402,7 +19408,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplit3_CUDA) {
 }
 
 // Non-divisible split through merge
-TEST(NVFuserTest, FusionNonDivisibleSplit4_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplit4_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19452,7 +19458,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplit4_CUDA) {
 }
 
 // Nested splits
-TEST(NVFuserTest, FusionNonDivisibleSplit5_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplit5_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19506,7 +19512,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplit5_CUDA) {
 }
 
 // Vectorized non-divisible split. Must be validated at run time
-TEST(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19555,7 +19561,7 @@ TEST(NVFuserTest, FusionNonDivisibleSplitVectorize1_CUDA) {
 }
 
 // If a split is validated at run time, it's not necessary to predicate.
-TEST(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
+TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 

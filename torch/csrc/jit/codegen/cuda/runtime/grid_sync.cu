@@ -53,7 +53,10 @@ __device__ void sync(int64_t& semaphore, const uint64_t& segment_size) {
                0) {
       // Put a sleep here so we have some breaks in probing the global
       // semaphore, giving a better chance for other warps/blocks to catch up.
-      __nanosleep(200);
+#if __CUDA_ARCH__ >= 700
+      // __nanosleep only available on compute capability 7.0 or higher
+      __nanosleep(200); // avoids busy waiting
+#endif
     }
   }
 

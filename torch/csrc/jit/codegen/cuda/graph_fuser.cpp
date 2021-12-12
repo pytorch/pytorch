@@ -1334,7 +1334,7 @@ Value* guardView(
   // for view_sizes list, and constraints
   TORCH_INTERNAL_ASSERT(
       fusion_value_to_runtime_size.find(self_value) !=
-      fusion_value_to_runtime_size.end(),
+          fusion_value_to_runtime_size.end(),
       "Failed to find runtime size for fusion value:\t",
       self_value->node()->kind().toDisplayString());
   Node* viewcheck_node =
