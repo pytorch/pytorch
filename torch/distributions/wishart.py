@@ -193,7 +193,7 @@ class Wishart(ExponentialFamily):
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample).logical_not()
         if len(self._batch_shape):
-            reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
+            reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
             is_singular = is_singular.amax(reduced_batch_dims)
 
         if is_singular.any():
