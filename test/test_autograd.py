@@ -8395,6 +8395,17 @@ class TestAutogradDeviceType(TestCase):
             z = x.to(torch.bfloat16)
             self.assertTrue(z.requires_grad)
 
+    def test_copy_forward_ad_broadcasting(self, device):
+        # copy_ allows the src to have a different shape from self as long as src is
+        # broadcastable to self. Make sure forward AD handles this case.
+        primal = torch.rand(3, 3, device=device)
+        tangent = torch.rand(3, 3, device=device)
+        non_dual = torch.rand(1, 3, 3, device=device)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(primal, tangent)
+            non_dual.copy_(dual)
+
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):
         class ReentrantFunc(Function):
