@@ -73,6 +73,10 @@ class DefaultFuseHandler(FuseHandler):
         assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
         "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
         def get_modules(pattern, modules):
+            """ Given a node pattern, extract the corresponding modules
+            e.g. input: (relu_node, (bn_node, conv_node))
+                 output: (relu_module, (bn_module, conv_module))
+            """
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
                 get_modules(n, modules)
