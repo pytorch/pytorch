@@ -202,14 +202,20 @@ class Wishart(ExponentialFamily):
             self._validate_sample(value)
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-        reduced_dims = [-x for x in range(len(self._batch_shape))]
-        return (
+
+        probs = (
             - nu * p * _log_2 / 2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             - torch.mvlgamma(nu / 2, p=p)
             + (nu - p - 1) / 2 * value.logdet()
             - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
-        ).sum(reduced_dims)
+        )
+
+        if len(self._batch_shape):
+            reduced_dims = [-(x + 1) for x in range(len(self._batch_shape))]
+            return probs.sum(reduced_dims)
+        else:
+            return probs
 
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
