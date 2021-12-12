@@ -86,7 +86,7 @@ class Wishart(ExponentialFamily):
         self.df = df.expand(batch_shape)
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
-            warnings.warn("Low df values detected. Singular samples are highly likely occured for df < ndim.")
+            warnings.warn("Low df values detected. Singular samples are highly likely occured for ndim - 1 < df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
@@ -96,6 +96,8 @@ class Wishart(ExponentialFamily):
             self._unbroadcasted_scale_tril = torch.linalg.cholesky(covariance_matrix)
         else:  # precision_matrix is not None
             self._unbroadcasted_scale_tril = _precision_to_scale_tril(precision_matrix)
+
+        self._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
         # Chi2 distribution is needed for Bartlett decomposition sampling
         self._dist_chi2 = torch.distributions.chi2.Chi2(
@@ -171,7 +173,7 @@ class Wishart(ExponentialFamily):
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
-    def rsample(self, sample_shape=torch.Size()):
+    def _barttlet_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
@@ -180,20 +182,35 @@ class Wishart(ExponentialFamily):
         noise[..., i, j] = torch.randn(
             torch.Size(sample_shape) + self._batch_shape + (p * (p - 1) // 2,),
             dtype=noise.dtype,
-            device=noise.device
+            device=noise.device,
         )
         chol = self._unbroadcasted_scale_tril @ noise
-        sample = chol @ chol.transpose(-2, -1)
+        return chol @ chol.transpose(-2, -1)
+
+    def rsample(self, sample_shape=torch.Size()):
+        sample_shape = torch.Size(sample_shape)
+        sample = self._barttlet_sampling(sample_shape)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
-        support_check = self.support.check(sample)
-        if not support_check.all():
-            warnings.warn("Singular sample detected.")
+        is_singular = self.support.check(sample).logical_not()
+        if len(self._batch_shape):
+            is_singular = is_singular.amax(self._reduced_batch_dims)
 
-            sample[support_check.logical_not()] = (
-                sample[support_check.logical_not()]
-                + torch.eye(p, dtype=sample.dtype, device=sample.device).mul(1e-8)
-            )
+        if is_singular.any():
+            warnings.warn("Singular sample detected.")
+            sample = sample[is_singular.logical_not()]
+
+            while is_singular.any():
+                new_sample = self._barttlet_sampling(is_singular[is_singular].shape)
+
+                is_singular = self.support.check(new_sample).logical_not()
+                if len(self._batch_shape):
+                    is_singular = is_singular.amax(self._reduced_batch_dims)
+
+                sample = torch.cat(
+                    (sample, new_sample[is_singular.logical_not()]),
+                    dim=-(len(self._batch_shape) + 3)
+                )
 
         return sample
 
@@ -202,32 +219,35 @@ class Wishart(ExponentialFamily):
             self._validate_sample(value)
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
-
-        probs = (
+        log_prob_vals = (
             - nu * p * _log_2 / 2
             - nu * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             - torch.mvlgamma(nu / 2, p=p)
-            + (nu - p - 1) / 2 * value.logdet()
+            + (nu - p - 1) / 2 * torch.linalg.slogdet(value).logabsdet
             - torch.cholesky_solve(value, self._unbroadcasted_scale_tril).diagonal(dim1=-2, dim2=-1).sum(dim=-1) / 2
         )
 
         if len(self._batch_shape):
-            reduced_dims = [-(x + 1) for x in range(len(self._batch_shape))]
-            return probs.sum(reduced_dims)
+            return log_prob_vals.sum(self._reduced_batch_dims)
         else:
-            return probs
+            return log_prob_vals
 
     def entropy(self):
         nu = self.df  # has shape (batch_shape)
         p = self._event_shape[-1]  # has singleton shape
         V = self.covariance_matrix  # has shape (batch_shape x event_shape)
-        return (
+        entropy_val = (
             (p + 1) * self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
             + p * (p + 1) * _log_2 / 2
             + torch.mvlgamma(nu / 2, p=p)
             - _mvdigamma(nu / 2, p=p) * (nu - p - 1) / 2
             + nu * p / 2
         )
+
+        if len(self._batch_shape):
+            return entropy_val.sum(self._reduced_batch_dims)
+        else:
+            return entropy_val
 
     @property
     def _natural_params(self):
