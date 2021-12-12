@@ -818,7 +818,7 @@ class TestDistributions(TestCase):
             axis = np.random.normal(size=(1,) + torch_samples.shape[1:])
             axis /= np.linalg.norm(axis)
             torch_samples = (axis * torch_samples).reshape(num_samples, -1).sum(-1)
-            ref_samples = np.dot(ref_samples, axis).reshape(num_samples, -1).sum(-1)
+            ref_samples = (axis * ref_samples).reshape(num_samples, -1).sum(-1)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
         if circular:
             samples = [(np.cos(x), v) for (x, v) in samples]
