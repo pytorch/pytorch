@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/ceil_div.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/CUDAFunctions.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/LaunchUtils.h>
-#include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
 
@@ -17,10 +17,6 @@
 namespace at { namespace native {
 
 namespace {
-
-int64_t div_up(int64_t a, int64_t b) {
-  return (a + (b - 1)) / b;
-}
 
 template <typename T>
 inline __device__ bool _isinf(T x) { return ::isinf(x); }
@@ -78,7 +74,7 @@ void renormRows(Tensor& t) {
       props->maxThreadsPerBlock, cuda_utils::kCUDABlockReduceMaxThreads);
 
   dim3 grid(rows < numSM * 4 ? rows : numSM * 4);
-  dim3 block(std::min(maxThreads, C10_WARP_SIZE * div_up(cols, C10_WARP_SIZE)));
+  dim3 block(std::min(maxThreads, C10_WARP_SIZE * ceil_div(cols, int64_t{C10_WARP_SIZE})));
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(t.scalar_type(), "renormRows_cuda", [&] {
     renormRowsL1<scalar_t>
@@ -338,7 +334,7 @@ void multinomial_with_replacement_kernel_impl(
     int maxThreads = props->maxThreadsPerBlock;
     int maxShared = props->sharedMemPerBlock;
 
-    int requiredWarps = at::cuda::ATenCeilDiv(numCategories, C10_WARP_SIZE);
+    int requiredWarps = at::ceil_div(numCategories, C10_WARP_SIZE);
     int requiredThreads = std::min(maxThreads, requiredWarps * C10_WARP_SIZE);
     int requiredShared = requiredThreads * sizeof(accscalar_t);
 

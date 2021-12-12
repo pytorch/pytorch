@@ -2,7 +2,6 @@
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
-#include <THC/THCTensorMathReduce.cuh>
 #include <math.h>
 
 #include <ATen/native/Distance.h>

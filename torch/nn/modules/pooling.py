@@ -84,7 +84,7 @@ class MaxPool1d(_MaxPoolNd):
     padding: _size_1_t
     dilation: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool1d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -158,7 +158,7 @@ class MaxPool2d(_MaxPoolNd):
     padding: _size_2_t
     dilation: _size_2_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool2d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -236,7 +236,7 @@ class MaxPool3d(_MaxPoolNd):
     padding: _size_3_t
     dilation: _size_3_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.max_pool3d(input, self.kernel_size, self.stride,
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
@@ -361,24 +361,30 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
-        >>> input = torch.tensor([[[[ 1.,  2,  3,  4],
-                                    [ 5,  6,  7,  8],
-                                    [ 9, 10, 11, 12],
-                                    [13, 14, 15, 16]]]])
+        >>> input = torch.tensor([[[[ 1.,  2.,  3.,  4.],
+                                    [ 5.,  6.,  7.,  8.],
+                                    [ 9., 10., 11., 12.],
+                                    [13., 14., 15., 16.]]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
         tensor([[[[  0.,   0.,   0.,   0.],
                   [  0.,   6.,   0.,   8.],
                   [  0.,   0.,   0.,   0.],
                   [  0.,  14.,   0.,  16.]]]])
+        >>> # Now using output_size to resolve an ambiguous size for the inverse
+        >>> input = torch.torch.tensor([[[[ 1.,  2.,  3., 4., 5.],
+                                          [ 6.,  7.,  8., 9., 10.],
+                                          [11., 12., 13., 14., 15.],
+                                          [16., 17., 18., 19., 20.]]]])
+        >>> output, indices = pool(input)
+        >>> # This call will not work without specifying output_size
+        >>> unpool(output, indices, output_size=input.size())
+        tensor([[[[ 0.,  0.,  0.,  0.,  0.],
+                  [ 0.,  7.,  0.,  9.,  0.],
+                  [ 0.,  0.,  0.,  0.,  0.],
+                  [ 0., 17.,  0., 19.,  0.]]]])
 
-        >>> # specify a different output size than input size
-        >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-        tensor([[[[  0.,   0.,   0.,   0.,   0.],
-                  [  6.,   0.,   8.,   0.,   0.],
-                  [  0.,   0.,   0.,  14.,   0.],
-                  [ 16.,   0.,   0.,   0.,   0.],
-                  [  0.,   0.,   0.,   0.,   0.]]]])
+
     """
 
     kernel_size: _size_2_t
@@ -772,7 +778,7 @@ class FractionalMaxPool2d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -835,7 +841,7 @@ class FractionalMaxPool3d(Module):
                 raise ValueError("output_ratio must be between 0 and 1 (got {})"
                                  .format(output_ratio))
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.fractional_max_pool3d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -1042,7 +1048,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
 
     output_size: _size_2_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
@@ -1085,7 +1091,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
 
     output_size: _size_3_opt_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 

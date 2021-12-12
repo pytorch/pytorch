@@ -74,7 +74,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATen)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNC)(benchmark::State& state) {
-
   BufHandle input("input", {N_, C_, H_, W_}, kFloat);
   BufHandle weight("weight", {C_}, kFloat);
   BufHandle bias("bias", {C_}, kFloat);
@@ -136,7 +135,6 @@ BENCHMARK_DEFINE_F(BatchNorm, ATenRelu)(benchmark::State& state) {
 }
 
 BENCHMARK_DEFINE_F(BatchNorm, NNCRelu)(benchmark::State& state) {
-
   BufHandle input("input", {N_, C_, H_, W_}, kFloat);
   BufHandle weight("weight", {C_}, kFloat);
   BufHandle bias("bias", {C_}, kFloat);

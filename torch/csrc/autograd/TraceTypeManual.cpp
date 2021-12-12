@@ -143,6 +143,7 @@ TORCH_LIBRARY_IMPL(aten, Tracer, m) {
   m.impl("requires_grad_", CppFunction::makeFallthrough());
   m.impl("retain_grad", CppFunction::makeFallthrough());
   m.impl("_fw_primal", CppFunction::makeFallthrough());
+  m.impl("_make_dual", CppFunction::makeFallthrough());
 }
 
 }  // namespace
@@ -185,7 +186,7 @@ void general_trace_function(
           type = type->expectRef<OptionalType>().getElementType();
         }
       }
-      if (type->isSubtypeOf(TensorType::get())) {
+      if (type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(iter->isTensor());
         tracer::addInputs(node, args[i].name().c_str(), iter->toTensor());
       } else if (type->kind() == TypeKind::FloatType) {
@@ -204,7 +205,7 @@ void general_trace_function(
         tracer::addInputs(node, args[i].name().c_str(), iter->toScalar());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
-        if (elem_type->isSubtypeOf(TensorType::get())) {
+        if (elem_type->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(iter->isTensorList());
           auto list = iter->toTensorVector();
           tracer::addInputs(node, args[i].name().c_str(), list);
@@ -265,12 +266,12 @@ void general_trace_function(
     for (auto iter = stack->end() - output_size; iter != stack->end();
           ++iter, ++i) {
       const auto& type = op.schema().returns()[i].type();
-      if (type->isSubtypeOf(TensorType::get())) {
+      if (type->isSubtypeOf(*TensorType::get())) {
         AT_ASSERT(iter->isTensor());
         tracer::addOutput(node, iter->toTensor());
       } else if (type->kind() == TypeKind::ListType) {
         const auto& elem_type = type->expectRef<ListType>().getElementType();
-        if (elem_type->isSubtypeOf(TensorType::get())) {
+        if (elem_type->isSubtypeOf(*TensorType::get())) {
           AT_ASSERT(iter->isTensorList());
           tracer::addOutput(node, iter->toTensorList());
         } else {
