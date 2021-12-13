@@ -1171,6 +1171,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/Lerp.cpp",
     "aten/src/ATen/native/Linear.cpp",
     "aten/src/ATen/native/LinearAlgebra.cpp",
+    "aten/src/ATen/native/LinearAlgebraUtils.cpp",
     "aten/src/ATen/native/Loss.cpp",
     "aten/src/ATen/native/LossCTC.cpp",
     "aten/src/ATen/native/LossMultiLabelMargin.cpp",
