@@ -19,7 +19,6 @@ from torch.ao.quantization import (
     float16_dynamic_qconfig,
     float_qparams_weight_only_qconfig,
     PerChannelMinMaxObserver,
-    QConfigDynamic,
     default_dynamic_quant_observer,
 )
 
@@ -560,8 +559,8 @@ class TestPostTrainingStatic(QuantizationTestCase):
             float_qparams_observer = PerChannelMinMaxObserver.with_args(dtype=dtype,
                                                                         qscheme=torch.per_channel_affine_float_qparams,
                                                                         ch_axis=0)
-            float_qparams_qconfig = QConfigDynamic(activation=default_dynamic_quant_observer,
-                                                   weight=float_qparams_observer)
+            float_qparams_qconfig = QConfig(activation=default_dynamic_quant_observer,
+                                            weight=float_qparams_observer)
             model.qconfig = float_qparams_qconfig
 
             prepare(model, inplace=True)
