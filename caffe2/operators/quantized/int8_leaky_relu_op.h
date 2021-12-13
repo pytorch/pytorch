@@ -20,6 +20,9 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
     CAFFE_ENFORCE_GT(alpha, 0.0);
     CAFFE_ENFORCE_LT(alpha, 1.0);
     this->alpha_ = alpha;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+    this->ws_ = ws;
+#endif
   }
 
   ~Int8LeakyReluOp() {
@@ -99,6 +102,9 @@ class Int8LeakyReluOp final : public Operator<CPUContext> {
 
  private:
   float alpha_;
+#if !defined(FBCODE_CAFFE2) && defined(USE_INTERNAL_PTHREADPOOL_IMPL)
+  Workspace* ws_;
+#endif
   // QNNPACK Leaky ReLU operator
   qnnp_operator_t qnnpackOperator_{nullptr};
 };
