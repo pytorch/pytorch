@@ -13473,31 +13473,8 @@ class TestNNDeviceType(NNTestCase):
         backend_actual = torch._C._select_conv_backend(*inputs)
         self.assertEqual(backend_actual, backend_expected)
 
-        # Autograd function to hook up the general convolution function to convolution_backward
-        # without a derivatives.yaml entry. TODO: Once general forward + backward are hooked up together,
-        # remove this.
-        class MyConv(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, input, weight, bias, stride, padding, dilation, transposed, output_padding, groups):
-                ctx.save_for_backward(input, weight, bias)
-                ctx.stuff = (stride, padding, dilation, transposed, output_padding, groups)
-                return torch.convolution(input, weight, bias, stride, padding, dilation, transposed,
-                                         output_padding, groups)
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                input, weight, bias = ctx.saved_tensors
-                stride, padding, dilation, transposed, output_padding, groups = ctx.stuff
-                grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
-                    grad_output, input, weight, None if bias is None else bias.shape, stride, padding, dilation,
-                    transposed, output_padding, groups,
-                    list(ctx.needs_input_grad[:2]) + [False if bias is None else True])
-                return grad_input, grad_weight, None if bias is None else grad_bias, None, \
-                    None, None, None, None, None
-
-        convolution = MyConv.apply
-
         # Ensure backward call succeeds.
+        convolution = torch.ops.aten.convolution
         output = convolution(*inputs)
         grad_output = torch.randn(output.shape, device=device, dtype=dtype)
         if not contiguous:
