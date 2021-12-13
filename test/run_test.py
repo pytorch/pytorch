@@ -909,6 +909,8 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
 
+        # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This below code should be removed once this issue is solved
         if distutils.version.LooseVersion(torch.version.cuda) >= "11.5":
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
