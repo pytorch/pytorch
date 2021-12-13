@@ -11,7 +11,6 @@ import multiprocessing as mp
 import os
 import socket
 import sys
-import unittest
 from contextlib import closing
 
 from torch.distributed.elastic.utils.distributed import (
@@ -22,13 +21,19 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     run_tests,
-    TEST_WITH_TSAN,
-    TestCase
+    TestCase,
 )
 
 
 def _create_c10d_store_mp(is_server, server_addr, port, world_size, wait_for_workers):
-    store = create_c10d_store(is_server, server_addr, port, world_size, wait_for_workers=wait_for_workers, timeout=2)
+    store = create_c10d_store(
+        is_server,
+        server_addr,
+        port,
+        world_size,
+        wait_for_workers=wait_for_workers,
+        timeout=2,
+    )
     if store is None:
         raise AssertionError()
 
@@ -51,7 +56,6 @@ class DistributedUtilTest(TestCase):
                 is_server=True, server_addr=socket.gethostname(), world_size=2
             )
 
-    @unittest.skipIf(TEST_WITH_TSAN, "test incompatible with tsan")
     def test_create_store_multi(self):
         world_size = 3
         wait_for_workers = False
@@ -69,12 +73,12 @@ class DistributedUtilTest(TestCase):
 
         # worker processes will use the port that was assigned to the server
         server_port = store.port
-
-        worker0 = mp.Process(
+        ctx = mp.get_context("spawn")
+        worker0 = ctx.Process(
             target=_create_c10d_store_mp,
             args=(False, localhost, server_port, world_size, wait_for_workers),
         )
-        worker1 = mp.Process(
+        worker1 = ctx.Process(
             target=_create_c10d_store_mp,
             args=(False, localhost, server_port, world_size, wait_for_workers),
         )

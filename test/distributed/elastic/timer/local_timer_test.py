@@ -20,7 +20,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_TSAN,
-    TestCase
+    TestCase,
 )
 
 
@@ -113,7 +113,9 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
         def test_timer(self):
             timeout = 0.1
             duration = 1
-            p = mp.Process(target=self._run, args=(self.mp_queue, timeout, duration))
+            p = self.ctx.Process(
+                target=self._run, args=(self.mp_queue, timeout, duration)
+            )
             p.start()
             p.join()
             self.assertEqual(-signal.SIGKILL, p.exitcode)
@@ -133,8 +135,12 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
 
     class MultiprocessingRequestQueueTest(TestCase):
+        def setUp(self):
+            super().setUp()
+            self.ctx = mp.get_context("spawn")
+
         def test_get(self):
-            mp_queue = mp.Queue()
+            mp_queue = self.ctx.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
 
             requests = request_queue.get(1, timeout=0.01)
@@ -156,13 +162,13 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             every ``interval`` seconds. Asserts that a ``get(n, timeout=n*interval+delta)``
             yields all ``n`` elements.
             """
-            mp_queue = mp.Queue()
+            mp_queue = self.ctx.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
             n = 10
             interval = 0.1
-            sem = mp.Semaphore(0)
+            sem = self.ctx.Semaphore(0)
 
-            p = mp.Process(
+            p = self.ctx.Process(
                 target=_enqueue_on_interval, args=(mp_queue, n, interval, sem)
             )
             p.start()
@@ -181,13 +187,13 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
             every ``interval`` seconds. Asserts that a ``get(n, timeout=(interval * n/2))``
             yields at most ``n/2`` elements.
             """
-            mp_queue = mp.Queue()
+            mp_queue = self.ctx.Queue()
             request_queue = MultiprocessingRequestQueue(mp_queue)
             n = 10
             interval = 0.1
-            sem = mp.Semaphore(0)
+            sem = self.ctx.Semaphore(0)
 
-            p = mp.Process(
+            p = self.ctx.Process(
                 target=_enqueue_on_interval, args=(mp_queue, n, interval, sem)
             )
             p.start()
@@ -203,7 +209,8 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
     class LocalTimerServerTest(TestCase):
         def setUp(self):
             super().setUp()
-            self.mp_queue = mp.Queue()
+            self.ctx = mp.get_context("spawn")
+            self.mp_queue = self.ctx.Queue()
             self.max_interval = 0.01
             self.server = timer.LocalTimerServer(self.mp_queue, self.max_interval)
 

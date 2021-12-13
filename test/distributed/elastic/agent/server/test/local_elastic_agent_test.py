@@ -184,10 +184,7 @@ def acquire_available_port():
           the port as quickly as possible.
     """
     addrs = socket.getaddrinfo(
-        host="localhost",
-        port=None,
-        family=socket.AF_UNSPEC,
-        type=socket.SOCK_STREAM
+        host="localhost", port=None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM
     )
 
     for addr in addrs:
@@ -219,6 +216,110 @@ class Conf:
     role: str = "default"
     redirects: Std = Std.NONE
     tee: Std = Std.NONE
+    rdzv_backend: str = "c10d"
+    run_id: str = "none"
+    rdzv_endpoint: str = "localhost:29500"
+
+
+def get_agent(
+    spec: WorkerSpec,
+    log_dir: Optional[str] = None,
+    start_method: str = "spawn",
+    exit_barrier_timeout=5,
+) -> LocalElasticAgent:
+    return LocalElasticAgent(
+        spec,
+        start_method=start_method,
+        exit_barrier_timeout=exit_barrier_timeout,
+        log_dir=log_dir,
+    )
+
+
+def get_worker_spec(
+    node_config: Conf,
+    min_nodes=1,
+    max_nodes=1,
+    max_restarts=0,
+    monitor_interval=0.01,
+    master_addr_override: Optional[str] = None,
+    master_port_override: Optional[int] = None,
+    is_host=True,
+):
+    rdzv_params = RendezvousParameters(
+        backend=node_config.rdzv_backend,
+        endpoint=node_config.rdzv_endpoint,
+        run_id=node_config.run_id,
+        min_nodes=min_nodes,
+        max_nodes=max_nodes,
+        is_host=is_host,
+    )
+    rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
+    return WorkerSpec(
+        role=node_config.role,
+        local_world_size=node_config.local_world_size,
+        entrypoint=node_config.entrypoint,
+        args=node_config.args,
+        rdzv_handler=rdzv_handler,
+        max_restarts=max_restarts,
+        monitor_interval=monitor_interval,
+        redirects=node_config.redirects,
+        tee=node_config.tee,
+        master_addr=master_addr_override,
+        master_port=master_port_override,
+    )
+
+
+# pyre-fixme[56]: Pyre was not able to infer the type of the decorator
+#  `torch.distributed.elastic.multiprocessing.errors.record`.
+@record
+def run_agent(
+    conf: Conf,
+    log_dir: Optional[str] = None,
+    agent_results: Optional[mp.Queue] = None,  # (role, agent_result)
+    min_nodes=1,
+    max_nodes=1,
+    start_method: str = "spawn",
+    max_restarts: int = 0,
+    exit_barrier_timeout=5,
+    master_addr_override: Optional[str] = None,
+    master_port_override: Optional[int] = None,
+    is_host=True,
+) -> Optional[RunResult]:
+    """
+    Runs a single agent. This method can be called either on a separate process
+    or the main test process. When calling this method on a sparate process make
+    sure to pass the ``agent_results`` multiprocessing Queue so that the agent's
+    run results can be returned. If ``agent_results`` is omitted, then the
+    run result is returned from the method.
+    """
+
+    spec = get_worker_spec(
+        node_config=conf,
+        min_nodes=min_nodes,
+        max_nodes=max_nodes,
+        max_restarts=max_restarts,
+        master_addr_override=master_addr_override,
+        master_port_override=master_port_override,
+        is_host=is_host,
+    )
+    agent = get_agent(
+        spec=spec,
+        log_dir=log_dir,
+        start_method=start_method,
+        exit_barrier_timeout=exit_barrier_timeout,
+    )
+
+    result = agent.run()
+    spec.rdzv_handler.shutdown()
+
+    if agent_results:
+        agent_results.put((conf.role, result))
+
+    if result.is_failed():
+        raise ChildFailedError(spec.get_entrypoint_name(), result.failures)
+    else:
+        if not agent_results:
+            return result
 
 
 class LocalElasticAgentTest(unittest.TestCase):
@@ -236,107 +337,13 @@ class LocalElasticAgentTest(unittest.TestCase):
     def setUp(self):
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
         self._run_id = str(uuid.uuid4()).split("-")[0]
+        self.ctx = mp.get_context("spawn")
 
     def tearDown(self):
         shutil.rmtree(self._test_dir)
 
     def log_dir(self) -> str:
         return tempfile.mkdtemp(prefix="torchelastic_", dir=self._test_dir)
-
-    def get_worker_spec(
-        self,
-        node_config: Conf,
-        min_nodes=1,
-        max_nodes=1,
-        max_restarts=0,
-        monitor_interval=0.01,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
-        is_host=True,
-    ):
-        rdzv_params = RendezvousParameters(
-            backend=self._backend,
-            endpoint=self._endpoint,
-            run_id=self._run_id,
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
-            is_host=is_host,
-        )
-        rdzv_handler = rdzv_registry.get_rendezvous_handler(rdzv_params)
-        return WorkerSpec(
-            role=node_config.role,
-            local_world_size=node_config.local_world_size,
-            entrypoint=node_config.entrypoint,
-            args=node_config.args,
-            rdzv_handler=rdzv_handler,
-            max_restarts=max_restarts,
-            monitor_interval=monitor_interval,
-            redirects=node_config.redirects,
-            tee=node_config.tee,
-            master_addr=master_addr_override,
-            master_port=master_port_override,
-        )
-
-    def get_agent(
-        self, spec: WorkerSpec, start_method: str = "spawn", exit_barrier_timeout=5
-    ) -> LocalElasticAgent:
-        return LocalElasticAgent(
-            spec,
-            start_method=start_method,
-            exit_barrier_timeout=exit_barrier_timeout,
-            log_dir=self.log_dir(),
-        )
-
-    # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
-    #  `torch.distributed.elastic.multiprocessing.errors.record`.
-    @record
-    def run_agent(
-        self,
-        conf: Conf,
-        agent_results: Optional[mp.Queue] = None,  # (role, agent_result)
-        min_nodes=1,
-        max_nodes=1,
-        start_method: str = "spawn",
-        max_restarts: int = 0,
-        exit_barrier_timeout=5,
-        master_addr_override: Optional[str] = None,
-        master_port_override: Optional[int] = None,
-        is_host=True,
-    ) -> Optional[RunResult]:
-        """
-        Runs a single agent. This method can be called either on a separate process
-        or the main test process. When calling this method on a sparate process make
-        sure to pass the ``agent_results`` multiprocessing Queue so that the agent's
-        run results can be returned. If ``agent_results`` is omitted, then the
-        run result is returned from the method.
-        """
-
-        spec = self.get_worker_spec(
-            node_config=conf,
-            min_nodes=min_nodes,
-            max_nodes=max_nodes,
-            max_restarts=max_restarts,
-            master_addr_override=master_addr_override,
-            master_port_override=master_port_override,
-            is_host=is_host,
-        )
-        agent = self.get_agent(
-            spec=spec,
-            start_method=start_method,
-            exit_barrier_timeout=exit_barrier_timeout,
-        )
-
-        result = agent.run()
-        spec.rdzv_handler.shutdown()
-
-        if agent_results:
-            agent_results.put((conf.role, result))
-
-        if result.is_failed():
-            raise ChildFailedError(spec.get_entrypoint_name(), result.failures)
-        else:
-            if not agent_results:
-                return result
 
     def run_job(
         self, node_configs: List[Conf], exit_barrier_timeout: int = 5
@@ -346,11 +353,14 @@ class LocalElasticAgentTest(unittest.TestCase):
         (one on each process). Agent 0 is run on the main process for
         test coverage and ease of debugging
         """
-
+        for node_config in node_configs:
+            node_config.rdzv_backend = self._backend
+            node_config.run_id = self._run_id
+            node_config.rdzv_endpoint = self._endpoint
         nnodes = len(node_configs)
 
         # each element in this queue holds a tuple (role, RunResult) for each agent
-        agent_results = mp.Queue()
+        agent_results = self.ctx.Queue()
 
         # run first agent of first config on main process for test coverage + ease of debugging
         # it is important we loop in reverse order b/c running fn on the main process blocks
@@ -359,6 +369,7 @@ class LocalElasticAgentTest(unittest.TestCase):
             conf = node_configs[node_idx]
             run_agent_args = {
                 "conf": conf,
+                "log_dir": self.log_dir(),
                 "agent_results": agent_results,
                 "min_nodes": nnodes,
                 "max_nodes": nnodes,
@@ -367,7 +378,7 @@ class LocalElasticAgentTest(unittest.TestCase):
                 "exit_barrier_timeout": exit_barrier_timeout,
                 "is_host": node_idx == 0,
             }
-            p = mp.Process(target=self.run_agent, kwargs=run_agent_args)
+            p = self.ctx.Process(target=run_agent, kwargs=run_agent_args)
             procs.append(p)
             p.start()
         for p in procs:
@@ -398,61 +409,69 @@ class LocalElasticAgentTest(unittest.TestCase):
 
         test_to_run()
 
-
     def dummy_compute(self):
-        res = self.run_agent(Conf(entrypoint=dummy_compute, local_world_size=2))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=dummy_compute,
+                local_world_size=2,
+            )
+        )
         self.assertFalse(res.is_failed())
         for return_value in res.return_values.values():
             self.assertIsInstance(return_value, torch.Tensor)
             self.assertEqual((100, 100), return_value.shape)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_dummy_compute_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.dummy_compute)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_dummy_compute_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.dummy_compute)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_dummy_compute_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.dummy_compute)
 
     def run_happy_function(self):
-        res = self.run_agent(Conf(entrypoint=_happy_function, local_world_size=2))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=_happy_function,
+                local_world_size=2,
+            )
+        )
         self.assertFalse(res.is_failed())
         self.assertIsNone(res.return_values[0])
         self.assertIsNone(res.return_values[1])
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_happy_function_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.run_happy_function)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_happy_function_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.run_happy_function)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_happy_function_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_happy_function)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.run_happy_function
+        )
 
     def check_master_addr_port_override(self):
         master_addr = "test_host"
         master_port = 42
-        res = self.run_agent(
+        res = run_agent(
             Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
                 entrypoint=_check_master_port_addr_override,
                 args=(master_addr, master_port),
                 local_world_size=1,
@@ -463,74 +482,93 @@ class LocalElasticAgentTest(unittest.TestCase):
         self.assertFalse(res.is_failed())
         self.assertIsNone(res.return_values[0])
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_check_master_addr_port_override_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.check_master_addr_port_override)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.check_master_addr_port_override
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_check_master_addr_port_override_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.check_master_addr_port_override)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.check_master_addr_port_override
+        )
 
     def run_check_env_function(self):
         # just checks that all env vars that we need to set on the user script
         # is actually set
-        res = self.run_agent(Conf(entrypoint=_check_env_function, local_world_size=1))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=_check_env_function,
+                local_world_size=1,
+            )
+        )
         self.assertFalse(res.is_failed())
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_check_env_function_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.run_check_env_function)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_check_env_function
+        )
 
     def run_function_with_return_value(self):
-        res = self.run_agent(Conf(entrypoint=_echo, args=("foo",), local_world_size=2))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=_echo,
+                args=("foo",),
+                local_world_size=2,
+            )
+        )
         self.assertFalse(res.is_failed())
         self.assertEqual("foo", res.return_values[0])
         self.assertEqual("foo", res.return_values[1])
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_function_with_return_value_c10d(self):
-        self.run_test_with_backend(backend="c10d", test_to_run=self.run_function_with_return_value)
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_function_with_return_value
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_function_with_return_value_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.run_function_with_return_value)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_function_with_return_value
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_function_with_return_value_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_function_with_return_value)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.run_function_with_return_value
+        )
 
     def simple_dist_sum(self):
-        res = self.run_agent(Conf(entrypoint=_dist_sum, local_world_size=2))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=_dist_sum,
+                local_world_size=2,
+            )
+        )
         self.assertFalse(res.is_failed())
         # _dist_sum internally checks that the sum computed is valid
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_simple_dist_sum_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.simple_dist_sum)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_simple_dist_sum_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.simple_dist_sum)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_simple_dist_sum_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.simple_dist_sum)
 
@@ -556,21 +594,27 @@ class LocalElasticAgentTest(unittest.TestCase):
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_run_distributed_sum_homogeneous_c10d(self):
-        self.run_test_with_backend(backend="c10d", test_to_run=self.run_distributed_sum_homogeneous)
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_distributed_sum_homogeneous
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_run_distributed_sum_homogeneous_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.run_distributed_sum_homogeneous)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_distributed_sum_homogeneous
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_run_distributed_sum_homogeneous_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_distributed_sum_homogeneous)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.run_distributed_sum_homogeneous
+        )
 
     def run_distributed_sum_heterogeneous(self):
         # sums all ranks on 3 agents; each running 1, 2, 3 workers respectively
@@ -593,23 +637,23 @@ class LocalElasticAgentTest(unittest.TestCase):
             ranks.update(run_results.return_values.keys())
         self.assertSetEqual(set(range(1 + 2 + 3)), ranks)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_distributed_sum_heterogeneous_c10d(self):
-        self.run_test_with_backend(backend="c10d", test_to_run=self.run_distributed_sum_heterogeneous)
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_distributed_sum_heterogeneous
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_distributed_sum_heterogeneous_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.run_distributed_sum_heterogeneous)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_distributed_sum_heterogeneous
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_distributed_sum_heterogeneous_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_distributed_sum_heterogeneous)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.run_distributed_sum_heterogeneous
+        )
 
     def run_sad_function(self):
         """
@@ -618,7 +662,15 @@ class LocalElasticAgentTest(unittest.TestCase):
         replyfile = os.path.join(self._test_dir, "error.json")
         with mock.patch.dict(os.environ, {"TORCHELASTIC_ERROR_FILE": replyfile}):
             with self.assertRaises(ChildFailedError) as cm:
-                self.run_agent(Conf(entrypoint=_sad_function, local_world_size=2))
+                run_agent(
+                    Conf(
+                        rdzv_backend=self._backend,
+                        run_id=self._run_id,
+                        rdzv_endpoint=self._endpoint,
+                        entrypoint=_sad_function,
+                        local_world_size=2,
+                    )
+                )
 
             rank, failure = cm.exception.get_first_failure()
             failure_data = failure.error_file_data["message"]
@@ -632,21 +684,15 @@ class LocalElasticAgentTest(unittest.TestCase):
                 self.assertEqual(data["message"], failure_data["message"])
                 self.assertEqual(int(data["extraInfo"]["timestamp"]), failure.timestamp)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_sad_function_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.run_sad_function)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_sad_function_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.run_sad_function)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_sad_function_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_sad_function)
 
@@ -654,32 +700,38 @@ class LocalElasticAgentTest(unittest.TestCase):
         """
         checks agent failure handling logic
         """
-        node_conf = Conf(entrypoint=_bipolar_function, local_world_size=4)
-        spec = self.get_worker_spec(node_conf, max_restarts=2)
-        agent = self.get_agent(spec)
+        node_conf = Conf(
+            entrypoint=_bipolar_function,
+            local_world_size=4,
+            rdzv_backend=self._backend,
+            rdzv_endpoint=self._endpoint,
+            run_id=self._run_id,
+        )
+        spec = get_worker_spec(node_conf, max_restarts=2)
+        agent = get_agent(spec, self.log_dir())
         run_result = agent.run()
         self.assertTrue(run_result.is_failed())
         self.assertEqual(0, agent._remaining_restarts)
         self.assertEqual(WorkerState.FAILED, agent.get_worker_group().state)
         self.assertTrue(agent._total_execution_time > 0)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_bipolar_function_c10d(self):
-        self.run_test_with_backend(backend="c10d", test_to_run=self.run_bipolar_function)
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.run_bipolar_function
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_bipolar_function_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.run_bipolar_function)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.run_bipolar_function
+        )
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_run_bipolar_function_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.run_bipolar_function)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.run_bipolar_function
+        )
 
     def correct_rank_assignment_heterogeneous(self):
         node_configs = [
@@ -710,14 +762,18 @@ class LocalElasticAgentTest(unittest.TestCase):
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_correct_rank_assignment_heterogeneous_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.correct_rank_assignment_heterogeneous)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.correct_rank_assignment_heterogeneous
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_correct_rank_assignment_heterogeneous_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.correct_rank_assignment_heterogeneous)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.correct_rank_assignment_heterogeneous
+        )
 
     def correct_rank_assignment_homogeneous(self):
         node_configs = [
@@ -744,14 +800,18 @@ class LocalElasticAgentTest(unittest.TestCase):
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_correct_rank_assignment_homogeneous_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.correct_rank_assignment_homogeneous)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.correct_rank_assignment_homogeneous
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_correct_rank_assignment_homogeneous_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.correct_rank_assignment_homogeneous)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.correct_rank_assignment_homogeneous
+        )
 
     def assert_rank_consistency(
         self,
@@ -813,8 +873,15 @@ class LocalElasticAgentTest(unittest.TestCase):
         """
         nnodes = 2
         wait = 2
-        node_conf = Conf(entrypoint=_dist_sum, args=(wait,), local_world_size=2)
-        agent_results = mp.Queue()
+        node_conf = Conf(
+            rdzv_backend=self._backend,
+            run_id=self._run_id,
+            rdzv_endpoint=self._endpoint,
+            entrypoint=_dist_sum,
+            args=(wait,),
+            local_world_size=2,
+        )
+        agent_results = self.ctx.Queue()
         agent_args = {
             "conf": node_conf,
             "agent_results": agent_results,
@@ -825,8 +892,8 @@ class LocalElasticAgentTest(unittest.TestCase):
 
         procs = []
         for _ in range(nnodes):
-            p = mp.Process(
-                target=self.run_agent,
+            p = self.ctx.Process(
+                target=run_agent,
                 kwargs=agent_args,
             )
             procs.append(p)
@@ -836,8 +903,8 @@ class LocalElasticAgentTest(unittest.TestCase):
         for i in range(nnodes):
             if i % 2 != 0:
                 procs[i].kill()
-                p = mp.Process(
-                    target=self.run_agent,
+                p = self.ctx.Process(
+                    target=run_agent,
                     kwargs=agent_args,
                 )
                 procs[i] = p
@@ -853,14 +920,18 @@ class LocalElasticAgentTest(unittest.TestCase):
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_double_agent_fault_tolerance_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.double_agent_fault_tolerance)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.double_agent_fault_tolerance
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_double_agent_fault_tolerance_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.double_agent_fault_tolerance)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.double_agent_fault_tolerance
+        )
 
     def double_agent_elastic(self):
         """
@@ -870,8 +941,15 @@ class LocalElasticAgentTest(unittest.TestCase):
         min_nodes = 1
         max_nodes = 2
         wait = 2
-        node_conf = Conf(entrypoint=_dist_sum, args=(wait,), local_world_size=2)
-        agent_results = mp.Queue()
+        node_conf = Conf(
+            rdzv_backend=self._backend,
+            run_id=self._run_id,
+            rdzv_endpoint=self._endpoint,
+            entrypoint=_dist_sum,
+            args=(wait,),
+            local_world_size=2,
+        )
+        agent_results = self.ctx.Queue()
         agent_args = {
             "conf": node_conf,
             "agent_results": agent_results,
@@ -882,8 +960,8 @@ class LocalElasticAgentTest(unittest.TestCase):
 
         procs = []
         for _ in range(max_nodes):
-            p = mp.Process(
-                target=self.run_agent,
+            p = self.ctx.Process(
+                target=run_agent,
                 kwargs=agent_args,
             )
             procs.append(p)
@@ -907,21 +985,27 @@ class LocalElasticAgentTest(unittest.TestCase):
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_double_agent_elastic_c10d(self):
-        self.run_test_with_backend(backend="c10d", test_to_run=self.double_agent_elastic)
+        self.run_test_with_backend(
+            backend="c10d", test_to_run=self.double_agent_elastic
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_double_agent_elastic_etcd(self):
-        self.run_test_with_backend(backend="etcd", test_to_run=self.double_agent_elastic)
+        self.run_test_with_backend(
+            backend="etcd", test_to_run=self.double_agent_elastic
+        )
 
     @unittest.skipIf(
         TEST_WITH_DEV_DBG_ASAN or TEST_WITH_TSAN,
         "test incompatible with dev/dbg asan or tsan",
     )
     def test_double_agent_elastic_etcd_v2(self):
-        self.run_test_with_backend(backend="etcd-v2", test_to_run=self.double_agent_elastic)
+        self.run_test_with_backend(
+            backend="etcd-v2", test_to_run=self.double_agent_elastic
+        )
 
     def torch_rpc(self):
         """
@@ -1052,25 +1136,27 @@ class LocalElasticAgentTest(unittest.TestCase):
         Failure during the barrier should NOT fail the job.
         """
         barrier_mock.side_effect = RuntimeError("test error")
-        res = self.run_agent(Conf(entrypoint=_happy_function, local_world_size=1))
+        res = run_agent(
+            Conf(
+                rdzv_backend=self._backend,
+                run_id=self._run_id,
+                rdzv_endpoint=self._endpoint,
+                entrypoint=_happy_function,
+                local_world_size=1,
+            )
+        )
         self.assertFalse(res.is_failed())
         barrier_mock.assert_called_once()
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_barrier_failed_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.barrier_failed)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_barrier_failed_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.barrier_failed)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_barrier_failed_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.barrier_failed)
 
@@ -1079,9 +1165,15 @@ class LocalElasticAgentTest(unittest.TestCase):
         pcontext_mock = Mock()
         pcontext_mock.pids.return_value = {0: 0}
         start_processes_mock.return_value = pcontext_mock
-        node_conf = Conf(entrypoint=_happy_function, local_world_size=1)
-        spec = self.get_worker_spec(node_conf, max_restarts=0)
-        agent = self.get_agent(spec)
+        node_conf = Conf(
+            entrypoint=_happy_function,
+            local_world_size=1,
+            rdzv_endpoint=self._endpoint,
+            rdzv_backend=self._backend,
+            run_id=self._run_id,
+        )
+        spec = get_worker_spec(node_conf, max_restarts=0)
+        agent = get_agent(spec, self.log_dir())
         with patch.object(agent, "_monitor_workers") as monitor_mock:
             monitor_mock.return_value = RunResult(
                 state=WorkerState.SUCCEEDED, return_values={0: 0}
@@ -1089,20 +1181,14 @@ class LocalElasticAgentTest(unittest.TestCase):
             agent.run("worker")
         pcontext_mock.close.assert_called_once()
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_shutdown_called_c10d(self):
         self.run_test_with_backend(backend="c10d", test_to_run=self.shutdown_called)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_shutdown_called_etcd(self):
         self.run_test_with_backend(backend="etcd", test_to_run=self.shutdown_called)
 
-    @sandcastle_skip_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_shutdown_called_etcd_v2(self):
         self.run_test_with_backend(backend="etcd-v2", test_to_run=self.shutdown_called)
