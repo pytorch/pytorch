@@ -2387,12 +2387,7 @@ int getUnswitchStopOffset(
   }
 }
 
-// Get offsets for the start and stop predicates. Similar to the
-// gather case, but it's a little simpler as it does not (yet)
-// dynamic shifting.
-void adjustStartAndStopOffsetsForShift(
-    std::vector<kir::Val*>& start_offsets,
-    std::vector<kir::Val*>& stop_offsets,
+std::pair<kir::Val*, kir::Val*> getStartAndStopOffsetsForShift(
     TensorView* consumer_tv,
     IterDomain* consumer_id,
     bool padding_predicate) {
@@ -2406,18 +2401,10 @@ void adjustStartAndStopOffsetsForShift(
   // Adjustment is not necessary if not shift.
   // Even so, padding predicate does not need any adjustment.
   if (shift_expr == nullptr || padding_predicate) {
-    return;
+    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
   }
 
   const auto root_axis_pos = consumer_tv->domain()->rootPosOf(consumer_id);
-
-  // Assume this adjustment is done first, so start and stop offsets
-  // just contain zeroVal.
-  TORCH_INTERNAL_ASSERT(
-      start_offsets.size() == 1 && start_offsets[0]->isZeroInt() &&
-      stop_offsets.size() == 1 && stop_offsets[0]->isZeroInt());
-  start_offsets.clear();
-  stop_offsets.clear();
 
   // The consumer offset is zero.
   auto consumer_offset = 0;
@@ -2445,15 +2432,12 @@ void adjustStartAndStopOffsetsForShift(
   auto start_offset = std::min(consumer_offset, producer_offset);
   auto stop_offset = std::max(consumer_offset, producer_offset);
 
-  start_offsets.push_back(ir_builder.create<kir::Int>(start_offset));
-  stop_offsets.push_back(ir_builder.create<kir::Int>(stop_offset));
+  return {
+      ir_builder.create<kir::Int>(start_offset),
+      ir_builder.create<kir::Int>(stop_offset)};
 }
 
-// Get offsets for the start and stop predicates. There can be two
-// offsets because the shift offset is determined by a loop index.
-void adjustStartAndStopOffsetsForGather(
-    std::vector<kir::Val*>& start_offsets,
-    std::vector<kir::Val*>& stop_offsets,
+std::pair<kir::Val*, kir::Val*> getStartAndStopOffsetsForGather(
     TensorView* consumer_tv,
     IterDomain* consumer_id,
     const std::unordered_map<kir::IterDomain*, kir::Val*>& ref_start_index_map,
@@ -2467,18 +2451,10 @@ void adjustStartAndStopOffsetsForGather(
   // Adjustment is not necessary if not gather. Even so, padding
   // predicate does not need any adjustment.
   if (!consumer_tv->definition()->isA<GatherOp>() || padding_predicate) {
-    return;
+    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
   }
 
   const auto root_axis_pos = consumer_tv->domain()->rootPosOf(consumer_id);
-
-  // Assume this adjustment is done first, so start and stop offsets
-  // just contain zeroVal.
-  TORCH_INTERNAL_ASSERT(
-      start_offsets.size() == 1 && start_offsets[0]->isZeroInt() &&
-      stop_offsets.size() == 1 && stop_offsets[0]->isZeroInt());
-  start_offsets.clear();
-  stop_offsets.clear();
 
   auto producer_start_offset = getProducerOffsetWithGather(
       root_axis_pos, consumer_tv, ref_start_index_map);
@@ -2486,21 +2462,39 @@ void adjustStartAndStopOffsetsForGather(
   auto producer_stop_offset = getProducerOffsetWithGather(
       root_axis_pos, consumer_tv, ref_stop_index_map);
 
-  // The producer and consumer accesses must be predicated as it is
-  // not statically determined which is more restrictive.
+  auto consumer_start_offset = ir_builder.zeroVal();
+  auto consumer_stop_offset = ir_builder.zeroVal();
 
-  // Consumer offsets are just zero.
-  start_offsets.push_back(ir_builder.zeroVal());
-  stop_offsets.push_back(ir_builder.zeroVal());
-
-  // Adds producer offsets if they are not zero.
-  if (!producer_start_offset->isZeroInt()) {
-    start_offsets.push_back(producer_start_offset);
+  if (producer_start_offset->isZeroInt() && producer_stop_offset->isZeroInt()) {
+    return {consumer_start_offset, consumer_stop_offset};
   }
 
-  if (!producer_stop_offset->isZeroInt()) {
-    stop_offsets.push_back(producer_stop_offset);
+  kir::Val* start_offset = nullptr;
+  kir::Val* stop_offset = nullptr;
+
+  // In the normal case, take the minimum of the start and the
+  // maximum of the stop offsets. If there's no padding, the producer
+  // offset must be always larger than the consumer
+  // offset. So, the consumer and produce offsets can be always used
+  // for the start and stop offsets, respectively.
+  const auto no_padding =
+      consumer_tv->definition()->as<GatherOp>()->padWidth()[root_axis_pos][0] ==
+      0;
+
+  if (no_padding) {
+    start_offset = consumer_start_offset;
+    stop_offset = producer_stop_offset;
+  } else {
+    start_offset =
+        ir_builder.minExpr(consumer_start_offset, producer_start_offset);
+    stop_offset =
+        ir_builder.maxExpr(consumer_stop_offset, producer_stop_offset);
   }
+
+  TORCH_INTERNAL_ASSERT(start_offset != nullptr);
+  TORCH_INTERNAL_ASSERT(stop_offset != nullptr);
+
+  return {start_offset, stop_offset};
 }
 
 // Get the start and stop limit offsets that define the valid range to
@@ -2725,7 +2719,7 @@ auto getPredicateReferenceIndexing(
 
 // Get the offsets for the start and stop predicates. The offsets
 // are to be added to the index.
-std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets(
+std::pair<kir::Val*, kir::Val*> getStartAndStopOffsets(
     IterDomain* consumer_id,
     TensorView* consumer_tv,
     const ReferenceTensor& reference,
@@ -2740,29 +2734,24 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   // By default, the offsets for the start and stop predicates are
-  // just zero.
-  std::vector<kir::Val*> start_offsets{ir_builder.zeroVal()};
-  std::vector<kir::Val*> stop_offsets{ir_builder.zeroVal()};
-
+  // just zero. All halo-related adjustments are done at root domains,
+  // so consumer_id is not a root domain, no adjustment is required.
   if (consumer_id->definition() != nullptr && !non_divisible_pred) {
-    return {start_offsets, stop_offsets};
+    return {ir_builder.zeroVal(), ir_builder.zeroVal()};
   }
 
   auto consumer_def = consumer_tv->definition();
 
+  kir::Val* start_offset = ir_builder.zeroVal();
+  kir::Val* stop_offset = ir_builder.zeroVal();
+
   // These adjustments are not required when predicating non-divisible splits
   if (!non_divisible_pred) {
     if (consumer_def->isA<ShiftOp>()) {
-      adjustStartAndStopOffsetsForShift(
-          start_offsets,
-          stop_offsets,
-          consumer_tv,
-          consumer_id,
-          padding_predicate);
+      std::tie(start_offset, stop_offset) = getStartAndStopOffsetsForShift(
+          consumer_tv, consumer_id, padding_predicate);
     } else if (consumer_def->isA<GatherOp>()) {
-      adjustStartAndStopOffsetsForGather(
-          start_offsets,
-          stop_offsets,
+      std::tie(start_offset, stop_offset) = getStartAndStopOffsetsForGather(
           consumer_tv,
           consumer_id,
           consumer_start_index_map,
@@ -2773,12 +2762,8 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
     // Adjustment for partial split
     auto partial_split_offset = getGlobalConsumerOffsetWithPartialSplit(
         gpu_lower->lowerValue(consumer_id)->as<kir::IterDomain>());
-    for (auto& start_offset : start_offsets) {
-      start_offset = ir_builder.addExpr(start_offset, partial_split_offset);
-    }
-    for (auto& stop_offset : stop_offsets) {
-      stop_offset = ir_builder.addExpr(stop_offset, partial_split_offset);
-    }
+    start_offset = ir_builder.addExpr(start_offset, partial_split_offset);
+    stop_offset = ir_builder.addExpr(stop_offset, partial_split_offset);
 
     // If generating a predicate for unswitch, adjust the stop offset to
     // accommodate the addition of halo to the loop stop. See the
@@ -2788,9 +2773,7 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
           !padding_predicate, "Unswitch should not use the padding predicate");
       auto stop_unswitch_offset =
           getUnswitchStopOffset(consumer_id, consumer_tv);
-      for (auto& stop_offset : stop_offsets) {
-        stop_offset = ir_builder.addExpr(stop_offset, stop_unswitch_offset);
-      }
+      stop_offset = ir_builder.addExpr(stop_offset, stop_unswitch_offset);
     }
   }
 
@@ -2810,20 +2793,30 @@ std::pair<std::vector<kir::Val*>, std::vector<kir::Val*>> getStartAndStopOffsets
   //  index + (start_offset - start_limit) >= 0
   //  index + (stop_offset - stop_limit)  < extent
 
-  for (auto& start_offset : start_offsets) {
-    start_offset = ir_builder.subExpr(start_offset, limits.first);
-  }
-  for (auto& stop_offset : stop_offsets) {
-    stop_offset = ir_builder.subExpr(stop_offset, limits.second);
-  }
+  start_offset = ir_builder.subExpr(start_offset, limits.first);
+  stop_offset = ir_builder.subExpr(stop_offset, limits.second);
 
-  return {start_offsets, stop_offsets};
+  return {start_offset, stop_offset};
 }
 
-bool canOmitStartPredicate(kir::Val* start_offset) {
+// A partial value of a start offset is returned if determined to be
+// safe. Nullptr is returned if it can be omitted completely.
+kir::Val* simplifyStartOffset(kir::Val* start_offset) {
   // Start predicate can be omitted when start_offset >= 0.
   auto offset_val = start_offset->as<kir::Int>()->value();
-  return offset_val.has_value() && offset_val.value() >= 0;
+  if (offset_val.has_value() && offset_val.value() >= 0) {
+    return nullptr;
+  }
+
+  // start_offset may look like min(0, window_index - pad). Then, can
+  // remove min and leave the rhs only.
+  auto def = dynamic_cast<kir::BinaryOp*>(start_offset->definition());
+  if (def != nullptr && def->operation() == BinaryOpType::Min &&
+      def->lhs()->isZeroInt()) {
+    return def->rhs();
+  }
+
+  return start_offset;
 }
 
 bool canOmitStopPredicate(
@@ -3004,7 +2997,7 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
     // The final predicates will look like:
     // (index + start_offset) >= 0 && (index + stop_offset) < extent.
 
-    std::tie(info.start_offsets_, info.stop_offsets_) = getStartAndStopOffsets(
+    std::tie(info.start_offset_, info.stop_offset_) = getStartAndStopOffsets(
         contig_id,
         consumer_tv,
         reference,
@@ -3019,31 +3012,29 @@ std::pair<std::vector<RootPredicateInfo>, ReferenceTensor> Index::
 
     // Build predicates for start positions as:
     //   start_index + start_offset >= 0
-    for (auto start_offset : info.start_offsets_) {
-      if (canOmitStartPredicate(start_offset)) {
-        info.start_predicates_.push_back(ir_builder.trueVal());
-        continue;
-      }
+    auto start_offset = simplifyStartOffset(info.start_offset_);
+    if (start_offset == nullptr) {
+      info.start_predicate_ = ir_builder.trueVal();
+    } else {
       auto offsetted_start_index =
           ir_builder.addExpr(start_index, start_offset);
-      auto pred =
+      auto start_pred =
           ir_builder.geExpr(offsetted_start_index, ir_builder.zeroVal())
               ->as<kir::Bool>();
-      info.start_predicates_.push_back(pred);
+      info.start_predicate_ = start_pred;
     }
 
     // Build predicates for stop positions as:
     //   stop_index + stop_offset < IterDomain::extent
-    for (auto stop_offset : info.stop_offsets_) {
-      if (canOmitStopPredicate(stop_index, stop_offset, kir_contig_id)) {
-        info.stop_predicates_.push_back(ir_builder.trueVal());
-        continue;
-      }
+    auto stop_offset = info.stop_offset_;
+    if (canOmitStopPredicate(stop_index, stop_offset, kir_contig_id)) {
+      info.stop_predicate_ = ir_builder.trueVal();
+    } else {
       auto offsetted_stop_index = ir_builder.addExpr(stop_index, stop_offset);
-      auto pred =
+      auto stop_pred =
           ir_builder.ltExpr(offsetted_stop_index, kir_contig_id->extent())
               ->as<kir::Bool>();
-      info.stop_predicates_.push_back(pred);
+      info.stop_predicate_ = stop_pred;
     }
 
     for (auto consumer_id : contig_id_entry.covered_ids) {
@@ -3073,12 +3064,8 @@ RootPredicateInfo RootPredicateInfo::getFalseInfo() {
   kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   RootPredicateInfo info;
-  info.start_predicates_.push_back(ir_builder.falseVal());
-  info.stop_predicates_.push_back(ir_builder.falseVal());
-  // These are just placeholder. When the predicate is false, the
-  // offset should not be used.
-  info.start_offsets_.push_back(nullptr);
-  info.stop_offsets_.push_back(nullptr);
+  info.start_predicate_ = ir_builder.falseVal();
+  info.stop_predicate_ = ir_builder.falseVal();
 
   return info;
 }

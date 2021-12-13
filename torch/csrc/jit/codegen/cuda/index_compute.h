@@ -183,24 +183,24 @@ class RootPredicateInfo {
   friend class Index;
 
  public:
-  const auto& startPredicates() const {
-    return start_predicates_;
+  const auto& startPredicate() const {
+    return start_predicate_;
   }
 
-  auto& startPredicates() {
-    return start_predicates_;
+  auto& startPredicate() {
+    return start_predicate_;
   }
 
-  const auto& startOffsets() const {
-    return start_offsets_;
+  const auto& startOffset() const {
+    return start_offset_;
   }
 
-  const auto& stopPredicates() const {
-    return stop_predicates_;
+  const auto& stopPredicate() const {
+    return stop_predicate_;
   }
 
-  const auto& stopOffsets() const {
-    return stop_offsets_;
+  const auto& stopOffset() const {
+    return stop_offset_;
   }
 
   const auto& rootIds() const {
@@ -212,14 +212,14 @@ class RootPredicateInfo {
   static RootPredicateInfo getFalseInfo();
 
  private:
-  // prdicates for lower end
-  std::vector<kir::Bool*> start_predicates_;
-  // prdicates for upper end
-  std::vector<kir::Bool*> stop_predicates_;
-  // Offsets of the start predicate
-  std::vector<kir::Val*> start_offsets_;
-  // Offsets of the stop predicate
-  std::vector<kir::Val*> stop_offsets_;
+  // prdicate for lower end
+  kir::Bool* start_predicate_ = nullptr;
+  // prdicate for upper end
+  kir::Bool* stop_predicate_ = nullptr;
+  // Offset of the start predicate
+  kir::Val* start_offset_ = nullptr;
+  // Offset of the stop predicate
+  kir::Val* stop_offset_ = nullptr;
   // Track which roots have been handled by the generated predicates
   std::unordered_set<IterDomain*> root_ids_;
 };

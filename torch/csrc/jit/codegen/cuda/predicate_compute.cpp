@@ -400,14 +400,8 @@ kir::Bool* PredicateCompute::getInlinePredicate(
         continue;
       }
     }
-    for (auto pred : pred_info.startPredicates()) {
-      TORCH_INTERNAL_ASSERT(pred != nullptr);
-      preds.push_back(pred);
-    }
-    for (auto pred : pred_info.stopPredicates()) {
-      TORCH_INTERNAL_ASSERT(pred != nullptr);
-      preds.push_back(pred);
-    }
+    preds.push_back(pred_info.startPredicate());
+    preds.push_back(pred_info.stopPredicate());
   }
 
   // When generating a predicate for blockReduce writes and not for
@@ -487,10 +481,8 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
   // predicates are generated in the finalize function.
 
   for (const auto& pred_info : ref_pred_info.first) {
-    if (pred_info.startPredicates().empty() &&
-        pred_info.stopPredicates().empty()) {
-      continue;
-    }
+    TORCH_INTERNAL_ASSERT(pred_info.startPredicate() != nullptr);
+    TORCH_INTERNAL_ASSERT(pred_info.stopPredicate() != nullptr);
 
     const auto& root_ids = pred_info.rootIds();
 
@@ -571,14 +563,14 @@ void UnswitchPredicate::predicateOn(kir::Expr* tv_expr) {
     // start and stop offsets.
     if (merged_pred_it != pending_predicates_.end()) {
       mergeUnswitchPredicateOffsets(
-          pred_info.startPredicates(),
-          pred_info.startOffsets(),
+          pred_info.startPredicate(),
+          pred_info.startOffset(),
           merged_pred_it->start,
           true);
 
       mergeUnswitchPredicateOffsets(
-          pred_info.stopPredicates(),
-          pred_info.stopOffsets(),
+          pred_info.stopPredicate(),
+          pred_info.stopOffset(),
           merged_pred_it->stop,
           false);
     }
@@ -659,12 +651,10 @@ void UnswitchPredicate::finalize() {
 }
 
 void UnswitchPredicate::mergeUnswitchPredicateOffsets(
-    const std::vector<kir::Bool*>& predicates,
-    const std::vector<kir::Val*>& offsets,
+    kir::Bool* predicate,
+    kir::Val* offset,
     MergedPredicates::Info& merged_predicate_info,
     bool is_start) {
-  TORCH_INTERNAL_ASSERT(predicates.size() == offsets.size());
-
   auto is_more_restrictive = [&is_start](int64_t new_val, int64_t current_val) {
     if (is_start) {
       return new_val < current_val;
@@ -673,25 +663,21 @@ void UnswitchPredicate::mergeUnswitchPredicateOffsets(
     }
   };
 
-  for (const auto i : c10::irange(predicates.size())) {
-    auto pred = predicates.at(i);
-    auto offset = offsets.at(i);
-    auto offset_int = dynamic_cast<kir::Int*>(offset);
-    // If it's a static predicate, replace the current one if it's
-    // more restrictive. If it's dynamic, just adds it to the dynamic
-    // predicate list.
-    if (offset_int && offset_int->isConst()) {
-      auto offset_const = offset_int->value().value();
-      auto& static_pred = merged_predicate_info.static_pred;
-      auto& static_offset = merged_predicate_info.static_offset;
-      if (static_pred == nullptr ||
-          is_more_restrictive(offset_const, static_offset)) {
-        static_pred = pred;
-        static_offset = offset_const;
-      }
-    } else {
-      merged_predicate_info.dynamic_preds.push_back(pred);
+  auto offset_int = dynamic_cast<kir::Int*>(offset);
+  // If it's a static predicate, replace the current one if it's
+  // more restrictive. If it's dynamic, just adds it to the dynamic
+  // predicate list.
+  if (offset_int && offset_int->isConst()) {
+    auto offset_const = offset_int->value().value();
+    auto& static_pred = merged_predicate_info.static_pred;
+    auto& static_offset = merged_predicate_info.static_offset;
+    if (static_pred == nullptr ||
+        is_more_restrictive(offset_const, static_offset)) {
+      static_pred = predicate;
+      static_offset = offset_const;
     }
+  } else {
+    merged_predicate_info.dynamic_preds.push_back(predicate);
   }
 }
 

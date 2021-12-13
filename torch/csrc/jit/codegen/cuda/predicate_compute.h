@@ -161,8 +161,8 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   //! static, only pick the most restrictive one, e.g., the one with the
   //! minimum offset for the start predication.
   void mergeUnswitchPredicateOffsets(
-      const std::vector<kir::Bool*>& predicates,
-      const std::vector<kir::Val*>& offsets,
+      kir::Bool* predicate,
+      kir::Val* offset,
       MergedPredicates::Info& merged_predicate_info,
       bool is_start);
 

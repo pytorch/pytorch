@@ -123,6 +123,8 @@ class TORCH_CUDA_CU_API SimplifyingIrBuilder : public IrBuilder {
   Val* addExpr(Val* lhs, Val* rhs);
   Val* subExpr(Val* lhs, Val* rhs);
   Val* andExpr(Val* lhs, Val* rhs);
+  Val* maxExpr(Val* lhs, Val* rhs);
+  Val* minExpr(Val* lhs, Val* rhs);
 };
 
 } // namespace kir

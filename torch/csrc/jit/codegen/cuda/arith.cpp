@@ -1318,6 +1318,10 @@ TensorView* gather(
       " but received ",
       window_shape.size());
 
+  std::for_each(window_shape.begin(), window_shape.end(), [](const auto& w) {
+    TORCH_CHECK(w > 0, "Window size must be > 0: ", w);
+  });
+
   TORCH_CHECK(
       ndims == pad_width.size(),
       "Invalid pad width: number of entries expected to be ",
@@ -1329,6 +1333,10 @@ TensorView* gather(
     TORCH_CHECK(
         p.size() == 2,
         "Each entry of pad_width must have two non-negative integers.");
+    std::for_each(p.begin(), p.end(), [](const auto& p_left_or_right) {
+      TORCH_CHECK(
+          p_left_or_right >= 0, "Padding must be >= 0: ", p_left_or_right);
+    });
   });
 
   TORCH_CHECK(
@@ -1337,6 +1345,10 @@ TensorView* gather(
       ndims,
       " but received ",
       strides.size());
+
+  std::for_each(strides.begin(), strides.end(), [](const auto& s) {
+    TORCH_CHECK(s > 0, "Stride must be > 0: ", s);
+  });
 
   std::vector<IterDomain*> out_root_domains;
   std::vector<IterDomain*> out_gather_dom;

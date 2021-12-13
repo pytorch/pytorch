@@ -278,6 +278,69 @@ Val* SimplifyingIrBuilder::andExpr(Val* lhs, Val* rhs) {
   return IrBuilder::andExpr(lhs, rhs);
 }
 
+namespace {
+
+template <typename IrBuilderFunc, typename IntFunc>
+Val* minOrMaxExpr(
+    SimplifyingIrBuilder* builder,
+    Int* lhs,
+    Int* rhs,
+    IrBuilderFunc ir_builder_func,
+    IntFunc int_func) {
+  if (rhs == nullptr) {
+    return lhs;
+  } else if (lhs == nullptr) {
+    return rhs;
+  } else if (lhs->isConst() && rhs->isConst()) {
+    return builder->create<kir::Int>(
+        int_func(lhs->value().value(), rhs->value().value()));
+  } else {
+    return ir_builder_func(lhs, rhs);
+  }
+}
+
+template <typename IrBuilderFunc, typename IntFunc>
+Val* minOrMaxExpr(
+    SimplifyingIrBuilder* builder,
+    Val* lhs,
+    Val* rhs,
+    IrBuilderFunc ir_builder_func,
+    IntFunc int_func) {
+  TORCH_INTERNAL_ASSERT(lhs != nullptr || rhs != nullptr);
+  if (lhs == nullptr) {
+    return rhs;
+  } else if (rhs == nullptr || lhs == rhs) {
+    return lhs;
+  }
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  auto rhs_int = dynamic_cast<Int*>(rhs);
+  if (lhs_int != nullptr && rhs_int != nullptr) {
+    return minOrMaxExpr(builder, lhs_int, rhs_int, ir_builder_func, int_func);
+  } else {
+    return ir_builder_func(lhs, rhs);
+  }
+}
+
+} // namespace
+
+Val* SimplifyingIrBuilder::maxExpr(Val* lhs, Val* rhs) {
+  return minOrMaxExpr(
+      this,
+      lhs,
+      rhs,
+      [this](Val* lhs, Val* rhs) { return IrBuilder::maxExpr(lhs, rhs); },
+      [](int64_t lhs, int64_t rhs) { return std::max(lhs, rhs); });
+}
+
+Val* SimplifyingIrBuilder::minExpr(Val* lhs, Val* rhs) {
+  return minOrMaxExpr(
+      this,
+      lhs,
+      rhs,
+      [this](Val* lhs, Val* rhs) { return IrBuilder::minExpr(lhs, rhs); },
+      [](int64_t lhs, int64_t rhs) { return std::min(lhs, rhs); });
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser
