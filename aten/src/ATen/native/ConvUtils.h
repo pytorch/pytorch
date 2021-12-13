@@ -26,14 +26,15 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
+                   const c10::optional<IntArrayRef> bias_sizes_opt) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -62,10 +63,14 @@ enum class ConvBackend {
 
 // Function to select the convolution backend based on the inputs and params.
 // This overload is used within the convolution internals but not exposed to python.
+// NB: The forward pass provides a bias tensor while the backward pass provides
+// a bool indicating whether the bias is defined. This is done to save memory by
+// avoiding saving the full bias tensor for backward.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const bool need_backward,
     const ConvParams& params);
 
 // Overload for selecting the convolution backend from the full set of convolution inputs.
