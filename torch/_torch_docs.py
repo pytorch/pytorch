@@ -782,15 +782,29 @@ add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
-Convert the data into a `torch.Tensor`. If the data is already a `Tensor` with the same `dtype` and `device`,
-no copy will be performed, otherwise a new `Tensor` will be returned with computational graph retained if data
-`Tensor` has ``requires_grad=True``. Similarly, if the data is an ``ndarray`` of the corresponding `dtype` and
-the `device` is the cpu, no copy will be performed.
+Converts data into a tensor, sharing data and preserving autograd
+history if possible.
+
+If data is already a tensor with the requeseted dtype and device
+then data itself is returned, but if data is a
+tensor with a different dtype or device then it's copied as if using
+`data.to(dtype=dtype, device=device)`.
+
+If data is a NumPy array (an ndarray) with the same dtype and device then a
+tensor is constructed using :func:`torch.from_numpy`.
+
+.. seealso::
+
+    :func:`torch.tensor` never shares its data and creates a new "leaf tensor" (see :doc:`/notes/autograd`).
+
 
 Args:
     {data}
     {dtype}
-    {device}
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
+        then the device of data is used. If None and data is not a tensor then
+        the result tensor is constructed on the CPU.
+
 
 Example::
 
@@ -2209,7 +2223,7 @@ Example::
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
     >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> z = l @ l.mT
@@ -2258,7 +2272,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],
@@ -2297,10 +2311,15 @@ triangular such that the returned tensor is
 .. math::
     inv = (u^T u)^{{-1}}
 
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
+
 Args:
-    input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
-           Cholesky factor
-    upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
+                consisting of symmetric positive-definite matrices
+                where :math:`*` is zero or more batch dimensions.
+    upper (bool, optional): flag that indicates whether to return a
+                upper or lower triangular matrix. Default: False
 
 Keyword args:
     out (Tensor, optional): the output tensor for `inv`
@@ -2309,7 +2328,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -2322,6 +2341,12 @@ Example::
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
+    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
+    >>> l = torch.linalg.cholesky(a)
+    >>> z = l @ l.mT
+    >>> torch.dist(z, a)
+    tensor(3.5894e-07)
 """)
 
 add_docstr(torch.clone, r"""
@@ -8110,29 +8135,29 @@ add_docstr(torch.tensor,
            r"""
 tensor(data, *, dtype=None, device=None, requires_grad=False, pin_memory=False) -> Tensor
 
-Constructs a tensor with :attr:`data`.
+Constructs a tensor with no autograd history (also known as a "leaf tensor", see :doc:`/notes/autograd`) by copying :attr:`data`.
 
 .. warning::
 
-    :func:`torch.tensor` always copies :attr:`data`. If you have a Tensor
-    ``data`` and want to avoid a copy, use :func:`torch.Tensor.requires_grad_`
-    or :func:`torch.Tensor.detach`.
-    If you have a NumPy ``ndarray`` and want to avoid a copy, use
-    :func:`torch.as_tensor`.
+    When working with tensors prefer using :func:`torch.Tensor.clone`,
+    :func:`torch.Tensor.detach`, and :func:`torch.Tensor.requires_grad_` for
+    readability. Letting `t` be a tensor, ``torch.tensor(t)`` is equivalent to
+    ``t.clone().detach()``, and ``torch.tensor(t, requires_grad=True)``
+    is equivalent to ``t.clone().detach().requires_grad_(True)``.
 
-.. warning::
+.. seealso::
 
-    When data is a tensor `x`, :func:`torch.tensor` reads out 'the data' from whatever it is passed,
-    and constructs a leaf variable. Therefore ``torch.tensor(x)`` is equivalent to ``x.clone().detach()``
-    and ``torch.tensor(x, requires_grad=True)`` is equivalent to ``x.clone().detach().requires_grad_(True)``.
-    The equivalents using ``clone()`` and ``detach()`` are recommended.
+    :func:`torch.as_tensor` preserves autograd history and avoids copies where possible.
+    :func:`torch.from_numpy` creates a tensor that shares storage with a NumPy array.
 
 Args:
     {data}
 
 Keyword args:
     {dtype}
-    {device}
+    device (:class:`torch.device`, optional): the device of the constructed tensor. If None and data is a tensor
+        then the device of data is used. If None and data is not a tensor then
+        the result tensor is constructed on the CPU.
     {requires_grad}
     {pin_memory}
 
@@ -8149,10 +8174,10 @@ Example::
 
     >>> torch.tensor([[0.11111, 0.222222, 0.3333333]],
     ...              dtype=torch.float64,
-    ...              device=torch.device('cuda:0'))  # creates a torch.cuda.DoubleTensor
+    ...              device=torch.device('cuda:0'))  # creates a double tensor on a CUDA device
     tensor([[ 0.1111,  0.2222,  0.3333]], dtype=torch.float64, device='cuda:0')
 
-    >>> torch.tensor(3.14159)  # Create a scalar (zero-dimensional tensor)
+    >>> torch.tensor(3.14159)  # Create a zero-dimensional (scalar) tensor
     tensor(3.1416)
 
     >>> torch.tensor([])  # Create an empty tensor (of size (0,))
@@ -9941,6 +9966,19 @@ If the diagonal of :attr:`A` contains zeros or elements that are very close to z
 the result may contain `NaN` s.
 
 Supports input of float, double, cfloat and cdouble data types.
+
+.. warning::
+
+    :func:`torch.triangular_solve` is deprecated in favor of :func:`torch.linalg.solve_triangular`
+    and will be removed in a future PyTorch release.
+    :func:`torch.linalg.solve_triangular` has its arguments reversed and does not return a
+    copy of one of the inputs.
+
+    ``X = torch.triangular_solve(B, A).solution`` should be replaced with
+
+    .. code:: python
+
+        X = torch.linalg.solve_triangular(A, B)
 
 Args:
     b (Tensor): multiple right-hand sides of size :math:`(*, m, k)` where
