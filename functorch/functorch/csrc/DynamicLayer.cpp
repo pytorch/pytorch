@@ -525,18 +525,6 @@ struct WithoutTop {
   DynamicLayer layer_;
 };
 
-struct SaveLocalDispatchKeySet {
- public:
-  SaveLocalDispatchKeySet() :
-    saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {}
-  ~SaveLocalDispatchKeySet() {
-    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
-  }
-
- private:
-  c10::impl::LocalDispatchKeySet saved_keyset_;
-};
-
 void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto cur_level = getDynamicLayerStack().back().layerId();
   auto cur_key = getDynamicLayerStack().back().key();
@@ -600,11 +588,10 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   WithoutTop guard;
 
   // "reset exclude set"
-  // TODO: Still a problem with composabiilty and AutoNonVariableTypeGuard.
-  // Users cannot do torch.no_grad otherwise there will be problems.
-  SaveLocalDispatchKeySet save_guard;
-  auto keyset = c10::impl::PODLocalDispatchKeySet();
-  c10::impl::_force_tls_local_dispatch_key_set(keyset);
+  auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+  local_keyset.included_ = local_keyset.included_ - (local_keyset.included_ & all_dynlayer_keyset.add(kVmapModeKey));
+  local_keyset.excluded_ = local_keyset.excluded_ - (local_keyset.excluded_ & all_dynlayer_keyset.add(kVmapModeKey));
+  ForceLocalDispatchKeySet save_guard(local_keyset);
   setDynamicLayerFrontBackKeysIncluded(true);
 
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
