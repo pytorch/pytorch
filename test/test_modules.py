@@ -397,11 +397,10 @@ class TestModule(TestCase):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True)
-        # Set some backend-specific validation settings.
+        # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
-        if torch.backends.cudnn.is_available():
-            # cuDNN introduces non-determinism
-            gradcheck_nondet_tol = GRADCHECK_NONDET_TOL
+        if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled):
+            gradcheck_nondet_tol = module_info.gradcheck_nondet_tol
 
         for module_input in module_inputs:
             if module_input.forward_input is None:
