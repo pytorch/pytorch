@@ -1637,11 +1637,11 @@ graph(%Ra, %Rb):
         add_node = foo.graph.findNode("aten::add")
         div_node = foo.graph.findNode("aten::div")
 
-        with foo.graph.with_insert_point(add_node):
-            with foo.graph.with_insert_point(div_node):
+        with foo.graph.insert_point_guard(add_node):
+            with foo.graph.insert_point_guard(div_node):
                 foo.graph.insertConstant("goodbye")
             foo.graph.insertConstant("hello")
-        with foo.graph.with_insert_point(foo.graph.findNode("aten::mul")):
+        with foo.graph.insert_point_guard(foo.graph.findNode("aten::mul")):
             foo.graph.insertConstant("hello")
         FileCheck().check("hello").check("goodbye").check("hello").run(foo.graph)
 
@@ -1664,14 +1664,15 @@ graph(%Ra, %Rb):
         muls = g.findAllNodes("aten::mul")
         scalar_muls = filter(lambda x: x.matches("aten::mul(Tensor self, Scalar other) -> Tensor"), muls)
         mul_constant_int = filter(lambda x: isinstance(list(x.inputs())[1].toIValue(), int), scalar_muls)
-        for mul in muls:
-            with g.with_insert_point(mul):
+        for mul in mul_constant_int:
+            with g.insert_point_guard(mul):
                 outputs = g.insertGraph(unrolled_mul.graph, list(mul.inputs()))
                 assert len(outputs) == len(list(mul.outputs()))
                 for new_out, old_out in zip(outputs, g.outputs()):
                     old_out.replaceAllUsesWith(new_out)
                 mul.destroy()
 
+        FileCheck().check_not("aten::mul").check("aten::add").run(foo.graph)
         self.assertEqual(foo(torch.ones([2, 2])), torch.ones([2, 2]) * 4)
 
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")

@@ -14,7 +14,7 @@ class _InsertPoint(object):
     def __exit__(self, *args):
         self.g.setInsertPoint(self.prev_insert_point)
 
-def with_insert_point(self, insert_point: Union[torch._C.Node, torch._C.Block]):
+def insert_point_guard(self, insert_point: Union[torch._C.Node, torch._C.Block]):
     return _InsertPoint(self, insert_point)
 
-torch._C.Graph.with_insert_point = with_insert_point
+torch._C.Graph.insert_point_guard = insert_point_guard
