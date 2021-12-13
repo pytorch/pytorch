@@ -389,8 +389,6 @@ class MinMaxObserver(_ObserverBase):
     where :math:`Q_\text{min}` and :math:`Q_\text{max}` are the minimum and
     maximum of the quantized data type.
 
-    .. warning:: Only works with ``torch.per_tensor_symmetric`` quantization scheme
-
     .. warning:: :attr:`dtype` can only take ``torch.qint8`` or ``torch.quint8``.
 
     .. note:: If the running minimum equals to the running maximum, the scale
