@@ -413,13 +413,6 @@ at::Tensor& LazyNativeFunctions::fill_(at::Tensor& self,
   return self;
 }
 
-at::Tensor LazyNativeFunctions::max_pool2d(
-    const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
-    at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
-  return aten_autograd_ops_ts::MaxPool2dAutogradFunctionTS::apply(
-      self, kernel_size, stride, padding, dilation, ceil_mode);
-}
-
 at::Tensor LazyNativeFunctions::max_pool3d(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
@@ -506,32 +499,6 @@ LazyNativeFunctions::native_batch_norm_backward(
 // We need to explicitly override max pooling operators and just call the
 // fallback for them because we've customized the autograd function for them
 // (backward needs saved indices from forward).
-
-std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::max_pool2d_with_indices(
-    const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
-    at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
-  return at::native::call_fallback_fn<
-      &ltc_eager_fallback, ATEN_OP(max_pool2d_with_indices)>::call(self,
-                                                                   kernel_size,
-                                                                   stride,
-                                                                   padding,
-                                                                   dilation,
-                                                                   ceil_mode);
-}
-
-at::Tensor LazyNativeFunctions::max_pool2d_with_indices_backward(
-    const at::Tensor& grad_output, const at::Tensor& self,
-    at::IntArrayRef kernel_size, at::IntArrayRef stride,
-    at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode,
-    const at::Tensor& indices) {
-  return at::native::call_fallback_fn<
-      &ltc_eager_fallback,
-      ATEN_OP(max_pool2d_with_indices_backward)>::call(grad_output, self,
-                                                       kernel_size, stride,
-                                                       padding, dilation,
-                                                       ceil_mode, indices);
-}
-
 std::tuple<at::Tensor, at::Tensor> LazyNativeFunctions::max_pool3d_with_indices(
     const at::Tensor& self, at::IntArrayRef kernel_size, at::IntArrayRef stride,
     at::IntArrayRef padding, at::IntArrayRef dilation, bool ceil_mode) {
