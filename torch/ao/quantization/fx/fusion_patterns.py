@@ -32,21 +32,15 @@ class FuseHandler(ABC):
              fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
         pass
 
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.Conv3d))
 @register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
 @register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
+@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Conv1d))
+@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
+@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.Conv3d))
 @register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Linear))
 class ConvOrLinearBNReLUFusion(FuseHandler):
     def __init__(self, quantizer: QuantizerCls, node: Node):
@@ -112,6 +106,12 @@ class ConvOrLinearBNReLUFusion(FuseHandler):
         # relu may be used multiple times, so we don't set relu to identity
         return quantizer.fused_graph.node_copy(self.conv_or_linear_node, load_arg)
 
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
+@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv3d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv1d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
+@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
 @register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
@@ -124,12 +124,6 @@ class ModuleReLUFusion(FuseHandler):
             quantizer: QuantizerCls,
             node: Node):
         super().__init__(quantizer, node)
-        self.relu_node = node
-        assert isinstance(node.args[0], Node)
-        node = node.args[0]
-        assert node.op == 'call_module'
-        self.module_node = node
-        self.module = quantizer.modules[self.module_node.target]
 
     def fuse(self, quantizer: QuantizerCls,
              load_arg: Callable,
