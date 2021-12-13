@@ -146,7 +146,7 @@ void OptimizeGraph(
 }
 
 bool IsSelfInGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
-  return graph->inputs().size() > 0 &&
+  return !graph->inputs().empty() &&
       graph->inputs().at(0)->type()->is_module();
 }
 
@@ -203,12 +203,12 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     bool is_frozen,
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
-  VLOG(1) << "StaticModuleOptions: cleanup_activations "
-          << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory "
-          << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors << ", enable_tensorexpr_fusion "
-          << opts.enable_tensorexpr_fusion;
+  LOG(INFO) << "StaticModuleOptions: cleanup_activations "
+            << opts.cleanup_activations << ", enable_out_variant "
+            << opts.enable_out_variant << ", optimize_memory "
+            << opts.optimize_memory << ", manage_output_tensors "
+            << opts.manage_output_tensors << ", enable_tensorexpr_fusion "
+            << opts.enable_tensorexpr_fusion;
 
   Module module = m.copy();
   if (!is_frozen) {
