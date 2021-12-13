@@ -543,8 +543,8 @@ bool ShiftOp::sameAs(const Statement* other) const {
 GatherOp::GatherOp(
     Val* out,
     Val* in,
-    std::vector<Int*> window_shape,
-    std::vector<std::vector<Int*>> pad_width)
+    std::vector<int> window_shape,
+    std::vector<std::vector<int>> pad_width)
     : Expr(ExprType::GatherOp),
       out_(out),
       in_(in),
@@ -584,22 +584,9 @@ GatherOp::GatherOp(
 GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {
-  std::transform(
-      src->window_shape_.begin(),
-      src->window_shape_.end(),
-      std::back_inserter(window_shape_),
-      [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
-  for (const auto& pad : src->pad_width_) {
-    std::vector<Int*> pad_clone;
-    std::transform(
-        pad.begin(),
-        pad.end(),
-        std::back_inserter(pad_clone),
-        [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
-    pad_width_.push_back(pad_clone);
-  }
-}
+      in_(ir_cloner->clone(src->in_)),
+      window_shape_(src->window_shape_),
+      pad_width_(src->pad_width_) {}
 
 bool GatherOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -609,22 +596,9 @@ bool GatherOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<GatherOp>();
-  if (windowShape().size() != other_op->windowShape().size()) {
+  if (windowShape() != other_op->windowShape() ||
+      padWidth() != other_op->padWidth()) {
     return false;
-  }
-  for (const auto i : c10::irange(windowShape().size())) {
-    if (!windowShape()[i]->sameAs(other_op->windowShape()[i])) {
-      return false;
-    }
-  }
-  if (padWidth().size() != other_op->padWidth().size()) {
-    return false;
-  }
-  for (const auto i : c10::irange(padWidth().size())) {
-    if (!padWidth()[i][0]->sameAs(other_op->padWidth()[i][0]) ||
-        !padWidth()[i][1]->sameAs(other_op->padWidth()[i][1])) {
-      return false;
-    }
   }
   return Expr::sameAs(other);
 }

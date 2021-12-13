@@ -1259,31 +1259,6 @@ TensorView* shift(TensorView* inp, const std::vector<int>& offsets, bool pad) {
 }
 
 namespace {
-std::vector<Int*> convertToIntVector(const std::vector<int>& x) {
-  std::vector<Int*> converted;
-  std::transform(x.begin(), x.end(), std::back_inserter(converted), [](int x) {
-    return new Int(x);
-  });
-  return converted;
-}
-} // namespace
-
-TensorView* gather(
-    TensorView* inp,
-    const std::vector<int>& window_shape,
-    const std::vector<std::vector<int>>& pad_width,
-    const std::vector<int>& strides) {
-  std::vector<Int*> window_shape_int = convertToIntVector(window_shape);
-  std::vector<std::vector<Int*>> pad_width_int;
-  std::transform(
-      pad_width.begin(),
-      pad_width.end(),
-      std::back_inserter(pad_width_int),
-      [](const std::vector<int>& x) { return convertToIntVector(x); });
-  return gather(inp, window_shape_int, pad_width_int, strides);
-}
-
-namespace {
 
 // Return a new TensorDomain with given root domains. Apply strides if
 // necessary. With non-unit strides, strided domains become an rfactor
@@ -1330,8 +1305,8 @@ TensorDomain* generateTensorDomainWithStrides(
 
 TensorView* gather(
     TensorView* inp,
-    const std::vector<Int*>& window_shape,
-    const std::vector<std::vector<Int*>>& pad_width,
+    const std::vector<int>& window_shape,
+    const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides) {
   auto inp_dom = TensorDomain::noReductions(inp->getRootDomain());
   const auto ndims = inp_dom.size();
@@ -1373,18 +1348,10 @@ TensorView* gather(
     const auto pad_right = pad_width[i][1];
     TORCH_INTERNAL_ASSERT(inp_axis->start()->isZeroInt());
     Val* out_axis_dim = nullptr;
-    if (window_dim->isConst() && pad_left->isConst() && pad_right->isConst()) {
-      const int64_t extent_adjustment =
-          -(-window_dim->value().value() + 1 + pad_left->value().value() +
-            pad_right->value().value());
-      out_axis_dim = extent_adjustment == 0
-          ? inp_axis->extent()
-          : sub(inp_axis->extent(), new Int(extent_adjustment));
-    } else {
-      out_axis_dim =
-          add(add(sub(inp_axis->extent(), window_dim), new Int(1)),
-              add(pad_left, pad_right));
-    }
+    const auto extent_adjustment = -(-window_dim + 1 + pad_left + pad_right);
+    out_axis_dim = extent_adjustment == 0
+        ? inp_axis->extent()
+        : sub(inp_axis->extent(), new Int(extent_adjustment));
     // TODO: out_axis_dim is assumed to be the same as the extent of
     // the input domain. Throw an error if it isn't the case.
     out_root_domains.push_back(new IterDomain(
@@ -1394,7 +1361,10 @@ TensorView* gather(
         inp_axis->getIterType()));
     // create a new axis for the gathered domain
     out_gather_dom.push_back(new IterDomain(
-        new Int(0), window_dim, ParallelType::Serial, IterType::Gather));
+        new Int(0),
+        new Int(window_dim),
+        ParallelType::Serial,
+        IterType::Gather));
   }
 
   out_root_domains.insert(

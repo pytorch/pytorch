@@ -302,7 +302,7 @@ std::unordered_map<kir::IterDomain*, kir::Val*> getReferenceHaloExtentMap(
 
 //! Offset of an index of a producer axis with respect to its
 //! corresponding consumer index
-kir::Val* getProducerHaloOffset(
+int getProducerHaloOffset(
     const TensorView* producer_tv,
     size_t producer_axis,
     const TensorView* consumer_tv) {
@@ -328,16 +328,12 @@ kir::Val* getProducerHaloOffset(
   const auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
 
-  kir::Val* offset = (p_pad->isConst() && c_pad->isConst())
-      ? ir_builder.create<kir::Int>(
-            p_pad->value().value() - c_pad->value().value())
-      : ir_builder.subExpr(p_pad, c_pad);
+  auto offset = p_pad - c_pad;
 
   // If the consumer is a result of shifting the producer, adjust the
   // producer index per the offsets argument of the shift op.
   if (auto shift_op = dynamic_cast<const ShiftOp*>(consumer_tv->definition())) {
-    offset = ir_builder.subExpr(
-        offset, ir_builder.create<kir::Int>(shift_op->offset(producer_axis)));
+    offset -= shift_op->offset(producer_axis);
   }
 
   return offset;
@@ -352,12 +348,12 @@ kir::Val* getProducerIndexWithHalo(
   const auto offset =
       getProducerHaloOffset(producer_tv, producer_axis, consumer_tv);
 
-  if (offset->isZeroInt()) {
+  if (offset == 0) {
     return producer_index;
   }
 
   const auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   producer_index = ir_builder.addExpr(producer_index, offset);
 
@@ -390,7 +386,7 @@ kir::Val* getProducerOffsetWithGather(
   // If the window extent is one, no specific offsetting
   // is necessary
   if (consumer_root_axis >= gather_expr->windowShape().size() ||
-      gather_expr->windowShape()[consumer_root_axis]->isOneInt()) {
+      gather_expr->windowShape()[consumer_root_axis] == 1) {
     return ir_builder.zeroVal();
   }
 
@@ -967,7 +963,8 @@ kir::Val* getHaloExtentOfRootAxis(
 
   const auto& halo = gpu_lower->haloInfo().getRootAxisInfo(id);
   if (halo.hasHalo()) {
-    auto halo_extent = ir_builder.addExpr(normal_extent, halo.width());
+    auto halo_extent = ir_builder.addExpr(
+        normal_extent, ir_builder.create<kir::Int>(halo.width()));
     return halo_extent;
   } else {
     return normal_extent;
@@ -2243,7 +2240,7 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     auto consumer_root_pos = consumer_tv->domain()->rootPosOf(consumer_root_id);
     if ((shift_expr && shift_expr->offset(consumer_root_pos) != 0) ||
         (gather_expr && consumer_root_pos < gather_expr->windowShape().size() &&
-         !gather_expr->windowShape().at(consumer_root_pos)->isOneInt())) {
+         gather_expr->windowShape().at(consumer_root_pos) != 1)) {
       excluded_ids.insert(consumer_root_id);
     }
   }
@@ -2350,7 +2347,7 @@ bool needsPadding(TensorView* tv) {
 // compared with each other by just looking at the additional offsets.
 //
 // consumer_root_id: the domain for which a stop predicate is being built.
-kir::Val* getUnswitchStopOffset(
+int getUnswitchStopOffset(
     IterDomain* consumer_root_id,
     TensorView* consumer_tv) {
   const auto gpu_lower = GpuLower::current();
@@ -2362,7 +2359,7 @@ kir::Val* getUnswitchStopOffset(
   // If the consumer root domain to predicate does not have halo, no
   // adjustment is required.
   if (!halo_info.hasHalo()) {
-    return ir_builder.zeroVal();
+    return 0;
   }
 
   // Find if this contig_id is used in the unswitched domains
@@ -2386,7 +2383,7 @@ kir::Val* getUnswitchStopOffset(
           })) {
     return halo_info.width();
   } else {
-    return ir_builder.zeroVal();
+    return 0;
   }
 }
 
@@ -2858,16 +2855,15 @@ bool canOmitStopPredicate(
 
   auto stop_offset_val = stop_offset->as<kir::Int>()->value();
 
-  auto halo_ext =
-      gpu_lower->haloInfo().getRootAxisInfo(kir_contig_id).width()->value();
+  auto halo_ext = gpu_lower->haloInfo().getRootAxisInfo(kir_contig_id).width();
 
   // If they are not compile-time constant, can't prove the
   // condition.
-  if (!stop_offset_val.has_value() || !halo_ext.has_value()) {
+  if (!stop_offset_val.has_value()) {
     return false;
   }
 
-  if (halo_ext.value() + stop_offset_val.value() > 0) {
+  if (halo_ext + stop_offset_val.value() > 0) {
     return false;
   }
 
@@ -2882,7 +2878,7 @@ bool canOmitStopPredicate(
     // If the domain has halo, the loop is expanded by the halo
     // extent, so we can't prove the loop extent is the same as the
     // parallel dimension.
-    if (!(halo_ext.has_value() && halo_ext.value() == 0)) {
+    if (halo_ext != 0) {
       return false;
     }
   }

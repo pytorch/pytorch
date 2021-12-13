@@ -228,6 +228,15 @@ Val* SimplifyingIrBuilder::addExpr(Val* lhs, Val* rhs) {
   }
 }
 
+Val* SimplifyingIrBuilder::addExpr(Val* lhs, Int::ScalarType rhs) {
+  auto lhs_int = dynamic_cast<Int*>(lhs);
+  if (lhs_int != nullptr) {
+    return addExpr(lhs_int, rhs);
+  } else {
+    return addExpr(lhs, create<kir::Int>(rhs));
+  }
+}
+
 Val* SimplifyingIrBuilder::subExpr(Val* lhs, Val* rhs) {
   return addExpr(lhs, negExpr(rhs));
 }

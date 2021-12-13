@@ -358,8 +358,8 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   GatherOp(
       Val* out,
       Val* in,
-      std::vector<Int*> window_shape,
-      std::vector<std::vector<Int*>> pad_width);
+      std::vector<int> window_shape,
+      std::vector<std::vector<int>> pad_width);
 
   GatherOp(const GatherOp* src, IrCloner* ir_cloner);
 
@@ -387,9 +387,9 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   Val* const out_ = nullptr;
   Val* const in_ = nullptr;
   //! Shape of a window gathered for each element.
-  std::vector<Int*> window_shape_;
+  std::vector<int> window_shape_;
   //! The size of zero-padding of each axis.
-  std::vector<std::vector<Int*>> pad_width_;
+  std::vector<std::vector<int>> pad_width_;
 };
 
 class TORCH_CUDA_CU_API ViewOp : public Expr {

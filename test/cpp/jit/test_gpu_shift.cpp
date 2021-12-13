@@ -379,22 +379,16 @@ TEST_F(NVFuserTest, FusionShiftSplit1_CUDA) {
   tv0->computeAt(tv2, -2);
   tv0->computeAt(tv3, -2);
 
-  // t1 allocation: (4 + 3)
+  // t1 allocation: 7
   GpuLower gpulw(&fusion);
   for (const auto& kir_node : gpulw.kernel()->irNodes()) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node.get())) {
       auto tensor_name = alloc->buffer()->name();
       if (tensor_name == 1) {
         TORCH_CHECK(alloc->shape().size() == 1);
-        auto def =
-            dynamic_cast<kir::BinaryOp*>(alloc->shape().at(0)->definition());
-        auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-        TORCH_CHECK(lhs != nullptr && lhs->isConst());
-        int lhs_value = *lhs->value();
-        auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-        TORCH_CHECK(rhs != nullptr && rhs->isConst());
-        int rhs_value = *rhs->value();
-        TORCH_CHECK(lhs_value == split_factor && rhs_value == 3);
+        auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
+        TORCH_CHECK(
+            size != nullptr && size->isConst() && size->value().value() == 7);
       }
     }
   }
@@ -444,23 +438,17 @@ TEST_F(NVFuserTest, FusionShiftSplit2_CUDA) {
   tv0->computeAt(tv5, -2);
   tv0->computeAt(tv8, -2);
 
-  // t1 and t2 allocation: (4 + 2)
-  // t4 allocation: (4)
+  // t1 and t2 allocation: 6
+  // t4 allocation: 4
   GpuLower gpulw(&fusion);
   for (const auto& kir_node : gpulw.kernel()->irNodes()) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node.get())) {
       auto tensor_name = alloc->buffer()->name();
       if (tensor_name == 1 || tensor_name == 2) {
         TORCH_CHECK(alloc->shape().size() == 1);
-        auto def =
-            dynamic_cast<kir::BinaryOp*>(alloc->shape().at(0)->definition());
-        auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-        TORCH_CHECK(lhs != nullptr && lhs->isConst());
-        int lhs_value = *lhs->value();
-        auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-        TORCH_CHECK(rhs != nullptr && rhs->isConst());
-        int rhs_value = *rhs->value();
-        TORCH_CHECK(lhs_value == split_factor && rhs_value == 2);
+        auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
+        TORCH_CHECK(
+            size != nullptr && size->isConst() && size->value().value() == 6);
       } else if (tensor_name == 4) {
         TORCH_CHECK(alloc->shape().size() == 1);
         auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
@@ -518,22 +506,16 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplit_CUDA) {
   // t2: [i1, i2/8, 8]
   // t3: [i1, i2/8, 8]
 
-  // t1 and t2 allocation: (split_factor1 + 1)
+  // t1 and t2 allocation: (split_factor1 + 1) = 9
   GpuLower gpulw(&fusion);
   for (const auto& kir_node : gpulw.kernel()->irNodes()) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node.get())) {
       auto tensor_name = alloc->buffer()->name();
       if (tensor_name == 1 || tensor_name == 2) {
         TORCH_CHECK(alloc->shape().size() == 1);
-        auto def =
-            dynamic_cast<kir::BinaryOp*>(alloc->shape().at(0)->definition());
-        auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-        TORCH_CHECK(lhs != nullptr && lhs->isConst());
-        int lhs_value = *lhs->value();
-        auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-        TORCH_CHECK(rhs != nullptr && rhs->isConst());
-        int rhs_value = *rhs->value();
-        TORCH_CHECK(lhs_value == split_factor1 && rhs_value == 1);
+        auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
+        TORCH_CHECK(
+            size != nullptr && size->isConst() && size->value().value() == 9);
       }
     }
   }
@@ -603,15 +585,10 @@ TEST_F(NVFuserTest, FusionShift3ptStencil_CUDA) {
       auto tensor_name = alloc->buffer()->name();
       if (tensor_name == cache->name()) {
         TORCH_CHECK(alloc->shape().size() == 1);
-        auto def =
-            dynamic_cast<kir::BinaryOp*>(alloc->shape().at(0)->definition());
-        auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-        TORCH_CHECK(lhs != nullptr && lhs->isConst());
-        int lhs_value = *lhs->value();
-        auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-        TORCH_CHECK(rhs != nullptr && rhs->isConst());
-        int rhs_value = *rhs->value();
-        TORCH_CHECK(lhs_value == split_factor && rhs_value == 2);
+        auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
+        TORCH_CHECK(
+            size != nullptr && size->isConst() &&
+            size->value().value() == split_factor + 2);
       }
     }
   }
@@ -678,15 +655,10 @@ TEST_F(NVFuserTest, FusionShift5ptStencil_CUDA) {
       if (tensor_name == cache->name()) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor[i] && rhs_value == 2);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor[i] + 2);
         }
       }
     }
@@ -769,15 +741,10 @@ TEST_F(NVFuserTest, FusionShift9ptStencil_CUDA) {
       if (tensor_name == cache->name()) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor[i] && rhs_value == 2);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor[i] + 2);
         }
       }
     }
@@ -832,15 +799,10 @@ TEST_F(NVFuserTest, FusionShiftSmemBlocking_CUDA) {
       if (tensor_name == tv1->name()) {
         TORCH_CHECK(alloc->shape().size() == 1);
         for (int i = 0; i < 1; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == smem_block_factor && rhs_value == 1);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == smem_block_factor + 1);
         }
       }
     }
@@ -1012,15 +974,10 @@ TEST_F(NVFuserTest, FusionShiftMerge1_CUDA) {
       if (tensor_name == 1) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor && rhs_value == 1);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor + 1);
         }
       }
     }
@@ -1073,15 +1030,10 @@ TEST_F(NVFuserTest, FusionShiftMerge2_CUDA) {
       if (tensor_name == 1) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor && rhs_value == 2);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor + 2);
         }
       }
     }
@@ -1198,16 +1150,10 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge1_CUDA) {
     if (auto alloc = dynamic_cast<kir::Allocate*>(kir_node.get())) {
       auto tensor_name = alloc->buffer()->name();
       if (tensor_name == 1 || tensor_name == 2) {
-        TORCH_CHECK(alloc->shape().size() == 1);
-        auto def =
-            dynamic_cast<kir::BinaryOp*>(alloc->shape().at(0)->definition());
-        auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-        TORCH_CHECK(lhs != nullptr && lhs->isConst());
-        int lhs_value = *lhs->value();
-        auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-        TORCH_CHECK(rhs != nullptr && rhs->isConst());
-        int rhs_value = *rhs->value();
-        TORCH_CHECK(lhs_value == split_factor1 && rhs_value == 1);
+        auto size = dynamic_cast<kir::Int*>(alloc->shape().at(0));
+        TORCH_CHECK(
+            size != nullptr && size->isConst() &&
+            size->value().value() == split_factor1 + 1);
       }
     }
   }
@@ -1277,15 +1223,10 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge2_CUDA) {
       if (tensor_name == 1 || tensor_name == 2) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor1 && rhs_value == 1);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor1 + 1);
         }
       }
     }
@@ -1367,15 +1308,10 @@ TEST_F(NVFuserTest, FusionShift5ptStencilParallel1DThreadBlock_CUDA) {
       if (tensor_name == tv0_cache->name()) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor[i] && rhs_value == 2);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(
+              size != nullptr && size->isConst() &&
+              size->value().value() == split_factor[i] + 2);
         }
       }
     }
@@ -1490,19 +1426,12 @@ TEST_F(NVFuserTest, FusionShiftChain3_CUDA) {
       if (tensor_name == 1 || tensor_name == 2) {
         TORCH_CHECK(alloc->shape().size() == 1);
         for (int i = 0; i < 1; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(size != nullptr && size->isConst());
           if (tensor_name == 1) {
-            TORCH_CHECK(rhs_value == 2);
+            TORCH_CHECK(size->value().value() == split_factor + 2);
           } else if (tensor_name == 2) {
-            TORCH_CHECK(rhs_value == 1);
+            TORCH_CHECK(size->value().value() == split_factor + 1);
           }
         }
       }
@@ -1564,21 +1493,15 @@ TEST_F(NVFuserTest, FusionShiftChain4_CUDA) {
       if (tensor_name == 1 || tensor_name == 2) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(size != nullptr && size->isConst());
+          auto size_val = size->value().value();
           if (tensor_name == 1) {
-            TORCH_CHECK(rhs_value == 9);
+            TORCH_CHECK(size_val == split_factor + 9);
           } else if (tensor_name == 2) {
-            TORCH_CHECK(rhs_value == 7);
+            TORCH_CHECK(size_val == split_factor + 7);
           } else if (tensor_name == 3) {
-            TORCH_CHECK(rhs_value == 4);
+            TORCH_CHECK(size_val == split_factor + 4);
           }
         }
       }
@@ -1689,19 +1612,12 @@ TEST_F(NVFuserTest, FusionShift5ptStencilChain_CUDA) {
           tensor_name == tv_stencil1->name()) {
         TORCH_CHECK(alloc->shape().size() == 2);
         for (int i = 0; i < 2; ++i) {
-          auto def =
-              dynamic_cast<kir::BinaryOp*>(alloc->shape().at(i)->definition());
-          auto lhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->lhs());
-          TORCH_CHECK(lhs != nullptr && lhs->isConst());
-          int lhs_value = *lhs->value();
-          auto rhs = dynamic_cast<kir::Int*>(def->as<kir::BinaryOp>()->rhs());
-          TORCH_CHECK(rhs != nullptr && rhs->isConst());
-          int rhs_value = *rhs->value();
-          TORCH_CHECK(lhs_value == split_factor[i]);
+          auto size = dynamic_cast<kir::Int*>(alloc->shape().at(i));
+          TORCH_CHECK(size != nullptr && size->isConst());
           if (tensor_name == tv0_cache->name()) {
-            TORCH_CHECK(rhs_value == 4);
+            TORCH_CHECK(size->value().value() == split_factor[i] + 4);
           } else if (tensor_name == tv_stencil1->name()) {
-            TORCH_CHECK(rhs_value == 2);
+            TORCH_CHECK(size->value().value() == split_factor[i] + 2);
           }
         }
       }
@@ -2639,7 +2555,7 @@ TEST_F(NVFuserTest, FusionGatherPadding2_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionConv2DStatic_CUDA) {
+TEST_F(NVFuserTest, FusionConv2D_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2732,119 +2648,17 @@ TEST_F(NVFuserTest, FusionConv2DStatic_CUDA) {
   testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
 }
 
-// Mostly the same as the static conv test, but the shape of the weights,
-// 3x3 in this case, is given dynamically
-TEST_F(NVFuserTest, FusionConv2DDynamic_CUDA) {
-  Fusion fusion;
-  FusionGuard fg(&fusion);
-
-  // Input: [C, H, W]
-  auto inp = makeSymbolicTensor(3);
-  fusion.addInput(inp);
-
-  // Weights: [K, C, S, T]
-  auto w = makeSymbolicTensor(4);
-  fusion.addInput(w);
-
-  auto w_h = new Int();
-  fusion.addInput(w_h);
-  auto w_w = new Int();
-  fusion.addInput(w_w);
-
-  auto pad_h = new Int();
-  fusion.addInput(pad_h);
-  auto pad_w = new Int();
-  fusion.addInput(pad_w);
-
-  // Gather a neighbor tile of [w_dim_h, w_dim_w] with padding
-  auto inp_tile = gather(
-      inp,
-      {new Int(1), w_h, w_w},
-      {{new Int(0), new Int(0)}, {pad_h, pad_h}, {pad_w, pad_w}});
-  // inp_tile: [C, 1, H - w_h + 1, W - w_w + 1, w_h, w_w]
-
-  auto inp_bc =
-      broadcast(inp_tile, {true, false, false, false, false, false, false});
-  auto w_bc = broadcast(w, {false, false, true, true, true, false, false});
-
-  auto inp_times_w = mul(inp_bc, w_bc);
-
-  // Reduce the channel and neighbor tile dimensions
-  auto out = sum(inp_times_w, {1, 4, 5, 6});
-
-  fusion.addOutput(out);
-
-  ////////////////////////////////////
-  // Cache the input and weight tensors
-  auto inp_cache = inp->cache_after();
-
-  // Blocking the spatial dimensions
-  const int block_w = 16;
-  const int block_h = 4;
-  // Blocking the channel dimension
-  const int block_c = 8;
-
-  out->split(2, block_h);
-  out->split(4, block_w);
-  out->reorder({{3, 4}});
-  // out: [K, C, Ho, Wo, Hi, Wi, 1, 3, 3]
-
-  out->split(1, block_c);
-  // out: [K, Co, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
-
-  auto out_rf = out->rFactor({1, -3, -2, -1});
-  // out_rf: [K, rCo, Ci, Ho, Wo, Hi, Wi, 1, 3, 3]
-  // out_rf: [K, Ci, Ho, Wo, Hi, Wi]
-
-  // Create a [block_x, block_y] tile on smem
-  inp_cache->computeAt(out, 4);
-  // inp_cache: [Co, Ho, Wo, Ci, Hi, Wi]
-  inp_cache->setMemoryType(MemoryType::Shared);
-
-  // Move Ci forward
-  out_rf->reorder({{-4, -6}, {-5, -4}, {-6, -5}});
-  inp_cache->computeAt(out_rf, 5);
-
-  inp_tile->computeAt(out_rf, -1);
-  w->computeAt(out_rf, -1);
-
-  out->axis(0)->parallelize(ParallelType::BIDx);
-  out->axis(1)->parallelize(ParallelType::TIDz);
-  out->axis(4)->parallelize(ParallelType::TIDy);
-  out->axis(5)->parallelize(ParallelType::TIDx);
-
-  scheduler_utils::parallelizeAllLike(out, {inp_cache, out_rf});
-
-  FusionExecutor fe;
-  fe.compileFusion(&fusion);
-
-  const int dim_h = 99;
-  const int dim_w = 101;
-  const int dim_c = 10;
-  const int dim_f = 20;
-  const int dim_w_h = 3;
-  const int dim_w_w = 3;
-  const int dim_pad_h = (dim_w_h - 1) / 2;
-  const int dim_pad_w = (dim_w_w - 1) / 2;
-
-  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
-  at::manual_seed(0);
-  at::Tensor at_inp = at::randn({dim_c, dim_h, dim_w}, options);
-  at::Tensor at_w = at::randn({dim_f, dim_c, dim_w_h, dim_w_w}, options);
-  std::vector<IValue> inputs = {
-      at_inp, at_w, dim_w_h, dim_w_w, dim_pad_h, dim_pad_w};
-
-  auto cg_outputs = fe.runFusion(inputs);
-
-  at_inp = at_inp.unsqueeze(0); // at::conv2d needs the N axis
-  auto at_out = at::conv2d(at_inp, at_w, {}, 1, 1);
-  at_out = at_out.squeeze(0); // drop the N axis
-
-  testValidate(&fusion, cg_outputs, inputs, {at_out}, __LINE__, __FILE__);
-}
-
 // 5x5 followed by 3x3
-TEST_F(NVFuserTest, FusionConv2DDynamicChain_CUDA) {
+TEST_F(NVFuserTest, FusionConv2DChain_CUDA) {
+  const int dim_w1_h = 5;
+  const int dim_w1_w = 5;
+  const int dim_pad1_h = (dim_w1_h - 1) / 2;
+  const int dim_pad1_w = (dim_w1_w - 1) / 2;
+  const int dim_w2_h = 3;
+  const int dim_w2_w = 3;
+  const int dim_pad2_h = (dim_w2_h - 1) / 2;
+  const int dim_pad2_w = (dim_w2_w - 1) / 2;
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -2860,31 +2674,11 @@ TEST_F(NVFuserTest, FusionConv2DDynamicChain_CUDA) {
   auto w2 = makeSymbolicTensor(4);
   fusion.addInput(w2);
 
-  auto w1_h = new Int();
-  fusion.addInput(w1_h);
-  auto w1_w = new Int();
-  fusion.addInput(w1_w);
-
-  auto w2_h = new Int();
-  fusion.addInput(w2_h);
-  auto w2_w = new Int();
-  fusion.addInput(w2_w);
-
-  auto pad_h1 = new Int();
-  fusion.addInput(pad_h1);
-  auto pad_w1 = new Int();
-  fusion.addInput(pad_w1);
-
-  auto pad_h2 = new Int();
-  fusion.addInput(pad_h2);
-  auto pad_w2 = new Int();
-  fusion.addInput(pad_w2);
-
   // Gather a neighbor tile of [w1_h, w1_w] with padding
   auto inp_tile = gather(
       inp,
-      {new Int(1), w1_h, w1_w},
-      {{new Int(0), new Int(0)}, {pad_h1, pad_h1}, {pad_w1, pad_w1}});
+      {1, dim_w1_h, dim_w1_w},
+      {{0, 0}, {dim_pad1_h, dim_pad1_h}, {dim_pad1_w, dim_pad1_w}});
   // inp_tile: [C, 1, H - w1_h + 1, W - w1_w + 1, w1_h, w1_w]
 
   auto inp_bc =
@@ -2899,8 +2693,8 @@ TEST_F(NVFuserTest, FusionConv2DDynamicChain_CUDA) {
   // Second conv
   auto out1_tile = gather(
       out1,
-      {new Int(1), w2_h, w2_w},
-      {{new Int(0), new Int(0)}, {pad_h2, pad_h2}, {pad_w2, pad_w2}});
+      {1, dim_w2_h, dim_w2_w},
+      {{0, 0}, {dim_pad2_h, dim_pad2_h}, {dim_pad2_w, dim_pad2_w}});
 
   auto out1_bc =
       broadcast(out1_tile, {true, false, false, false, false, false, false});
@@ -2956,32 +2750,13 @@ TEST_F(NVFuserTest, FusionConv2DDynamicChain_CUDA) {
   const int dim_k1 = 3;
   const int dim_k2 = 5;
   const int dim_k3 = 7;
-  const int dim_w1_h = 5;
-  const int dim_w1_w = 5;
-  const int dim_pad1_h = (dim_w1_h - 1) / 2;
-  const int dim_pad1_w = (dim_w1_w - 1) / 2;
-  const int dim_w2_h = 3;
-  const int dim_w2_w = 3;
-  const int dim_pad2_h = (dim_w2_h - 1) / 2;
-  const int dim_pad2_w = (dim_w2_w - 1) / 2;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::manual_seed(0);
   at::Tensor at_inp = at::randn({dim_k1, dim_h, dim_w}, options);
   at::Tensor at_w1 = at::randn({dim_k2, dim_k1, dim_w1_h, dim_w1_w}, options);
   at::Tensor at_w2 = at::randn({dim_k3, dim_k2, dim_w2_h, dim_w2_w}, options);
-  std::vector<IValue> inputs = {
-      at_inp,
-      at_w1,
-      at_w2,
-      dim_w1_h,
-      dim_w1_w,
-      dim_w2_h,
-      dim_w2_w,
-      dim_pad1_h,
-      dim_pad1_w,
-      dim_pad2_h,
-      dim_pad2_w};
+  std::vector<IValue> inputs = {at_inp, at_w1, at_w2};
 
   auto cg_outputs = fe.runFusion(inputs);
 
@@ -3882,26 +3657,21 @@ TEST_F(NVFuserTest, FusionShiftUnswitch1_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionGatherUnswitch1_CUDA) {
+  const int tv1_gather = 3;
+  const int tv1_gather_pad = 1;
+  const int tv2_gather = 5;
+  const int tv2_gather_pad = 2;
+
   Fusion fusion;
   FusionGuard fg(&fusion);
 
   auto tv0 = makeSymbolicTensor(1);
   fusion.addInput(tv0);
 
-  auto tv1_gather_param = new Int();
-  fusion.addInput(tv1_gather_param);
-  auto tv1_gather_pad_param = new Int();
-  fusion.addInput(tv1_gather_pad_param);
-  auto tv1 = gather(
-      tv0, {tv1_gather_param}, {{tv1_gather_pad_param, tv1_gather_pad_param}});
+  auto tv1 = gather(tv0, {tv1_gather}, {{tv1_gather_pad, tv1_gather_pad}});
   fusion.addOutput(tv1);
 
-  auto tv2_gather_param = new Int();
-  fusion.addInput(tv2_gather_param);
-  auto tv2_gather_pad_param = new Int();
-  fusion.addInput(tv2_gather_pad_param);
-  auto tv2 = gather(
-      tv0, {tv2_gather_param}, {{tv2_gather_pad_param, tv2_gather_pad_param}});
+  auto tv2 = gather(tv0, {tv2_gather}, {{tv2_gather_pad, tv2_gather_pad}});
   fusion.addOutput(tv2);
 
   // Static gather
@@ -3923,15 +3693,10 @@ TEST_F(NVFuserTest, FusionGatherUnswitch1_CUDA) {
   tv4->axis(1)->parallelize(ParallelType::TIDx);
 
   const int numel_x = 100;
-  const int tv1_gather = 3;
-  const int tv1_gather_pad = 1;
-  const int tv2_gather = 5;
-  const int tv2_gather_pad = 2;
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor t0 = at::randn({numel_x}, options);
-  std::vector<IValue> inputs = {
-      t0, tv1_gather, tv1_gather_pad, tv2_gather, tv2_gather_pad};
+  std::vector<IValue> inputs = {t0};
 
   FusionExecutor fe;
   fe.compileFusion(&fusion);

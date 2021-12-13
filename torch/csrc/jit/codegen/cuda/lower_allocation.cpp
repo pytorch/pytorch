@@ -215,7 +215,8 @@ class AllocationInserter : public kir::MutableIrVisitor {
       // Use halo-extended extent if found
       auto halo_extent = gpu_lower->haloInfo().getRootAxisInfo(id);
       if (halo_extent.hasHalo()) {
-        extent = ir_builder.addExpr(extent, halo_extent.width());
+        extent = ir_builder.addExpr(
+            extent, ir_builder.create<kir::Int>(halo_extent.width()));
       }
       alloc_dims.push_back(extent);
     }

@@ -94,45 +94,25 @@ void ShiftPredicateInserter::insert(
   shift_ite->elseBody().push_back(bounds_ite);
 }
 
-AxisHaloInfo::AxisHaloInfo() {
+int AxisHaloInfo::width() const {
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
-  setWidth(0, ir_builder.zeroVal());
-  setWidth(1, ir_builder.zeroVal());
+  return width(0) + width(1);
 }
 
-kir::Int* AxisHaloInfo::width() const {
-  auto gpu_lower = GpuLower::current();
-  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
-  return ir_builder.addExpr(width(0), width(1))->as<kir::Int>();
-}
-
-kir::Int* AxisHaloInfo::width(int pos) const {
+int AxisHaloInfo::width(int pos) const {
   TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
-  TORCH_INTERNAL_ASSERT(widths_[pos] != nullptr);
   return widths_[pos];
 }
 
-void AxisHaloInfo::setWidth(int pos, kir::Int* width) {
+void AxisHaloInfo::setWidth(int pos, int width) {
   TORCH_INTERNAL_ASSERT(pos >= 0 && pos < 2);
   widths_[pos] = width;
 }
 
-void AxisHaloInfo::merge(int pos, kir::Int* other) {
+void AxisHaloInfo::merge(int pos, int other) {
   auto gpu_lower = GpuLower::current();
   kir::IrBuilder ir_builder(gpu_lower->kernel());
-  auto cur = width(pos);
-  kir::Int* new_width = nullptr;
-  if (cur->isConst() && other->isConst()) {
-    new_width = ir_builder.create<kir::Int>(
-        std::max(cur->value().value(), other->value().value()));
-  } else if (cur->isZeroInt()) {
-    new_width = other;
-  } else if (other->isZeroInt()) {
-    new_width = cur;
-  } else {
-    new_width = ir_builder.maxExpr(width(pos), other)->as<kir::Int>();
-  }
+  auto new_width = std::max(width(pos), other);
   setWidth(pos, new_width);
 }
 
@@ -144,13 +124,12 @@ void AxisHaloInfo::merge(const AxisHaloInfo& other) {
 
 bool AxisHaloInfo::hasHalo() const {
   return std::any_of(
-      widths_.begin(), widths_.end(), [](auto w) { return !w->isZeroInt(); });
+      widths_.begin(), widths_.end(), [](auto w) { return w != 0; });
 }
 
 std::string AxisHaloInfo::toString() const {
   std::stringstream ss;
-  ss << "<" << kir::toString(width(0)) << ", " << kir::toString(width(1))
-     << ">";
+  ss << "<" << width(0) << ", " << width(1) << ">";
   return ss.str();
 }
 
@@ -332,31 +311,19 @@ void HaloInfo::propagateRootAxisInfo(
         p_info.merge(c_info);
       } else {
         int pos = (offset > 0) ? 0 : 1;
-        p_info.merge(
-            pos,
-            ir_builder.addExpr(c_info.width(pos), std::abs(offset))
-                ->as<kir::Int>());
+        p_info.merge(pos, c_info.width(pos) + std::abs(offset));
       }
     } else if (auto gather_op = dynamic_cast<GatherOp*>(expr)) {
-      const auto window_dim =
-          gpu_lower->lowerValue(gather_op->windowShape()[i]);
-      if (window_dim->isOneInt()) {
+      const auto window_dim = gather_op->windowShape()[i];
+      if (window_dim == 1) {
         p_info.merge(c_info);
         continue;
       }
-      const auto& pad_dim = gather_op->padWidth()[i];
-      const auto pad_dim0 = gpu_lower->lowerValue(pad_dim[0])->as<kir::Int>();
-      p_info.merge(
-          0, ir_builder.addExpr(c_info.width(0), pad_dim0)->as<kir::Int>());
+      const auto pad_dim0 = gather_op->padWidth()[i][0];
+      p_info.merge(0, c_info.width(0) + pad_dim0);
       // The right-side halo is propagated as:
       //   consumer_right_halo + (window_dim - 1 - left_padding)
-      p_info.merge(
-          1,
-          ir_builder
-              .subExpr(
-                  ir_builder.addExpr(c_info.width(1), window_dim),
-                  ir_builder.addExpr(pad_dim0, 1))
-              ->as<kir::Int>());
+      p_info.merge(1, c_info.width(1) + window_dim - 1 - pad_dim0);
     } else {
       p_info.merge(c_info);
     }
@@ -396,12 +363,13 @@ void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
   auto halo_width = halo_info.width();
 
   if (!halo_info.hasHalo()) {
-    halo_width_map_[id] = ir_builder.zeroVal();
+    setHaloWidth(id, 0);
     return;
   }
 
-  auto expanded_extent =
-      ir_builder.addExpr(gpu_lower->lowerValue(id->extent()), halo_width);
+  auto expanded_extent = ir_builder.addExpr(
+      gpu_lower->lowerValue(id->extent()),
+      ir_builder.create<kir::Int>(halo_width));
   kir_extent_map_[gpu_lower->lowerValue(id)->as<kir::IterDomain>()] =
       expanded_extent;
   halo_width_map_[id] = halo_width;
@@ -409,10 +377,14 @@ void HaloInfo::initializeFromRootAxisInfo(IterDomain* id) {
   inheritance_map_[id] = {id};
 }
 
+void HaloInfo::setHaloWidth(IterDomain* id, int halo_width) {
+  halo_width_map_[id] = halo_width;
+}
+
 // Propagate extent information from root axes to descendants
 void HaloInfo::build(TensorDomain* td) {
   auto gpu_lower = GpuLower::current();
-  kir::IrBuilder ir_builder(gpu_lower->kernel());
+  kir::SimplifyingIrBuilder ir_builder(gpu_lower->kernel());
 
   auto exprs = DependencyCheck::getAllExprsBetween(
       {td->getMaybeRFactorDomain().begin(), td->getMaybeRFactorDomain().end()},
@@ -459,19 +431,17 @@ void HaloInfo::build(TensorDomain* td) {
 
       auto in_id = split->in();
 
-      const auto& halo_width_it = halo_width_map_.find(in_id);
-
       // If no halo info is found, nothing needs to be done. This ID
       // must be an ancestor of a domain set by setRootAxisInfo.
-      if (halo_width_it == halo_width_map_.end()) {
+      if (!hasHaloWidth(in_id)) {
         continue;
       }
 
-      const auto halo_width = halo_width_it->second;
+      const auto halo_width = getHaloWidth(in_id);
 
-      if (halo_width->isZeroInt()) {
-        halo_width_map_.insert({split->outer(), halo_width});
-        halo_width_map_.insert({split->inner(), halo_width});
+      if (halo_width == 0) {
+        setHaloWidth(split->outer(), 0);
+        setHaloWidth(split->inner(), 0);
         continue;
       }
 
@@ -484,8 +454,8 @@ void HaloInfo::build(TensorDomain* td) {
           {gpu_lower->lowerValue(out_id)->as<kir::IterDomain>(),
            expanded_extent});
 
-      halo_width_map_.insert({split->outer(), ir_builder.zeroVal()});
-      halo_width_map_.insert({split->inner(), halo_width});
+      setHaloWidth(split->outer(), 0);
+      setHaloWidth(split->inner(), halo_width);
 
       insertToInheritanceMap(td, in_id, split->inner());
     } else if (auto merge = dynamic_cast<Merge*>(expr)) {
@@ -513,7 +483,7 @@ void HaloInfo::build(TensorDomain* td) {
         merged_shifted_ids.insert(merge->out());
         // Note that halo_width_map_ is not updated
       } else {
-        halo_width_map_.insert({merge->out(), ir_builder.zeroVal()});
+        setHaloWidth(merge->out(), 0);
       }
     } else {
       TORCH_INTERNAL_ASSERT(false, "Unsupported expr: ", expr);
@@ -643,7 +613,7 @@ kir::Val* HaloInfo::getExtent(kir::IterDomain* id) const {
   }
 }
 
-kir::Int* HaloInfo::getHaloWidth(IterDomain* id) const {
+int HaloInfo::getHaloWidth(IterDomain* id) const {
   auto it = halo_width_map_.find(id);
   TORCH_INTERNAL_ASSERT(it != halo_width_map_.end());
   return it->second;
@@ -736,63 +706,11 @@ bool extentCompare(
 } // namespace
 
 bool HaloInfo::extentLessEqual(IterDomain* id1, IterDomain* id2) const {
-  auto cmp = [](kir::Int* x, kir::Int* y) {
-    if (x == y) {
-      return true;
-    }
-    auto xv = x->value();
-    auto yv = y->value();
-    return xv.has_value() && yv.has_value() && xv.value() <= yv.value();
-  };
-  return extentCompare(*this, id1, id2, cmp);
+  return extentCompare(*this, id1, id2, std::less_equal<>());
 }
 
 bool HaloInfo::extentEqual(IterDomain* id1, IterDomain* id2) const {
-  // Returns true only when x and y are proven to be the same. The
-  // analysis is not comprehensive and can prove in rather trivial
-  // cases only. Specifically:
-  //   - x and y are the same pointers
-  //   - Both have static values and they are the same
-  //   - Both are defined by the same expression and the inputs are
-  //     proven to be equal
-  std::function<bool(kir::Int*, kir::Int*)> cmp = [&](kir::Int* x,
-                                                      kir::Int* y) {
-    if (x == y) {
-      return true;
-    }
-
-    auto xv = x->value();
-    auto yv = y->value();
-    if (xv.has_value() && yv.has_value() && xv.value() == yv.value()) {
-      return true;
-    }
-
-    // Check if both are defined by an expression of the same type. If
-    // so, recursively check the input operands.
-    auto x_def = x->definition();
-    auto y_def = y->definition();
-    if (x_def && y_def &&
-        ((x_def->isA<kir::UnaryOp>() && y_def->isA<kir::UnaryOp>() &&
-          x_def->as<kir::UnaryOp>()->operation() ==
-              y_def->as<kir::UnaryOp>()->operation()) ||
-         (x_def->isA<kir::BinaryOp>() && y_def->isA<kir::BinaryOp>() &&
-          x_def->as<kir::BinaryOp>()->operation() ==
-              y_def->as<kir::BinaryOp>()->operation()))) {
-      for (const auto i : c10::irange(x_def->inputs().size())) {
-        auto x_input = dynamic_cast<kir::Int*>(x_def->inputs()[i]);
-        auto y_input = dynamic_cast<kir::Int*>(y_def->inputs()[i]);
-        // Both must be kir::Int
-        TORCH_INTERNAL_ASSERT(x_input && y_input);
-        if (!cmp(x_input, y_input)) {
-          return false;
-        }
-      }
-      return true;
-    }
-
-    return false;
-  };
-  return extentCompare(*this, id1, id2, cmp);
+  return extentCompare(*this, id1, id2, std::equal_to<>());
 }
 
 std::string HaloInfo::toString() const {
@@ -831,7 +749,7 @@ bool HaloInfo::needsShiftPredicate(Expr* expr) const {
     if (consumer_halo_info.hasHalo() ||
         (shift_expr != nullptr && shift_expr->offset(i) != 0 &&
          !consumer_id->isBroadcast()) ||
-        (gather_expr != nullptr && !gather_expr->windowShape()[i]->isOneInt() &&
+        (gather_expr != nullptr && gather_expr->windowShape()[i] != 1 &&
          !consumer_id->isBroadcast())) {
       return true;
     }

@@ -16,16 +16,14 @@ namespace cuda {
 //! Auxiliary class to represent information about halo of an axis
 class AxisHaloInfo {
  public:
-  AxisHaloInfo();
-
   //! Width of halo.
   //!
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  kir::Int* width(int pos) const;
+  int width(int pos) const;
 
   //! Sum of the widths of both widths
-  kir::Int* width() const;
+  int width() const;
 
   const auto& widths() const {
     return widths_;
@@ -34,10 +32,10 @@ class AxisHaloInfo {
   //! Set the halo width of either side.
   //! pos is either 0 or 1. The width of halo at offset zero is set
   //! when pos is 0.
-  void setWidth(int pos, kir::Int* width);
+  void setWidth(int pos, int width);
 
   //! Extend the halo width to account for another axis.
-  void merge(int pos, kir::Int* other);
+  void merge(int pos, int other);
 
   //! Extend the halo width to account for another axis.
   void merge(const AxisHaloInfo& other);
@@ -53,7 +51,7 @@ class AxisHaloInfo {
   //! widths_[0] is non-zero and designates the size of the
   //! halo. Similarly, non-zero widths_[1] means the axis has halo at
   //! the other end of the axis.
-  std::array<kir::Int*, 2> widths_ = {nullptr, nullptr};
+  std::array<int, 2> widths_ = {0, 0};
 };
 
 //! Helper class for lowering tensors with halo. Only valid at the
@@ -98,7 +96,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //!
   //! It's an error if queried for an axis with no halo width
   //! information.
-  kir::Int* getHaloWidth(IterDomain* id) const;
+  int getHaloWidth(IterDomain* id) const;
 
   //! Returns an extent if id is extended for halo. Nullptr is
   //! returned otherwise.
@@ -166,6 +164,8 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! Validate shift usage
   void validate(TensorView* td) const;
 
+  void setHaloWidth(IterDomain* id, int halo_width);
+
  private:
   //! Halo information of root axes
   std::unordered_map<IterDomain*, AxisHaloInfo> root_axis_map_;
@@ -209,7 +209,7 @@ class TORCH_CUDA_CU_API HaloInfo {
   //! inner axis is merged with another axis of extent M, we know that
   //! the extent of the resulting output axis is 5*M, but we don't
   //! create its mapping.
-  std::unordered_map<IterDomain*, kir::Int*> halo_width_map_;
+  std::unordered_map<IterDomain*, int> halo_width_map_;
 
   //! Mappings from root domains to child domains that inherit halo
   std::unordered_map<IterDomain*, std::unordered_set<IterDomain*>>

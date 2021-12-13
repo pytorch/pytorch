@@ -523,18 +523,6 @@ TORCH_CUDA_CU_API TensorView* gather(
     const std::vector<std::vector<int>>& pad_width,
     const std::vector<int>& strides = {});
 
-//! Gather a window of nearby elements for each element.
-//!
-//! Same as the another gather interface but with Int* parameters.
-//!
-//! TODO: Remove this interface as we do not intend to support dynamic
-//! window shapes at this moment.
-TORCH_CUDA_CU_API TensorView* gather(
-    TensorView* inp,
-    const std::vector<Int*>& window_shape,
-    const std::vector<std::vector<Int*>>& pad_width,
-    const std::vector<int>& strides = {});
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
