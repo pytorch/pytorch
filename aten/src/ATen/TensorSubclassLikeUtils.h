@@ -22,11 +22,11 @@ namespace at {
 //    If input is a Tensor subclass, then the above ends up either erroring out
 //    or returning a regular non-Tensor-subclass Tensor!
 
-constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
+static auto kFunctorchWrappedTensors = DispatchKeySet({
     DispatchKey::FuncTorchGradWrapper,
     DispatchKey::FuncTorchBatched});
 
-constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
+static auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
     DispatchKey::Batched,
     DispatchKey::SparseCPU,
     DispatchKey::SparseCUDA,
