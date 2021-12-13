@@ -8748,16 +8748,17 @@ class TestAutogradInferenceMode(TestCase):
         self.assertFalse(torch.is_inference_mode_enabled())
 
     def test_inference_mode_decorator(self):
-        @torch.inference_mode()
-        def func(x):
-            self.assertTrue(torch.is_inference_mode_enabled())
-            return x * x
+        for mode in (True, False):
+            @torch.inference_mode(mode)
+            def func(x):
+                self.assertEqual(torch.is_inference_mode_enabled(), mode)
+                return x * x
 
-        for requires_grad in (True, False):
-            c = torch.ones(1, 2, 3, requires_grad=requires_grad)
-            d = func(c)
-            self.assertTrue(torch.is_inference(d))
-            self.assertFalse(d.requires_grad)
+            for requires_grad in (True, False):
+                c = torch.ones(1, 2, 3, requires_grad=requires_grad)
+                d = func(c)
+                self.assertTrue(not mode or torch.is_inference(d))
+                self.assertEqual(d.requires_grad, requires_grad and not mode)
 
     def test_inference_mode_tensor_creation(self):
         with torch.inference_mode():
