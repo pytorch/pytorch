@@ -295,15 +295,15 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
-        build_environment="win-vs2019-cuda11.5-py3",
+        build_environment="periodic-win-vs2019-cuda11.5-py3",
         cuda_version="11.5",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
         num_test_shards=2,
-        only_run_smoke_tests_on_pull_request=True,
         enable_force_on_cpu_test=1,
+        is_scheduled="45 4,10,16,22 * * *",
         ciflow_config=CIFlowConfig(
             run_on_canary=True,
-            labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
         ),
     ),
     CIWorkflow(
