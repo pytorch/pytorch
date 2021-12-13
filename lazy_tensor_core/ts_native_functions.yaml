@@ -47,6 +47,8 @@ full_codegen:
   - lt.Tensor
   - masked_fill_.Scalar
   - masked_fill_.Tensor
+  - max_pool2d_with_indices
+  - max_pool2d_with_indices_backward
   - mean
   - mean.dim
   - mm
@@ -104,8 +106,6 @@ supported:
   - mul.Scalar
   - native_batch_norm
   - native_batch_norm_backward
-  - max_pool2d_with_indices
-  - max_pool2d_with_indices_backward
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
   - permute
@@ -132,5 +132,4 @@ supported:
   - alias
   - tanh_backward
 autograd:
-  - max_pool2d
   - max_pool3d
