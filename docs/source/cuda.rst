@@ -92,6 +92,7 @@ Memory management
 
      empty_cache
      list_gpu_processes
+     mem_get_info
      memory_stats
      memory_summary
      memory_snapshot
