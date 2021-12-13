@@ -165,6 +165,8 @@ def qengine_is_fbgemm():
     return torch.backends.quantized.engine == 'fbgemm'
 def qengine_is_qnnpack():
     return torch.backends.quantized.engine == 'qnnpack'
+def qengine_is_onednn():
+    return torch.backends.quantized.engine == 'onednn'
 
 # Helper function used to simulate per-channel fake-quant against any axis
 def _permute_to_axis_zero(X, axis):
