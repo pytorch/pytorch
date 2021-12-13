@@ -82,28 +82,6 @@ template <> struct RemoveBatchDimAfterTensor<typelist<>> {
 };
 template<class TypeList> using remove_batch_dim_after_tensor_t = typename RemoveBatchDimAfterTensor<TypeList>::type;
 
-// TODO: get rid of these
-// Do I need templates on templates now?
-// template <typename func_t> struct LowerToNextLayer {};
-// template <typename Return, typename... Args> struct LowerToNextLayer<Return(Args...)> {
-//   // How to pass in batch_rule directly?
-//   static Return apply(Args... args);
-// };
-
-
-//# Tensor lowerToNextLayer(
-//#     std::function<std::tuple<Tensor,optional<int64_t>>(const Tensor&, optional<int64_t>)> batch_rule,
-//#     const Tensor& tensor);
-std::tuple<Tensor,optional<int64_t>> abs_batch_rule(const Tensor& tensor, optional<int64_t> batch_dim);
-
-template<typename F, F Func, typename Return, typename TupleArgs> struct TORCH_API Dummy {};
-
-template<typename F, F Func, typename Return, typename...T> struct Dummy<F, Func, Return, std::tuple<T...>> {
-  static Return apply(T... args) {
-    return lowerToNextLayer(abs_batch_rule, std::forward<T>(args)...);
-  }
-};
-
 template <typename T> struct UnpackSingleItemTuple {
   using type = T;
 };
@@ -123,8 +101,6 @@ struct BuildFunction {
 template <typename Return, typename TL> using build_function_t = typename BuildFunction<Return, TL>::type;
 
 
-// std::tuple<Tensor,optional<int64_t>> (*kAbsBatchRule)(const Tensor& Tensor, optional<int64_t>)
-//  = &abs_batch_rule;
 template <typename batch_rule_t> struct ToOperatorType {
   using batch_rule_return_type = typename c10::guts::function_traits<batch_rule_t>::return_type;
   using batch_rule_parameter_types = typename c10::guts::function_traits<batch_rule_t>::parameter_types;
@@ -140,30 +116,6 @@ template <typename batch_rule_t> struct ToOperatorType {
 };
 template <typename batch_rule_t> using to_operator_t = typename ToOperatorType<batch_rule_t>::type;
 
-template <typename F, F Func> struct TORCH_API PrimBatchRule3 {
-  using func_t = to_operator_t<typename std::remove_pointer<F>::type>;
-  using result_type = typename c10::guts::function_traits<func_t>::return_type;
-  using parameter_types = c10::guts::typelist::to_tuple_t<typename c10::guts::function_traits<func_t>::parameter_types>;
-  static auto apply = Dummy<F, Func, result_type, parameter_types>::apply;
-};
-
-template<typename Return, typename TypeList> struct TORCH_API PrimBatchRule5 {};
-template<typename Return, typename... T> struct PrimBatchRule5<Return, typelist<T...>> {
-  static inline Return apply(T... args) {
-    return lowerToNextLayer(abs_batch_rule, std::forward<T>(args)...);
-  }
-};
-
-template<typename func_t> struct PrimBatchRule6 {};
-template<typename Return, typename... Args> struct PrimBatchRule6<Return (Args...)> {
-  static inline Return apply(Args... args) {
-    return lowerToNextLayer(abs_batch_rule, std::forward<Args>(args)...);
-  }
-};
-
-// template<typename batch_rule_t, batch_rule_t BatchRule> struct PrimBatchRule7 {};
-// template<typename batch_rule_t, batch_rule_t BatchRule, typename BRReturn, typename... BRArgs>
-// struct PrimBatchRule7<BRReturn(*)(BRArgs...), BatchRule> {
 template<typename br_t, br_t BatchRule, typename func_t> struct PrimBatchRule7 {};
 template<typename br_t, br_t BatchRule, typename Return, typename... Args> struct PrimBatchRule7<
 br_t, BatchRule, Return (Args...)> {
