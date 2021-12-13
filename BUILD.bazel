@@ -315,8 +315,7 @@ filegroup(
 
 filegroup(
     name = "aten_native_mkldnn_cpp",
-    srcs = glob(["aten/src/ATen/native/mkldnn/*.cpp"],
-                exclude = ["aten/src/ATen/native/mkldnn/LlgaTensorImpl.cpp"]),
+    srcs = glob(["aten/src/ATen/native/mkldnn/*.cpp"]),
 )
 
 filegroup(

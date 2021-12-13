@@ -9,7 +9,7 @@ pytest test/test_jit_llga_fuser.py
 
 ## Quick Start
 
-A simple cascaded Conv-Relu example is provided in test. Enabling log outputs to familiarize with the whole pipeline:
+A simple cascaded Conv-Relu example is provided in test. Please consider enabling log outputs to familiarize yourself with the whole pipeline:
 
 **Mutation Removal -> DecomposeOps -> Prepare Binary -> Defer Size Check -> Graph Fuser -> Layout Propagation -> Type Guard -> Kernel Execution**
 
@@ -19,26 +19,26 @@ DNNL_VERBOSE=1 PYTORCH_JIT_LOG_LEVEL=">>graph_helper:>>graph_fuser:>>kernel:>>in
 
 ## Codebase structure
 
-Most of the source code are placed in
+Most of the source code is placed in
 
 ```bash
 torch/csrc/jit/codegen/onednn/*
 ```
 
-Tensor related code are located at
+Tensor related code is located at
 
 ```bash
-aten/src/ATen/native/mkldnn/LlgaTensorImpl.h
-aten/src/ATen/native/mkldnn/LlgaTensorImpl.cpp
+torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h
+torch/csrc/jit/codegen/onednn/LlgaTensorImpl.cpp
 ```
 
-CMake where bridge code are included in
+CMake where bridge code is included:
 
 ```bash
 caffe2/CMakeLists.txt
 ```
 
-CMake where oneDNN Graph submodule are included in
+CMake where oneDNN Graph submodule are included:
 
 ```bash
 third_party/mkl-dnn

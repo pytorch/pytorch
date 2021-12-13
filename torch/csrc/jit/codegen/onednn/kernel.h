@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/codegen/onednn/LlgaTensorImpl.h>
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
-#include <torch/csrc/jit/codegen/onednn/rw_mutex.hpp>
 #include <unordered_map>
 
 #include <oneapi/dnnl/dnnl_graph.hpp>
@@ -61,22 +60,6 @@ class LlgaKernel {
     return s.logical_tensor();
   }
 
-  void lock_read() {
-    rw_mutex_.lock_read();
-  }
-
-  void lock_write() {
-    rw_mutex_.lock_write();
-  }
-
-  void unlock_read() {
-    rw_mutex_.unlock_read();
-  }
-
-  void unlock_write() {
-    rw_mutex_.unlock_write();
-  }
-
   at::Device device_ = at::kCPU;
   const Node* fusionNode_;
   std::shared_ptr<Graph> graph_;
@@ -97,7 +80,7 @@ class LlgaKernel {
   ArgSpecs outputSpecs_;
   std::unordered_map<size_t, size_t> inplacePairs_; // output id -> input offset
   std::string debugName_;
-  rw_mutex_t rw_mutex_;
+  std::once_flag initialized_flag;
   bool is_initialized_ = false;
 };
 
