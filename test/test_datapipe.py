@@ -746,15 +746,14 @@ class TestFunctionalIterDataPipe(TestCase):
 
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
-
     def test_fork_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp1 = input_dp.fork(num_instances=1)
-        self.assertEqual(dp1, input_dp)
+        dp0 = input_dp.fork(num_instances=1)
+        self.assertEqual(dp0, input_dp)
 
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
