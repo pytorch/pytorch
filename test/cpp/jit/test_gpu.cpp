@@ -8604,6 +8604,10 @@ TEST_F(NVFuserTest, FusionMagicSchedulerLayerNormalization_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionMagicSchedulerBatchNormalization_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -18288,6 +18292,10 @@ TEST_F(NVFuserTest, FusionPredicateParallelizedDomains_CUDA) {
 
 // Repro of #1102 and #1129
 TEST_F(NVFuserTest, FusionSmemPredicateUnswitch_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -18655,6 +18663,10 @@ TEST_F(NVFuserTest, FusionTestWarpSoftMax_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIssue1133_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -19096,6 +19108,10 @@ TEST_F(NVFuserTest, PersistentBufferProjection_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionIssue1223_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 

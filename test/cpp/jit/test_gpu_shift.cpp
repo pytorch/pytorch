@@ -4357,6 +4357,10 @@ TEST_F(NVFuserTest, FusionGatherStridedChain_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -4434,6 +4438,10 @@ TEST_F(NVFuserTest, FusionMaxPoolingStrided_CUDA) {
 }
 
 TEST_F(NVFuserTest, FusionConv2DStaticStrided_CUDA) {
+  if (!deviceMajorMinorCheck(7)) {
+    GTEST_SKIP() << "skipping tests on pre-Volta GPUs";
+    return;
+  }
   Fusion fusion;
   FusionGuard fg(&fusion);
 
