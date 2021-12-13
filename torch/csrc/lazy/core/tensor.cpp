@@ -259,7 +259,7 @@ Value LazyTensor::GetIrValueForTensor(
   if (tensor.dim() == 0 && tensor.numel() == 1) {
     at::Scalar value = tensor.item();
     if (IsSpecialScalar(value)) {
-      return MakeNode<Scalar>(std::move(value), tensor.scalar_type());
+      return MakeNode<Scalar>(value, tensor.scalar_type());
     }
     data = LazyGraphExecutor::Get()->GetDeviceData(tensor.cpu(), device);
     read_only = true;

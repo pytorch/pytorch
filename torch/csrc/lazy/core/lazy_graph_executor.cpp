@@ -488,6 +488,7 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
   // The LockDevices() API returns a vector of
   // ExceptionCleanup object, which is going to be freed
   // immediately, turning this operation into a lock barrier.
+  // NOLINTNEXTLINE
   DeviceLockerArena::Get()->LockDevices(wait_devices);
 }
 
@@ -959,8 +960,9 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       // even in case the caller does not wait, and that is accomplished by
       // setting the unlockers status. In that case the exception will be
       // surfaced when the user tries to acquire the device locks the next time.
-      std::exception_ptr exptr = std::current_exception();
+      //std::exception_ptr exptr = std::current_exception();
       for (auto& unlocker : async->unlocker) {
+        std::exception_ptr exptr = std::current_exception();
         unlocker.SetStatus(std::move(exptr));
       }
       throw;
