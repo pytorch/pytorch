@@ -18,29 +18,20 @@ namespace at {
 namespace functorch {
 
 struct TORCH_API DynamicLayer {
-  DynamicLayer(
+  explicit DynamicLayer(
       DispatchKey key,
       int64_t layerId,
       optional<int64_t> batchSize = nullopt,
-      optional<bool> prev_grad_mode = nullopt):
-    key_(key), layerId_(layerId), batchSize_(batchSize), prevGradMode_(prev_grad_mode)
-  {
-    if (key_ == DispatchKey::Autograd) {
-      TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
-    }
-  }
+      optional<bool> prev_grad_mode = nullopt);
 
-  DispatchKey key() const { return key_; }
-  int64_t layerId() const { return layerId_; }
+  DispatchKey key() const;
+  int64_t layerId() const;
+
   // Only valid for vmap
-  int64_t batchSize() const {
-    TORCH_INTERNAL_ASSERT(batchSize_);
-    return *batchSize_;
-  }
+  int64_t batchSize() const;
+
   // only valid for grad-based transforms
-  optional<bool> prevGradMode() const {
-    return prevGradMode_;
-  }
+  optional<bool> prevGradMode() const;
  private:
   DispatchKey key_;
   int64_t layerId_;
