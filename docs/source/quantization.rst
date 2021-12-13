@@ -827,7 +827,6 @@ This is because directly saving and loading a quantized model using ``torch.save
 is not supported. To save/load quantized models, the following ways can be used:
 
 1. Saving/Loading the quantized model state_dict
-2. Saving/Loading scripted quantized models using ``torch.jit.save`` and ``torch.jit.load``
 
 An example::
 
@@ -852,10 +851,20 @@ An example::
   torch.save(quantized_orig.state_dict(), b)
 
   m2 = M().eval()
-  prepared = prepare_fx(m, {'' : default_qconfig})
+  prepared = prepare_fx(m2, {'' : default_qconfig})
   quantized = convert_fx(prepared)
   b.seek(0)
   quantized.load_state_dict(torch.load(b))
+
+2. Saving/Loading scripted quantized models using ``torch.jit.save`` and ``torch.jit.load``
+
+An example::
+
+  # Note: using the same model M from previous example
+  m = M().eval()
+  prepare_orig = prepare_fx(m, {'' : default_qconfig})
+  prepare_orig(torch.rand(5, 5))
+  quantized_orig = convert_fx(prepare_orig)
 
   # save/load using scripted model
   scripted = torch.jit.script(quantized_orig)
@@ -863,7 +872,6 @@ An example::
   torch.jit.save(scripted, b)
   b.seek(0)
   scripted_quantized = torch.jit.load(b)
-
 
 Numerical Debugging (prototype)
 -------------------------------
