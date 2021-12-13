@@ -845,10 +845,36 @@ void AddIncrefsHelper(Graph& graph, Block* block) {
   }
 }
 
+void ForceNonEmptyOutputsHelper(Graph& graph, Block* block) {
+  for (auto* node : block->nodes()) {
+    bool needs_output = false;
+    for (auto* sub_block : node->blocks()) {
+      if (sub_block->outputs().empty()) {
+        auto* none_node = graph.create(prim::Constant);
+        none_node->output()->setType(c10::NoneType::get());
+        sub_block->appendNode(none_node);
+        sub_block->registerOutput(none_node->output());
+        needs_output = true;
+      }
+
+      ForceNonEmptyOutputsHelper(graph, sub_block);
+    }
+
+    if (needs_output) {
+      auto* output = node->addOutput();
+      output->setType(c10::NoneType::get());
+    }
+  }
+}
+
 } // namespace
 
 void AddIncrefs(Graph& graph) {
   AddIncrefsHelper(graph, graph.block());
+}
+
+void ForceNonEmptyOutputs(Graph& graph) {
+  ForceNonEmptyOutputsHelper(graph, graph.block());
 }
 
 } // namespace jit
