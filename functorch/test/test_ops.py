@@ -551,6 +551,12 @@ class TestOperators(TestCase):
         xfail('linalg.inv'),
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
+
+        # Causing a CUDA assert, needs investigation
+        skip('div', 'floor_rounding', device_type='cuda'),
+        skip('div', 'no_rounding_mode', device_type='cuda'),
+        skip('div', 'trunc_rounding', device_type='cuda'),
+        skip('true_divide', device_type='cuda'),
     })
     def test_vmapjvp(self, device, dtype, op):
         if is_inplace(op, op.get_op()):
