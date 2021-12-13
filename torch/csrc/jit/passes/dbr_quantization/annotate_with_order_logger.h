@@ -5,7 +5,7 @@
 namespace torch {
 namespace jit {
 
-TORCH_API Module DBRQuantization(const Module& module);
+TORCH_API Module DBRQuantAnnotateWithOrderLogger(Module& module, const Module& logger);
 
 } // namespace jit
 } // namespace torch

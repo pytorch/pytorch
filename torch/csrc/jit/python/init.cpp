@@ -25,7 +25,7 @@
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
-#include <torch/csrc/jit/passes/dbr_quantization.h>
+#include <torch/csrc/jit/passes/dbr_quantization/annotate_with_order_logger.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/frozen_concat_linear.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
@@ -356,8 +356,9 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_fold_convbn",
           [](Module& module) { return FoldConvBatchNorm(module); })
       .def(
-          "_jit_pass_dbr_quantization",
-          [](Module& module) { return DBRQuantization(module); })
+          "_jit_pass_dbr_quant_annotate_with_order_logger",
+          [](Module& module,
+             Module& logger) { return DBRQuantAnnotateWithOrderLogger(module, logger); })
       .def(
           "_jit_onnx_list_model_parameters",
           [](Module& module) { return list_module_parameters(module); })

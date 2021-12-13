@@ -25,6 +25,9 @@ import torch.ao.quantization._quantize_dbr as _quantize_dbr
 import torch.ao.ns._numeric_suite_dbr as ns
 # TODO(future PR): move these utils out of the FX folder
 import torch.ao.ns._numeric_suite_fx as ns_fx
+from torch.ao.quantization._dbr.torchscript_utils import (
+    trace_and_record_order,
+)
 
 def _allclose(a, b):
     if isinstance(a, tuple):
@@ -107,22 +110,6 @@ class QuantizeDBRTestCase(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeDBR(QuantizeDBRTestCase):
-    def test_scripting(self):
-        from torch.jit._recursive import wrap_cpp_module
-
-        class M(torch.nn.Module):
-            def forward(self, x):
-                x = x + x
-                return x
-
-        m = M()
-        ms = torch.jit.script(m)
-        print(ms.graph)
-        model_c = ms._c
-        model_c = torch._C._jit_pass_dbr_quantization(model_c)
-        ms2 = wrap_cpp_module(model_c)
-        print(ms2)
-
     def test_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -1002,3 +989,73 @@ class TestQuantizeDBRModels(QuantizeDBRTestCase):
             m, qconfig, (torch.randn(1, 3, 224, 224),),
             # TODO fix this (reason TBD)
             do_torchscript_checks=False)
+
+@skipIfNoFBGEMM
+class TestQuantizeDBRScript(QuantizeDBRTestCase):
+    def test_annotate_with_order_logger(self):
+        """
+        Basic test for annotating a scripted module with operation
+        order.
+        """
+
+        class Child2(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = x + x
+                x = x + x
+                return x
+
+        class Child1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.child2 = Child2()
+
+            def forward(self, x):
+                x = x + x
+                x = x + x
+                x = self.child2(x)
+                return x
+
+        class Parent(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.flag = False
+                self.count = 1
+                self.child1 = Child1()
+
+            def forward(self, x):
+                # test regular add
+                x = x + x
+
+                # test an if statement
+                if self.flag:
+                    x = x + x
+                else:
+                    x = x + x
+
+                # test a for loop
+                for i in range(self.count):
+                    x = x + x
+
+                # test recursive module calls
+                x = self.child1(x)
+
+                return x
+
+        m = Parent()
+        ms = torch.jit.script(m)
+
+        ms2 = trace_and_record_order(ms, (torch.randn(1, 1, 1, 1),))
+
+        # parent should have three items:
+        # 1. one regular add
+        # 2. one add from one branch of the if statement
+        # 3. one add from the for loop
+        # TODO(future PR): stop hardcoding _logger_0 since the index may change
+        self.assertTrue(len(ms2._logger_0.op_idxs) == 3)
+
+        # child1 should have two items
+        self.assertTrue(len(ms2.child1._logger_0.op_idxs) == 2)
+
+        # child2 should have three items
+        self.assertTrue(len(ms2.child1.child2._logger_0.op_idxs) == 3)
