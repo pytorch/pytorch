@@ -20,7 +20,7 @@ class ShardedOptimizer(optim.Optimizer):
         Args:
             named_params (Dict[str, Union[Tensor, ShardedTensor]]) : a Dict
                 of parameters, where key is the parameter key, value is either
-                nn.Parameter or ShardedTensor parameter. This usually used in
+                Tensor or ShardedTensor parameter. This usually used in
                 conjunction with :meth:`named_params_with_sharded_tensor`
             optimizer_class (torch.optim.Optimizer): the Optimizer to use
                 locally, i.e. torch.optim.SGD, torch.optim.Adagrad, etc.
@@ -74,7 +74,7 @@ class ShardedOptimizer(optim.Optimizer):
     def state_dict(self) -> Dict[str, Any]:
         """
         Returned state and param_groups will contain parameter keys
-        instead of parameter indices like torch.Optimizer.
+        instead of parameter indices like torch.optim.Optimizer.
         This allows for advanced functionality like optimizer re-sharding to be implemented.
         """
         # TODO: implement state_dict
