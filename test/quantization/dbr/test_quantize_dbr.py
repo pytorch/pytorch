@@ -107,6 +107,22 @@ class QuantizeDBRTestCase(QuantizationTestCase):
 
 @skipIfNoFBGEMM
 class TestQuantizeDBR(QuantizeDBRTestCase):
+    def test_scripting(self):
+        from torch.jit._recursive import wrap_cpp_module
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        m = M()
+        ms = torch.jit.script(m)
+        print(ms.graph)
+        model_c = ms._c
+        model_c = torch._C._jit_pass_dbr_quantization(model_c)
+        ms2 = wrap_cpp_module(model_c)
+        print(ms2)
+
     def test_fusion(self):
         class M(torch.nn.Module):
             def __init__(self):
