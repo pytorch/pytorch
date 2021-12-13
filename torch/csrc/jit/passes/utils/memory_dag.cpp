@@ -107,7 +107,7 @@ bool MemoryDAG::mayContainAlias(
   }
 
   const auto& a_contained = getAllContainedMemoryLocations(a);
-  return std::any_of(b.begin(), b.end(), [this, &a_contained](Element *b_elem) {
+  return std::any_of(b.begin(), b.end(), [this, &a_contained](Element* b_elem) {
     return a_contained.intersects(this->getAllContainedMemoryLocations(b_elem));
   });
 }
