@@ -1,4 +1,5 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include "c10/core/ScalarType.h"
 #include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
@@ -41,10 +42,10 @@ torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
       auto scalarType = ts_data->scalar.value().type();
       if (isFloatingType(scalarType)){
         param->setType(c10::FloatType::get());
-      } else if (isIntegralType(scalarType)) {
+      } else if (isIntegralType(scalarType) || (scalarType == c10::kBool)) {
         param->setType(c10::IntType::get());
       } else {
-        TORCH_CHECK(false, "Unhandled scalar type ");
+        TORCH_CHECK(false, "Unhandled scalar type: ", c10::toString(scalarType));
       }
     }
     it = parameters_map_.emplace(handle, Parameter{param, parameters_.size()})
