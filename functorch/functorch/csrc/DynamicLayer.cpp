@@ -126,31 +126,18 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   return layerId;
 }
 
-static int64_t pushDynamicLayer(
-    DispatchKey key,
-    optional<int64_t> batch_size = nullopt,
-    optional<bool> prev_grad_mode = nullopt) {
-  auto& dynamicLayerStack = dynamicLayerStackAccessor();
-  TORCH_INTERNAL_ASSERT(key != DispatchKey::Undefined);
-  TORCH_INTERNAL_ASSERT(key != DispatchKey::Batched);
-
-  auto layerId = 1 + dynamicLayerStack.size();
-  dynamicLayerStack.emplace_back(key, layerId, batch_size, prev_grad_mode);
-
-  if (layerId == 2) {
-    // std::cout << "DynamicLayer on" << std::endl;
-    setDynamicLayerFrontBackKeysIncluded(true);
-  }
-
-  return layerId;
-}
-
 int64_t initAndPushDynamicLayer(
     DispatchKey key,
     optional<int64_t> batch_size,
     optional<bool> prev_grad_mode) {
-  auto layerId = pushDynamicLayer(key, batch_size, prev_grad_mode);
+  TORCH_INTERNAL_ASSERT(key == DispatchKey::Autograd || key == kBatchedKey);
+  const auto& dynamicLayerStack = dynamicLayerStackAccessor();
+  const auto layerId = 1 + dynamicLayerStack.size();
+  DynamicLayer new_layer(key, layerId, batch_size, prev_grad_mode);
+  pushDynamicLayer(std::move(new_layer));
+
   auto& data = getGlobalDynmetaData();
+
   TORCH_INTERNAL_ASSERT(data.find(layerId) == data.end());
   if (key == DispatchKey::Autograd) {
     TORCH_INTERNAL_ASSERT(prev_grad_mode.has_value());
