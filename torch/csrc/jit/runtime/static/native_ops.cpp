@@ -617,7 +617,7 @@ std::vector<IValue> collectLoopInputs(const ProcessedNode& p_node) {
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::Loop,
     prim_Loop,
-    [](Node* n) -> SROperator {
+    [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
         const auto max_trip_count = p_node->Input(0).toInt();
         auto condition = p_node->Input(1).toBool();
@@ -630,8 +630,6 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         int64_t loop_count = 0;
 
         while (condition && loop_count < max_trip_count) {
-          LOG(INFO) << args[0].toInt();
-          LOG(INFO) << args[1].toTensor();
           auto output = (*runner)(args);
 
           if (output.isTuple()) {
