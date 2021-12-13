@@ -603,6 +603,37 @@ class TestGradTransform(TestCase):
         with self.assertRaisesRegex(RuntimeError, 'Expected pytree structure'):
             result, = vjp_fn(((v1, (v2, v3)),))
 
+    def test_vjp_aux_tensor(self, device):
+        def f(x):
+            y = x.sin()
+            return y, x.cos()
+
+        x = torch.randn(3, device=device)
+
+        out, vjp_fn, aux = vjp(f, x, has_aux=True)
+        self.assertEqual(aux, x.cos())
+        self.assertEqual(out, x.sin())
+
+        v = torch.randn(3, device=device)
+        grad_x, = vjp_fn(v)
+        self.assertEqual(grad_x, v * x.cos())
+
+    def test_vjp_aux_pytree(self, device):
+        def f(x):
+            y = x.sin()
+            return y, {'a': x.cos(), 'b': [x.tan()]}
+
+        x = torch.randn(3, device=device)
+
+        out, vjp_fn, aux = vjp(f, x, has_aux=True)
+        expected_out, expected_aux = f(x)
+        self.assertEqual(out, expected_out)
+        self.assertEqual(aux, expected_aux)
+
+        v = torch.randn(3, device=device)
+        grad_x, = vjp_fn(v)
+        self.assertEqual(grad_x, v * x.cos())
+
     def test_functional_init(self, device):
         class MLPClassifier(nn.Module):
             def __init__(self, hidden_dim=32, n_classes=2):
@@ -1111,6 +1142,31 @@ class TestJac(TestCase):
         result = jacapi(f)(x)
         self.assertEqual(result.dim(), 2)
         self.assertEqual(result, x.new_ones(1, 1))
+
+    @FIXME_jacrev_only
+    def test_aux_tensor(self, device, jacapi):
+        def f(x):
+            y = x.clone()
+            return y, y.cos()
+
+        x = torch.randn(3, device=device)
+        result, aux = jacapi(f, has_aux=True)(x)
+
+        self.assertEqual(result, torch.eye(3, 3, device=device))
+        self.assertEqual(aux, x.cos())
+
+    @FIXME_jacrev_only
+    def test_aux_pytree(self, device, jacapi):
+        def f(x):
+            y = x.clone()
+            return y, {'a': y.cos(), 'b': [y.tan()]}
+
+        x = torch.randn(3, device=device)
+        result, aux = jacapi(f, has_aux=True)(x)
+
+        self.assertEqual(result, torch.eye(3, 3, device=device))
+        expected_aux = {'a': x.cos(), 'b': [x.tan()]}
+        self.assertEqual(aux, expected_aux)
 
     @FIXME_jacrev_only
     def test_multiple_inputs_outputs_pytree(self, device, jacapi):

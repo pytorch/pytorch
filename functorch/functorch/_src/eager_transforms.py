@@ -131,7 +131,7 @@ def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, creat
 
 
 # How do we increment and decrement the nesting? I don't think we can.
-def vjp(f: Callable, *primals):
+def vjp(f: Callable, *primals, has_aux=False):
     """
     Standing for the vector-Jacobian product, returns a tuple containing the
     results of :attr:`f` applied to :attr:`primals` and a function that, when
@@ -144,13 +144,19 @@ def vjp(f: Callable, *primals):
         primals (Tensors): Positional arguments to :attr:`f` that must all be
             Tensors. The returned function will also be computing the
             derivative with respect to these arguments
+        has_aux (bool): Flag indicating that :attr:`f` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            other auxiliary objects that will not be differentiated.
+            Default: False.
 
     Returns:
-        Returns a tuple containing the output of :attr:`f` applied to
-        :attr:`primals` and a function that computes the vjp of :attr:`f` with
-        respect to all :attr:`primals` using the cotangents passed to the
-        returned function. The returned function will return a tuple of each
-        VJP
+        Returns a ``(output, vjp_fn)`` tuple containing the output of :attr:`f`
+        applied to :attr:`primals` and a function that computes the vjp of
+        :attr:`f` with respect to all :attr:`primals` using the cotangents passed
+        to the returned function. If ``has_aux is True``, then instead returns a
+        ``(output, vjp_fn, aux)`` tuple.
+        The returned ``vjp_fn`` function will return a tuple of each VJP.
 
     When used in simple cases, :func:`vjp` behaves the same as :func:`grad`
 
@@ -228,6 +234,10 @@ def vjp(f: Callable, *primals):
             diff_primals = _create_differentiable(primals, level)
             primals_out = f(*diff_primals)
 
+            if has_aux:
+                primals_out, aux = primals_out
+                aux = _undo_create_differentiable(aux, level)
+
             results = _undo_create_differentiable(primals_out, level)
             flat_diff_primals, primals_spec = tree_flatten(diff_primals)
             flat_primals_out, primals_out_spec = tree_flatten(primals_out)
@@ -257,13 +267,16 @@ def vjp(f: Callable, *primals):
     finally:
         _grad_decrement_nesting()
 
-    return results, wrapper
+    if has_aux:
+        return results, wrapper, aux
+    else:
+        return results, wrapper
 
 def _safe_zero_index(x):
     assert len(x) == 1
     return x[0]
 
-def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
+def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
     """
     Computes the Jacobian of :attr:`f` with respect to the arg(s) at index
     :attr:`argnum` using reverse mode autodiff
@@ -274,11 +287,18 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
         argnums (int or Tuple[int]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
+        has_aux (bool): Flag indicating that :attr:`f` returns a
+            ``(output, aux)`` tuple where the first element is the output of
+            the function to be differentiated and the second element is
+            auxiliary objects that will not be differentiated.
+            Default: False.
 
     Returns:
         Returns a function that takes in the same inputs as :attr:`f` and
         returns the Jacobian of :attr:`f` with respect to the arg(s) at
-        :attr:`argnums`
+        :attr:`argnums`. If ``has_aux is True``, then the returned function
+        instead returns a ``(jacobian, aux)`` tuple where ``jacobian``
+        is the Jacobian and ``aux`` is auxiliary objects returned by ``f``.
 
     A basic usage with a pointwise, unary operation will give a diagonal array
     as the Jacobian
@@ -358,7 +378,11 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
     @wraps(f)
     def wrapper_fn(*args):
         f_wrapper, primals = _argnums_partial(f, args, argnums)
-        output, vjp_fn = vjp(f_wrapper, *primals)
+        vjp_out = vjp(f_wrapper, *primals, has_aux=has_aux)
+        if has_aux:
+            output, vjp_fn, aux = vjp_out
+        else:
+            output, vjp_fn = vjp_out
 
         # See NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
         flat_output, output_spec = tree_flatten(output)
@@ -409,6 +433,8 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0):
             flat_output_input = tuple(_safe_zero_index(flat_input)
                                       for flat_input in flat_output_input)
         output_input = tree_unflatten(flat_output_input, output_spec)
+        if has_aux:
+            return output_input, aux
         return output_input
     return wrapper_fn
 
