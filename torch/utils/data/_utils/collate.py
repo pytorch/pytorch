@@ -3,6 +3,8 @@ collate samples fetched from dataset into Tensor(s).
 
 These **needs** to be in global scope since Py2 doesn't support serializing
 static methods.
+
+`default_collate` and `default_convert` are exposed to users via 'dataloader.py'.
 """
 
 import torch
