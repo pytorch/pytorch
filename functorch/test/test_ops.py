@@ -265,6 +265,9 @@ class TestOperators(TestCase):
 
         # Causing a CUDA assert, needs investigation
         skip('div', 'floor_rounding', device_type='cuda'),
+        skip('div', 'no_rounding_mode', device_type='cuda'),
+        skip('div', 'trunc_rounding', device_type='cuda'),
+        skip('true_divide', device_type='cuda'),
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
