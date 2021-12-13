@@ -85,13 +85,13 @@ class AllgatherOp final : public Operator<Context> {
 
     // Verify tensors all have same size
     size_t size = Input(1).numel();
-    for (auto i = 2; i < InputSize(); i++) {
+    for (const auto i : c10::irange(2, InputSize())) {
       CAFFE_ENFORCE_EQ(Input(i).numel(), size);
     }
 
     // Verify tensors all have same type
     TypeMeta meta = Input(1).dtype();
-    for (auto i = 2; i < InputSize(); i++) {
+    for (const auto i : c10::irange(2, InputSize())) {
       CAFFE_ENFORCE(Input(i).dtype() == meta);
     }
 
@@ -113,7 +113,7 @@ class AllgatherOp final : public Operator<Context> {
     params.inputs.resize(InputSize() - 1);
     params.size = Input(1).numel();
     params.meta = Input(1).dtype();
-    for (auto i = 0; i < params.inputs.size(); i++) {
+    for (const auto i : c10::irange(params.inputs.size())) {
       params.inputs[i] = Input(i + 1).raw_data();
     }
     params.outputs.resize(OutputSize());

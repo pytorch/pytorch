@@ -4,6 +4,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
+#include <c10/util/irange.h>
 
 namespace caffe2 {
 namespace detail {
@@ -29,10 +30,10 @@ void GRUUnit(
     bool drop_states,
     T* H,
     Context* /*context*/) {
-  for (int n = 0; n < N; ++n) {
+  for (const auto n : c10::irange(N)) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
 
-    for (int d = 0; d < D; ++d) {
+    for (const auto d : c10::irange(D)) {
       if (!valid) {
         if (drop_states) {
           H[d] = 0;
@@ -68,10 +69,10 @@ void GRUUnitGradient(
     T* H_prev_diff,
     T* X_diff,
     Context* /*context*/) {
-  for (int n = 0; n < N; ++n) {
+  for (const auto n : c10::irange(N)) {
     const bool valid = seqLengths == nullptr || t < seqLengths[n];
 
-    for (int d = 0; d < D; ++d) {
+    for (const auto d : c10::irange(D)) {
       T* h_prev_diff = H_prev_diff + d;
       T* reset_diff = X_diff + 0 * D + d;
       T* update_diff = X_diff + 1 * D + d;
