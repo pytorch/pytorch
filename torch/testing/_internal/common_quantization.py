@@ -630,7 +630,7 @@ class QuantizationTestCase(TestCase):
                 str(expected_node_list))
 
     def printGraphModule(self, graph_module, print_str=True):
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
