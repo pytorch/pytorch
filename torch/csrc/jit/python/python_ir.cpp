@@ -416,6 +416,8 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .GS(appendNode)
       .GS(prependNode)
+      // NB: insert_point_guard defined on Graph in python in jit/_ir_utils.py
+      // Use that over direct modification of insert point
       .GS(insertPoint)
       .def("setInsertPoint", [](Graph& g, Node* n) {
         g.setInsertPoint(n);
