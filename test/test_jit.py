@@ -1626,6 +1626,55 @@ graph(%Ra, %Rb):
         for node in g.nodes():
             self.assertTrue(g2.findNode(node.kind()) is not None)
 
+    def test_python_ir_utils(self):
+        @torch.jit.script
+        def foo(inp):
+            x = inp + 1
+            y = x / 2
+            z = y * y
+            return z
+
+        add_node = foo.graph.findNode("aten::add")
+        div_node = foo.graph.findNode("aten::div")
+
+        with foo.graph.with_insert_point(add_node):
+            with foo.graph.with_insert_point(div_node):
+                foo.graph.insertConstant("goodbye")
+            foo.graph.insertConstant("hello")
+        with foo.graph.with_insert_point(foo.graph.findNode("aten::mul")):
+            foo.graph.insertConstant("hello")
+        FileCheck().check("hello").check("goodbye").check("hello").run(foo.graph)
+
+        self.assertTrue(add_node.matches(add_node.schema()))
+        self.assertFalse(add_node.matches(div_node.schema()))
+
+    def test_python_ir_utils_graph(self):
+        @torch.jit.script
+        def unrolled_mul(x: torch.Tensor, y: int):
+            out = x
+            for _ in range(y):
+                out = out + x
+            return out
+
+        @torch.jit.script
+        def foo(x):
+            return x * 4
+
+        g = foo.graph
+        muls = g.findAllNodes("aten::mul")
+        scalar_muls = filter(lambda x: x.matches("aten::mul(Tensor self, Scalar other) -> Tensor"), muls)
+        mul_constant_int = filter(lambda x: isinstance(list(x.inputs())[1].toIValue(), int), scalar_muls)
+        for mul in muls:
+            with g.with_insert_point(mul):
+                import pdb; pdb.set_trace()
+                outputs = g.insertGraph(unrolled_mul.graph, list(mul.inputs()))
+                assert len(outputs) == len(list(mul.outputs()))
+                for new_out, old_out in zip(outputs, g.outputs()):
+                    old_out.replaceAllUsesWith(new_out)
+                mul.destroy()
+
+        self.assertEqual(foo(torch.ones([2, 2])), torch.ones([2, 2]) * 4)
+
     @unittest.skipIf(IS_SANDCASTLE, "gtest runs these in sandcastle")
     @unittest.skipIf(RUN_CUDA, "covered by test_cpp_cuda")
     @unittest.skipIf(not torch._C._jit_has_cpp_tests(), "Tests were not built, use BUILD_TEST=1")
