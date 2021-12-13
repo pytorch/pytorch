@@ -3281,7 +3281,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('isclose'),
         xfail('cartesian_prod'),
         xfail('nn.functional.fractional_max_pool3d'),
-        xfail('nn.functional.feature_alpha_dropout'),
         xfail('nn.functional.conv_transpose3d'),
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.bilinear'),
