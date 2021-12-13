@@ -3,7 +3,6 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
-#include <ATen/cuda/CUDAConfig.h>
 #include <limits>
 #include <sstream>
 #include <cstring>
