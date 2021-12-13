@@ -611,7 +611,7 @@ class SequentialLR(_LRScheduler):
     """
 
     def __init__(self, optimizer, schedulers, milestones, last_epoch=-1, verbose=False):
-        for scheduler_idx in len(schedulers):
+        for scheduler_idx in range(len(schedulers)):
             if schedulers[scheduler_idx].optimizer != optimizer:
                 raise ValueError(
                     "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
