@@ -1223,7 +1223,7 @@ class TestSparseCSR(TestCase):
         # Fail early to prevent silent success with this test
         assert inp.ndim == 2, "Expected 2D input tensor for Sparse CSR"
 
-        with self.assertRaisesRegex(RuntimeError, "Exponent as 0 is not supported for Sparse CSR Layout."):
+        with self.assertRaisesRegex(RuntimeError, "Exponent must be greater than 0 for Sparse CSR Layout."):
             # Generate exponent as 0 per the given dtype
             if dtype.is_complex:
                 exp = 0 + 0j
