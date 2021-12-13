@@ -5178,16 +5178,6 @@ def sample_inputs_linalg_cholesky(op_info, device, dtype, requires_grad=False, *
         out.append(SampleInput(a, kwargs={"upper": upper}))
     return out
 
-def sample_inputs_symeig(op_info, device, dtype, requires_grad=False):
-    out = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
-
-    for o in out:
-        o.kwargs = {"upper": bool(np.random.choice([True, False])),
-                    "eigenvectors": True}
-        # A gauge-invariant function
-        o.output_process_fn_grad = lambda output: (output[0], abs(output[1]))
-    return out
-
 def sample_inputs_linalg_eig(op_info, device, dtype, requires_grad=False):
     """
     This function generates input for torch.linalg.eigh with UPLO="U" or "L" keyword argument.
@@ -5681,42 +5671,6 @@ def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, require
     tensors = [SampleInput(make_tensor((N, N), device=device, dtype=dtype,
                requires_grad=requires_grad)) for _ in range(1, N)]
     return tensors
-
-def sample_inputs_eig(op_info, device, dtype, requires_grad=False, **kwargs):
-    eigvecs = make_tensor((S, S), device=device, dtype=dtype,
-                          low=None, high=None)
-    eigvals = make_tensor((S,), device=device, dtype=dtype,
-                          low=None, high=None)
-    # we produce only diagonazible inputs which do not have
-    # complex eigenvalues for real inputs, as there is no
-    # backward implementation for real inputs with complex
-    # eigenvalues yet.
-    input = (eigvecs * eigvals.unsqueeze(-2)) @ eigvecs.inverse()
-    input.requires_grad_(requires_grad)
-
-    def process_output(eigpair):
-        eigvals, eigvecs = eigpair
-        if dtype.is_complex:
-            # eig produces eigenvectors which are normalized to 1 norm.
-            # Note that if v is an eigenvector, so is v * e^{i \phi},
-            # and |v| = |v * e^{i \phi}| = 1.
-            # This, however, makes the eigenvector backward computation process
-            # rather unstable unless the objective function is gauge-invariant,
-            # that is if f(z) == f(|z|), for example.
-            # Hence for complex inputs we ignore the phases and return only
-            # the absolute values.
-            return eigvals, eigvecs.abs()
-        else:
-            return eigvals, eigvecs
-
-    return [
-        SampleInput(
-            input,
-            kwargs=dict(eigenvectors=True),
-            output_process_fn_grad=process_output
-        ),
-    ]
-
 
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
@@ -8923,12 +8877,6 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_sparse_csr=True,
                    assert_autodiffed=True),
-    OpInfo('cholesky',
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_linalg_cholesky,
-           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],),
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_types(),
@@ -8983,12 +8931,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: inputSet && outputSet
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":118
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),),),
-    OpInfo('symeig',
-           dtypes=floating_and_complex_types(),
-           check_batched_gradgrad=False,
-           sample_inputs_func=sample_inputs_symeig,
-           gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     # NOTE: clamp has seperate opinfos for scalar min/max (unary op) vs. tensors
     OpInfo('clamp',
            aliases=('clip',),
@@ -11724,7 +11666,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_dist),
     OpInfo('outer',
            op=torch.outer,
-           aliases=('ger', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_outer,),
@@ -11762,17 +11703,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),),
-    OpInfo('qr',
-           op=torch.qr,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_qr,
-           # batched gradients do not work for empty inputs
-           # https://github.com/pytorch/pytorch/issues/50743#issuecomment-767376085
-           check_batched_gradgrad=False,
-           supports_forward_ad=True,
-           # See https://github.com/pytorch/pytorch/issues/66357
-           check_batched_forward_grad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -12147,12 +12077,6 @@ op_db: List[OpInfo] = [
                    supports_sparse=True,
                    supports_sparse_csr=True,
                    supports_autograd=False,),
-    OpInfo('solve',
-           op=torch.solve,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_legacy_solve,
-           check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack]),
     UnaryUfuncInfo('tan',
                    ref=np.tan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -12544,15 +12468,6 @@ op_db: List[OpInfo] = [
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            ),
-    OpInfo('eig',
-           op=torch.eig,
-           dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_eig,
-           decorators=[
-               skipCUDAIfNoMagma,
-               skipCPUIfNoLapack,
-               skipCUDAIfRocm
-           ],),
     OpInfo('einsum',
            # we need this lambda because SampleInput expects tensor input as the first argument
            # TODO(@heitorschueroff) update SampleInput to handle such cases

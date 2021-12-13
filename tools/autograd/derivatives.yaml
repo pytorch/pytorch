@@ -241,7 +241,7 @@
 
 - name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
-  mat: grad.ger(vec.conj()) * alpha.conj()
+  mat: grad.outer(vec.conj()) * alpha.conj()
   vec: mat.t().conj().mv(grad) * alpha.conj()
   result: maybe_multiply(self_t, beta) + maybe_multiply(mat_t.mv(vec_p), alpha) + maybe_multiply(mat_p.mv(vec_t), alpha)
 
@@ -347,9 +347,6 @@
 - name: ceil(Tensor self) -> Tensor
   self: zeros_like(grad)
   result: auto_element_wise
-
-- name: cholesky(Tensor self, bool upper=False) -> Tensor
-  self: cholesky_backward(grad, upper, result)
 
 - name: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   self: cholesky_backward(grad, upper, L)
@@ -545,9 +542,6 @@
 - name: native_dropout_backward(Tensor grad_output, Tensor mask, float scale) -> Tensor
   grad_output: "native_dropout_double_backward(grad, grad_output, mask, scale)"
   mask: 'not_implemented("native_dropout_backward: mask")'
-
-- name: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: eig_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
 - name: eq_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
@@ -896,10 +890,6 @@
 - name: logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   self: logsumexp_backward(grad, self, result, dim, keepdim)
 
-- name: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  self: not_implemented("lstsq")
-  A: not_implemented("lstsq")
-
 - name: linalg_lstsq(Tensor self, Tensor b, float? rcond=None, *, str? driver=None) -> (Tensor solution, Tensor residuals, Tensor rank, Tensor singular_values)
   self, b: linalg_lstsq_backward(grad, self, b, rcond, driver, grad_input_mask)
   solution: linalg_lstsq_jvp(self_p, b_p, self_t, b_t)
@@ -1051,7 +1041,7 @@
   result: self_t * other
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
-  self: grad.ger(vec.conj())
+  self: grad.outer(vec.conj())
   vec: self.conj().t().mv(grad)
 
 - name: mvlgamma(Tensor self, int p) -> Tensor
@@ -1335,10 +1325,6 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  self: solve_backward_self(grad, self, A)
-  A: solve_backward_A(grad, self, A, solution)
-
 - name: linalg_solve(Tensor input, Tensor other) -> Tensor
   input: solve_backward_A(grad, other, input, result)
   other: solve_backward_self(grad, other, input)
@@ -1428,9 +1414,6 @@
 
 - name: _svd_helper(Tensor self, bool some, bool compute_uv) -> (Tensor U, Tensor S, Tensor V)
   self: svd_backward(grads, self, some, compute_uv, U, S, V)
-
-- name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: eigh_backward(grads, self, eigenvectors, eigenvalues, eigenvectors_return)
 
 - name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
   self: eigh_backward(grads, self, /*eigenvectors=*/true, eigenvalues, eigenvectors)

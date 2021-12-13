@@ -335,7 +335,6 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(ADD_NS(addbmm), "addbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(baddbmm), "baddbmm", Tensor (const Tensor &, const Tensor &, const Tensor &, const Scalar&, const Scalar&), lower_precision_fp)
   KERNEL(ADD_NS(bmm), "bmm", Tensor (const Tensor &, const Tensor &), lower_precision_fp)
-  KERNEL(ADD_NS(chain_matmul), "chain_matmul", Tensor (TensorList), lower_precision_fp)
   KERNEL(ADD_NS(linalg_multi_dot), "linalg_multi_dot", Tensor (TensorList), lower_precision_fp)
   // The macro doesn't like these (I think it chokes on commas inside <>) so write them manually
   m.impl(TORCH_SELECTIVE_NAME("aten::_thnn_fused_lstm_cell"),
@@ -547,13 +546,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(ADD_NS(triu), "triu", Tensor(const Tensor &, int64_t), fp32)
   KERNEL_CPU(ADD_NS(vander), "vander", Tensor(const Tensor &, c10::optional<int64_t>, bool), fp32)
   KERNEL_CPU(ADD_NS(view_as_complex), "view_as_complex", Tensor(const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(cholesky), "cholesky", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(cholesky_inverse), "cholesky_inverse", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(cholesky_solve), "cholesky_solve", Tensor(const Tensor &, const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(dot), "dot", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(inverse), "inverse", Tensor(const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(lu_solve), "lu_solve", Tensor(const Tensor &, const Tensor &, const Tensor &), fp32)
-  KERNEL_CPU(ADD_NS(matrix_rank), "matrix_rank", Tensor(const Tensor &, bool), fp32)
   KERNEL_CPU(ADD_NS(orgqr), "orgqr", Tensor(const Tensor &, const Tensor &), fp32)
   KERNEL_CPU(ADD_NS(ormqr), "ormqr", Tensor(const Tensor &, const Tensor &, const Tensor &, bool, bool), fp32)
   KERNEL_CPU(ADD_NS(pinverse), "pinverse", Tensor(const Tensor &, double), fp32)
@@ -643,23 +640,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor> (const Tensor &, at::Dimname),
                                  &ADD_NS(cummin)>::type::call)));
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::eig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(eig)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::geqrf"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  std::tuple<Tensor, Tensor> (const Tensor &),
                                  &ADD_NS(geqrf)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::lstsq"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(lstsq)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::_lu_with_info"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
@@ -673,29 +658,11 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, const Tensor &, bool, bool),
                                  &ADD_NS(lu_unpack)>::type::call)));
 
-  m.impl(TORCH_SELECTIVE_NAME("aten::qr"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool),
-                                 &ADD_NS(qr)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::solve"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, const Tensor &),
-                                 &ADD_NS(solve)>::type::call)));
-
   m.impl(TORCH_SELECTIVE_NAME("aten::svd"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
                                  std::tuple<Tensor, Tensor, Tensor> (const Tensor &, bool, bool),
                                  &ADD_NS(svd)>::type::call)));
-
-  m.impl(TORCH_SELECTIVE_NAME("aten::symeig"),
-         TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 std::tuple<Tensor, Tensor> (const Tensor &, bool, bool),
-                                 &ADD_NS(symeig)>::type::call)));
 
   m.impl(TORCH_SELECTIVE_NAME("aten::triangular_solve"),
          TORCH_FN((&WrapFunction<CastPolicy::fp32, DeviceType::CPU,

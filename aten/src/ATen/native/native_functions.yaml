@@ -1097,13 +1097,6 @@
     SparseCPU, SparseCUDA: ceil_sparse_out
     SparseCsrCPU, SparseCsrCUDA: ceil_sparse_csr_out
 
-# alias for torch.linalg.multi_dot
-- func: chain_matmul(Tensor[] matrices) -> Tensor
-  variants: function
-
-# alias for torch.linalg.multi_dot
-- func: chain_matmul.out(Tensor[] matrices, *, Tensor(a!) out) -> Tensor(a!)
-
 - func: unsafe_chunk(Tensor self, int chunks, int dim=0) -> Tensor[]
   variants: function, method
   device_check: NoCheck
@@ -2857,10 +2850,6 @@
   variants: function, method
 
 - func: matmul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
-
-- func: matrix_rank.tol(Tensor self, float tol, bool symmetric=False) -> Tensor
-
-- func: matrix_rank(Tensor self, bool symmetric=False) -> Tensor
 
 # Alias to linalg.matrix_power
 - func: matrix_power(Tensor self, int n) -> Tensor
@@ -6983,17 +6972,6 @@
 - func: cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, int ignore_index=-100, float label_smoothing=0.0) -> Tensor
   python_module: nn
 
-- func: lstsq.X(Tensor self, Tensor A, *, Tensor(a!) X, Tensor(b!) qr) -> (Tensor(a!) solution, Tensor(b!) QR)
-  dispatch:
-    CPU: legacy_lstsq_out
-    CUDA: legacy_lstsq_out_cuda
-
-- func: lstsq(Tensor self, Tensor A) -> (Tensor solution, Tensor QR)
-  variants: method, function
-  dispatch:
-    CPU: legacy_lstsq
-    CUDA: legacy_lstsq_cuda
-
 - func: triangular_solve.X(Tensor self, Tensor A, bool upper=True, bool transpose=False, bool unitriangular=False, *, Tensor(a!) X, Tensor(b!) M) -> (Tensor(a!) solution, Tensor(b!) cloned_coefficient)
   structured: True
   dispatch:
@@ -7016,29 +6994,11 @@
   dispatch:
     CPU, CUDA: linalg_solve_triangular
 
-- func: symeig.e(Tensor self, bool eigenvectors=False, bool upper=True, *, Tensor(a!) e, Tensor(b!) V) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CompositeExplicitAutograd: symeig_out
-
-- func: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: symeig
-
 - func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _symeig_helper_cpu
     CUDA: _symeig_helper_cuda
-
-- func: eig.e(Tensor self, bool eigenvectors=False, *, Tensor(a!) e, Tensor(b!) v) -> (Tensor(a!) eigenvalues, Tensor(b!) eigenvectors)
-  dispatch:
-    CompositeExplicitAutograd: eig_out
-
-- func: eig(Tensor self, bool eigenvectors=False) -> (Tensor eigenvalues, Tensor eigenvectors)
-  variants: method, function
-  dispatch:
-    CompositeExplicitAutograd: eig
 
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
@@ -7075,15 +7035,6 @@
   device_guard: False
   tags: inplace_view
 
-- func: cholesky.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CPU, CUDA: cholesky_out
-
-- func: cholesky(Tensor self, bool upper=False) -> Tensor
-  variants: method, function
-  dispatch:
-    CPU, CUDA: cholesky
-
 - func: cholesky_solve.out(Tensor self, Tensor input2, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CompositeExplicitAutograd: cholesky_solve_out
@@ -7099,21 +7050,6 @@
     CPU: _cholesky_solve_helper_cpu
     CUDA: _cholesky_solve_helper_cuda
 
-- func: solve(Tensor self, Tensor A) -> (Tensor solution, Tensor LU)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: solve
-
-- func: solve.solution(Tensor self, Tensor A, *, Tensor(a!) solution, Tensor(b!) lu) -> (Tensor(a!) solution, Tensor(b!) LU)
-  dispatch:
-    CompositeExplicitAutograd: solve_out
-
-- func: _solve_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _solve_helper_cpu
-    CUDA: _solve_helper_cuda
-
 - func: cholesky_inverse(Tensor self, bool upper=False) -> Tensor
   variants: method, function
   dispatch:
@@ -7122,11 +7058,6 @@
 - func: cholesky_inverse.out(Tensor self, bool upper=False, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: cholesky_inverse_out
-
-- func: qr.Q(Tensor self, bool some=True, *, Tensor(a!) Q, Tensor(b!) R) -> (Tensor(a!) Q, Tensor(b!) R)
-
-- func: qr(Tensor self, bool some=True) -> (Tensor Q, Tensor R)
-  variants: method, function
 
 - func: geqrf.a(Tensor self, *, Tensor(a!) a, Tensor(b!) tau) -> (Tensor(a!) a, Tensor(b!) tau)
   dispatch:
@@ -11010,12 +10941,6 @@
   variants: function, method
 
 - func: outer.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
-
-# torch.ger, alias for torch.outer
-- func: ger(Tensor self, Tensor vec2) -> Tensor
-  variants: function, method
-
-- func: ger.out(Tensor self, Tensor vec2, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: linalg_norm(Tensor self, Scalar? ord=None, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   python_module: linalg

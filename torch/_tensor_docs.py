@@ -829,13 +829,6 @@ ceil_() -> Tensor
 In-place version of :meth:`~Tensor.ceil`
 """)
 
-add_docstr_all('cholesky',
-               r"""
-cholesky(upper=False) -> Tensor
-
-See :func:`torch.cholesky`
-""")
-
 add_docstr_all('cholesky_solve',
                r"""
 cholesky_solve(input2, upper=False) -> Tensor
@@ -1308,13 +1301,6 @@ dot(other) -> Tensor
 See :func:`torch.dot`
 """)
 
-add_docstr_all('eig',
-               r"""
-eig(eigenvectors=False) -> (Tensor, Tensor)
-
-See :func:`torch.eig`
-""")
-
 add_docstr_all('element_size',
                r"""
 element_size() -> int
@@ -1599,13 +1585,6 @@ add_docstr_all('geqrf',
 geqrf() -> (Tensor, Tensor)
 
 See :func:`torch.geqrf`
-""")
-
-add_docstr_all('ger',
-               r"""
-ger(vec2) -> Tensor
-
-See :func:`torch.ger`
 """)
 
 add_docstr_all('inner', r"""
@@ -2299,13 +2278,6 @@ logsumexp(dim, keepdim=False) -> Tensor
 See :func:`torch.logsumexp`
 """)
 
-add_docstr_all('lstsq',
-               r"""
-lstsq(A) -> (Tensor, Tensor)
-
-See :func:`torch.lstsq`
-""")
-
 add_docstr_all('lt', r"""
 lt(other) -> Tensor
 
@@ -2862,13 +2834,6 @@ put(input, index, source, accumulate=False) -> Tensor
 
 Out-of-place version of :meth:`torch.Tensor.put_`.
 `input` corresponds to `self` in :meth:`torch.Tensor.put_`.
-""")
-
-add_docstr_all('qr',
-               r"""
-qr(some=True) -> (Tensor, Tensor)
-
-See :func:`torch.qr`
 """)
 
 add_docstr_all('qscheme',
@@ -3540,13 +3505,6 @@ Example::
 
 """)
 
-add_docstr_all('solve',
-               r"""
-solve(A) -> Tensor, Tensor
-
-See :func:`torch.solve`
-""")
-
 add_docstr_all('sort',
                r"""
 sort(dim=-1, descending=False) -> (Tensor, LongTensor)
@@ -3768,13 +3726,6 @@ add_docstr_all('svd',
 svd(some=True, compute_uv=True) -> (Tensor, Tensor, Tensor)
 
 See :func:`torch.svd`
-""")
-
-add_docstr_all('symeig',
-               r"""
-symeig(eigenvectors=False, upper=True) -> (Tensor, Tensor)
-
-See :func:`torch.symeig`
 """)
 
 add_docstr_all('swapdims', r"""

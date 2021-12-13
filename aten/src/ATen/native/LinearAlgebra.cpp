@@ -606,24 +606,6 @@ Tensor linalg_matrix_rank(const Tensor& input, double tol, bool hermitian) {
   return result;
 }
 
-Tensor matrix_rank(const Tensor& self, double tol, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, tol, symmetric);
-}
-
-Tensor matrix_rank(const Tensor& self, bool symmetric) {
-  TORCH_WARN_ONCE(
-    "torch.matrix_rank is deprecated in favor of torch.linalg.matrix_rank",
-    "and will be removed in a future PyTorch release. The parameter 'symmetric' was ",
-    "renamed in torch.linalg.matrix_rank to 'hermitian'."
-  );
-  return at::linalg_matrix_rank(self, 0.0, c10::nullopt, symmetric);
-}
-
 // multi_dot helper functions
 namespace {
 
@@ -874,43 +856,6 @@ Tensor& linalg_multi_dot_out(TensorList tensors, Tensor& result) {
   return result;
 }
 
-Tensor chain_matmul(TensorList matrices) {
-  TORCH_WARN_ONCE(
-      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
-      "multiple parameters."
-  );
-  checkAllSameDim(matrices, 2);
-
-  TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
-
-  if (matrices.size() == 1) {
-    return matrices[0].clone();
-  }
-
-  return at::native::linalg_multi_dot(matrices);
-}
-
-Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
-  TORCH_WARN_ONCE(
-      "torch.chain_matmul is deprecated and will be removed in a future PyTorch release. ",
-      "Use torch.linalg.multi_dot instead, which accepts a list of two or more tensors rather than ",
-      "multiple parameters."
-  );
-  checkAllSameDim(matrices, 2);
-
-  TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
-
-  if (matrices.size() == 1) {
-    at::native::resize_output(result, matrices[0].sizes());
-    return result.copy_(matrices[0]);
-  }
-
-  return at::native::linalg_multi_dot_out(matrices, result);
-}
-
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
  TORCH_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
@@ -1037,17 +982,6 @@ Tensor& math_addr_out(const Tensor& self,
   at::native::resize_output(result, addr_result.sizes().vec());
   result.copy_(addr_result);
   return result;
-}
-
-// torch.ger, alias for torch.outer
-Tensor& ger_out(const Tensor& self, const Tensor& vec2, Tensor &result) {
-  TORCH_WARN("torch.ger is deprecated and will be removed in a future PyTorch release. "
-             "Use torch.outer instead.");
-  return at::outer_out(result, self, vec2);
-}
-
-Tensor ger(const Tensor& self, const Tensor& vec2) {
-  return self.outer(vec2);
 }
 
 Tensor& inner_out(const Tensor& self, const Tensor& other, Tensor& out) {
