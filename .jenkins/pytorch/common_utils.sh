@@ -106,33 +106,34 @@ function clone_pytorch_xla() {
 
 export UCX_HOME='/usr'
 function install_ucx() {
-    git clone --recursive https://github.com/openucx/ucx.git
-    pushd ucx
-    ./autogen.sh
-    ./configure --prefix=$UCX_HOME      \
-        --enable-mt                     \
-        --with-cuda=/usr/local/cuda/    \
-        --enable-profiling              \
-        --enable-stats
-    time make -j
-    sudo make install
-    popd
+  git clone --recursive https://github.com/openucx/ucx.git
+  pushd ucx
+  ./autogen.sh
+  ./configure --prefix=$UCX_HOME      \
+      --enable-mt                     \
+      --with-cuda=/usr/local/cuda/    \
+      --enable-profiling              \
+      --enable-stats
+  time make -j
+  sudo make install
+  popd
 }
 
 export UCC_HOME='/usr'
 function install_ucc() {
-    rm -rf ucc
-    # git clone --recursive https://github.com/openucx/ucc.git
-    git clone --recursive https://github.com/zasdfgbnm/ucc.git -b fp16-fix
-    pushd ucc
-    ./autogen.sh
-    ./configure --prefix=$UCC_HOME      \
-        --with-ucx=$UCX_HOME            \
-        --with-nccl=/usr                \
-        --with-cuda=/usr/local/cuda/
-    time make -j
-    sudo make install
-    popd
+  echo "CUDA_VERSION: ${CUDA_VERSION}"
+  rm -rf ucc
+  # git clone --recursive https://github.com/openucx/ucc.git
+  git clone --recursive https://github.com/zasdfgbnm/ucc.git -b fp16-fix
+  pushd ucc
+  ./autogen.sh
+  ./configure --prefix=$UCC_HOME      \
+      --with-ucx=$UCX_HOME            \
+      --with-nccl=/usr                \
+      --with-cuda=/usr/local/cuda/
+  time make -j
+  sudo make install
+  popd
 }
 
 function install_torch_ucc() {
