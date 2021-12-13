@@ -141,6 +141,6 @@ function install_torch_ucc() {
 
   git clone https://github.com/facebookresearch/torch_ucc.git
   pushd torch_ucc
-  time python setup.py install
+  time python setup.py install --oss
   popd
 }
