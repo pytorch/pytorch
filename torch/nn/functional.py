@@ -5006,7 +5006,8 @@ def _scaled_dot_product_attention(
 def _mha_shape_check(query: Tensor, key: Tensor, value: Tensor,
                      key_padding_mask: Optional[Tensor], attn_mask: Optional[Tensor], num_heads: int):
     # Verifies the expected shape for `query, `key`, `value`, `key_padding_mask` and `attn_mask`
-    # and returns if the input is batched or not
+    # and returns if the input is batched or not.
+    # Raises an error if `query` is not 2-D (unbatched) or 3-D (batched) tensor.
 
     # Shape check.
     if query.dim() == 3:
