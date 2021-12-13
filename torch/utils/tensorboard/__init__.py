@@ -1,13 +1,11 @@
 import tensorboard
-from setuptools import distutils
+import packaging.version
 
-LooseVersion = distutils.version.LooseVersion
-
-if not hasattr(tensorboard, '__version__') or LooseVersion(tensorboard.__version__) < LooseVersion('1.15'):
+if not hasattr(tensorboard, '__version__') or packaging.version.parse(tensorboard.__version__) < packaging.version.parse('1.15'):
     raise ImportError('TensorBoard logging requires TensorBoard version 1.15 or above')
 
 del distutils
-del LooseVersion
+del packaging
 del tensorboard
 
 from .writer import FileWriter, SummaryWriter  # noqa: F401
