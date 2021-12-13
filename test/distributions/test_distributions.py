@@ -2303,8 +2303,8 @@ class TestDistributions(TestCase):
 
     def test_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = (torch.rand([]) + 1) * 4
-        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(4, 4))
+        df = (torch.rand([]) + 1) * 3
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(3, 3))
         d = Wishart(df=df, scale_tril=scale_tril)
         samples = d.rsample((1000000,))
         empirical_mean = samples.mean(0)
