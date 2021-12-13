@@ -133,6 +133,7 @@ void OptimizeGraph(
   UseVariadicGroupedAccessor(graph);
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
+  AddIncrefs(*graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -1781,10 +1782,11 @@ static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
 }
 
 bool ProcessedNode::verify_no_memory_overlap(bool force_check) const {
-  const static std::array<c10::Symbol, 3> special_case_ops = {
+  const static std::array<c10::Symbol, 4> special_case_ops = {
       fromQualString("prim::TypeCheck"),
       fromQualString("static_runtime::VarTupleUnpack"),
-      fromQualString("static_runtime::dict_unpack")};
+      fromQualString("static_runtime::dict_unpack"),
+      fromQualString("static_runtime::incref")};
   if (!force_check &&
       std::find(
           begin(special_case_ops), end(special_case_ops), node()->kind()) !=

@@ -563,5 +563,14 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
   };
 });
 
+// See [Increment reference count for returned constants]
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    static_runtime::incref,
+    static_runtime_incref,
+    [](Node*) -> SROperator {
+      return
+          [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
+    });
+
 } // namespace jit
 } // namespace torch

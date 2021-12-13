@@ -398,6 +398,7 @@ TORCH_LIBRARY_FRAGMENT(static_runtime, m) {
   m.def(torch::schema(
       "static_runtime::dequantize_copy.self(Tensor self) -> Tensor",
       c10::AliasAnalysisKind::PURE_FUNCTION));
+  m.def(torch::schema("static_runtime::incref(...) -> ..."));
 }
 
 void FuseSignLog1P(std::shared_ptr<torch::jit::Graph>& graph) {
@@ -817,6 +818,37 @@ void UseVariadicGroupedAccessor(const std::shared_ptr<Graph>& graph) {
       graph,
       fromQualString("grouped_accessor::grouped_accessor_op_v2"),
       fromQualString("static_runtime::variadic_grouped_accessor_op_v2"));
+}
+
+namespace {
+
+void AddIncrefsHelper(Graph& graph, Block* block) {
+  for (auto* node : block->nodes()) {
+    for (auto* sub_block : node->blocks()) {
+      AddIncrefsHelper(graph, sub_block);
+    }
+  }
+
+  auto outputs = block->outputs();
+  for (const auto i : c10::irange(outputs.size())) {
+    auto* output = outputs[i];
+    if (toIValue(output).has_value() ||
+        output->node()->owningBlock() != block) {
+      auto* incref_node =
+          graph.create(fromQualString("static_runtime::incref"));
+      incref_node->addInput(output);
+      incref_node->output()->copyMetadata(output);
+
+      block->appendNode(incref_node);
+      block->replaceOutput(i, incref_node->output());
+    }
+  }
+}
+
+} // namespace
+
+void AddIncrefs(Graph& graph) {
+  AddIncrefsHelper(graph, graph.block());
 }
 
 } // namespace jit
