@@ -449,7 +449,12 @@ void OperatorEntry::reportError(DispatchKey dispatchKey) const {
 // updateDispatchTableFull_ would update the dispatch table to be)
 std::string OperatorEntry::dumpComputedTable() const {
   std::ostringstream oss;
-  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) {
+  // Need to handle Undefined separately, because its a runtime key that can't be represented
+  // in a DispatchKeySet.
+  std::vector<DispatchKey> runtime_keys = {DispatchKey::Undefined};
+  for (auto k : DispatchKeySet(DispatchKeySet::FULL)) runtime_keys.push_back(k);
+
+  for (auto k : runtime_keys) {
     auto kernel_prov = computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
     if (kernel_prov.first.kernel.isValid()) {
       oss << toString(k) << ": "

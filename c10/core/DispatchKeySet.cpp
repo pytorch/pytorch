@@ -43,6 +43,8 @@ DispatchKeySet autogradother_backends = DispatchKeySet(
      DispatchKey::ORT,
      DispatchKey::Vulkan,
      DispatchKey::Metal,
+     DispatchKey::SparseCsrCPU,
+     DispatchKey::SparseCsrCUDA,
      DispatchKey::CustomRNGKeyId,
      DispatchKey::MkldnnCPU,
      DispatchKey::Meta});
@@ -167,7 +169,7 @@ DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t) {
     case DispatchKey::CPUBit:
       return DispatchKeySet(DispatchKey::AutocastCPU);
     case DispatchKey::CUDABit:
-    case DispatchKey::XLA:
+    case DispatchKey::XLABit:
       return DispatchKeySet(DispatchKey::AutocastCUDA);
     default:
       return DispatchKeySet();
@@ -339,15 +341,15 @@ struct FunctionalityOffsetAndMask {
 static std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
     std::array<FunctionalityOffsetAndMask, num_functionality_keys>
-    offsets_and_masks_;
+    offsets_and_masks;
     // manual set the first entry, which corresponds to Undefined.
-    offsets_and_masks_[0] = FunctionalityOffsetAndMask(0, 0);
+    offsets_and_masks[0] = FunctionalityOffsetAndMask(0, 0);
     // loop through every functionality key (aside from Undefined).
     for (uint8_t k_idx = static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 2;
             k_idx < static_cast<uint8_t>(DispatchKey::EndOfFunctionalityKeys); ++k_idx) {
         // functionality_idx should be Dense -> 1, ...
         auto functionality_idx = k_idx - static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) - 1;
-        auto prev_offset_and_mask = offsets_and_masks_[functionality_idx - 1];
+        auto prev_offset_and_mask = offsets_and_masks[functionality_idx - 1];
         auto k = static_cast<DispatchKey>(k_idx);
 
 
@@ -359,18 +361,22 @@ initializeFunctionalityOffsetsAndMasks() {
         // For non-per-backend functionalities, this offset should always be 0.
         // Otherwise, we need to get the index of the backend (which we can do using a backend mask).
         auto next_mask = isPerBackendFunctionalityKey(k) ? full_backend_mask : 0;
-        offsets_and_masks_[functionality_idx] = FunctionalityOffsetAndMask(next_offset, next_mask);
+        offsets_and_masks[functionality_idx] = FunctionalityOffsetAndMask(next_offset, next_mask);
     }
     // Sanity check that the computed offset index of the last functionality key is correct.
     // This assumes that the highest priority functionality key is not per backend.
-    TORCH_INTERNAL_ASSERT(offsets_and_masks_[num_functionality_keys - 1].offset == (num_runtime_entries - 1),
+    TORCH_INTERNAL_ASSERT(offsets_and_masks[num_functionality_keys - 1].offset == (num_runtime_entries - 1),
         "num_runtime_entries: ", num_runtime_entries,
-        "last_offset: ", offsets_and_masks_[num_functionality_keys - 1].offset);
-    return offsets_and_masks_;
+        "last_offset: ", offsets_and_masks[num_functionality_keys - 1].offset);
+    return offsets_and_masks;
 }
 
 static std::array<FunctionalityOffsetAndMask, num_functionality_keys>
-offsets_and_masks_ = initializeFunctionalityOffsetsAndMasks();
+offsetsAndMasks() {
+    static auto offsets_and_masks_ = initializeFunctionalityOffsetsAndMasks();
+    return offsets_and_masks_;
+}
+
 
 DispatchKey DispatchKeySet::highestFunctionalityKey() const {
     auto functionality_idx = indexOfHighestBit();
@@ -397,7 +403,7 @@ uint64_t DispatchKeySet::getDispatchTableIndexForDispatchKeySet() const {
     auto functionality_idx =
         DispatchKeySet(repr_ >> (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1))
            .indexOfHighestBit();
-    auto offset_and_mask = offsets_and_masks_[functionality_idx];
+    auto offset_and_mask = offsetsAndMasks()[functionality_idx];
     // Mask the functionality bits out first, then right-shift by 1.
     // right-shifting by 1 because everything is zero-indexed.
     // E.g. 000001 (CPU) should give us an offset of 0, 000010 (CUDA) should give us an offset of 1, etc.
