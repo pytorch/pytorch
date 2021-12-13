@@ -2901,8 +2901,8 @@ class TestDynamicQuantizedOps(TestCase):
 
         for rnn_type in ['LSTM', 'GRU']:
             for dtype in [torch.qint8, torch.float16]:
-                # Fp16 quantization is not supported for qnnpack
-                if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
+                # Fp16 quantization is not supported for qnnpack or onednn
+                if torch.backends.quantized.engine in ('qnnpack', 'onednn') and dtype == torch.float16:
                     continue
 
                 if torch.backends.quantized.engine == 'qnnpack':
@@ -3035,8 +3035,8 @@ class TestDynamicQuantizedOps(TestCase):
 
         for rnn_type in ['LSTMCell', 'GRUCell', 'RNNTanh', 'RNNReLU']:
             for dtype in [torch.qint8, torch.float16]:
-                # Fp16 quantization is not supported for qnnpack
-                if torch.backends.quantized.engine == 'qnnpack' and dtype == torch.float16:
+                # Fp16 quantization is not supported for qnnpack or onednn
+                if torch.backends.quantized.engine in ('qnnpack', 'onednn') and dtype == torch.float16:
                     continue
 
                 if torch.backends.quantized.engine == 'qnnpack':
@@ -3202,6 +3202,9 @@ class TestQuantizedLinear(TestCase):
         ).astype(np.uint8)
         W_scales = np.random.rand(output_channels)
         W_zps = np.round(np.random.rand(output_channels) * 100 - 50).astype(np.int)
+        # ONEDNN only supports symmetric quantization of weight
+        if torch.backends.quantized.engine == 'onednn':
+            W_zps = np.zeros(output_channels).astype(np.int)
         W_value_min = -128
         W_value_max = 127
         W_q0 = np.round(
@@ -3300,6 +3303,13 @@ class TestQuantizedLinear(TestCase):
                                 * 100 - 50).to(torch.int64)
         qlinear_prepack = torch.ops.quantized.linear_prepack
         qlinear_unpack = torch.ops.quantized.linear_unpack
+
+        # ONEDNN only supports symmetric quantization of weight
+        if torch.backends.quantized.engine == 'onednn':
+            if use_channelwise:
+                W_zps = torch.zeros(output_channels).to(torch.int64)
+            else:
+                W_zp = 0
 
         W = torch.from_numpy(W)
         if use_channelwise:
@@ -3759,6 +3769,10 @@ class TestQuantizedConv(TestCase):
         if channelwise and transposed:
             # currently transposed conv and per-channel per quantization does not work
             return
+        # ONEDNN only supports symmetric quantization of weight and zero output padding
+        if torch.backends.quantized.engine == 'onednn':
+            W_zero_point = 0
+            o_pads = len(o_pads) * [0] if o_pads is not None else None
         if channelwise:
             if transposed:
                 output_channels = W.shape[1]  # IC OC/G
@@ -3888,6 +3902,9 @@ class TestQuantizedConv(TestCase):
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
         Y_zero_point, use_bias, use_relu, use_channelwise, use_transpose
     ):
+        # ONEDNN only supports symmetric quantization of weight
+        if torch.backends.quantized.engine == 'onednn':
+            W_zero_point = len(W_zero_point) * [0] if W_zero_point is not None else None
         (X, W), (X_q, W_q), bias_float = self._make_qconv_tensors(
             batch_size, input_channels_per_group, input_feature_map_shape,
             output_channels_per_group, groups, kernels,
@@ -4170,6 +4187,9 @@ class TestQuantizedConv(TestCase):
             use_bias):
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
+        # ONEDNN does not support non-zero output padding
+        if torch.backends.quantized.engine == 'onednn':
+            o_pad_h, o_pad_w = 0, 0
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
 
@@ -4289,6 +4309,8 @@ class TestQuantizedConv(TestCase):
             use_bias):
         if qengine_is_qnnpack():
             return  # QNNPACK doesn't support this
+        if torch.backends.quantized.engine == 'onednn':
+            o_pad_t, o_pad_h, o_pad_w = 0, 0, 0
         assume(o_pad_t < stride_t or o_pad_t < dilation)
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
