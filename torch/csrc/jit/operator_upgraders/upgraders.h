@@ -10,7 +10,7 @@ namespace jit {
 static std::unordered_map<std::string, std::string> upgraders_graph(
     {{"_test_serialization_subcmul_0_2", R"IR(graph(%self.1 : Tensor,
                                                     %other.1 : Tensor,
-                                                    %alpha.1 : Union[float, int]):
+                                                    %alpha.1 : Union(float, int)):
                                                 %7 : int = prim::Constant[value=1]()
                                                 %6 : Tensor = aten::mul(%self.1, %alpha.1) # torch/jit/operator_upgraders.py:18:20
                                                 %8 : Tensor = aten::sub(%other.1, %6, %7) # torch/jit/operator_upgraders.py:18:11

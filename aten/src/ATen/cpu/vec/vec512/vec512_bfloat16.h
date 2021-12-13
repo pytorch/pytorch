@@ -279,6 +279,8 @@ public:
     }
     return b;
   }
+  #pragma clang diagnostic push
+  #pragma clang diagnostic ignored "-Wignored-qualifiers"
   Vectorized<BFloat16> map(const __m512 (*const vop)(__m512)) const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
@@ -286,6 +288,7 @@ public:
     const auto o2 = vop(hi);
     return cvtfp32_bf16(o1, o2);
   }
+  #pragma clang diagnostic pop
   Vectorized<BFloat16> abs() const {
     __m512 lo, hi;
     cvtbf16_fp32(values, lo, hi);
