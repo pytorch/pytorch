@@ -18,6 +18,15 @@
 namespace at {
 namespace functorch {
 
+constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
+  kDynamicLayerFrontModeKey,
+  kDynamicLayerBackModeKey,
+  kGradWrapperKey,
+  // DispatchKey::Batched,
+  kBatchedKey,
+  DispatchKey::ADInplaceOrView
+}) | autograd_dispatch_keyset;
+
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
 DynmetaData kDynMetaDataSingleton;
 
@@ -302,15 +311,6 @@ static bool anyTensors(
   // Demorgan's law
   return !allTensors(args, [&](const Tensor& self) { return !pred(self); });
 }
-
-constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
-  kDynamicLayerFrontModeKey,
-  kDynamicLayerBackModeKey,
-  kGradWrapperKey,
-  // DispatchKey::Batched,
-  kBatchedKey,
-  DispatchKey::ADInplaceOrView
-}) | autograd_dispatch_keyset;
 
 static void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto num_args = op.schema().arguments().size();
