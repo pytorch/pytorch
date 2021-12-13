@@ -162,9 +162,7 @@ template <class scalar_t>
 void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
 template<class scalar_t, class value_t=scalar_t>
-void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda,
-               value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
-
+void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda, value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 #endif
 
 #if AT_BUILD_WITH_BLAS()
