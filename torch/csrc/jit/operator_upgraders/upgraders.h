@@ -64,7 +64,7 @@ static std::unordered_map<std::string, std::string> upgraders_graph(
                             block0():
                                 -> (%7)
                             block1():
-                            %10 : bool = aten::is_floating_point(%other.1) # torch/jit/operator_upgraders.py:31:36
+                                %10 : bool = aten::is_floating_point(%other.1) # torch/jit/operator_upgraders.py:31:36
                                 -> (%10)
                         %18 : bool = prim::If(%12) # torch/jit/operator_upgraders.py:31:8
                             block0():
@@ -79,7 +79,24 @@ static std::unordered_map<std::string, std::string> upgraders_graph(
                             block1():
                                 %46 : Tensor = aten::div(%self.1, %other.1, %41, %out.1) # torch/jit/operator_upgraders.py:33:11
                                 -> (%46)
-                        return (%44))IR"}});
+                        return (%44))IR"},
+     {"full_0_4", R"IR(graph(%size.1 : int[],
+                                %fill_value.1 : Union(float, int),
+                                %dtype.1 : int?,
+                                %layout.1 : int?,
+                                %device.1 : Device?,
+                                %pin_memory.1 : bool?):
+                            %7 : NoneType = prim::Constant() # torch/jit/operator_upgraders.py:59:20
+                            %8 : bool = aten::__is__(%dtype.1, %7) # torch/jit/operator_upgraders.py:59:11
+                            %fill_value : Union(float, int), %dtype : int? = prim::If(%8) # torch/jit/operator_upgraders.py:59:8
+                                block0():
+                                    %fill_value.5 : float = aten::Float(%fill_value.1) # torch/jit/operator_upgraders.py:60:25
+                                    -> (%fill_value.5, %dtype.1)
+                                block1():
+                                    %dtype.7 : int = prim::unchecked_cast(%dtype.1)
+                                    -> (%fill_value.1, %dtype.7)
+                            %30 : Tensor = aten::full(%size.1, %fill_value, %dtype, %layout.1, %device.1, %pin_memory.1) # torch/jit/operator_upgraders.py:61:15
+                            return (%30))IR"}});
 
 } // namespace jit
 } // namespace torch

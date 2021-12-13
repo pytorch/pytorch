@@ -73,3 +73,17 @@ class TestUpgraders(JitTestCase):
         # we check by its' code because graph variable names
         # can be different every time
         self.assertEqual(loaded_model.code, loaded_model_twice.code)
+
+    def test_aten_full_at_4(self):
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_full_integer_value_v4.pt"
+        loaded_model = torch.jit.load(model_path)
+        FileCheck().check_count("aten::Float", 1).run(loaded_model.graph)
+        FileCheck().check_count("aten::full", 2).run(loaded_model.graph)
+
+        buffer = io.BytesIO()
+        torch.jit.save(loaded_model, buffer)
+        buffer.seek(0)
+        loaded_model_twice = torch.jit.load(buffer)
+        # we check by its' code because graph variable names
+        # can be different every time
+        self.assertEqual(loaded_model.code, loaded_model_twice.code)

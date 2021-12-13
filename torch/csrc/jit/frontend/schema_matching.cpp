@@ -470,7 +470,7 @@ static c10::optional<MatchedSchema> tryMatchSchema(
   }
 
   // construct the full name of the schema for easier look up
-  auto schema_name = schema.operator_name().name + "." + schema.overload_name();
+  auto schema_name = getFullSchemaName(schema);
 
   return MatchedSchema{
       std::move(positional_inputs),
@@ -620,6 +620,13 @@ static Value* emitBuiltinNode(
   return packOutputs(graph, n->outputs(), matched_schema.return_field_names);
 }
 
+std::string getFullSchemaName(const ::c10::FunctionSchema& schema) {
+    if (schema.overload_name() != "") {
+        return schema.operator_name().name + "." + schema.overload_name();
+    }
+    return schema.operator_name().name;
+}
+
 // Search for operators matching the provided symbol name and input types.
 // If one is found, emit a node to the graph for that operator.
 Value* emitBuiltinCall(
@@ -644,9 +651,7 @@ Value* emitBuiltinCall(
   schemas.reserve(variants.size());
   for (const std::shared_ptr<Operator>& op : variants) {
     bool found_upgrader = false;
-    auto op_name = op->schema().operator_name().name +
-        ((op->schema().overload_name() != "")
-        ? "." + op->schema().overload_name() : "");
+    auto op_name = getFullSchemaName(op->schema());
     if (graph_version.has_value()) {
       auto version_entry = kOperatorVersionMap.find(op_name);
       if (version_entry != kOperatorVersionMap.end()) {
