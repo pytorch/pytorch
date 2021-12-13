@@ -764,7 +764,8 @@ void StaticRuntime::set_arg(const size_t idx, const IValue& arg) {
 namespace {
 void check_type(const Argument& schema_arg, const IValue& arg) {
   // Fast path for most common case
-  if (arg.isTensor() && schema_arg.type()->castRaw<TensorType>()) {
+  if (arg.isTensor() &&
+      schema_arg.type()->kind() == c10::TypeKind::TensorType) {
     return;
   }
   TORCH_CHECK(arg.type()->isSubtypeOf(schema_arg.type()));
