@@ -39,12 +39,12 @@ static DynmetaData& getGlobalDynmetaData() {
   return kDynMetaDataSingleton;
 }
 
-class DynamicLayerStackHolder : public FuncTorchTLSBase {
+class FuncTorchTLS : public FuncTorchTLSBase {
  public:
-  DynamicLayerStackHolder() {}
+  FuncTorchTLS() {}
 
   std::unique_ptr<FuncTorchTLSBase> deepcopy() const override {
-    auto result = std::make_unique<DynamicLayerStackHolder>();
+    auto result = std::make_unique<FuncTorchTLS>();
     result->dynamicLayerStack = dynamicLayerStack;
     return result;
   }
@@ -54,16 +54,19 @@ class DynamicLayerStackHolder : public FuncTorchTLSBase {
   std::vector<DynamicLayer> dynamicLayerStack = { DynamicLayer(DispatchKey::Autograd, 1, nullopt, true) };
 };
 
-static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
+static FuncTorchTLS* getRawFunctorchTLS() {
   auto& state = functorchTLSAccessor();
   if (state == nullptr) {
-    state = std::make_unique<DynamicLayerStackHolder>();
+    state = std::make_unique<FuncTorchTLS>();
   }
   // Raw pointer usage OK, `state` keeps the pointer alive
   FuncTorchTLSBase* raw_state = state.get();
-  DynamicLayerStackHolder* holder = static_cast<DynamicLayerStackHolder*>(raw_state);
-  // TODO: Can memoize if perf is a problem
-  return holder->dynamicLayerStack;
+  FuncTorchTLS* result = static_cast<FuncTorchTLS*>(raw_state);
+  return result;
+}
+
+static std::vector<DynamicLayer>& dynamicLayerStackAccessor() {
+  return getRawFunctorchTLS()->dynamicLayerStack;
 }
 
 std::shared_ptr<bool> getLifeHandleForLevel(int64_t level) {
