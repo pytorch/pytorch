@@ -572,5 +572,26 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
+  return [](ProcessedNode* p_node) {
+    auto condition = p_node->Input(0).toBool();
+    auto& blocks = p_node->blocks();
+    DCHECK(blocks.size() == 2);
+    auto& runner = blocks[!condition];
+
+    auto output = (*runner)({});
+    if (output.isTuple()) {
+      auto& elems = output.toTupleRef().elements();
+      DCHECK(elems.size() == p_node->num_outputs());
+      for (const auto i : c10::irange(elems.size())) {
+        p_node->Output(i) = elems[i];
+      }
+      return;
+    }
+
+    p_node->Output(0) = std::move(output);
+  };
+});
+
 } // namespace jit
 } // namespace torch
