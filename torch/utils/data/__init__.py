@@ -36,7 +36,7 @@ from torch.utils.data._decorator import (
     runtime_validation_disabled,
 )
 from torch.utils.data.dataloader_experimental import DataLoader2
-from torch.utils.data import communication
+from torch.utils.data import communication, collate
 
 __all__ = ['BatchSampler',
            'ChainDataset',

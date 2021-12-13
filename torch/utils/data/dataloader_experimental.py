@@ -98,7 +98,7 @@ class DataLoader2:
                 if batch_size is not None:
                     datapipe = datapipe.batch(batch_size, drop_last=drop_last)
                     if collate_fn is None:
-                        collate_fn = torch.utils.data._utils.collate.default_collate
+                        collate_fn = torch.utils.data.collate.default_collate
             if parallelism_mode == 'mp' or num_workers == 0:
 
                 my_worker_init_fn = functools.partial(
@@ -135,7 +135,7 @@ class DataLoader2:
                 return data_loader
             else:
                 if collate_fn is None:
-                    collate_fn = torch.utils.data._utils.collate.default_collate
+                    collate_fn = torch.utils.data.collate.default_collate
                 datapipe = IterableWrapper(data_loader).batch(
                     batch_size, drop_last=drop_last).map(collate_fn)
                 return datapipe

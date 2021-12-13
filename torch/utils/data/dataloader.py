@@ -19,6 +19,7 @@ from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
 from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import collate
 from . import _utils
 
 T_co = TypeVar('T_co', covariant=True)
@@ -36,7 +37,7 @@ _collate_fn_t = Callable[[List[T]], Any]
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
-default_collate: _collate_fn_t = _utils.collate.default_collate
+default_collate: _collate_fn_t = collate.default_collate
 
 get_worker_info = _utils.worker.get_worker_info
 
@@ -281,9 +282,9 @@ class DataLoader(Generic[T_co]):
 
         if collate_fn is None:
             if self._auto_collation:
-                collate_fn = _utils.collate.default_collate
+                collate_fn = collate.default_collate
             else:
-                collate_fn = _utils.collate.default_convert
+                collate_fn = collate.default_convert
 
         self.collate_fn = collate_fn
         self.persistent_workers = persistent_workers

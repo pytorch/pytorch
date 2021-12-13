@@ -1,5 +1,5 @@
 import warnings
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe
+from torch.utils.data import collate, IterDataPipe, functional_datapipe
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
@@ -195,7 +195,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = _utils.collate.default_collate,
+        collate_fn: Callable = collate.default_collate,
         fn_args: Optional[Tuple] = None,
         fn_kwargs: Optional[Dict] = None,
     ) -> None:
