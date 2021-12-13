@@ -20,7 +20,7 @@ LazyTensor::Data::~Data() {
 LazyTensor LazyTensor::Create(
     const at::Tensor& tensor,
     const BackendDevice& device) {
-  CHECK_NE(tensor.device().type(), at::kLazy);
+  TORCH_CHECK(tensor.device().type() != at::kLazy);
   LazyTensor xtensor(tensor, device);
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;
@@ -69,7 +69,7 @@ LazyTensor::LazyTensor(
 LazyTensor::LazyTensor(std::shared_ptr<Data> data) : data_(std::move(data)) {}
 
 LazyTensor::Data* LazyTensor::data() const {
-  CHECK(data_ != nullptr) << "Trying to access a null cursor";
+  TORCH_CHECK(data_ != nullptr, "Trying to access a null cursor");
   return data_.get();
 }
 
@@ -95,7 +95,7 @@ MaybeRef<Shape> LazyTensor::shape() const {
     // TODO(whc) remove shape from LazyTensor API too!
     return GetShapeFromTsValue(data()->ir_value);
   }
-  CHECK(data()->tensor_data);
+  TORCH_CHECK(data()->tensor_data);
   return Shape(
       data()->tensor_data->scalar_type(),
       ToI64Vector(data()->tensor_data->sizes()));
@@ -128,9 +128,9 @@ BackendDataPtr LazyTensor::GetDataHandle() {
   if (up_to_date) {
     BackendDataPtr handle = CurrentDataHandle();
     if (handle != nullptr) {
-      CHECK(handle->HasValue())
-          << "Trying to access data while an async operation is in flight: "
-          << Shape(handle->shape());
+      TORCH_CHECK(handle->HasValue(),
+          "Trying to access data while an async operation is in flight: ",
+          handle->shape().to_string());
       return handle;
     }
   }
@@ -144,7 +144,7 @@ BackendDataPtr LazyTensor::GetDataHandle() {
   if (data()->ir_value) {
     ApplyPendingGraph();
   } else {
-    CHECK(data()->tensor_data);
+    TORCH_CHECK(data()->tensor_data);
     data()->handle = TensorToDataHandle(*data()->tensor_data, GetDevice());
   }
   return data()->handle;
@@ -228,7 +228,7 @@ Value LazyTensor::GetIrValue() const {
     return data()->ir_value;
   }
   c10::optional<at::Tensor> tensor_data = CurrentTensorData();
-  CHECK(tensor_data);
+  TORCH_CHECK(tensor_data);
   AssignIrValue(GetIrValueForTensor(*tensor_data, GetDevice()));
   return data()->ir_value;
 }
@@ -284,7 +284,7 @@ std::shared_ptr<LazyView> LazyTensor::UpdateView(
     std::shared_ptr<LazyView> view,
     Value ir_value) const {
   if (GetShapeFromTsValue(ir_value).sizes() != view->shape().sizes()) {
-    CHECK_EQ(GetShapeFromTsValue(ir_value).numel(), view->shape().numel());
+    TORCH_CHECK(GetShapeFromTsValue(ir_value).numel() == view->shape().numel());
 
     ViewInfo view_info(
         ViewInfo::Type::kReshape, GetShapeFromTsValue(ir_value), view->shape());

@@ -643,7 +643,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
         // The tensor only has at::Tensor data. We need to queue it for a
         // device upload.
         c10::optional<at::Tensor> tensor_data = tensors[i].CurrentTensorData();
-        CHECK(tensor_data);
+        TORCH_CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
         devices.push_back(tensors[i].GetDevice());
         at_tensor_index.push_back(i);
@@ -806,9 +806,9 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   VLOG(3) << "Compiling IR graph hash " << HashToString(coll.hash)
           << " on device " << coll.device << " done!";
   if (computation) {
-    // TODO(whc) should computation be allowed null here? (becuase it is in one
+    // TODO(whc) should computation be allowed null here? (because it is in one
     // case)
-    CHECK_EQ(computation->parameters_size(), po_data->parameters_data.size());
+    TORCH_CHECK(computation->parameters_size() == po_data->parameters_data.size());
   }
 
   return {
@@ -871,7 +871,7 @@ void LazyGraphExecutor::BuildInputOutputAliases(
           // {});
           alias_map[output_index] = i;
 
-          VLOG(6) << "Aliased paramter " << i << " with output " << output_index
+          VLOG(6) << "Aliased parameter " << i << " with output " << output_index
                   << ": " << Shape(parameters_data[i]->shape());
         }
       }
@@ -1033,7 +1033,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       if (tensor_data) {
         results.push_back(*tensor_data);
       } else {
-        CHECK_LT(literals_index, tensors_data.size());
+        TORCH_CHECK(literals_index < tensors_data.size());
         results.push_back(getBackend()->MakeTensorFromComputationData(
             tensors_data[literals_index], (*tensors)[i].dtype()));
         ++literals_index;
@@ -1066,7 +1066,7 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
       ++indices_index;
     } else if (!tensors[i].CurrentTensorData()) {
       BackendDataPtr handle = tensors[i].CurrentDataHandle();
-      CHECK(handle != nullptr);
+      TORCH_CHECK(handle != nullptr);
       result_tensors_data.push_back(std::move(handle));
     }
   }
