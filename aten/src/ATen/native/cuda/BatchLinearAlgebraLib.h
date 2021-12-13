@@ -39,6 +39,17 @@ void triangular_solve_cublas(const Tensor& A, const Tensor& B, bool left, bool u
 void triangular_solve_batched_cublas(const Tensor& A, const Tensor& B, bool left, bool upper, TransposeType transpose, bool unitriangular);
 void gels_batched_cublas(const Tensor& a, Tensor& b, Tensor& infos);
 void lu_solve_batched_cublas(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose);
+void ldl_factor_looped_cusolver(
+    const Tensor& factors,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian);
+void ldl_solve_looped_cusolver(
+    const Tensor& factors,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper);
 
 #ifdef USE_CUSOLVER
 

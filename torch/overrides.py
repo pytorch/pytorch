@@ -580,6 +580,8 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.kron: lambda input, other: -1,
         torch.kthvalue: lambda input, k, dim=None, keepdim=False, out=None: -1,
+        torch.linalg.ldl_factor_ex: lambda input, upper=False, hermitian=False, check_errors=False, out=None: -1,
+        torch.linalg.ldl_solve: lambda factors, pivots, B, upper=False, hermitian=False, out=None: -1,
         torch.layer_norm: lambda input, normalized_shape, weight=None, bias=None, esp=1e-05, cudnn_enabled=True: -1,
         torch.lcm: lambda input, other, out=None: -1,
         torch.ldexp: lambda input, other, out=None: -1,

@@ -811,6 +811,102 @@ Examples::
     https://www.netlib.org/lapack/lug/node128.html
 """)
 
+ldl_factor_ex = _add_docstr(_linalg.linalg_ldl_factor_ex, r"""
+linalg.ldl_factor_ex(A, *, upper=False, hermitian=False, check_errors=False, out=None) -> (Tensor, Tensor, Tensor)
+
+Computes the LDL decomposition of a Hermitian/symmetric indefinite matrix.
+When :attr:`A` is complex valued it can be Hermitian (:attr:`hermitian` = `True`)
+or symmetric (:attr:`hermitian` = `False`).
+
+:attr:`upper` is a boolean value that controls whether the form of the decomposition is
+:math:`L D L^T` (:attr:`upper` = `False`) or :math:`U D U^T` (:attr:`upper` = `True`).
+If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
+
+:math:`L` (or :math:`U`) and :math:`D` are stored in compact form in ``factors``.
+This format is used by :func:`torch.linalg.ldl_solve` for solving linear systems.
+
+``info`` stores integer error codes from the backend library (see `sytrf` function from LAPACK).
+The positive integer indicates the diagonal element of :math:`D` that is zero.
+Division by 0 will occur if the result is used for solving a system of linear equations.
+``info`` filled with zeros indicates that the decomposition was successful.
+If ``check_errors=True`` and ``info`` contains positive integers, then a RuntimeError is thrown.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. note:: If :attr:`A` is on a CUDA device, this function may synchronize that device with the CPU.
+
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
+Args:
+    A (Tensor): the Hermitian/symmetric `n \times n` matrix or the batch of such matrices of size
+                    `(*, n, n)` where `*` is one or more batch dimensions.
+
+Keyword args:
+    upper (bool, optional): whether to compute LDL or UDU decomposition. Default: `False`.
+    hermitian (bool, optional): whether to consider the input to be Hermitian or symmetric.
+                                For real-valued matrices, this switch has no effect. Default: `False`.
+    check_errors (bool, optional): controls whether to check the content of ``info``. Default: `False`.
+    out (tuple, optional): tuple of three tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3)
+    >>> A
+    tensor([[ 0.1222,  1.0385, -0.8855],
+            [-0.3465, -0.0985, -1.1092],
+            [-1.9515, -1.4130,  0.0787]])
+    >>> factors, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> factors
+    tensor([[ 0.1222,  0.0000,  0.0000],
+            [-1.9515,  0.0787,  0.0000],
+            [ 0.7330,  0.2235,  0.4713]])
+    >>> pivots
+    tensor([-3, -3,  3], dtype=torch.int32)
+    >>> info
+    tensor(0, dtype=torch.int32)
+""")
+
+ldl_solve = _add_docstr(_linalg.linalg_ldl_solve, r"""
+linalg.ldl_solve(factors, pivots, B, *, upper=False, hermitian=False, out=None) -> Tensor
+
+Computes the solution of a system of linear equations using the LDL factorization.
+
+:attr:`upper` is a boolean value that controls whether the form of the decomposition is
+:math:`L D L^T` (:attr:`upper` = `False`) or :math:`U D U^T` (:attr:`upper` = `True`).
+If :attr:`hermitian` is `True` then transpose operation is the conjugate transpose.
+
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
+the output has the same batch dimensions.
+
+.. warning:: This function is "experimental" and it may change in a future PyTorch release.
+
+Args:
+    factors (Tensor): the `n \times n` matrix or the batch of such matrices of size
+                      `(*, n, n)` where `*` is one or more batch dimensions.
+    pivots (Tensor): the pivots corresponding to the LDL factorization of :attr:`factors`.
+    B (Tensor): right-hand side tensor of shape `(*, n, k)`.
+
+Keyword args:
+    upper (bool, optional): whether to use LDL or UDU decomposition. Default: `False`.
+    hermitian (bool, optional): whether to consider the decomposed matrix to be Hermitian or symmetric.
+                                For real-valued matrices, this switch has no effect. Default: `False`.
+    out (tuple, optional): output tensor. `B` may be passed as `out` and the result is computed in-place on `B`.
+                           Ignored if `None`. Default: `None`.
+
+Examples::
+
+    >>> A = torch.randn(2, 3, 3)
+    >>> A = A @ A.mT # make symmetric
+    >>> factors, pivots, info = torch.linalg.ldl_factor_ex(A)
+    >>> B = torch.randn(2, 3, 4)
+    >>> X = torch.linalg.ldl_solve(factors, pivots, B)
+    >>> torch.linalg.norm(A @ X - B)
+    >>> tensor(0.0001)
+""")
+
 lstsq = _add_docstr(_linalg.linalg_lstsq, r"""
 torch.linalg.lstsq(A, B, rcond=None, *, driver=None) -> (Tensor, Tensor, Tensor, Tensor)
 

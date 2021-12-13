@@ -56,6 +56,128 @@ extern "C" void cpotri_(char *uplo, int *n, std::complex<float> *a, int *lda, in
 extern "C" void dpotri_(char *uplo, int *n, double *a, int *lda, int *info);
 extern "C" void spotri_(char *uplo, int *n, float *a, int *lda, int *info);
 
+// sytrf
+extern "C" void dsytrf_(
+    char* uplo,
+    int* n,
+    double* a,
+    int* lda,
+    int* ipiv,
+    double* work,
+    int* lwork,
+    int* info);
+extern "C" void ssytrf_(
+    char* uplo,
+    int* n,
+    float* a,
+    int* lda,
+    int* ipiv,
+    float* work,
+    int* lwork,
+    int* info);
+extern "C" void zsytrf_(
+    char* uplo,
+    int* n,
+    std::complex<double>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<double>* work,
+    int* lwork,
+    int* info);
+extern "C" void csytrf_(
+    char* uplo,
+    int* n,
+    std::complex<float>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<float>* work,
+    int* lwork,
+    int* info);
+
+// hetrf
+extern "C" void zhetrf_(
+    char* uplo,
+    int* n,
+    std::complex<double>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<double>* work,
+    int* lwork,
+    int* info);
+extern "C" void chetrf_(
+    char* uplo,
+    int* n,
+    std::complex<float>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<float>* work,
+    int* lwork,
+    int* info);
+
+// sytrs
+extern "C" void dsytrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    double* a,
+    int* lda,
+    int* ipiv,
+    double* b,
+    int* ldb,
+    int* info);
+extern "C" void ssytrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    float* a,
+    int* lda,
+    int* ipiv,
+    float* b,
+    int* ldb,
+    int* info);
+extern "C" void zsytrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    std::complex<double>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<double>* b,
+    int* ldb,
+    int* info);
+extern "C" void csytrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    std::complex<float>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<float>* b,
+    int* ldb,
+    int* info);
+
+// hetrs
+extern "C" void zhetrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    std::complex<double>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<double>* b,
+    int* ldb,
+    int* info);
+extern "C" void chetrs_(
+    char* uplo,
+    int* n,
+    int* nrhs,
+    std::complex<float>* a,
+    int* lda,
+    int* ipiv,
+    std::complex<float>* b,
+    int* ldb,
+    int* info);
+
 // geqrf
 extern "C" void zgeqrf_(int *m, int *n, std::complex<double> *a, int *lda, std::complex<double> *tau, std::complex<double> *work, int *lwork, int *info);
 extern "C" void cgeqrf_(int *m, int *n, std::complex<float> *a, int *lda, std::complex<float> *tau, std::complex<float> *work, int *lwork, int *info);
@@ -205,6 +327,67 @@ extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, 
 
 namespace at {
 namespace meta {
+
+TORCH_META_FUNC(linalg_ldl_factor_ex)
+(const Tensor& self, bool upper, bool hermitian, bool check_errors) {
+  at::native::squareCheckInputs(self, "torch.linalg.ldl_factor_ex");
+  at::native::checkFloatingOrComplex(self, "torch.linalg.ldl_factor_ex");
+
+  auto ndim = self.dim();
+  auto n = self.size(-2);
+
+  // prefer column major strides
+  auto ldu_strides = at::detail::defaultStrides(self.sizes());
+  ldu_strides[ndim - 2] = 1;
+  ldu_strides[ndim - 1] = std::max<int64_t>(1, n);
+  set_output(0, self.sizes(), ldu_strides, self.options(), {}); // factors
+
+  auto pivots_shape =
+      IntArrayRef(self.sizes().data(), ndim - 1); // self.shape[:-1]
+  set_output(
+      1, pivots_shape, {}, self.options().dtype(ScalarType::Int), {}); // pivots
+
+  auto info_shape =
+      IntArrayRef(self.sizes().data(), ndim - 2); // self.shape[:-2]
+  set_output(
+      2, info_shape, {}, self.options().dtype(ScalarType::Int), {}); // info
+}
+
+TORCH_META_FUNC(linalg_ldl_solve)
+(const Tensor& factors,
+ const Tensor& pivots,
+ const Tensor& B,
+ bool upper,
+ bool hermitian) {
+  at::native::squareCheckInputs(factors, "torch.linalg.ldl_solve");
+  at::native::checkFloatingOrComplex(factors, "torch.linalg.ldl_solve");
+  at::native::linearSolveCheckInputs(B, factors, "torch.linalg.ldl_solve");
+  TORCH_CHECK(
+      B.dim() >= 2,
+      "torch.linalg.ldl_solve: Expected B to have at least 2 dimensions, but it has ",
+      B.dim(),
+      " dimensions instead");
+  TORCH_CHECK(
+      at::isIntegralType(pivots.scalar_type()),
+      "torch.linalg.ldl_solve: Expected pivots to be integers. Got ",
+      pivots.scalar_type());
+  TORCH_CHECK(
+      factors.scalar_type() == B.scalar_type(),
+      "torch.linalg.ldl_solve: ",
+      "factors dtype",
+      factors.scalar_type(),
+      " does not match b dtype ",
+      B.scalar_type());
+
+  auto ndim = B.dim();
+  auto n = B.size(-2);
+
+  // prefer column major strides
+  auto result_strides = at::detail::defaultStrides(B.sizes());
+  result_strides[ndim - 2] = 1;
+  result_strides[ndim - 1] = std::max<int64_t>(1, n);
+  set_output(0, B.sizes(), result_strides, B.options(), {});
+}
 
 TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
   TORCH_CHECK(self.dim() >= 2,
@@ -518,6 +701,290 @@ template<> void lapackSvd<double>(char jobz, int m, int n, double *a, int lda,
 template<> void lapackSvd<float>(char jobz, int m, int n, float *a, int lda,
                                  float *s, float *u, int ldu, float *vt, int ldvt, float *work, int lwork, float *rwork, int *iwork, int *info) {
   sgesdd_(&jobz, &m, &n, a, &lda, s, u, &ldu, vt, &ldvt, work, &lwork, iwork, info);
+}
+
+template <>
+void lapackLdlSymmetric<double>(
+    char uplo,
+    int n,
+    double* a,
+    int lda,
+    int* ipiv,
+    double* work,
+    int lwork,
+    int* info) {
+  dsytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void lapackLdlSymmetric<float>(
+    char uplo,
+    int n,
+    float* a,
+    int lda,
+    int* ipiv,
+    float* work,
+    int lwork,
+    int* info) {
+  ssytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void lapackLdlSymmetric<c10::complex<double>>(
+    char uplo,
+    int n,
+    c10::complex<double>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<double>* work,
+    int lwork,
+    int* info) {
+  zsytrf_(
+      &uplo,
+      &n,
+      reinterpret_cast<std::complex<double>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<double>*>(work),
+      &lwork,
+      info);
+}
+
+template <>
+void lapackLdlSymmetric<c10::complex<float>>(
+    char uplo,
+    int n,
+    c10::complex<float>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<float>* work,
+    int lwork,
+    int* info) {
+  csytrf_(
+      &uplo,
+      &n,
+      reinterpret_cast<std::complex<float>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<float>*>(work),
+      &lwork,
+      info);
+}
+
+template <>
+void lapackLdlHermitian<double>(
+    char uplo,
+    int n,
+    double* a,
+    int lda,
+    int* ipiv,
+    double* work,
+    int lwork,
+    int* info) {
+  dsytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void lapackLdlHermitian<float>(
+    char uplo,
+    int n,
+    float* a,
+    int lda,
+    int* ipiv,
+    float* work,
+    int lwork,
+    int* info) {
+  ssytrf_(&uplo, &n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template <>
+void lapackLdlHermitian<c10::complex<double>>(
+    char uplo,
+    int n,
+    c10::complex<double>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<double>* work,
+    int lwork,
+    int* info) {
+  zhetrf_(
+      &uplo,
+      &n,
+      reinterpret_cast<std::complex<double>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<double>*>(work),
+      &lwork,
+      info);
+}
+
+template <>
+void lapackLdlHermitian<c10::complex<float>>(
+    char uplo,
+    int n,
+    c10::complex<float>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<float>* work,
+    int lwork,
+    int* info) {
+  chetrf_(
+      &uplo,
+      &n,
+      reinterpret_cast<std::complex<float>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<float>*>(work),
+      &lwork,
+      info);
+}
+
+template <>
+void lapackLdlSolveSymmetric<double>(
+    char uplo,
+    int n,
+    int nrhs,
+    double* a,
+    int lda,
+    int* ipiv,
+    double* b,
+    int ldb,
+    int* info) {
+  dsytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template <>
+void lapackLdlSolveSymmetric<float>(
+    char uplo,
+    int n,
+    int nrhs,
+    float* a,
+    int lda,
+    int* ipiv,
+    float* b,
+    int ldb,
+    int* info) {
+  ssytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template <>
+void lapackLdlSolveSymmetric<c10::complex<double>>(
+    char uplo,
+    int n,
+    int nrhs,
+    c10::complex<double>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<double>* b,
+    int ldb,
+    int* info) {
+  zsytrs_(
+      &uplo,
+      &n,
+      &nrhs,
+      reinterpret_cast<std::complex<double>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<double>*>(b),
+      &ldb,
+      info);
+}
+
+template <>
+void lapackLdlSolveSymmetric<c10::complex<float>>(
+    char uplo,
+    int n,
+    int nrhs,
+    c10::complex<float>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<float>* b,
+    int ldb,
+    int* info) {
+  csytrs_(
+      &uplo,
+      &n,
+      &nrhs,
+      reinterpret_cast<std::complex<float>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<float>*>(b),
+      &ldb,
+      info);
+}
+
+template <>
+void lapackLdlSolveHermitian<double>(
+    char uplo,
+    int n,
+    int nrhs,
+    double* a,
+    int lda,
+    int* ipiv,
+    double* b,
+    int ldb,
+    int* info) {
+  dsytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template <>
+void lapackLdlSolveHermitian<float>(
+    char uplo,
+    int n,
+    int nrhs,
+    float* a,
+    int lda,
+    int* ipiv,
+    float* b,
+    int ldb,
+    int* info) {
+  ssytrs_(&uplo, &n, &nrhs, a, &lda, ipiv, b, &ldb, info);
+}
+
+template <>
+void lapackLdlSolveHermitian<c10::complex<double>>(
+    char uplo,
+    int n,
+    int nrhs,
+    c10::complex<double>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<double>* b,
+    int ldb,
+    int* info) {
+  zhetrs_(
+      &uplo,
+      &n,
+      &nrhs,
+      reinterpret_cast<std::complex<double>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<double>*>(b),
+      &ldb,
+      info);
+}
+
+template <>
+void lapackLdlSolveHermitian<c10::complex<float>>(
+    char uplo,
+    int n,
+    int nrhs,
+    c10::complex<float>* a,
+    int lda,
+    int* ipiv,
+    c10::complex<float>* b,
+    int ldb,
+    int* info) {
+  chetrs_(
+      &uplo,
+      &n,
+      &nrhs,
+      reinterpret_cast<std::complex<float>*>(a),
+      &lda,
+      ipiv,
+      reinterpret_cast<std::complex<float>*>(b),
+      &ldb,
+      info);
 }
 
 template<> void lapackLuSolve<c10::complex<double>>(char trans, int n, int nrhs, c10::complex<double> *a, int lda, int *ipiv, c10::complex<double> *b, int ldb, int *info) {
@@ -3844,6 +4311,138 @@ Tensor _det_lu_based_helper_backward_helper(
 
     // multiply by p to restore the row order
     return at::matmul(p, d);
+  }
+}
+
+DEFINE_DISPATCH(ldl_factor_stub);
+
+TORCH_IMPL_FUNC(linalg_ldl_factor_ex_out)
+(const Tensor& self,
+ bool upper,
+ bool hermitian,
+ bool check_errors,
+ const Tensor& factors,
+ const Tensor& pivots,
+ const Tensor& info) {
+  TORCH_CHECK(
+      factors.scalar_type() == self.scalar_type(),
+      "torch.linalg.ldl_factor_ex: ",
+      "Expected factors to have ",
+      self.scalar_type(),
+      " dtype, but got factors with dtype ",
+      info.scalar_type());
+  TORCH_CHECK(
+      pivots.scalar_type() == ScalarType::Int,
+      "torch.linalg.ldl_factor_ex: ",
+      "Expected pivots to have ",
+      ScalarType::Int,
+      " dtype, but got pivots with dtype ",
+      info.scalar_type());
+  TORCH_CHECK(
+      info.scalar_type() == ScalarType::Int,
+      "torch.linalg.ldl_factor_ex: ",
+      "Expected info to have ",
+      ScalarType::Int,
+      " dtype, but got info with dtype ",
+      info.scalar_type());
+
+  auto ndim = self.dim();
+  auto pivots_shape = IntArrayRef(self.sizes().data(), ndim - 1);
+  auto info_shape = IntArrayRef(self.sizes().data(), ndim - 2);
+  at::native::resize_output(pivots, pivots_shape);
+  at::native::resize_output(info, info_shape);
+
+  auto info_ = info.expect_contiguous();
+  auto pivots_ = pivots.expect_contiguous();
+
+  bool factors_equal_expected_shape = factors.sizes().equals(self.sizes());
+  bool factors_batched_column_major = factors.mT().is_contiguous();
+
+  c10::MaybeOwned<Tensor> factors_;
+  if (factors_equal_expected_shape && factors_batched_column_major) {
+    factors_ = c10::MaybeOwned<Tensor>::borrowed(factors);
+    factors_->copy_(self);
+  } else {
+    factors_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(self));
+  }
+
+  if (upper) {
+    factors_->triu_();
+  } else {
+    factors_->tril_();
+  }
+
+  // call ldl_factor_stub that fills the result tensors
+  ldl_factor_stub(
+      self.device().type(), *factors_, *pivots_, *info_, upper, hermitian);
+
+  if (!factors.is_same(*factors_)) {
+    at::native::resize_output(factors, factors_->sizes());
+    factors.copy_(*factors_);
+  }
+  if (!info.is_same(*info_)) {
+    info.copy_(*info_);
+  }
+  if (!pivots.is_same(*pivots_)) {
+    pivots.copy_(*pivots_);
+  }
+
+  if (check_errors) {
+    if (self.dim() > 2) {
+      batchCheckErrors(info, "torch.linalg.ldl_factor_ex");
+    } else {
+      singleCheckErrors(info.item().toInt(), "torch.linalg.ldl_factor_ex");
+    }
+  }
+}
+
+DEFINE_DISPATCH(ldl_solve_stub);
+
+TORCH_IMPL_FUNC(linalg_ldl_solve_out)
+(const Tensor& factors,
+ const Tensor& pivots,
+ const Tensor& B,
+ bool upper,
+ bool hermitian,
+ const Tensor& result) {
+  TORCH_CHECK(
+      result.scalar_type() == factors.scalar_type(),
+      "torch.linalg.ldl_solve: ",
+      "Expected result to have ",
+      factors.scalar_type(),
+      " dtype, but got result with dtype ",
+      result.scalar_type());
+
+  Tensor B_broadcast;
+  std::tie(B_broadcast, std::ignore) =
+      _linalg_broadcast_batch_dims(B, factors, /*don't check errors*/ nullptr);
+
+  auto pivots_ = pivots.expect_contiguous();
+
+  bool result_equal_expected_shape = result.sizes().equals(B_broadcast.sizes());
+  bool result_batched_column_major = result.mT().is_contiguous();
+
+  c10::MaybeOwned<Tensor> result_;
+  if (result_equal_expected_shape && result_batched_column_major) {
+    result_ = c10::MaybeOwned<Tensor>::borrowed(result);
+    result_->copy_(B_broadcast);
+  } else {
+    result_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(B));
+  }
+
+  c10::MaybeOwned<Tensor> factors_;
+  if (factors.mT().is_contiguous()) {
+    factors_ = c10::MaybeOwned<Tensor>::borrowed(factors);
+  } else {
+    factors_ = c10::MaybeOwned<Tensor>::owned(cloneBatchedColumnMajor(factors));
+  }
+
+  ldl_solve_stub(
+      B.device().type(), *factors_, *pivots_, *result_, upper, hermitian);
+
+  if (!result.is_same(*result_)) {
+    at::native::resize_output(result, result_->sizes());
+    result.copy_(*result_);
   }
 }
 
