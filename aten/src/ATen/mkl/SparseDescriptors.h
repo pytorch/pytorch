@@ -92,8 +92,9 @@ class MklSparseCsrDescriptor
 
     crow_indices_ = prepare_indices_for_mkl(crow_indices);
     col_indices_ = prepare_indices_for_mkl(col_indices);
+    values_ = values.expect_contiguous();
 
-    auto values_ptr = values.data_ptr<scalar_t>();
+    auto values_ptr = values_->data_ptr<scalar_t>();
     auto crow_indices_ptr = crow_indices_->data_ptr<MKL_INT>();
     auto col_indices_ptr = col_indices_->data_ptr<MKL_INT>();
 
@@ -104,9 +105,6 @@ class MklSparseCsrDescriptor
       TORCH_CHECK(
           values.size(-1) == values.size(-2),
           "MKL Sparse doesn't support matrices with non-square blocks.");
-      TORCH_CHECK(
-          values.is_contiguous(),
-          "MKL Sparse doesn't support non-contiguous values for sparse matrices.");
       auto block_size = mkl_int_cast(values.size(-1), "block_size");
       create_bsr<scalar_t>(
           &raw_descriptor,
@@ -142,6 +140,7 @@ class MklSparseCsrDescriptor
  private:
   c10::MaybeOwned<Tensor> crow_indices_;
   c10::MaybeOwned<Tensor> col_indices_;
+  c10::MaybeOwned<Tensor> values_;
 };
 
 } // namespace sparse
