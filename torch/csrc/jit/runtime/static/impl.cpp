@@ -621,10 +621,6 @@ std::pair<size_t, size_t> StaticModule::prepareProcessedNodes(
 
     ProcessedFunction* fn = &functions_[node_idx];
     // create a new ProcessedNode
-    // see [Check and correct bad schema alias info at runtime]
-    bool check_outputs_for_overlap =
-        !alias_db.mayContainAlias(node->inputs(), node->outputs()) &&
-        containTensorsOnly(node->outputs());
     nodes.emplace_back(
         node, fn, std::move(input_indices), node_output_idx_map[node_idx]);
 
