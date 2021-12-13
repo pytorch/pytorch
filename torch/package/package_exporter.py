@@ -191,7 +191,7 @@ class PackageExporter:
         self,
         f: Union[str, Path, BinaryIO],
         importer: Union[Importer, Sequence[Importer]] = sys_importer,
-        do_selective_intern: bool = True,
+        do_selective_intern: bool = False,
     ):
         """
         Create an exporter.
