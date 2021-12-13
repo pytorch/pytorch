@@ -568,8 +568,7 @@ at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double
     std::vector<torch::lazy::Shape> shapes = {torch::lazy::Shape(self.scalar_type(), self.sizes().vec())};
     auto node = torch::lazy::MakeNode<ir::ops::Normal>(lazy_self.GetIrValue(), mean, std, std::move(shapes));
     lazy_self.SetInPlaceIrValue(node);
-    auto& result = self;
-    return result;
+    return self;
 };
 
 at::Tensor LazyNativeFunctions::permute(const at::Tensor& self,
