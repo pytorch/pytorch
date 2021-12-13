@@ -673,6 +673,8 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   }
 }
 
+// Sparse tensors do not work with static CPU dispatch
+#ifndef ATEN_CPU_STATIC_DISPATCH
 TEST(IValueTest, IdentityAndHashing_SparseCOO) {
   using namespace torch::indexing;
 
@@ -725,6 +727,7 @@ TEST(IValueTest, IdentityAndHashing_SparseCOO) {
   EXPECT_FALSE(idx1_v.isAliasOf(val_v));
   EXPECT_FALSE(sparse1_v.isAliasOf(idx2_v));
 }
+#endif // ATEN_CPU_STATIC_DISPATCH
 
 TEST(IValueTest, getSubValues) {
   // Scalars have no subvalues.
