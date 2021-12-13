@@ -27,7 +27,7 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    const c10::optional<Tensor>& bias,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -44,12 +44,11 @@ bool available(
          (weight.device().is_cpu()) &&
          (kFloat == weight.scalar_type()) &&
          // Bias
-         ((bias && bias->defined()) ? ((1 == bias->ndimension()) &&
-                                       (bias->device().is_cpu()) &&
-                                       (kFloat == bias->scalar_type()) &&
-                                       ((transposed ? (weight.size(Layout::Filter::input) == (bias->size(0) / groups))
-                                                    : (weight.size(Layout::Filter::output) == (bias->size(0))))))
-                                    : true) &&
+         (bias_sizes_opt.has_value() ? ((1 == bias_sizes_opt->size()) &&
+                ((transposed ? (weight.size(Layout::Filter::input) ==
+                                ((*bias_sizes_opt)[0] / groups))
+                  : (weight.size(Layout::Filter::output) == ((*bias_sizes_opt)[0])))))
+            : true) &&
          // Padding
          (padding[Layout::Parameter::height] >= 0) &&
          (padding[Layout::Parameter::width] >= 0) &&
@@ -190,7 +189,7 @@ ContextConv2D create(
   TORCH_CHECK(
       available(
           weight_nhwc,
-          bias,
+          (bias.has_value() && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
           padding_expanded,
           stride_expanded,
           dilation_expanded,
@@ -453,7 +452,7 @@ Tensor conv2d_transpose_clamp_run(
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -461,7 +460,7 @@ bool use_convolution2d(
     const bool transposed) {
   return internal::convolution2d::available(
             weight,
-            bias,
+            bias_sizes_opt,
             padding,
             stride,
             dilation,
