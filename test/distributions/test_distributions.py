@@ -2303,10 +2303,10 @@ class TestDistributions(TestCase):
 
     def test_wishart_moments(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        df = (torch.rand([]) + 1) * 5
-        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        df = (torch.rand([]) + 1) * 4
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(4, 4))
         d = Wishart(df=df, scale_tril=scale_tril)
-        samples = d.rsample((1000000,))
+        samples = d.rsample((100000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.05, rtol=0)
         empirical_var = samples.var(0)
@@ -3645,7 +3645,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(wishart.sample().size(), torch.Size((2, 1, 1)))
         self.assertEqual(wishart.sample((3, 2)).size(), torch.Size((3, 2, 2, 1, 1)))
         self.assertRaises(ValueError, wishart.log_prob, self.tensor_sample_2)
-        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size(2))
+        self.assertEqual(wishart.log_prob(torch.ones(2, 1, 1)).size(), torch.Size((2,)))
 
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
