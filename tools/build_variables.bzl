@@ -118,6 +118,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders.cpp",
 ]
 
 torch_unpickler_common = [
@@ -132,6 +133,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/monitor/counters.cpp",
+    "torch/csrc/monitor/events.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
