@@ -11,6 +11,8 @@ namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
 using Shape = torch::lazy::Shape;
+using at::operator<<;
+
 // kNullValue is used to contribute a static hash value any time
 // a node has an Optional<Value> input that is nullopt.  It is important
 // to differentiate between HASH(nullopt, something) and HASH(something, nullopt),

@@ -4,20 +4,22 @@
 
 #include <vector>
 
-namespace torch_lazy_tensors {
-namespace ir {
-namespace ops {
+namespace torch {
+namespace lazy {
 
-class Expand : public torch::lazy::TsNode {
+class TORCH_API Expand : public TsNode {
  public:
-  Expand(const torch::lazy::Value& input, std::vector<int64_t> size,
-         bool is_scalar_expand);
+  Expand(const Value& input, std::vector<int64_t> size, bool is_scalar_expand);
 
   std::string ToString() const override;
 
-  const std::vector<int64_t>& size() const { return size_; };
+  const std::vector<int64_t>& size() const {
+    return size_;
+  };
 
-  bool is_scalar_expand() const { return is_scalar_expand_; }
+  bool is_scalar_expand() const {
+    return is_scalar_expand_;
+  }
 
  private:
   std::vector<int64_t> size_;
@@ -27,6 +29,5 @@ class Expand : public torch::lazy::TsNode {
   bool is_scalar_expand_;
 };
 
-}  // namespace ops
-}  // namespace ir
-}  // namespace torch_lazy_tensors
+} // namespace lazy
+} // namespace torch
