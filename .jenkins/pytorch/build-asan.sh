@@ -52,5 +52,7 @@ popd
 
 assert_git_not_dirty
 
-# export test times so that potential sharded tests that'll branch off this build will use consistent data
-python test/run_test.py --export-past-test-times
+(
+  # export test times so that potential sharded tests that'll branch off this build will use consistent data
+  python test/run_test.py --export-past-test-times
+)
