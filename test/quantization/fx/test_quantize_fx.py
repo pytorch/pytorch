@@ -46,6 +46,7 @@ from torch.ao.quantization import (
     float_qparams_weight_only_qconfig,
     get_default_qconfig,
     get_default_qat_qconfig,
+    get_default_qconfig_dict,
     fuse_modules,
     prepare,
     prepare_qat,
@@ -62,6 +63,7 @@ from torch.ao.quantization import (
     MovingAverageMinMaxObserver,
     HistogramObserver,
     QConfig,
+    default_embedding_qat_qconfig,
 )
 
 from torch.ao.quantization.fx.pattern_utils import (
@@ -126,7 +128,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable
+from typing import Callable, Optional
 
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
@@ -420,6 +422,8 @@ class TestFuseFx(QuantizationTestCase):
         )
         self.assertTrue('But found \'typo\' instead.' in str(context.exception))
 
+    @unittest.skip("Temprorarily skipping the test case, will enable after the simple"
+                   "pattern format is supported")
     def test_fuse_addtional_fuser_method(self):
         class MyConvReLU(torch.nn.Module):
             pass
@@ -3342,6 +3346,54 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(get_default_output_activation_post_process_map(is_training=False) is
                         DEFAULT_OUTPUT_OBSERVER_MAP)
 
+    def test_reuse_input_qconfig(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.reshape()
+                return x
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = x.reshape()
+                return x
+
+        options = itertools.product([M1, M2], [True, False])
+        for M, is_qat in options:
+            m = M1().eval()
+            m = prepare_fx(m, get_default_qconfig_dict())
+            m = convert_fx(m)
+            node_list = [
+                ns.call_function(torch.quantize_per_tensor),
+                ns.call_module(nnq.Conv2d),
+                ns.call_method("reshape"),
+                ns.call_method("dequantize"),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_list=node_list)
+
+            m = M2().eval()
+            m = prepare_fx(m, get_default_qconfig_dict())
+            m = convert_fx(m)
+            node_occurrence = {
+                ns.call_function(torch.quantize_per_tensor): 0,
+                ns.call_method("dequnatize"): 0,
+            }
+            node_list = [
+                ns.call_method("reshape"),
+            ]
+            self.checkGraphModuleNodes(
+                m,
+                expected_node_occurrence=node_occurrence,
+                expected_node_list=node_list)
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):
@@ -5744,6 +5796,101 @@ class TestQuantizeFxModels(QuantizationTestCase):
         model = models.__dict__[name](pretrained=False).eval().float()
         self._test_model_impl(
             'ddp', 'resnet18', model, eager_quantizable_model)
+
+    @override_qengines
+    def test_qat_embeddingbag_linear(self):
+        for device in get_supported_device_types():
+            class EmbeddingBagLinear(torch.nn.Module):
+                def __init__(self):
+                    super(EmbeddingBagLinear, self).__init__()
+                    self.emb = torch.nn.EmbeddingBag(num_embeddings=10, embedding_dim=12, mode='sum')
+                    self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
+
+                def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
+                            per_sample_weights: Optional[torch.Tensor] = None):
+                    x = self.emb(input, offsets, per_sample_weights)
+                    x = self.linear(x)
+                    return x
+
+            qengine = torch.backends.quantized.engine
+            qconfig_dict = {"": get_default_qat_qconfig(qengine),
+                            "object_type": [(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)]}
+
+            train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
+            eval_output = [[torch.randint(0, 10, (12, 1))]]
+
+            model = EmbeddingBagLinear().train()
+            prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
+            test_only_train_fn(prepared_fx_model, train_indices)
+            convert_custom_config_dict = {
+                "additional_object_mapping": {
+                    "static": {
+                        torch.nn.qat.EmbeddingBag: nn.quantized.EmbeddingBag,
+                    }
+                }
+            }
+            quant_model = convert_fx(prepared_fx_model,
+                                     convert_custom_config_dict=convert_custom_config_dict,
+                                     qconfig_dict=qconfig_dict)
+
+            def checkQuantized(model):
+                # Make sure EmbeddingBag is now a quantized EmbeddingBag.
+                self.assertTrue(type(model.emb), nn.quantized.EmbeddingBag)
+                # Also test that Linear has been quantized.
+                self.assertTrue(type(model.linear), nnq.Linear)
+
+                test_only_eval_fn(model, eval_output)
+                self.checkScriptable(model, eval_output)
+                self.checkNoQconfig(model)
+            checkQuantized(quant_model)
+
+
+    @override_qengines
+    def test_qat_embedding_linear(self):
+        for device in get_supported_device_types():
+            class EmbeddingLinear(torch.nn.Module):
+                def __init__(self):
+                    super(EmbeddingLinear, self).__init__()
+                    self.emb = torch.nn.Embedding(num_embeddings=10, embedding_dim=12)
+                    self.linear = torch.nn.Linear(12, 1).to(dtype=torch.float)
+
+                def forward(self, input: torch.Tensor):
+                    x = torch.sum(self.emb(input), dim=1)
+                    x = self.linear(x)
+                    return x
+
+            qengine = torch.backends.quantized.engine
+            qconfig_dict = {"": get_default_qat_qconfig(qengine),
+                            "object_type": [(torch.nn.Embedding, default_embedding_qat_qconfig)]}
+
+
+            train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
+            eval_output = [[torch.randint(0, 10, (12, 1))]]
+
+            model = EmbeddingLinear().train()
+            prepared_fx_model = prepare_qat_fx(model, qconfig_dict)
+            test_only_train_fn(prepared_fx_model, train_indices)
+            convert_custom_config_dict = {
+                "additional_object_mapping": {
+                    "static": {
+                        torch.nn.qat.Embedding: nn.quantized.Embedding,
+                    }
+                }
+            }
+            quant_model = convert_fx(prepared_fx_model,
+                                     convert_custom_config_dict=convert_custom_config_dict,
+                                     qconfig_dict=qconfig_dict)
+
+            def checkQuantized(model):
+                # Make sure EmbeddingBag is now a quantized EmbeddingBag.
+                self.assertTrue(type(model.emb), nn.quantized.Embedding)
+                # Also test that Linear has been quantized.
+                self.assertTrue(type(model.linear), nnq.Linear)
+
+                test_only_eval_fn(model, eval_output)
+                self.checkScriptable(model, eval_output)
+                self.checkNoQconfig(model)
+            checkQuantized(quant_model)
 
     @given(
         device=st.sampled_from(
