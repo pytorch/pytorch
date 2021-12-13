@@ -9738,7 +9738,7 @@ op_db: List[OpInfo] = [
                                     "test_out_arg_all_dtypes",
                                     device_type='cuda'),
                    ),
-                   supports_fwgrad_bwgrad=True,
+                   supports_fwgrad_bwgrad=False,  # Need: _s_where
                    supports_forward_ad=True),
     UnaryUfuncInfo('special.i1e',
                    aten_name='special_i1e',
@@ -10358,7 +10358,8 @@ op_db: List[OpInfo] = [
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_masked_select),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -10408,7 +10409,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
@@ -10424,7 +10426,8 @@ op_db: List[OpInfo] = [
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10520,7 +10523,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
     OpInfo('quantile',
            dtypes=floating_types(),
@@ -10835,7 +10839,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
@@ -11926,7 +11931,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
            skips=(
-                # Passes for complex, but for float - Need: _s_where
+               # Passes for complex, but for float - Need: _s_where
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=[torch.float64]),)
            ),
@@ -13126,7 +13131,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_index_select,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
@@ -13217,7 +13223,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           supports_fwgrad_bwgrad=True,  # Need: put_
            sample_inputs_func=sample_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13935,7 +13941,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
+           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+           supports_fwgrad_bwgrad=False,
            sample_inputs_func=sample_inputs_trace),
     OpInfo('transpose',
            aliases=('swapdims', 'swapaxes'),
@@ -15208,7 +15215,8 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+        supports_fwgrad_bwgrad=False,
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
