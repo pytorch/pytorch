@@ -122,7 +122,8 @@ function install_ucx() {
 export UCC_HOME='/usr'
 function install_ucc() {
     rm -rf ucc
-    git clone --recursive https://github.com/openucx/ucc.git
+    # git clone --recursive https://github.com/openucx/ucc.git
+    git clone --recursive https://github.com/zasdfgbnm/ucc.git -b fp16-fix
     pushd ucc
     ./autogen.sh
     ./configure --prefix=$UCC_HOME      \
