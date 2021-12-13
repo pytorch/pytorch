@@ -175,6 +175,7 @@ bool mayContainAlias(
     AliasDb& db,
     const Value* a,
     const FastSet<const Value*>& b) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
