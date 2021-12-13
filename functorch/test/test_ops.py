@@ -463,6 +463,8 @@ class TestOperators(TestCase):
         xfail('stft'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.conv_transpose1d', device_type='cuda'),
+        skip('nn.functional.conv_transpose2d', device_type='cuda'),
+        xfail('nn.functional.conv_transpose3d', device_type='cuda'),
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
