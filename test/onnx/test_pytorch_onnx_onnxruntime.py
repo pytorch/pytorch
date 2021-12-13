@@ -1730,7 +1730,7 @@ class TestONNXRuntime(unittest.TestCase):
                     x.to(dtype=torch.float64) // y.to(dtype=torch.int64), x.to(dtype=torch.float64) // y.to(dtype=torch.float64), \
                     x.to(dtype=torch.int64) // y.to(dtype=torch.int64), x.to(dtype=torch.int64) // y
 
-        x = torch.arange(0, 4).reshape(2, 3, 1)
+        x = torch.arange(0, 6).reshape(2, 3, 1)
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
@@ -1740,7 +1740,7 @@ class TestONNXRuntime(unittest.TestCase):
             def forward(self, x, y):
                 return x // 3, x // 2., x // y
 
-        x = torch.arange(0, 4).reshape(2, 3, 1)
+        x = torch.arange(0, 6).reshape(2, 3, 1)
         y = torch.rand(2, 3, 4)
         self.run_test(FloorDivModule(), (x, y))
 
