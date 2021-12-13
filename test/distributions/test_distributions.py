@@ -2306,7 +2306,7 @@ class TestDistributions(TestCase):
         df = (torch.rand([]) + 1) * 4
         scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(4, 4))
         d = Wishart(df=df, scale_tril=scale_tril)
-        samples = d.rsample((100000,))
+        samples = d.rsample((1000000,))
         empirical_mean = samples.mean(0)
         self.assertEqual(d.mean, empirical_mean, atol=0.05, rtol=0)
         empirical_var = samples.var(0)
