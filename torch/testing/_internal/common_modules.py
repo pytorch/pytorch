@@ -7,10 +7,10 @@ import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf)
+    _TestParametrizer, _update_param_kwargs, skipIf, skipCUDAIfCudnnVersionLessThan)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
@@ -153,6 +153,7 @@ class ModuleInfo(object):
                  decorators=None,  # Additional decorators to apply to generated tests
                  dtypes=floating_types(),  # dtypes this function is expected to work with
                  supports_gradgrad=True,  # whether the op supports second order gradients
+                 gradcheck_nondet_tol=0.0,  # tolerance for nondeterminism while performing gradcheck
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
@@ -160,6 +161,7 @@ class ModuleInfo(object):
         self.decorators = decorators
         self.dtypes = dtypes
         self.supports_gradgrad = supports_gradgrad
+        self.gradcheck_nondet_tol = gradcheck_nondet_tol
 
     def should_skip(self, cls_name, test_name, device_type, dtype):
         return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
@@ -476,6 +478,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_inputs_func=module_inputs_torch_nn_AdaptiveAvgPool2d),
     ModuleInfo(torch.nn.AvgPool1d,
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
@@ -489,29 +492,38 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=module_inputs_torch_nn_Conv2d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
                    # No channels_last support for Conv2d on cpu currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
+               decorators=(
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=module_inputs_torch_nn_Conv3d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
                    # No channels_last support for Conv3d on cpu currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),
                    # Greatest difference was 0.05072784423828125  > atol of 0.05
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),),
+               decorators=(
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=module_inputs_torch_nn_ConvTranspose2d,
+               gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                skips=(
                    # NHWC is disabled for float64 input in CudNN Conv.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', dtypes=[torch.float64]),
                    # No channels_last support for ConvTranspose2d on cpu currently.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
+               decorators=(
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),)
                ),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
