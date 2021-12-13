@@ -14170,8 +14170,8 @@ op_db: List[OpInfo] = [
                    supports_fwgrad_bwgrad=True,
                    safe_casts_outputs=True,
                    skips=(
-                        # Dispatch stub: unsupported device typemeta
-                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+                       # Dispatch stub: unsupported device typemeta
+                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
                    )),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
