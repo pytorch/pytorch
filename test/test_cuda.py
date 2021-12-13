@@ -528,17 +528,6 @@ class TestCuda(TestCase):
         y = torch.ones(10000000, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
-        # Test the case where the pinned data_ptr is not equal to the storage data_ptr.
-        x_base = torch.zeros(10000000, dtype=torch.uint8).pin_memory()
-        x = x_base[1:]
-        self.assertTrue(x.is_pinned())
-        self.assertTrue(x_base.is_pinned())
-        self.assertNotEqual(x_base.data_ptr(), x.data_ptr())
-        self.assertEqual(x_base.storage().data_ptr(), x.storage().data_ptr())
-        y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
-        _test_copy_non_blocking(x, y)
-
-
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -1647,6 +1636,20 @@ except RuntimeError as e:
     def test_norm_type_conversion(self):
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
+
+    # Verifies that mem_get_info works, including when called for a different device
+    def test_mem_get_info(self):
+        def _test(idx):
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+            t = torch.randn(1024 * 1024, device='cuda:' + str(idx))
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+
+            self.assertTrue(after_free_bytes < before_free_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
+
+        _test(0)
+        if TEST_MULTIGPU:
+            _test(1)
 
     # Test that wrap_with_cuda_memory_check successfully detects leak
     # skip for ROCM. Look into #62533.
