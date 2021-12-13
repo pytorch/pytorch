@@ -1666,7 +1666,6 @@ graph(%Ra, %Rb):
         mul_constant_int = filter(lambda x: isinstance(list(x.inputs())[1].toIValue(), int), scalar_muls)
         for mul in muls:
             with g.with_insert_point(mul):
-                import pdb; pdb.set_trace()
                 outputs = g.insertGraph(unrolled_mul.graph, list(mul.inputs()))
                 assert len(outputs) == len(list(mul.outputs()))
                 for new_out, old_out in zip(outputs, g.outputs()):
