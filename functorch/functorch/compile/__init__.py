@@ -3,6 +3,7 @@ from .._src.memory_efficient_op_authoring import memory_efficient_pointwise_fusi
 from .._src.python_key import nnc_jit, make_nnc, pythonkey_decompose
 from .._src.decompositions import register_decomposition, decomposition_table
 from .._src.nnc_compile import nnc_compile, get_ops
+from .._src.fx_minifier import minimizer
 from .._src.aot_autograd import (
     aot_function,
     aot_module,
