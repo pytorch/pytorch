@@ -19,13 +19,13 @@ from torch.testing._internal.common_utils import \
      TEST_WITH_ASAN, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU,
      iter_indices, gradcheck, gradgradcheck)
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes,
+    (instantiate_device_type_tests, dtypes, has_cusolver,
      onlyCPU, skipCUDAIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipCUDAVersionIn, skipMeta, skipCUDAIfNoCusolver)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    all_types, floating_types, floating_and_complex_types, get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes,
+    all_types, floating_and_complex_types, get_all_dtypes, get_all_int_dtypes, get_all_complex_dtypes,
     get_all_fp_dtypes,
 )
 from torch.testing._internal.common_cuda import SM53OrLater, tf32_on_and_off, CUDA11OrLater, CUDA9
@@ -2696,79 +2696,6 @@ class TestLinalg(TestCase):
         self.assertRaisesRegex(RuntimeError, "duplicate or invalid", torch.norm, x, "nuc", (0, 0))
         self.assertRaisesRegex(IndexError, "Dimension out of range", torch.norm, x, "nuc", (0, 2))
 
-    # ~~~ tests for torch.svd ~~~
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.double)
-    def test_svd(self, device, dtype):
-        def run_test(dims, some, compute_uv):
-            x = torch.randn(*dims, dtype=dtype, device=device)
-            outu = torch.empty(0, dtype=dtype, device=device)
-            outs = torch.empty(0, dtype=dtype, device=device)
-            outv = torch.empty(0, dtype=dtype, device=device)
-            torch.svd(x, some=some, compute_uv=compute_uv, out=(outu, outs, outv))
-
-            if compute_uv:
-                if some:
-                    x_recon = torch.matmul(outu, torch.matmul(outs.diag_embed(), outv.mT))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-                else:
-                    narrow_u = outu[..., :min(*dims[-2:])]
-                    narrow_v = outv[..., :min(*dims[-2:])]
-                    x_recon = torch.matmul(narrow_u, torch.matmul(outs.diag_embed(), narrow_v.mT))
-                    self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-            else:
-                _, singvals, _ = torch.svd(x, compute_uv=True)
-                self.assertEqual(singvals, outs, msg='Singular values mismatch')
-                self.assertEqual(outu, torch.zeros_like(outu), msg='U not zero')
-                self.assertEqual(outv, torch.zeros_like(outv), msg='V not zero')
-
-            resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
-            self.assertEqual(resu, outu, msg='outputs of svd and svd with out differ')
-            self.assertEqual(ress, outs, msg='outputs of svd and svd with out differ')
-            self.assertEqual(resv, outv, msg='outputs of svd and svd with out differ')
-
-            # test non-contiguous
-            x = torch.randn(*dims, dtype=dtype, device=device)
-            if x.numel() > 0:
-                n_dim = len(dims)
-                # Reverse the batch dimensions and the matrix dimensions and then concat them
-                x = x.permute(tuple(range(n_dim - 3, -1, -1)) + (n_dim - 1, n_dim - 2))
-                assert not x.is_contiguous(), "x is intentionally non-contiguous"
-                resu, ress, resv = torch.svd(x, some=some, compute_uv=compute_uv)
-                if compute_uv:
-                    if some:
-                        x_recon = torch.matmul(resu, torch.matmul(ress.diag_embed(), resv.mT))
-                        self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-                    else:
-                        narrow_u = resu[..., :min(*dims[-2:])]
-                        narrow_v = resv[..., :min(*dims[-2:])]
-                        x_recon = torch.matmul(narrow_u, torch.matmul(ress.diag_embed(), narrow_v.mT))
-                        self.assertEqual(x, x_recon, atol=1e-8, rtol=0, msg='Incorrect reconstruction using U @ diag(S) @ V.T')
-                else:
-                    _, singvals, _ = torch.svd(x, compute_uv=True)
-                    self.assertEqual(singvals, ress, msg='Singular values mismatch')
-                    self.assertEqual(resu, torch.zeros_like(resu), msg='U not zero')
-                    self.assertEqual(resv, torch.zeros_like(resv), msg='V not zero')
-
-        shapes = [(0, 0), (5, 0), (0, 5),  # empty matrices
-                  (0, 0, 0), (0, 5, 5), (0, 5, 3),  # zero batch dimension
-                  (3, 3), (5, 3, 3), (7, 5, 3, 3),  # square matrices
-                  (7, 3), (5, 7, 3), (7, 5, 7, 3),  # fat matrices
-                  (3, 7), (5, 3, 7), (7, 5, 3, 7)]  # thin matrices
-        for dims, some, compute_uv in product(shapes, [True, False], [True, False]):
-            run_test(dims, some, compute_uv)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float)
-    def test_svd_no_singularvectors(self, device, dtype):
-        for size in [(5, 5), (5, 20), (20, 5)]:
-            a = torch.randn(*size, device=device, dtype=dtype)
-            u, s_expect, v = torch.svd(a)
-            u, s_actual, v = torch.svd(a, compute_uv=False)
-            self.assertEqual(s_expect, s_actual, msg="Singular values don't match")
-
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
@@ -2841,200 +2768,54 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
-    @dtypes(torch.cfloat)
-    def test_svd_complex(self, device, dtype):
-        # this test verifies that torch.svd really returns V and not V.conj()
-        # see: https://github.com/pytorch/pytorch/issues/45821
-        t = torch.randn((10, 10), dtype=dtype, device=device)
-        U, S, V = torch.svd(t, some=False)
-        # verify that t ≈ t2
-        # t2 = U @ diag(S) @ Vᴴ
-        # Vᴴ is the conjugate transpose of V
-        t2 = U @ torch.diag(S).type(dtype) @ V.conj().T
-        self.assertEqual(t, t2)
-
-    def _test_svd_helper(self, shape, some, col_maj, device, dtype):
-        # test implementation below uses cpu unconditionally
-        if not torch._C.has_lapack:
-            reason = "PyTorch compiled without Lapack"
-            raise unittest.SkipTest(reason)
-        # To have accurate tests and less false positives on different CPUs and GPUs,
-        # we use double or complex double accuracy for CPU reference.
-        cpu_dtype = torch.complex128 if dtype.is_complex else torch.float64
-        cpu_tensor = torch.randn(shape, device='cpu', dtype=cpu_dtype)
-        device_tensor = cpu_tensor.to(device=device, dtype=dtype)
-        if col_maj:
-            cpu_tensor = cpu_tensor.t()
-            device_tensor = device_tensor.t()
-        cpu_result = torch.svd(cpu_tensor, some=some)
-        device_result = torch.svd(device_tensor, some=some)
-        m = min(cpu_tensor.shape[-2:])
-        # torch.svd returns torch.return_types.svd which is a tuple of (U, V, S).
-        # - When some==False, U[..., m:] can be arbitrary.
-        # - When some==True, U shape: [..., m], V shape: [m, m]
-        # - Signs are not deterministic. If the sign of a column of U is changed
-        #   then the corresponding column of the V has to be changed.
-        # Thus here we only compare result[..., :m].abs() from CPU and device.
-        for x, y in zip(cpu_result, device_result):
-            self.assertEqual(x[..., :m].abs(), y[..., :m].abs(), exact_dtype=False)
-
-    @skipCUDAIfNoMagma
-    @skipCPUIfNoLapack
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
+    @setLinalgBackendsToDefaultFinally
     @dtypes(*floating_and_complex_types())
-    def test_svd_errors_and_warnings(self, device, dtype):
-        for svd in [torch.svd, torch.linalg.svd]:
-            # if non-empty out tensor with wrong shape is passed a warning is given
-            a = torch.randn(3, 3, dtype=dtype, device=device)
-            real_dtype = a.real.dtype if dtype.is_complex else dtype
-            out_u = torch.empty(2, 2, dtype=dtype, device=device)
-            out_s = torch.empty(4, 4, dtype=real_dtype, device=device)
-            out_v = torch.empty(6, 6, dtype=dtype, device=device)
-            with warnings.catch_warnings(record=True) as w:
-                # Trigger warning
-                svd(a, out=(out_u, out_s, out_v))
-                # Check warning occurs
-                self.assertEqual(len(w), 3)
-                self.assertTrue("An output with one or more elements was resized" in str(w[-3].message))
-                self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
-                self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
+    def test_svd(self, device, dtype):
+        # tests linalg.svd, svd, linalg.svdvals
+        make_arg = partial(make_tensor, dtype=dtype, device=device)
 
-            # dtypes should be safely castable
-            out_u = torch.empty(0, dtype=torch.int, device=device)
-            out_s = torch.empty(0, dtype=torch.int, device=device)
-            out_v = torch.empty(0, dtype=torch.int, device=device)
-            with self.assertRaisesRegex(RuntimeError, "but got U with dtype Int"):
-                svd(a, out=(out_u, out_s, out_v))
+        backends = ["default"]
 
-            out_u = torch.empty(0, dtype=dtype, device=device)
-            if svd == torch.linalg.svd:
-                msg = "but got Vh with dtype Int"
-            else:
-                msg = "but got V with dtype Int"
-            with self.assertRaisesRegex(RuntimeError, msg):
-                svd(a, out=(out_u, out_s, out_v))
+        if torch.device(device).type == 'cuda':
+            if torch.cuda.has_magma:
+                backends.append("magma")
+            if has_cusolver():
+                backends.append("cusolver")
 
-            out_v = torch.empty(0, dtype=dtype, device=device)
-            with self.assertRaisesRegex(RuntimeError, "but got S with dtype Int"):
-                svd(a, out=(out_u, out_s, out_v))
+        ns = (5, 2, 0)
+        batches = ((), (0,), (1,), (2,), (2, 1), (0, 2))
 
-            # device should match
-            if torch.cuda.is_available():
-                wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
-                out_u = torch.empty(0, device=wrong_device, dtype=dtype)
-                out_s = torch.empty(0, device=wrong_device, dtype=real_dtype)
-                out_v = torch.empty(0, device=wrong_device, dtype=dtype)
-                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                    # error from out_u
-                    svd(a, out=(out_u, out_s, out_v))
+        for backend in backends:
+            torch.backends.cuda.preferred_linalg_library(backend)
 
-                out_u = torch.empty(0, device=device, dtype=dtype)
-                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                    # error from out_s
-                    svd(a, out=(out_u, out_s, out_v))
+            for batch, m, n in product(batches, ns, ns):
+                shape = batch + (m, n)
+                k = min(m, n)
+                A = make_arg(shape)
+                U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+                self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ Vh, A)
 
-                out_s = torch.empty(0, device=device, dtype=real_dtype)
-                with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
-                    # error from out_v
-                    svd(a, out=(out_u, out_s, out_v))
+                U_f, S_f, Vh_f = torch.linalg.svd(A, full_matrices=True)
+                self.assertEqual(S_f, S)
+                self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ Vh_f[..., :k, :], A)
 
-            # if input contains NaN then an error is triggered for svd
-            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
-            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
-            a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
-            a[0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                svd(a)
-            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
-            a = torch.randn(3, 33, 33, dtype=dtype, device=device)
-            a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, error_msg):
-                svd(a)
+                S_s = torch.linalg.svdvals(A)
+                self.assertEqual(S_s, S)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svd_square(self, device, dtype):
-        self._test_svd_helper((10, 10), True, False, device, dtype)
+                U, S, V = torch.svd(A, some=True)
+                self.assertEqual((U @ S.to(A.dtype).diag_embed()) @ V.mH, A)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_square_col_maj(self, device, dtype):
-        self._test_svd_helper((10, 10), True, True, device, dtype)
+                U_f, S_f, V_f = torch.svd(A, some=False)
+                self.assertEqual(S_f, S)
+                self.assertEqual((U_f[..., :k] @ S_f.to(A.dtype).diag_embed()) @ V_f[..., :k].mH, A)
 
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_some(self, device, dtype):
-        self._test_svd_helper((20, 5), True, False, device, dtype)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_all(self, device, dtype):
-        self._test_svd_helper((20, 5), False, False, device, dtype)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_some_col_maj(self, device, dtype):
-        self._test_svd_helper((5, 20), True, True, device, dtype)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_types())
-    def test_svd_tall_all_col_maj(self, device, dtype):
-        self._test_svd_helper((5, 20), False, True, device, dtype)
-
-    # ~~~ tests for torch.linalg.svd ~~~
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    def test_linalg_svd_compute_uv(self, device, dtype):
-        """
-        Test the default case. Here we have the very same behavior as
-        NumPy with compute_uv=True.
-        """
-        t = torch.randn((10, 11), device=device, dtype=dtype)
-        np_t = t.cpu().numpy()
-        for full_matrices in (True, False):
-            # check linalg.svd vs numpy
-            expected = np.linalg.svd(np_t, full_matrices, compute_uv=True)
-            actual = torch.linalg.svd(t, full_matrices)
-            # sign/phase of the singular vectors is not unique and therefore absolute values are compared
-            self.assertEqual(abs(actual[0]), abs(expected[0]))
-            self.assertEqual(actual[1], expected[1])
-            self.assertEqual(abs(actual[2]), abs(expected[2]))
-            # check linalg.svd vs linalg.svd(out=...)
-            out = (torch.empty_like(actual[0]),
-                   torch.empty_like(actual[1]),
-                   torch.empty_like(actual[2]))
-            out2 = torch.linalg.svd(t, full_matrices, out=out)
-            self.assertEqual(actual, out)
-            self.assertEqual(actual, out2)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_svdvals(self, device, dtype):
-
-        def run_test(shape):
-            # NumPy doesn't have separate svdvals function, it is included in
-            # svd with compute_uv=False
-            # so we test our implementation against numpy.linalg.svd(*, compute_uv=False)
-            A = make_tensor(shape, dtype=dtype, device=device)
-            expected = np.linalg.svd(A.cpu(), compute_uv=False)
-            actual = torch.linalg.svdvals(A)
-            self.assertEqual(actual, expected)
-
-        batches = [(), (0, ), (2, ), (2, 1)]
-        ns = [5, 2, 0]
-        for batch, (m, n) in itertools.product(batches, product(ns, ns)):
-            run_test((*batch, m, n))
+                S_s = torch.svd(A, compute_uv=False).S
+                self.assertEqual(S_s, S)
 
     @skipCUDAIfNoCusolver  # MAGMA backend doesn't work in this case
     @skipCUDAIfRocm
+    @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_svd_memory_allocation(self, device, dtype):
@@ -3044,14 +2825,9 @@ class TestLinalg(TestCase):
         n = 2**20
         a = make_tensor((m, n), dtype=dtype, device=device)
         # the following should run without errors
-        result = torch.linalg.svdvals(a)
+        S = torch.linalg.svdvals(a)
         result = torch.linalg.svd(a, full_matrices=False)
-
-        out0 = torch.empty_like(result[0])
-        out1 = torch.empty_like(result[1])
-        out2 = torch.empty_like(result[2])
-        torch.linalg.svdvals(a, out=out0)
-        torch.linalg.svd(a, full_matrices=False, out=(out0, out1, out2))
+        self.assertEqual(result.S, S)
 
     def cholesky_solve_test_helper(self, A_dims, b_dims, upper, device, dtype):
         from torch.testing._internal.common_utils import random_hermitian_pd_matrix

@@ -5668,13 +5668,16 @@ def sample_inputs_linalg_svd(op_info, device, dtype, requires_grad=False, **kwar
     return _sample_inputs_svd(op_info, device, dtype, requires_grad, is_linalg_svd=True)
 
 def sample_inputs_linalg_svdvals(op_info, device, dtype, requires_grad=False, **kwargs):
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     batches = [(), (0, ), (2, ), (1, 1)]
     ns = [5, 2, 0]
-    samples = []
-    for batch, (m, n) in product(batches, product(ns, ns)):
-        a = make_tensor((*batch, m, n), device, dtype, low=None, high=None, requires_grad=requires_grad)
-        samples.append(SampleInput(a))
-    return samples
+
+    def gen_samples():
+        for batch, m, n in product(batches, ns, ns):
+            yield SampleInput(make_arg(batch + (m, n)))
+
+    return list(gen_samples())
 
 def sample_inputs_softshrink_hardshrink_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs):
     N = 10

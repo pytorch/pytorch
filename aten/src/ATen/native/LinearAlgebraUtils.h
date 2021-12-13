@@ -5,12 +5,16 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/string_view.h>
 #include <c10/util/Optional.h>
+#include <ATen/core/DimVector.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 
 #include <functional>
 #include <string>
 #include <tuple>
 #include <vector>
+#include <type_traits>
 
 namespace at { namespace native {
 
@@ -29,6 +33,47 @@ TORCH_API Tensor cloneBatchedColumnMajor(const Tensor& src);
 
 Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows = -1,
     c10::optional<IntArrayRef> desired_batch_sizes = c10::nullopt);
+
+
+template<class Vec>
+Vec contiguous_strides_template(const IntArrayRef sizes, const bool f_contig=false) {
+  static_assert(std::is_same<IntArrayRef::value_type, typename Vec::value_type>::value,
+                "Incompatible integral type of sizes and strides");
+  // f_contig chooses between the strides of a batch of Fortran (F-contiguous) and C-contiguous matrices
+  using Int = IntArrayRef::value_type;
+  constexpr auto one = Int{1};
+  const auto n = sizes.size();
+  if (n == 0) {
+    return Vec{};
+  } else if (n == 1) {
+    // Use initializer-list to initialize the vector
+    return Vec{one};
+  }
+  // Now we have a matrix or batch of matrices
+  auto strides = Vec(n);
+  const auto last_idx = n - 1;
+  const auto snd_last_idx = n - 2;
+  // We'll fill the first two strides afterwards, otherwise the first step
+  // in the for loop is wrong
+  strides[snd_last_idx] = std::max<int64_t>(sizes[last_idx], one);
+  for (int i = snd_last_idx - 1; i >= 0; --i) {
+    strides[i] = strides[i + 1] * std::max(sizes[i + 1], one);
+  }
+  strides[last_idx] = f_contig ? std::max(sizes[snd_last_idx], one) : one;
+  if (f_contig) {
+    // We filled the wrong stride before so we correct it
+    strides[snd_last_idx] = one;
+  }
+  return strides;
+}
+
+DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig=false);
+
+std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig=false);
+
+c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig);
+
+Tensor borrow_else_clone_tensor(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig);
 
 TORCH_API int64_t batchCount(const Tensor& batched_matrices);
 
@@ -131,7 +176,6 @@ void batch_iterator_with_broadcasting(const Tensor& a, const Tensor& b, const fu
   iter.serial_for_each(loop, {0, batchCount(b)});
 }
 
-
 // Returns the epsilon value for floating types except half
 double _get_epsilon(const ScalarType& sc_type);
 
@@ -163,7 +207,6 @@ TORCH_API std::tuple<std::vector<int64_t>,
                      std::vector<int64_t>,
                      int64_t> _compute_geometry_for_Q(const Tensor& input, bool reduced);
 
-TORCH_API std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv, const bool svd_use_cusolver=false);
 
 TORCH_API Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options);
 
@@ -175,7 +218,9 @@ TORCH_API int64_t computeLRWorkDim(const char jobz, int64_t m, int64_t n);
 
 void checkUplo(const c10::string_view uplo);
 
-void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result");
+bool svd_uses_cusolver(const Tensor& A);
+
+TORCH_API void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result");
 
 void checkLinalgCompatibleDtype(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name = "result");
 

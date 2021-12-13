@@ -7,7 +7,11 @@ from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 Tensor = torch.Tensor
 
 common_notes = {
-    "sync_note": """When inputs are on a CUDA device, this function synchronizes that device with the CPU."""
+    "experimental_warning": """This function is "experimental" and it may change in a future PyTorch release.""",
+    "sync_note": "When inputs are on a CUDA device, this function synchronizes that device with the CPU.",
+    "sync_note_ex": r"When the inputs are on a CUDA device, this function synchronizes only when :attr:`check_errors`\ `= True`.",
+    "sync_note_has_ex": ("When inputs are on a CUDA device, this function synchronizes that device with the CPU. "
+                         "For a version of this function that does not synchronize, see :func:`{}`.")
 }
 
 

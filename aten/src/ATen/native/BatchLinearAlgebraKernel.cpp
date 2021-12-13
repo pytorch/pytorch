@@ -943,6 +943,82 @@ void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
   lu_solve_trans_kernel(b, lu, pivots, TransposeType::NoTranspose);
 }
 
+template <typename scalar_t>
+static void apply_svd(const Tensor& A,
+                      const bool full_matrices,
+                      const bool compute_uv,
+                      const Tensor& U,
+                      const Tensor& S,
+                      const Tensor& Vh,
+                      const Tensor& info) {
+#if !AT_BUILD_WITH_LAPACK()
+  AT_ERROR("svd: LAPACK library not found in compilation");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  const auto A_data = A.data_ptr<scalar_t>();
+  const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
+  const auto S_data = S.data_ptr<value_t>();
+  const auto info_data = info.data_ptr<int>();
+  const auto Vh_data = compute_uv ? Vh.data_ptr<scalar_t>() : nullptr;
+  const auto A_stride = matrixStride(A);
+  const auto S_stride = S.size(-1);
+  const auto U_stride = compute_uv ? matrixStride(U) : 1;
+  const auto Vh_stride = compute_uv ? matrixStride(Vh) : 1;
+  const auto batchsize = batchCount(A);
+  const char jobz = compute_uv ? (full_matrices ? 'A' : 'S') : 'N';
+
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+  const auto lda = A.strides().end()[-1];
+  const auto ldu= compute_uv ? U.strides().end()[-1] : 1;
+  const auto ldvh = compute_uv ? Vh.strides().end()[-1] : 1;
+
+  auto iwork = std::vector<int>(8 * std::min(m, n));
+  auto* const iwork_data = iwork.data();
+
+  // rwork is just used for the complex decomposition
+  auto rwork = std::vector<value_t>{};
+  if (A.is_complex()) {
+    rwork.resize(std::max(computeLRWorkDim(jobz, m, n), int64_t{1}));
+  }
+  auto* const rwork_data = rwork.data();
+
+  // Query svd for the optimal lwork size
+  int lwork = -1;
+  {
+    scalar_t wkopt;
+    lapackSvd<scalar_t, value_t>(jobz, m, n, A_data, lda, S_data, U_data, ldu, Vh_data, ldvh, &wkopt, lwork, rwork_data, iwork_data, info_data);
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  }
+  auto work = std::vector<scalar_t>(lwork);
+  auto* const work_data = work.data();
+
+  for (const auto i : c10::irange(batchsize)) {
+    auto* const A_working_ptr = &A_data[i * A_stride];
+    auto* const S_working_ptr = &S_data[i * S_stride];
+    auto* const U_working_ptr = compute_uv ? &U_data[i * U_stride] : nullptr;
+    auto* const Vh_working_ptr = compute_uv ? &Vh_data[i * Vh_stride] : nullptr;
+
+    // Compute S, U (optionally) and Vh (optionally)
+    lapackSvd<scalar_t, value_t>(jobz, m, n, A_working_ptr, lda,
+                        S_working_ptr, U_working_ptr, ldu, Vh_working_ptr, ldvh, work_data, lwork, rwork_data, iwork_data, info_data + i);
+  }
+#endif
+}
+
+void svd_kernel(const Tensor& A,
+                const bool full_matrices,
+                const bool compute_uv,
+                const Tensor& U,
+                const Tensor& S,
+                Tensor& Vh,
+                const Tensor& infos) {
+  // Need to copy A as column major, as its contents will be destroyed in the LAPACK call.
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "linalg_svd_cpu", [&]{
+    apply_svd<scalar_t>(cloneBatchedColumnMajor(A), full_matrices, compute_uv, U, S, Vh, infos);
+  });
+}
+
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
@@ -1010,4 +1086,8 @@ REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
+REGISTER_ARCH_DISPATCH(svd_stub, DEFAULT, &svd_kernel);
+REGISTER_AVX512_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_AVX2_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_VSX_DISPATCH(svd_stub, &svd_kernel);
 }} // namespace at::native

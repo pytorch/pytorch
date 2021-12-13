@@ -3,6 +3,7 @@
 #include <c10/core/ScalarType.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <limits>
 #include <sstream>
 #include <cstring>
@@ -72,6 +73,32 @@ Tensor copyBatchedColumnMajor(const Tensor& src, int64_t nrows,
   auto copy = at::empty_strided(copy_sizes, copy_strides, src.options());
   copy.narrow(-2, 0, src.size(-2)).copy_(src);
   return copy;
+}
+
+DimVector contiguous_strides(const IntArrayRef sizes, const bool f_contig) {
+  return contiguous_strides_template<DimVector>(sizes, f_contig);
+}
+
+std::vector<int64_t> contiguous_strides_vec(const IntArrayRef sizes, const bool f_contig) {
+  return contiguous_strides_template<std::vector<int64_t>>(sizes, f_contig);
+}
+
+/*
+ * contig chooses between C-contig (true) and F-contig (false)
+ */
+c10::MaybeOwned<Tensor> borrow_else_clone(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig) {
+  return cond ? c10::MaybeOwned<Tensor>::borrowed(borrow)
+              : c10::MaybeOwned<Tensor>::owned(contig ? clone.clone(MemoryFormat::Contiguous)
+                                                      : cloneBatchedColumnMajor(clone));
+}
+
+/*
+ * contig chooses between C-contig (true) and F-contig (false)
+ */
+Tensor borrow_else_clone_tensor(const bool cond, const Tensor& borrow, const Tensor& clone, const bool contig) {
+  return cond ? borrow
+              : contig ? clone.clone(MemoryFormat::Contiguous)
+                       : cloneBatchedColumnMajor(clone);
 }
 
 /*
@@ -311,64 +338,6 @@ std::tuple<std::vector<int64_t>,
   return std::make_tuple(q_sizes, q_strides, n_columns_q);
 }
 
-// Function to generate empty tensors of required size, strides and dtype for the SVD operation
-std::tuple<Tensor, Tensor, Tensor> _create_U_S_VT(const Tensor& input, bool some, bool compute_uv,
-    const bool svd_use_cusolver) {
-
-  // U, S, VT are initialized as empty tensors.
-  // For CPU LAPACK and GPU MAGMA backend, the tensors are initialized on CPU.
-  // For GPU cuSOLVER backend, the tensors are initialized on GPU.
-  const auto usvt_device = svd_use_cusolver ? at::kCUDA : at::kCPU;
-
-  auto sizes = input.sizes().vec();
-  int64_t m = input.size(-2), n = input.size(-1);
-
-  sizes[input.dim() - 1] = some ? std::min(m, n) : m;
-  auto u_strides = at::detail::defaultStrides(sizes);
-  // U should be a column-major or a batch of column-major matrices
-  // ... x m x ucol will have strides: ...., ucol, 1
-  // We require: ...., 1, m
-  u_strides[input.dim() - 1] = m;
-  u_strides[input.dim() - 2] = 1;
-
-  // cuSOLVER's gesvdjBatched fails with illegal memory access and
-  // cuSOLVER's gesvdj fails with CUSOLVER_STATUS_EXECUTION_FAILED
-  // if matrices for U and VT are not allocated
-  // even though the result of computation is not used we need to allocate this memory
-
-  Tensor U_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, u_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // VT should be a column-major or a batch of column-major matrices
-  sizes[input.dim() - 2] = some ? std::min(m, n) : n;
-  sizes[input.dim() - 1] = n;
-  auto vt_strides = at::detail::defaultStrides(sizes);
-  if (!svd_use_cusolver) {
-    vt_strides[input.dim() - 1] = sizes[input.dim() - 2];
-    vt_strides[input.dim() - 2] = 1;
-  }
-  Tensor VT_empty = (compute_uv || svd_use_cusolver)
-      ? at::empty_strided(sizes, vt_strides, input.options().device(usvt_device))
-      : at::empty({0}, input.options().device(usvt_device));
-
-  // U and VT might not get filled in this case
-  if (!some && compute_uv && input.numel() == 0) {
-    U_empty.zero_();
-    VT_empty.zero_();
-    // make U and VT an identity matrix, because they should be orthogonal
-    U_empty.diagonal(0, -2, -1).fill_(1);
-    VT_empty.diagonal(0, -2, -1).fill_(1);
-  }
-
-  sizes.pop_back();
-  sizes[input.dim() - 2] = std::min(m, n);
-  ScalarType dtype = toValueType(input.scalar_type());
-  Tensor S_empty = at::empty(sizes, input.options().dtype(dtype).device(usvt_device));
-
-  return std::tuple<Tensor, Tensor, Tensor>(U_empty, S_empty, VT_empty);
-}
-
 // Function used instead of .to so that the original strides are retained
 // .to doesn't retain strides and make the output tensor contiguous
 Tensor same_stride_to(const Tensor& original_tensor, const at::TensorOptions& options) {
@@ -443,6 +412,14 @@ void checkUplo(const c10::string_view uplo) {
   char uplo_uppercase = static_cast<char>(std::toupper(static_cast<unsigned char>(uplo[0])));
   TORCH_CHECK(uplo.size() == 1 && (uplo_uppercase == 'U' || uplo_uppercase == 'L'),
     "Expected UPLO argument to be 'L' or 'U', but got ", uplo);
+}
+
+bool svd_uses_cusolver(const Tensor& A) {
+  // if cusolver is available, it is used unconditionallY
+  return A.is_cuda()
+         && at::globalContext().hascuSOLVER()
+         && (at::globalContext().linalgPreferredBackend() != at::LinalgBackend::Magma
+             || !at::globalContext().hasMAGMA());
 }
 
 void checkSameDevice(const std::string& fn_name, Tensor result, Tensor input, const std::string& result_name) {
