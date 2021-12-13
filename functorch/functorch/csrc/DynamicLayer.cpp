@@ -27,6 +27,11 @@ constexpr DispatchKeySet all_dynlayer_keyset = DispatchKeySet({
   DispatchKey::ADInplaceOrView
 }) | autograd_dispatch_keyset;
 
+static void setDynamicLayerFrontBackKeysIncluded(bool included) {
+  c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, included);
+  c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, included);
+}
+
 using DynmetaData = std::unordered_map<int64_t, std::shared_ptr<bool>>;
 DynmetaData kDynMetaDataSingleton;
 
@@ -102,8 +107,7 @@ static DynamicLayer popDynamicLayer() {
       std::cout << "DynamicLayer off" << std::endl;
     }
 #endif
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, false);
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, false);
+    setDynamicLayerFrontBackKeysIncluded(false);
   }
 
   return result;
@@ -116,8 +120,7 @@ static int64_t pushDynamicLayer(DynamicLayer&& dynamic_layer) {
   dynamicLayerStack.emplace_back(dynamic_layer);
 
   if (layerId == 2) {
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
+    setDynamicLayerFrontBackKeysIncluded(true);
   }
 
   return layerId;
@@ -136,8 +139,7 @@ static int64_t pushDynamicLayer(
 
   if (layerId == 2) {
     // std::cout << "DynamicLayer on" << std::endl;
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
-    c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
+    setDynamicLayerFrontBackKeysIncluded(true);
   }
 
   return layerId;
@@ -532,8 +534,7 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   SaveLocalDispatchKeySet save_guard;
   auto keyset = c10::impl::PODLocalDispatchKeySet();
   c10::impl::_force_tls_local_dispatch_key_set(keyset);
-  c10::impl::tls_set_dispatch_key_included(kDynamicLayerFrontModeKey, true);
-  c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, true);
+  setDynamicLayerFrontBackKeysIncluded(true);
 
   // Re-dispatch
   if (cur_key == DispatchKey::Autograd && *prev_grad_mode == false) {
