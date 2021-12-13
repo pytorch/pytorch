@@ -2,6 +2,7 @@
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
@@ -387,6 +388,7 @@ const at::cuda::NVRTC& nvrtc() {
 }
 
 // query codegen output arch and target
+// TODO refactor so this function is usable both from jit and from aten
 void codegenOutputQuery(
     const cudaDeviceProp* const prop,
     int& major,
@@ -431,6 +433,19 @@ void codegenOutputQuery(
     major = dev_version.first;
     minor = dev_version.second;
     compile_to_sass = true;
+  }
+}
+
+//TODO another copy paste from jit, refactor so it's usable from both
+void __inline__ initializeCudaContext() {
+  // lazily construct context if non-existing yet;
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    std::unique_lock<std::mutex> cudaFreeMutexLock(
+        *(c10::cuda::CUDACachingAllocator::getFreeMutex()));
+    cudaFree(nullptr);
   }
 }
 
@@ -640,7 +655,7 @@ void launch_jitted_pwise_function(
     std::array<void*, 7>& args,
     const int nBlocks,
     const int kBlockSize) {
-  cudaFree(0); //FIXME
+  initializeCudaContext();
   const auto& nvrtc = at::globalContext().getNVRTC();
   // Launches kernel on current stream
   auto stream = at::cuda::getCurrentCUDAStream();
