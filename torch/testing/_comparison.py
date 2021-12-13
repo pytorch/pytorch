@@ -823,9 +823,7 @@ class TensorLikePair(Pair):
     ) -> None:
         """Checks if the values of two tensors are close up to a desired tolerance."""
         actual, expected = self._promote_for_comparison(actual, expected)
-        # torch.isclose is currently not supported on the XLA backend
-        comparison_fn = self._isclose_xla if actual.device.type == "xla" else torch.isclose
-        mismatches = ~comparison_fn(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
+        mismatches = ~torch.isclose(actual, expected, rtol=rtol, atol=atol, equal_nan=equal_nan)
         if not torch.any(mismatches):
             return
 
@@ -852,32 +850,6 @@ class TensorLikePair(Pair):
         else:
             dtype = torch.int64
         return actual.to(dtype), expected.to(dtype)
-
-    # TODO: remove this as soon as torch.isclose is supported on the XLA backend
-    def _isclose_xla(
-            self, actual: torch.Tensor, expected: torch.Tensor, *, rtol: float, atol: float, equal_nan: bool
-    ) -> torch.Tensor:
-        matches = actual == expected
-        if equal_nan:
-            # FIXME: debug
-            a = actual.isnan()
-            b = expected.isnan()
-            mask = a.to(torch.bool) & b.to(torch.bool)
-            matches[mask] = True
-
-        if rtol == 0 and atol == 0:
-            return matches
-
-        abs_diff = torch.abs(actual - expected)
-        tolerance = atol + rtol * torch.abs(expected)
-
-        # FIXME: debug
-        c = abs_diff.isfinite()
-        d = abs_diff <= tolerance
-        mask = c.to(torch.bool) & d.to(torch.bool)
-        matches[mask] = True
-
-        return matches
 
     def extra_repr(self) -> Sequence[str]:
         return (
