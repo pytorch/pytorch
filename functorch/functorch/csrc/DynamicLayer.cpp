@@ -32,6 +32,20 @@ static void setDynamicLayerFrontBackKeysIncluded(bool included) {
   c10::impl::tls_set_dispatch_key_included(kDynamicLayerBackModeKey, included);
 }
 
+struct ForceLocalDispatchKeySet {
+ public:
+  ForceLocalDispatchKeySet(c10::impl::LocalDispatchKeySet key_set) :
+      saved_keyset_(c10::impl::tls_local_dispatch_key_set()) {
+    c10::impl::_force_tls_local_dispatch_key_set(key_set);
+  }
+  ~ForceLocalDispatchKeySet() {
+    c10::impl::_force_tls_local_dispatch_key_set(saved_keyset_);
+  }
+
+ private:
+  c10::impl::LocalDispatchKeySet saved_keyset_;
+};
+
 DynamicLayer::DynamicLayer(
     DispatchKey key,
     int64_t layerId,
@@ -468,7 +482,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   auto layer = dynamicLayerStack.back();
 
   DispatchKeySet exclude = keysToExcludeWhenEnteringDynamicLayer(layer.key());
-  DispatchKeySet include;
+  DispatchKeySet hacky_include;
   // hack
   if (layer.key() == kBatchedKey) {
     // Only enable dispatch on kBatchedKey if there are tensors batched
@@ -477,10 +491,12 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
     if (allTensors(args, notBatchedAtCurrentLevel)) {
       exclude = exclude.add(kBatchedKey);
     }
-    include = include.add(kVmapModeKey);
+    hacky_include = hacky_include.add(kVmapModeKey);
   }
-  c10::impl::ExcludeDispatchKeyGuard exclude_guard(exclude);
-  c10::impl::IncludeDispatchKeyGuard include_guard(include);
+  auto local_keyset = c10::impl::tls_local_dispatch_key_set();
+  local_keyset.excluded_ = local_keyset.excluded_ | exclude;
+  local_keyset.included_ = local_keyset.included_ | hacky_include;
+  ForceLocalDispatchKeySet guard(local_keyset);
 
   // Re-dispatch
   op.callBoxed(stack);
