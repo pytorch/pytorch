@@ -208,7 +208,7 @@ void LlgaKernel::run(Stack& stack) {
   });
 
   // Even in case of concurrent threads, the kernel would be initialized once.
-  std::call_once(initialized_flag, 
+  std::call_once(initialized_flag,
                  [&](const TensorArgs& inputs) {
                    GRAPH_DEBUG("Initializing input logical tensors");
                    inputSpecs_ = initializeInputSpecs(inputs);
