@@ -47,12 +47,40 @@ std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rul
   return std::make_tuple(result, 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> randn_like_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Disable the random key
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  return std::make_tuple(
+      at::randn_like(self, dtype, layout, device, pin_memory, optional_memory_format),
+      self_bdim);
+}
+
+std::tuple<Tensor,optional<int64_t>> rand_like_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // Disable the random key
+  c10::impl::ExcludeDispatchKeyGuard guard(kVmapModeKey);
+  return std::make_tuple(
+      at::rand_like(self, dtype, layout, device, pin_memory, optional_memory_format),
+      self_bdim);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("ones_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(ones_like)));
   VMAP_SUPPORT("zeros_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(zeros_like)));
   VMAP_SUPPORT("empty_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(empty_like)));
-  VMAP_SUPPORT("randn_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(randn_like)));
-  VMAP_SUPPORT("rand_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(rand_like)));
+  VMAP_SUPPORT("randn_like", randn_like_batch_rule);
+  VMAP_SUPPORT("rand_like", rand_like_batch_rule);
   VMAP_SUPPORT("full_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(full_like)));
   VMAP_SUPPORT("new_empty", NEW_BLAH_BATCH_RULE(ATEN_FN(new_empty)));
   VMAP_SUPPORT("new_zeros", NEW_BLAH_BATCH_RULE(ATEN_FN(new_zeros)));
