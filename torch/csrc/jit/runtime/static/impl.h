@@ -81,7 +81,7 @@ TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
 class ValueGroup {
  public:
   explicit ValueGroup() = default;
-  void init(const std::shared_ptr<torch::jit::Graph>& graph, AliasDb& db);
+  void init(const Block& block, const AliasDb& db);
 
   bool isExternalAlias(const Value* value) const {
     return external_aliases_.find(value) != external_aliases_.end();
@@ -111,7 +111,8 @@ class TORCH_API ManagedTensorRanges {
  public:
   ManagedTensorRanges() = default;
   ManagedTensorRanges(
-      const std::shared_ptr<Graph>& graph,
+      Block* block,
+      const AliasDb& alias_db,
       const FastSet<const Value*>& managed_tensor_values);
 
   // If true, then this node is the last use of at least one
@@ -209,11 +210,112 @@ struct TORCH_API StaticModuleOptions {
 ///   pool.push(runtime);
 /// @endcode
 ///
-
 class MemoryPlanner;
 class ProcessedFunction;
 class ProcessedNode;
 class StaticRuntime;
+
+class BlockInfo {
+ public:
+  BlockInfo(uint32_t input_idx, Block* block)
+      : input_idx_(input_idx), block_(block) {}
+
+  void set_nodes(
+      std::vector<ProcessedNode> nodes,
+      const FastMap<Node*, bool>& node_has_out_variant);
+
+  // NB: This function copies nodes_ since each block runner instance
+  // needs its own copy!
+  std::vector<ProcessedNode> nodes() const {
+    return nodes_;
+  }
+
+  size_t num_nodes() const {
+    return nodes_.size();
+  }
+
+  size_t num_inputs() const {
+    return block_->inputs().size();
+  }
+
+  size_t num_outputs() const {
+    return block_->outputs().size();
+  }
+
+  graph_node_list node_ptrs() const {
+    return block_->nodes();
+  }
+
+  void set_output_indices(std::vector<uint32_t> indices) {
+    output_indices_ = std::move(indices);
+  }
+
+  const std::vector<uint32_t>& block_output_indices() const {
+    return output_indices_;
+  }
+
+  auto block_inputs_idx() const {
+    return input_idx_;
+  }
+
+  bool node_is_optimizable_container_type(const Node* node) const {
+    return node_is_optimizable_container_type_.find(node) !=
+        node_is_optimizable_container_type_.end();
+  }
+
+  bool value_is_managed_tensor(const Value* value) const {
+    return managed_tensor_values_.find(value) != managed_tensor_values_.end();
+  }
+
+  bool value_is_leaked_container(const Value* value) const {
+    return leaked_values_.find(value) != leaked_values_.end();
+  }
+
+  const ValueGroup& value_group() const {
+    return value_group_;
+  }
+
+  const ManagedTensorRanges& managed_tensor_ranges() const {
+    return managed_tensor_ranges_;
+  }
+
+  void init_value_group(const AliasDb& alias_db) {
+    value_group_.init(*block_, alias_db);
+  }
+
+  void prepare_for_memory_planner(
+      const AliasDb& alias_db,
+      const StaticModuleOptions& opt);
+
+  const auto& managed_output_tensor_values() const {
+    return managed_output_tensor_values_;
+  }
+
+  const auto& managed_tensor_values() const {
+    return managed_tensor_values_;
+  }
+
+  const auto& leaked_values() const {
+    return leaked_values_;
+  }
+
+ private:
+  std::vector<ProcessedNode> nodes_{};
+
+  ValueGroup value_group_;
+
+  FastSet<const Node*> node_is_optimizable_container_type_{};
+  FastSet<const Value*> managed_tensor_values_{};
+  FastSet<const Value*> managed_output_tensor_values_{};
+  FastSet<const Value*> leaked_values_{};
+
+  ManagedTensorRanges managed_tensor_ranges_{};
+
+  const uint32_t input_idx_;
+  std::vector<uint32_t> output_indices_;
+  Block* block_;
+};
+
 class TORCH_API StaticModule {
  public:
   explicit StaticModule(
@@ -225,22 +327,11 @@ class TORCH_API StaticModule {
       bool is_frozen = false,
       const StaticModuleOptions& opts = StaticModuleOptions());
 
-  typedef enum {
-    CONSTANT_VALUE = -2, // VALUE nodes defined by prim::Constant
-    INPUT_VALUE = -1, // VALUE nodes representing graph inputs
-  } VALUE_KIND;
-
  private:
   explicit StaticModule(
       std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
-
-  // for <kind, idx>
-  //   if kind == CONSTANT_VALUE: map to constants_[idx]
-  //   if kind == INPUT_VALUE: map to inputs_[idx]
-  //   otherwise: map to nodes_[kind].outputs()[idx]
-  using DefInfo = std::pair<int, int>;
 
  public:
   using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
@@ -262,68 +353,37 @@ class TORCH_API StaticModule {
 
   const StaticModuleOptions& opts() const;
 
-  const ValueGroup& valueGroup() const {
-    return value_group_;
-  }
-
   size_t num_inputs() const;
   size_t num_outputs() const;
-
-  C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
-    return output_indices_;
-  }
 
   const std::vector<IValue>& constants() const {
     return constants_;
   }
 
+  const BlockInfo& block_info(size_t block_idx) const {
+    DCHECK(block_idx < blocks_.size());
+    return blocks_[block_idx];
+  }
+
  private:
   friend class StaticRuntime;
-
-  // Our nodes don't have their inputs & outputs initialized; don't
-  // let anybody but StaticRuntime and tests get them.
-  const std::vector<ProcessedNode>& nodes() const {
-    return nodes_;
-  }
+  friend class StaticRuntimeBlockRunner;
 
  public:
   auto num_nodes() const {
-    return nodes_.size();
+    return std::accumulate(
+        blocks_.begin(),
+        blocks_.end(),
+        0,
+        [](size_t sum, const BlockInfo& block_info) {
+          return sum + block_info.num_nodes();
+        });
   }
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
-  graph_node_list node_ptrs() const {
-    return graph_->nodes();
-  }
-
-  bool is_optimizable_container_type(const Node* n) const {
-    auto it = node_is_optimizable_container_type_.find(n);
-    return it != node_is_optimizable_container_type_.end();
-  }
-
   const c10::optional<c10::FunctionSchema>& schema() const {
     return schema_;
-  }
-
-  const ValueGroup& value_group() const {
-    return value_group_;
-  }
-
-  const FastSet<const Value*>& managed_tensor_values() const {
-    return managed_tensor_values_;
-  }
-
-  const FastSet<const Value*>& managed_output_tensor_values() const {
-    return managed_output_tensor_values_;
-  }
-
-  const FastSet<const Value*>& leaked_values() const {
-    return leaked_values_;
-  }
-
-  const ManagedTensorRanges& managed_tensor_ranges() const {
-    return managed_tensor_ranges_;
   }
 
   bool first_input_is_self() const {
@@ -332,7 +392,30 @@ class TORCH_API StaticModule {
 
   StaticRuntime& runtime();
 
+  size_t value_buffer_size() const {
+    return value_buffer_size_;
+  }
+
  private:
+  size_t prepareBlocksAndOutputIndices(
+      Block* block,
+      const size_t start_idx,
+      std::vector<uint32_t>& node_output_idx_map,
+      FastMap<const Value*, uint32_t>& value_to_index);
+
+  void prepareFunctionsAndConstants(
+      Block* block,
+      const AliasDb& alias_db,
+      FastMap<const Value*, uint32_t>& value_to_index);
+
+  std::pair<size_t, size_t> prepareProcessedNodes(
+      Block* block,
+      const std::vector<uint32_t>& node_output_idx_map,
+      const FastMap<const Value*, uint32_t>& value_to_index,
+      const AliasDb& alias_db,
+      size_t node_idx = 0,
+      size_t block_idx = 0);
+
   // Initialize various attributes that the memory planner will need.
   // To be called at the tail of the ctor.
   void prepareForMemoryPlanner();
@@ -348,29 +431,21 @@ class TORCH_API StaticModule {
   std::vector<IValue> constants_;
   // The functions to be called by corresponding ProcessedNode.
   std::vector<ProcessedFunction> functions_{};
-  // The nodes we need to run
-  std::vector<ProcessedNode> nodes_;
-  // Indices of graph outputs in the single values array.
-  std::vector<uint16_t> output_indices_;
-
-  ValueGroup value_group_;
-
-  FastSet<const Node*> node_is_optimizable_container_type_;
-
-  FastSet<const Value*> managed_tensor_values_{};
-  FastSet<const Value*> managed_output_tensor_values_{};
-  FastSet<const Value*> leaked_values_{};
-  ManagedTensorRanges managed_tensor_ranges_{};
+  std::vector<BlockInfo> blocks_;
+  size_t value_buffer_size_ = 0;
 };
 
-class TORCH_API StaticRuntime {
+class TORCH_API StaticRuntimeBlockRunner {
  public:
-  explicit StaticRuntime(const StaticModule& sm);
-  StaticRuntime(StaticRuntime&&) = delete;
-  StaticRuntime& operator=(StaticRuntime&&) = delete;
-  ~StaticRuntime();
+  explicit StaticRuntimeBlockRunner(
+      const StaticModule& sm,
+      std::vector<IValue>& values,
+      const size_t block_idx);
+  StaticRuntimeBlockRunner(StaticRuntimeBlockRunner&&) = delete;
+  StaticRuntimeBlockRunner& operator=(StaticRuntimeBlockRunner&&) = delete;
+  ~StaticRuntimeBlockRunner();
 
-  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntime);
+  C10_DISABLE_COPY_AND_ASSIGN(StaticRuntimeBlockRunner);
 
   using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
   c10::IValue operator()(
@@ -413,10 +488,15 @@ class TORCH_API StaticRuntime {
 
   // Input is readwrite
   IValue& Input(uint32_t i) {
-    DCHECK_LT(i, static_module_.num_inputs());
+    DCHECK_LT(i, block_info_.num_inputs());
     DCHECK_LT(i, values_.size());
-    return values_[i];
+    return values_[i + block_info_.block_inputs_idx()];
   }
+
+  size_t init_sub_blocks(
+      const StaticModule& sm,
+      std::vector<IValue>& values,
+      size_t block_idx);
 
   // Output is readonly. The writing process happens inside ProcessedNodes
   C10_NODISCARD const IValue& Output(uint32_t i) const {
@@ -437,7 +517,7 @@ class TORCH_API StaticRuntime {
   }
 
   graph_node_list node_ptrs() const {
-    return static_module_.node_ptrs();
+    return block_info_.node_ptrs();
   }
 
   const Graph& graph() const {
@@ -449,10 +529,6 @@ class TORCH_API StaticRuntime {
   }
 
   bool check_for_memory_leak(bool output_returned = true);
-
-  bool is_optimizable_container_type(Node* n) const {
-    return static_module_.is_optimizable_container_type(n);
-  }
 
   // WARNING: Deallocate managed output tensors.  A client receiving Static
   // Runtime-managed Tensors needs to be very careful to call
@@ -483,7 +559,8 @@ class TORCH_API StaticRuntime {
   // when destructed.
   class Deallocator {
    public:
-    explicit Deallocator(StaticRuntime& runtime) : runtime_(runtime) {}
+    explicit Deallocator(StaticRuntimeBlockRunner& block_runner)
+        : block_runner_(block_runner) {}
 
     Deallocator(Deallocator&&) = default;
     Deallocator(const Deallocator&) = default;
@@ -499,7 +576,7 @@ class TORCH_API StaticRuntime {
     void cleanupImpl();
 
     bool finished_ = false;
-    StaticRuntime& runtime_;
+    StaticRuntimeBlockRunner& block_runner_;
   };
 
   template <typename IValueList>
@@ -520,8 +597,8 @@ class TORCH_API StaticRuntime {
 
   // clean up owning refs of input IValues
   void clean_up_input_ivalues() noexcept {
-    for (const auto idx : c10::irange(static_module_.num_inputs())) {
-      values_[idx] = IValue();
+    for (const auto idx : c10::irange(block_info_.num_inputs())) {
+      values_[idx + inputs_begin_] = IValue();
     }
   }
 
@@ -545,16 +622,20 @@ class TORCH_API StaticRuntime {
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  const BlockInfo& block_info_;
+
   bool manage_output_tensors_enabled_ = false;
+  const bool is_root_block_;
   std::unique_ptr<MemoryPlanner> planner_;
-  // first static_module_.num_inputs() slots are inputs, next
-  // static_module_.constants().size() slots are a copy of
-  // static_module_.constants(), rest are regular values in the
-  // graph. ProcessedNodes reference their inputs and outputs with
+  // ProcessedNodes reference their inputs and outputs with
   // offsets into this array, which saves memory.
-  std::vector<IValue> values_;
+  // The first static_module_.num_constants() slots are constants.
+  // Inputs for this block runner begin at inputs_begin_.
+  std::vector<IValue>& values_;
   std::vector<IValue*> outputs_;
   std::vector<ProcessedNode> nodes_;
+
+  const uint32_t inputs_begin_;
 };
 
 class TORCH_API ProcessedFunction {
@@ -686,7 +767,13 @@ class TORCH_API ProcessedNode {
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
+  std::vector<std::shared_ptr<StaticRuntimeBlockRunner>>& blocks() {
+    return blocks_;
+  }
+
  private:
+  std::vector<std::shared_ptr<StaticRuntimeBlockRunner>> blocks_;
+
   C10_NODISCARD bool verify_outputs_dont_overlap_each_other() const;
 
   C10_NODISCARD bool verify_inputs_dont_overlap_outputs(bool force_check) const;
@@ -701,6 +788,59 @@ class TORCH_API ProcessedNode {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   const char* op_name_;
 #endif
+};
+
+class TORCH_API StaticRuntime {
+ public:
+  explicit StaticRuntime(const StaticModule& sm);
+
+  using KeywordArgs = std::unordered_map<std::string, c10::IValue>;
+  c10::IValue operator()(
+      const std::vector<c10::IValue>& args,
+      const KeywordArgs& kwargs = KeywordArgs());
+  c10::IValue operator()(
+      std::vector<c10::IValue>&& args,
+      const KeywordArgs& kwargs = KeywordArgs());
+
+  bool check_for_memory_leak(bool output_returned = true);
+  bool checkOutputTensorMemoryLeaks();
+
+  void deallocateOutputTensors();
+  bool isManagedOutputTensor(const IValue& ivalue) const;
+  void disableManageOutputTensors();
+
+  const MemoryPlanner* get_memory_planner() const;
+
+  void benchmark(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<KeywordArgs>& kwargs_list,
+      const int warmup_runs,
+      const int main_runs,
+      bool print_per_node_time = false,
+      bool generate_ai_pep_output = false) {
+    block_->benchmark(
+        args_list,
+        kwargs_list,
+        warmup_runs,
+        main_runs,
+        print_per_node_time,
+        generate_ai_pep_output);
+  }
+
+  using IndividualMetrics = StaticRuntimeBlockRunner::IndividualMetrics;
+
+  IndividualMetrics benchmark_individual_ops(
+      const std::vector<std::vector<c10::IValue>>& args_list,
+      const std::vector<KeywordArgs>& kwargs_list,
+      const int warmup_runs,
+      const int main_runs) {
+    return block_->benchmark_individual_ops(
+        args_list, kwargs_list, warmup_runs, main_runs);
+  }
+
+ private:
+  std::unique_ptr<StaticRuntimeBlockRunner> block_;
+  std::vector<IValue> values_;
 };
 
 } // namespace jit
