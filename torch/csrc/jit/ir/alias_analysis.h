@@ -67,6 +67,8 @@ class AliasDb {
   // hold in memory any element that exists in the other
   TORCH_API bool mayContainAlias(Value* a, Value* b) const;
 
+  TORCH_API bool mayContainAlias(Value* a, const at::ArrayRef<Value*> b) const;
+
   // Do any values in group `a` share a memory location or hold in memory
   // any element that exists in group `b`
   TORCH_API bool mayContainAlias(

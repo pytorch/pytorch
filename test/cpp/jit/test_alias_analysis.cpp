@@ -725,7 +725,8 @@ TEST(ContainerAliasingTest, MayContainAlias) {
   EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->inputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(local_var, graph->inputs()));
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({ten_output}, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(ten_output, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(at::ArrayRef<Value*>{ten_output}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(str_output, graph->outputs()));
 }
 
@@ -760,7 +761,8 @@ TEST(ContainerAliasingTest, MayContainAlias_cast) {
   EXPECT_TRUE(aliasDb.mayContainAlias(a, b));
   EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->inputs()));
 
-  EXPECT_TRUE(aliasDb.mayContainAlias({c}, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(c, graph->outputs()));
+  EXPECT_TRUE(aliasDb.mayContainAlias(at::ArrayRef<Value*>{c}, graph->outputs()));
   EXPECT_FALSE(aliasDb.mayContainAlias(b, graph->outputs()));
 }
 

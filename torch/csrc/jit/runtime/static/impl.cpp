@@ -171,6 +171,10 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
   return db.mayContainAlias(const_cast<Value*>(a), const_cast<Value*>(b));
 }
 
+bool mayContainAlias(AliasDb& db, const Value* a, const FastSet<const Value*>& b) {
+  return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
+}
+
 bool mayContainAlias(
     AliasDb& db,
     const FastSet<const Value*>& a,
@@ -241,7 +245,7 @@ void ValueGroup::init(
       continue;
     }
     for (const auto* v : node->outputs()) {
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
       }
     }
@@ -259,11 +263,11 @@ void ValueGroup::init(
       // Add values that can aliase input/constant values. Note some output
       // aliases may end up in this category via collection objects (e.g.,
       // Tuple).
-      if (mayContainAlias(db, {v}, external_aliases_)) {
+      if (mayContainAlias(db, v, external_aliases_)) {
         external_aliases_.insert(v);
         continue;
       }
-      if (mayContainAlias(db, {v}, output_aliases_)) {
+      if (mayContainAlias(db, v, output_aliases_)) {
         output_aliases_.insert(v);
       }
     }
