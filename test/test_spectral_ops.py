@@ -17,7 +17,7 @@ from torch.testing._internal.common_device_type import \
 from torch.testing._internal.common_methods_invocations import (
     spectral_funcs, SpectralFuncInfo, SpectralFuncType)
 
-import packaging.version
+from pkg_resources import packaging
 from typing import Optional, List
 
 
@@ -37,8 +37,8 @@ except ModuleNotFoundError:
 
 REFERENCE_NORM_MODES = (
     (None, "forward", "backward", "ortho")
-    if packaging.version.parse(np.__version__) >= '1.20.0' and (
-        not has_scipy_fft or packaging.version.parse(scipy.__version__) >= '1.6.0')
+    if packaging.version.parse(np.__version__) >= packaging.version.Version('1.20.0') and (
+        not has_scipy_fft or packaging.version.parse(scipy.__version__) >= packaging.version.Version('1.6.0'))
     else (None, "ortho"))
 
 

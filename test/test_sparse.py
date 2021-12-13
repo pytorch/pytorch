@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
-import packaging.version
+from pkg_resources import packaging
 from torch.testing import get_all_complex_dtypes, get_all_fp_dtypes
 from torch.testing._internal.common_cuda import \
     (SM53OrLater, SM80OrLater, CUDA11OrLater)
@@ -37,7 +37,7 @@ load_tests = load_tests
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
-    IS_WINDOWS and torch.version.cuda and packaging.version.parse(torch.version.cuda) > "11.2"
+    IS_WINDOWS and torch.version.cuda and packaging.version.parse(torch.version.cuda) > packaging.version.Version("11.2")
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
 class TestSparse(TestCase):
