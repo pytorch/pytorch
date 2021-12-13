@@ -17,6 +17,7 @@ from torch.ao.quantization import (
     default_dynamic_qconfig,
     per_channel_dynamic_qconfig,
     float16_dynamic_qconfig,
+    float_qparams_weight_only_qconfig,
     float_qparams_weight_only_qconfig_4bit,
     PerChannelMinMaxObserver,
     QConfigDynamic,
