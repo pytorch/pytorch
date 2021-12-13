@@ -102,6 +102,10 @@ struct TORCH_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool hasCuSOLVER() const {
+    return false;
+  }
+
   virtual const at::cuda::NVRTC& nvrtc() const {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }

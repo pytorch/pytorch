@@ -130,6 +130,14 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
+bool CUDAHooks::hasCuSOLVER() const {
+#if defined(CUDART_VERSION) && defined(CUSOLVER_VERSION)
+  return true;
+#else
+  return false;
+#endif
+}
+
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());
