@@ -192,8 +192,9 @@ class DataCacheArena {
         at::TensorOptions(
             scalar_type == at::ScalarType::BFloat16 ? at::ScalarType::Float
                                                     : scalar_type));
-    if (scalar_type == at::ScalarType::BFloat16)
+    if (scalar_type == at::ScalarType::BFloat16) {
       t = t.to(scalar_type);
+    }
     return GetDeviceData(t, device);
   }
 
@@ -202,7 +203,7 @@ class DataCacheArena {
     size_t operator()(const at::Tensor& tensor) const {
       return HashReduce(
           HashCombine(GetEnumValue(tensor.scalar_type()), TensorHash(tensor)));
-    };
+    }
   };
   struct TensorComparer {
     bool operator()(const at::Tensor& tensor1, const at::Tensor& tensor2)
@@ -383,8 +384,8 @@ bool ShouldSyncIrValue(const Value& ir_value) {
 // Return true if no tensor in the list has an underlying IR (leaf or
 // operation).
 bool TensorsHaveIR(const std::vector<LazyTensor>& tensors) {
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    if (tensors[i].CurrentDataHandle() || tensors[i].CurrentIrValue()) {
+  for (const auto& tensor : tensors) {
+    if (tensor.CurrentDataHandle() || tensor.CurrentIrValue()) {
       return true;
     }
   }
@@ -599,8 +600,8 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
     const std::vector<LazyTensor>& tensors,
     const SyncTensorsConfig& config) {
   Unique<BackendDevice> unique_device;
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    unique_device.set(tensors[i].GetDevice());
+  for (const auto& tensor : tensors) {
+    unique_device.set(tensor.GetDevice());
   }
   SyncTensorCollection coll;
   if (!unique_device) {

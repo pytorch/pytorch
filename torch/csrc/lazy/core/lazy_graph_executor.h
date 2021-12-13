@@ -147,7 +147,7 @@ class TORCH_API LazyGraphExecutor {
   };
 
   struct CachedComputation {
-    CachedComputation(ComputationPtr computation)
+    explicit CachedComputation(ComputationPtr computation)
         : computation(std::move(computation)) {}
 
     ComputationPtr computation;
