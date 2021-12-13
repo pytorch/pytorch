@@ -836,6 +836,11 @@ LazyGraphExecutor::ComputationCache::TypePtr LazyGraphExecutor::
   return cached_computation;
 }
 
+#if defined(_MSC_VER)
+#include <BaseTsd.h>
+typedef SSIZE_T ssize_t;
+#endif
+
 void LazyGraphExecutor::BuildInputOutputAliases(
     const std::vector<LazyTensor>& tensors,
     c10::ArrayRef<size_t> indices,
