@@ -171,7 +171,10 @@ bool mayContainAlias(AliasDb& db, const Value* a, const Value* b) {
   return db.mayContainAlias(const_cast<Value*>(a), const_cast<Value*>(b));
 }
 
-bool mayContainAlias(AliasDb& db, const Value* a, const FastSet<const Value*>& b) {
+bool mayContainAlias(
+    AliasDb& db,
+    const Value* a,
+    const FastSet<const Value*>& b) {
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
 
