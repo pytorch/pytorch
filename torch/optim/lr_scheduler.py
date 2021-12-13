@@ -623,7 +623,6 @@ class SequentialLR(_LRScheduler):
                     "Sequential Schedulers expects all schedulers to belong to the same optimizer, but "
                     f"got schedulers at index {0} and {scheduler_idx} to be different."
                 )
-    
         if (len(milestones) != len(schedulers) - 1):
             raise ValueError(
                 "Sequential Schedulers expects number of schedulers provided to be one more "
