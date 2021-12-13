@@ -366,38 +366,47 @@ Writing PRs that test the binaries is annoying, since the default circleci jobs 
 # Make your changes
 touch .circleci/verbatim-sources/nightly-binary-build-defaults.yml
 
+
 # Regenerate the yaml, has to be in python 3.7
 .circleci/regenerate.sh
+
 
 # Make a commit
 git add .circleci *
 git commit -m "My real changes"
 git push origin my_branch
 
+
 # Now hardcode the jobs that you want in the .circleci/config.yml workflows section
 # Also eliminate ensure-consistency and should_run_job checks
 # e.g. https://github.com/pytorch/pytorch/commit/2b3344bfed8772fe86e5210cc4ee915dee42b32d
+
 
 # Make a commit you won't keep
 git add .circleci
 git commit -m "[DO NOT LAND] testing binaries for above changes"
 git push origin my_branch
 
+
 # Now you need to make some changes to the first commit.
 git rebase -i HEAD~2 # mark the first commit as 'edit'
+
 
 # Make the changes
 touch .circleci/verbatim-sources/nightly-binary-build-defaults.yml
 .circleci/regenerate.sh
+
 
 # Ammend the commit and recontinue
 git add .circleci
 git commit --amend
 git rebase --continue
 
+
 # Update the PR, need to force since the commits are different now
 git push origin my_branch --force
 ```
+
 
 The advantage of this flow is that you can make new changes to the base commit and regenerate the .circleci without having to re-write which binary jobs you want to test on. The downside is that all updates will be force pushes.
 
