@@ -593,5 +593,67 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(prim::If, prim_If, [](Node* n) -> SROperator {
   };
 });
 
+namespace {
+
+std::vector<IValue> collectLoopInputs(const ProcessedNode& p_node) {
+  const auto num_inputs = p_node.num_inputs();
+  DCHECK(num_inputs >= 2);
+  const auto num_args = num_inputs - 2;
+
+  std::vector<IValue> result;
+  result.reserve(num_args);
+  // First argument is always the loop counter, initially zero.
+  result.emplace_back(0);
+
+  for (const auto i : c10::irange(num_args)) {
+    result.push_back(p_node.Input(2 + i));
+  }
+
+  return result;
+}
+
+} // namespace
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::Loop,
+    prim_Loop,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto max_trip_count = p_node->Input(0).toInt();
+        auto condition = p_node->Input(1).toBool();
+
+        auto& blocks = p_node->blocks();
+        DCHECK(blocks.size() == 1);
+        auto& runner = blocks[0];
+
+        auto args = collectLoopInputs(*p_node);
+        int64_t loop_count = 0;
+
+        while (condition && loop_count < max_trip_count) {
+          LOG(INFO) << args[0].toInt();
+          LOG(INFO) << args[1].toTensor();
+          auto output = (*runner)(args);
+
+          if (output.isTuple()) {
+            auto& elems = output.toTupleRef().elements();
+            DCHECK(elems.size() == args.size());
+            for (const auto i : c10::irange(1, args.size())) {
+              args[i] = elems[i];
+            }
+            condition = elems[0].toBool();
+          } else {
+            condition = output.toBool();
+          }
+          args[0] = ++loop_count;
+        }
+
+        const auto num_outputs = p_node->num_outputs();
+        DCHECK(args.size() == num_outputs + 1);
+        for (const auto i : c10::irange(num_outputs)) {
+          p_node->Output(i) = std::move(args[i + 1]);
+        }
+      };
+    });
+
 } // namespace jit
 } // namespace torch
