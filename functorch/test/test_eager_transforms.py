@@ -1572,6 +1572,7 @@ class TestJvp(TestCase):
             jvp(h, (x,), (t,))
 
 class TestCustomFunction(TestCase):
+    @onlyCPU
     def test_basic(self, device):
         called_impl = False
         called_vjp = False
