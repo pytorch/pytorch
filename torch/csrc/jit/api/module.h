@@ -9,7 +9,7 @@
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/api/include/torch/ordered_dict.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/utils/memory.h>
@@ -298,7 +298,9 @@ TORCH_API Module freeze(
 
 // C++ equivalent api of `torch.jit.optimize_for_inference`. See documentation
 // there for details.
-TORCH_API Module optimize_for_inference(Module& module);
+TORCH_API Module optimize_for_inference(
+    Module& module,
+    const std::vector<std::string>& other_methods = {});
 
 namespace detail {
 
