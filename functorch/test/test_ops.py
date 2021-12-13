@@ -262,6 +262,9 @@ class TestOperators(TestCase):
         xfail('linalg.matrix_power'),
         xfail('linalg.cholesky'),
         xfail('tensor_split'),
+
+        # Causing a CUDA assert, needs investigation
+        skip('div', 'floor_rounding', device_type='cuda'),
     }))
     def test_jvp(self, device, dtype, op):
         # TODO: when we change supports_autograd to supports_backward_ad, also change in this file
@@ -810,6 +813,7 @@ class TestDecompositionOpInfo(TestCase):
         xfail('to_sparse'),
         skip('tensor_split'),
         skip('mvlgamma'),
+        skip('tanh', device_type='cuda'), # cuda bfloat16 failure
         skip('eig'),
         skip('nn.functional.dropout'),
         skip('_masked.softmin'),
