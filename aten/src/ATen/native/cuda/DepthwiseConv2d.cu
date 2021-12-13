@@ -13,6 +13,7 @@ namespace native {
 namespace {
 using at::cuda::detail::CUDA_NUM_THREADS;
 using at::cuda::detail::GET_BLOCKS;
+
 constexpr int GRAD_PARAMS_MAX_BLOCK_SIZE = 256;
 int getGradParamsNumThreads(int batchSize) {
   //warp per item in a batch, up to a maximum
