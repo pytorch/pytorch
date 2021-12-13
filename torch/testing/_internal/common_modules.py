@@ -193,7 +193,7 @@ def module_inputs_torch_nn_Linear(module_info, device, dtype, requires_grad, **k
 
 def module_inputs_torch_nn_Bilinear(module_info, device, dtype, requires_grad, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-    
+
     def bilinear_reference_fn(m, p, x1, x2, bias=True):
         result = torch.einsum('bn,anm,bm->ba', x1, p[0], x2)
         if bias:
@@ -418,8 +418,7 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.Bilinear,
                module_inputs_func=module_inputs_torch_nn_Bilinear,
                decorators=(
-                    DecorateInfo(
-                        toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)})),
+                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)})),
                )),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
