@@ -210,5 +210,10 @@ bool is_batchnorm3d_module(
     const Match& match,
     const std::unordered_map<std::string, Value*>& vmap);
 
+bool isFunctionNode(
+    Node* n,
+    const std::vector<std::string>& call_funcs,
+    const std::vector<std::string>& aten_funcs);
+
 } // namespace jit
 } // namespace torch
