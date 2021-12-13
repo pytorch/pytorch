@@ -10002,8 +10002,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
-               # NotImplementedError: the derivative for 'eigh' with complex inputs is not implemented.
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',),
                # Gradcheck for complex is not implemented yet
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),
                # Pre-existing condition; Needs to be fixed
@@ -10358,9 +10356,12 @@ op_db: List[OpInfo] = [
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
-           sample_inputs_func=sample_inputs_masked_select),
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_masked_select,
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('matrix_exp',
            dtypes=floating_and_complex_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
@@ -10409,9 +10410,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
@@ -10419,16 +10423,23 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and(torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
-           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False),
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10450,7 +10461,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               # Division by zero, may be related to above?
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'))),
     OpInfo('std_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10472,7 +10485,9 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD'),
+               # Division by zero, may be related to above?
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad'))),
     OpInfo('meshgrid',
            variant_test_name='variadic_tensors',
            ref=np.meshgrid,
@@ -10523,9 +10538,12 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
            supports_out=False,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
-           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,),
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_max_min_reduction_no_dim,
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('quantile',
            dtypes=floating_types(),
            sample_inputs_func=sample_inputs_reduction_quantile,
@@ -10839,12 +10857,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
+           supports_fwgrad_bwgrad=True,
            # vmap does not support inplace views
            check_inplace_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_as_strided,
            skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                # With rtol=1e-07 and atol=1e-07, found 1 element(s) (out of 1) whose difference(s)
                # exceeded the margin of error (including 0 nan comparisons). The greatest difference
@@ -13164,10 +13183,13 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_index_select,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
+           supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
+           gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -13256,7 +13278,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
            supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,  # Need: put_
+           supports_fwgrad_bwgrad=False,  # Need: put_
            sample_inputs_func=sample_inputs_take),
     OpInfo('scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13887,20 +13909,32 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_trapezoid),
+           sample_inputs_func=sample_trapezoid,
+           skips=(
+               # Dispatch stub: unsupported device typemeta
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+           )),
     OpInfo('trapezoid',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_trapezoid),
+           sample_inputs_func=sample_trapezoid,
+           skips=(
+               # Dispatch stub: unsupported device typemeta
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+           )),
     OpInfo('cumulative_trapezoid',
            dtypes=all_types_and_complex_and(),
            dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
-           sample_inputs_func=sample_cumulative_trapezoid),
+           sample_inputs_func=sample_cumulative_trapezoid,
+           skips=(
+               # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
+           )),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
@@ -13974,9 +14008,12 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
-           # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-           supports_fwgrad_bwgrad=False,
-           sample_inputs_func=sample_inputs_trace),
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_trace,
+           skips=(
+               # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+           )),
     OpInfo('transpose',
            aliases=('swapdims', 'swapaxes'),
            assert_jit_shape_analysis=True,
@@ -14164,7 +14201,11 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   safe_casts_outputs=True),
+                   safe_casts_outputs=True,
+                   skips=(
+                        # Dispatch stub: unsupported device typemeta
+                        DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+                   )),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
                    aliases=('special.erf', ),
@@ -15249,9 +15290,10 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
-        # RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
-        supports_fwgrad_bwgrad=False,
+        supports_fwgrad_bwgrad=True,
         skips=(
+            # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestJit",
