@@ -29,6 +29,7 @@ def get_trt_plugin(
     """
     plugin_registry = trt.get_plugin_registry()
     plugin_creator = plugin_registry.get_plugin_creator(plugin_name, version, plugin_namespace)
+    assert plugin_creator, f"Unabled to find plugin creator with name {plugin_name}"
     plugin = plugin_creator.create_plugin(name=plugin_name, field_collection=field_collection)
 
     assert plugin is not None, f"Plugin: {plugin_name} could not be fetched"
