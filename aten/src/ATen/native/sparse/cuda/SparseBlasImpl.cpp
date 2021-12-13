@@ -247,27 +247,13 @@ void block_sparse_triangular_solve_mat(
       ? CUSPARSE_DIRECTION_ROW
       : CUSPARSE_DIRECTION_COLUMN;
 
-  // c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
-  // // cuSPARSE doesn't let us pass transpose flag separately for X and B
-  // // therefore we use same strides for both X and B
-  // // if X is row-major, we set the transpose flag for B and X
-  // c10::MaybeOwned<Tensor> B_ =
-  //     prepare_dense_matrix_for_cusparse(B, X_->strides());
-
   c10::MaybeOwned<Tensor> X_ = prepare_column_major_matrix_for_cusparse(X);
   c10::MaybeOwned<Tensor> B_ = prepare_column_major_matrix_for_cusparse(B);
 
-  IntArrayRef X_strides = X_->strides();
-  auto ndim = X_->dim();
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(ndim == 2);
-  bool is_X_row_major = (X_strides[ndim - 1] == 1);
-  // int ldx = is_X_row_major ? cuda_int_cast(X_strides[ndim - 2], "ldx")
-  //                          : cuda_int_cast(X_strides[ndim - 1], "ldx");
   int ldb = cuda_int_cast(B_->stride(-1), "ldb");
   int ldx = cuda_int_cast(X_->stride(-1), "ldx");
 
-  cusparseOperation_t opX = CUSPARSE_OPERATION_NON_TRANSPOSE;//is_X_row_major ? CUSPARSE_OPERATION_TRANSPOSE
-                                          //  : CUSPARSE_OPERATION_NON_TRANSPOSE;
+  cusparseOperation_t opX = CUSPARSE_OPERATION_NON_TRANSPOSE;
   cusparseOperation_t opA = transpose ? CUSPARSE_OPERATION_TRANSPOSE
                                       : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
