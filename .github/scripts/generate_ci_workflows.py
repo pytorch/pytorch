@@ -512,6 +512,27 @@ LINUX_WORKFLOWS = [
             labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
         ),
     ),
+    # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-cuda11.3-py3.7-gcc7-no-ops",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7",
+        test_runner_type=LINUX_CUDA_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CUDA]),
+        ),
+    ),
+    CIWorkflow(
+        arch="linux",
+        build_environment="linux-xenial-py3.7-gcc7-no-ops",
+        docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3.7-gcc7",
+        test_runner_type=LINUX_CPU_TEST_RUNNER,
+        exclude_test=True,
+        ciflow_config=CIFlowConfig(
+            labels=set([LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_CPU]),
+        ),
+    ),
     CIWorkflow(
         arch="linux",
         build_environment="libtorch-linux-xenial-cuda11.3-py3.7-gcc7",
