@@ -2447,6 +2447,10 @@ Tensor movedim(const Tensor& self, IntArrayRef src, IntArrayRef dst) {
   TORCH_CHECK(all_unique(normalized_src), "movedim: repeated dim in `source` (", src, ")");
   TORCH_CHECK(all_unique(normalized_dst), "movedim: repeated dim in `destination` (", dst, ")");
 
+  // handle the case of scalar tensor as a no-op
+  if (self_dim == 0)
+    return self.alias();
+
   // TODO: The algorithm below can probably be optimized.
   // Reference: https://github.com/pytorch/pytorch/pull/41480#discussion_r456100505
 
