@@ -2305,5 +2305,6 @@ TEST(StaticRuntime, ReplaceWithMaybeCopy) {
 
   EXPECT_TRUE(expected.equal(actual));
   EXPECT_FALSE(hasProcessedNodeWithName(smodule, "aten::to"));
-  EXPECT_TRUE(hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
+  EXPECT_TRUE(
+      hasProcessedNodeWithName(smodule, "static_runtime::to_maybe_copy_out"));
 }
