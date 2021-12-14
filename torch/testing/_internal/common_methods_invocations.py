@@ -9282,6 +9282,9 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
+                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -9298,6 +9301,9 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
+                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -9314,6 +9320,9 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True),
                     skips=(
+                        # 69913: RuntimeError: CUDA error: an illegal memory access was encountered
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                                     device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD',
                                      device_type='cuda', dtypes=[torch.double, torch.cdouble]),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_inplace_forward_mode_AD',
@@ -13966,9 +13975,11 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_cumulative_trapezoid,
            skips=(
                # Two failures:
-               # 1. (CUDA) RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+               # 1. (CUDA) RuntimeError: Expected all tensors to be on the same device, but found at
+               #    least two devices, cuda:0 and cpu!
                # 2. (ROCm) Memory exception on virtual address 0x7f6a2216f000, node id 4: Page not present
-               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
+               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients',
+                            'test_fn_fwgrad_bwgrad', device_type='cuda'),
            )),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
