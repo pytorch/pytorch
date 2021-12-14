@@ -203,7 +203,7 @@ void createTensorFromList(Stack& stack) {
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
-  at::ScalarType initial_scalar_type = scalarTypeFromJitType(elem_type);
+  at::ScalarType initial_scalar_type = scalarTypeFromJitType(*elem_type);
   if (initial_scalar_type == at::ScalarType::Double) {
     initial_scalar_type = typeMetaToScalarType(c10::get_default_dtype());
   }
@@ -245,7 +245,7 @@ void createTensorFromList(Stack& stack) {
 RegisterOperators reg({
     OperatorGenerator(
         TORCH_SELECTIVE_SCHEMA(
-            "aten::split(Tensor self, int[] split_sizes, int dim=0) -> Tensor[]"),
+            "aten::split(Tensor(a -> *) self, int[] split_sizes, int dim=0) -> Tensor(a)[]"),
         [](Stack& stack) {
           RECORD_FUNCTION("split_with_sizes", last(stack, 3));
 

@@ -309,4 +309,9 @@ TORCH_LIBRARY_IMPL(_quantized, QuantizedCPU, m) {
 }
 
 }  // namespace
+
+Tensor quantized_add(Tensor qa, Tensor qb, double scale, int64_t zero_point){
+  return qadd<false>(qa, qb, scale, zero_point);
+}
+
 }}  // namespace at::native

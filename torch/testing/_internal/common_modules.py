@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _dtype_test_suffix, _update_param_kwargs, skipIf)
+    _TestParametrizer, _update_param_kwargs, skipIf)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb)
@@ -51,23 +51,25 @@ class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
     def __init__(self, module_info_list, allowed_dtypes=None):
-        super().__init__(handles_dtypes=True)
         self.module_info_list = module_info_list
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
 
     def _parametrize_test(self, test, generic_cls, device_cls):
+        if device_cls is None:
+            raise RuntimeError('The @modules decorator is only intended to be used in a device-specific '
+                               'context; use it with instantiate_device_type_tests() instead of '
+                               'instantiate_parametrized_tests()')
+
         for module_info in self.module_info_list:
-            # TODO: Factor some of this out since it's similar to OpInfo.
+            # Construct the test name; device / dtype parts are handled outside.
+            # See [Note: device and dtype suffix placement]
+            test_name = module_info.name.replace('.', '_')
+
             dtypes = set(module_info.dtypes)
             if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
             for dtype in dtypes:
-                # Construct the test name.
-                test_name = '{}_{}{}'.format(module_info.name.replace('.', '_'),
-                                             device_cls.device_type,
-                                             _dtype_test_suffix(dtype))
-
                 # Construct parameter kwargs to pass to the test.
                 param_kwargs = {'module_info': module_info}
                 _update_param_kwargs(param_kwargs, 'dtype', dtype)

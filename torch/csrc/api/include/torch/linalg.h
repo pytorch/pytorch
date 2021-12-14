@@ -72,6 +72,10 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return torch::linalg_lstsq(self, b, cond, driver);
 }
 
+inline Tensor matrix_exp(const Tensor& self) {
+  return torch::linalg_matrix_exp(self);
+}
+
 inline Tensor norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return torch::linalg_norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
 }
@@ -158,6 +162,14 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return torch::linalg_solve_out(result, input, other);
+}
+
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return torch::linalg_solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
 inline std::tuple<Tensor, Tensor, Tensor> svd(const Tensor& input, bool full_matrices) {
@@ -302,6 +314,13 @@ inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(const Tensor& self, cons
   return detail::lstsq(self, b, cond, driver);
 }
 
+/// Computes the matrix exponential
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.matrix_exp
+inline Tensor matrix_exp(const Tensor& input) {
+  return detail::matrix_exp(input);
+}
+
 // C10_DEPRECATED_MESSAGE("linalg_norm is deprecated, use norm instead.")
 inline Tensor linalg_norm(const Tensor& self, const optional<Scalar>& opt_ord, optional<IntArrayRef> opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
   return detail::norm(self, opt_ord, opt_dim, keepdim, opt_dtype);
@@ -391,7 +410,7 @@ inline Tensor& multi_dot_out(TensorList tensors, Tensor& result) {
   return detail::multi_dot_out(tensors, result);
 }
 
-/// Computes pseudo-inverse
+/// Computes the pseudo-inverse
 ///
 /// See https://pytorch.org/docs/master/linalg.html#torch.linalg.pinv
 inline Tensor pinv(const Tensor& input, double rcond=1e-15, bool hermitian=false) {
@@ -424,6 +443,18 @@ inline Tensor solve(const Tensor& input, const Tensor& other) {
 
 inline Tensor& solve_out(Tensor& result, const Tensor& input, const Tensor& other) {
   return detail::solve_out(result, input, other);
+}
+
+/// Computes a solution of a linear system AX = B for input = A and other = B whenever A is square
+/// upper or lower triangular and does not have zeros in the diagonal
+///
+/// See https://pytorch.org/docs/master/linalg.html#torch.linalg.solve_triangular
+inline Tensor solve_triangular(const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular(input, other, upper, left, unitriangular);
+}
+
+inline Tensor& solve_triangular_out(Tensor& result, const Tensor& input, const Tensor& other, bool upper, bool left, bool unitriangular) {
+  return detail::solve_triangular_out(result, input, other, upper, left, unitriangular);
 }
 
 /// Computes the singular values and singular vectors

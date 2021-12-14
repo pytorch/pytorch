@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/autocast.h>
 #include <torch/csrc/jit/passes/batch_mm.h>
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/canonicalize_graph_fuser_ops.h>
@@ -21,6 +22,7 @@
 #include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/decompose_ops.h>
+#include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -47,7 +49,7 @@
 #include <torch/csrc/jit/passes/onnx/eliminate_unused_items.h>
 #include <torch/csrc/jit/passes/onnx/eval_peephole.h>
 #include <torch/csrc/jit/passes/onnx/fixup_onnx_controlflow.h>
-#include <torch/csrc/jit/passes/onnx/fold_if_node.h>
+#include <torch/csrc/jit/passes/onnx/function_extraction.h>
 #include <torch/csrc/jit/passes/onnx/function_substitution.h>
 #include <torch/csrc/jit/passes/onnx/list_model_parameters.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
@@ -91,6 +93,7 @@
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
+#include <torch/csrc/jit/runtime/jit_trace.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/print_handler.h>
 #include <torch/csrc/jit/runtime/static/init.h>
@@ -182,6 +185,21 @@ void initJITBindings(PyObject* module) {
             return shapeComputeGraphForSchema(n->schema());
           })
       .def("_jit_pass_propagate_shapes_on_graph", PropagateShapesOnGraph)
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          [](std::shared_ptr<Graph>& graph) {
+            return PropagateShapesAndBuildLargeShapeComputeGraph(
+                graph, *graph->nodes().begin(), *graph->nodes().end());
+          })
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          [](std::shared_ptr<Graph>& graph, Node* beg) {
+            return PropagateShapesAndBuildLargeShapeComputeGraph(
+                graph, beg, *graph->nodes().end());
+          })
+      .def(
+          "_jit_pass_propagate_shapes_on_graph_and_build_compute",
+          PropagateShapesAndBuildLargeShapeComputeGraph)
       .def("_jit_pass_onnx_function_substitution", ONNXFunctionCallSubstitution)
       .def("_jit_pass_integer_value_refinement", RefineIntegerValues)
       .def(
@@ -190,11 +208,6 @@ void initJITBindings(PyObject* module) {
       .def(
           "_jit_symbolic_shapes_test_mode_enabled",
           &symbolicShapeAnalysisTestModeEnabled)
-      .def(
-          "_jit_pass_onnx_fold_if",
-          [](std::shared_ptr<Graph>& graph) {
-            return FoldIfNodeONNX(graph->block());
-          })
       .def(
           "_jit_pass_onnx_peephole",
           [](std::shared_ptr<Graph>& graph,
@@ -264,6 +277,10 @@ void initJITBindings(PyObject* module) {
             ONNXShapeTypeInference(graph, params_dict, opset_version);
           })
       .def("_jit_pass_onnx_set_dynamic_input_shape", ONNXSetDynamicInputShape)
+      .def("_jit_pass_autocast", Autocast)
+      .def("_jit_set_autocast_mode", &setAutocastMode)
+      .def("_jit_pass_onnx_lint", ONNXLintGraph)
+      .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
       .def(
           "_jit_pass_dce",
@@ -361,6 +378,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
+      .def(
+          "_jit_pass_optimize_for_inference",
+          [](Module& module, std::vector<std::string> other_methods) {
+            optimize_for_inference(module, other_methods);
+          },
+          py::arg("module"),
+          py::arg("other_methods") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -415,6 +439,7 @@ void initJITBindings(PyObject* module) {
               std::vector<std::pair<std::string, std::string>>())
       .def("_jit_pass_constant_pooling", ConstantPooling)
       // RemoveInplaceOps is used by CoreML so it must be removed with care.
+      .def("_jit_pass_propagate_dtype", DtypePropagation)
       .def(
           "_jit_pass_remove_inplace_ops",
           [](const std::shared_ptr<Graph>& g) { return RemoveInplaceOps(g); })
@@ -442,11 +467,11 @@ void initJITBindings(PyObject* module) {
           [](std::shared_ptr<Graph>& g) { return InlineFunctionalGraphs(g); })
       .def(
           "_jit_pass_peephole",
-          [](const std::shared_ptr<Graph>& g, bool addmm_fusion_enabled) {
-            return PeepholeOptimize(g, addmm_fusion_enabled);
+          [](const std::shared_ptr<Graph>& g, bool disable_shape_peepholes) {
+            return PeepholeOptimize(g, disable_shape_peepholes);
           },
           py::arg("graph"),
-          py::arg("addmm_fusion_enabled") = false)
+          py::arg("disable_shape_peepholes") = false)
       .def(
           "_jit_pass_peephole_list_idioms",
           [](const std::shared_ptr<Graph>& g, bool refine_list_len) {
@@ -508,6 +533,42 @@ void initJITBindings(PyObject* module) {
           },
           py::doc(
               "Interpret a JIT graph with given inputs without running any optimization passes on it"))
+      .def(
+          "_jit_trace_graph",
+          [](std::shared_ptr<Graph>& graph, const py::tuple& inputs) {
+            Stack stack;
+            stack.reserve(inputs.size()); // captures?
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto g_inputs = graph->inputs();
+            for (const auto i : c10::irange(inputs.size())) {
+              if (stack[i].isTensor()) {
+                g_inputs[i]->setType(stack[i].type());
+              }
+            }
+            return TraceGraph(graph, stack);
+          })
+      .def(
+          "_jit_trace_module",
+          [](Module& model, const py::tuple& inputs) {
+            auto graph = model.get_method("forward").graph();
+            Stack stack;
+            stack.reserve(inputs.size() + 1); // captures?
+            push(stack, model._ivalue());
+            for (auto& obj : inputs) {
+              stack.push_back(toTypeInferredIValue(obj));
+            }
+            auto traced = TraceGraph(graph, stack);
+            GRAPH_DUMP("Traced Graph", traced);
+
+            // the easiest way to replace a graph in a module is
+            // to remove all the nodes in the original graph
+            // clone everything from the traced one
+            graph->block()->clear();
+            graph->block()->cloneFrom(traced->block(), nullptr);
+            GRAPH_DUMP("Copied Graph", graph);
+          })
       .def("_jit_pass_remove_expands", RemoveExpands)
       .def("_jit_pass_erase_number_types", EraseNumberTypes)
       .def("_jit_pass_inline_fork_wait", InlineForkWait)
@@ -519,6 +580,7 @@ void initJITBindings(PyObject* module) {
             return LowerGraph(*graph, self._ivalue());
           })
       .def("_jit_pass_loop_unrolling", UnrollLoops)
+      .def("_jit_pass_constant_loop_unrolling", UnrollConstantLoops)
       .def(
           "_jit_pass_constant_propagation_immutable_types",
           [](std::shared_ptr<Graph>& g) {
@@ -554,9 +616,15 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph) {
-            CreateAutodiffSubgraphs(graph);
-          })
+          [](const std::shared_ptr<Graph>& graph, py::object threshold) {
+            if (threshold.is(py::none())) {
+              CreateAutodiffSubgraphs(graph);
+            } else {
+              CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
+            }
+          },
+          py::arg("graph"),
+          py::arg("threshold") = py::none())
 #if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",

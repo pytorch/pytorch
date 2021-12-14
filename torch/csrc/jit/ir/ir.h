@@ -6,7 +6,7 @@
 #include <torch/csrc/jit/ir/scope.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/disallow_copy.h>
 #include <torch/csrc/utils/python_stub.h>
 
@@ -82,6 +82,7 @@ using namespace ::c10::cuda;
 } // namespace cuda
 
 struct Function;
+struct GraphFunction;
 struct MatchedSchema;
 
 // A Graph represents one "function" of computation.
@@ -675,6 +676,13 @@ struct TORCH_API Node {
   // Result: %3 = f()
   void removeAllInputs();
 
+  // Remove all outputs from a node.
+  //
+  // Given: %1, %2 = f()
+  // Execute:removeAllInputs()
+  // Result: = f()
+  void removeAllOutputs();
+
   // Rearrange the ordering of inputs or outputs of a node
   // Given: %3 = f(%1, %2)
   // Execute: %3.permuteInputs({1, 0})
@@ -1049,6 +1057,9 @@ struct Block {
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
+  void removeAllInputs() {
+    input_->removeAllOutputs();
+  }
   size_t registerOutput(Value* v) {
     output_->addInput(v);
     return outputs().size() - 1;
@@ -1060,6 +1071,10 @@ struct Block {
   void eraseOutput(size_t i) {
     output_->removeInput(i);
   }
+  void removeAllOutputs() {
+    output_->removeAllInputs();
+  }
+
   void replaceOutput(size_t i, Value* n) {
     output_->replaceInput(i, n);
   }
@@ -1099,6 +1114,14 @@ struct Block {
     if (wrap_) {
       wrap_->clear();
     }
+  }
+
+  void clear() {
+    removeAllOutputs();
+    for (auto it = nodes().rbegin(); it != nodes().rend(); it++) {
+      it.destroyCurrent();
+    }
+    removeAllInputs();
   }
 
  private:
@@ -1373,6 +1396,7 @@ struct Graph {
   friend TORCH_API std::ostream& operator<<(std::ostream& out, const Graph& g);
 
   TORCH_API std::shared_ptr<Graph> copy();
+  TORCH_API std::unique_ptr<Graph> copyUnique();
   TORCH_API void remapTypes(const std::function<TypePtr(TypePtr)>& type_map);
 
  private:
@@ -1380,6 +1404,7 @@ struct Graph {
   TORCH_API void freeNode(Node* n);
   TORCH_API void freeValue(Value* v);
   TORCH_API void freeBlock(Block* b);
+  void cloneFrom(Graph& src);
 };
 
 /** \brief An utility class for setting temporary insertion points.
@@ -1464,8 +1489,17 @@ struct ProfileOp : public Node {
     callback_ = std::move(callback);
   }
 
+  bool hasRun() const {
+    return has_run_;
+  }
+
+  void setHasRun(bool has_run) {
+    has_run_ = has_run;
+  }
+
  private:
   std::function<void(std::vector<IValue>&)> callback_;
+  bool has_run_ = false;
 };
 
 struct TORCH_API ProfileIValueOp : public Node {
@@ -1539,7 +1573,7 @@ TORCH_API std::vector<Value*> insertGraph(
  */
 TORCH_API std::vector<Value*> inlineCallTo(
     Node* to_replace,
-    Function* callee,
+    GraphFunction* callee,
     bool use_graph = true);
 
 /** If there is only one value in \p OUTPUTS and its kind is Tuple, insert a
@@ -1547,8 +1581,16 @@ TORCH_API std::vector<Value*> inlineCallTo(
  */
 TORCH_API std::vector<Value*> unpackOutputs(const std::vector<Value*>& outputs);
 
+TORCH_API std::vector<Node*> findAllNodes(Graph& g, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(Block& b, Symbol kind, bool recurse);
+TORCH_API std::vector<Node*> findAllNodes(
+    at::ArrayRef<Block*> a,
+    Symbol kind,
+    bool recurse);
+
 struct OperatorSet {
   OperatorSet(std::initializer_list<const char*> sig_literals);
+  std::vector<std::shared_ptr<Operator>> getOps() const;
 
  private:
   friend struct Node;
@@ -1579,6 +1621,12 @@ struct OperatorMap {
     erase(op);
     map[Symbol::fromQualString(op->schema().name())].emplace_back(
         std::make_pair(op, val));
+  }
+
+  void insert(const OperatorSet& op_set, T val) {
+    for (auto& op : op_set.getOps()) {
+      insert(op, val);
+    }
   }
 
   void insert(
@@ -1621,6 +1669,10 @@ struct OperatorMap {
       }
     }
     return false;
+  }
+
+  bool contains(const Node* n) const {
+    return n->maybeOperator() && contains(n->getOperator());
   }
 
   c10::optional<T> find(const Operator& op) {

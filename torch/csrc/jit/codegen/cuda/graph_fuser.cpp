@@ -12,7 +12,8 @@
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/pass_manager.h>
-#include <torch/csrc/jit/passes/remove_inplace_ops.h>
+#include <torch/csrc/jit/passes/remove_mutation.h>
+#include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -278,7 +279,7 @@ struct CudaGraphFuser {
     // remapping nodes that used the input to the newly-merged node
     // n is not an input when the fusion group is empty
     auto inputs = group->inputs();
-    for (size_t i = 0; i < n->outputs().size(); ++i) {
+    for (const auto i : c10::irange(n->outputs().size())) {
       auto it = std::find(inputs.begin(), inputs.end(), n->outputs()[i]);
       if (it != inputs.end()) {
         size_t p = it - inputs.begin();
@@ -298,7 +299,7 @@ struct CudaGraphFuser {
     // have a valid mapping
     group->insertBefore(n);
     Node* mergedNode = mergeNodeIntoGroup(group, n);
-    for (size_t i = 0; i < n->outputs().size(); i++) {
+    for (const auto i : c10::irange(n->outputs().size())) {
       getSubgraph(group).registerOutput(mergedNode->output(i));
       auto sel = group->addOutput();
       sel->copyMetadata(n->output(i));
@@ -351,7 +352,7 @@ struct CudaGraphFuser {
 
     // We need to apply this to all outputs from producer->node();
     auto producer_outputs = producer->node()->outputs();
-    for (size_t i = 0; i < producer_outputs.size(); i++) {
+    for (const auto i : c10::irange(producer_outputs.size())) {
       if (producer_outputs[i]->uses().size() != 0) {
         getSubgraph(group).registerOutput(merged->outputs()[i]);
         Value* new_producer = group->addOutput();
@@ -389,7 +390,7 @@ struct CudaGraphFuser {
       return;
     }
     auto& subgraph = getSubgraph(group);
-    for (size_t i = 0; i < chunk->outputs().size(); ++i) {
+    for (const auto i : c10::irange(chunk->outputs().size())) {
       // Find the input to the FusionGroup (group)
       auto* replacement_val = existingFusedChunk->outputs().at(i);
       auto* val = chunk->outputs().at(i);
@@ -439,8 +440,8 @@ struct CudaGraphFuser {
 
     // Replace tensors inputs with broadcasted values
     auto new_tensors_it = new_tensors.begin();
-    for (size_t i = 0; i < node->inputs().size(); ++i) {
-      if (node->inputs()[i]->type()->isSubtypeOf(*TensorType::get())) {
+    for (const auto i : c10::irange(node->inputs().size())) {
+      if (node->inputs()[i]->type()->isSubtypeOf(TensorType::get())) {
         AT_ASSERT(new_tensors_it != new_tensors.end());
         node->replaceInput(i, *(new_tensors_it++));
       }
@@ -603,10 +604,10 @@ struct CudaGraphFuser {
       auto it = std::find(bchunk_inputs.begin(), bchunk_inputs.end(), input);
       if (it != bchunk_inputs.end()) {
         chunked_inputs.emplace_back();
-        const auto input_index = std::distance(bchunk_inputs.begin(), it);
-        for (const auto chunki : c10::irange(nchunks)) {
+        auto input_index = std::distance(bchunk_inputs.begin(), it);
+        for (const auto chunk : c10::irange(nchunks)) {
           chunked_inputs.back().push_back(
-              bchunk->outputs().at(nchunks * input_index + chunki));
+              bchunk->outputs().at(nchunks * input_index + chunk));
         }
         continue;
       }
@@ -776,8 +777,7 @@ struct CudaGraphFuser {
       WithInsertPoint guard(bchunk->next());
 
       // Split the bchunk into bchunks.inputs().size() number of chunk nodes.
-      for (size_t input_offset = 0; input_offset < bchunk->inputs().size();
-           input_offset++) {
+      for (const auto input_offset : c10::irange(bchunk->inputs().size())) {
         auto* input = bchunk->inputs().at(input_offset);
 
         Node* new_chunk =
@@ -836,7 +836,7 @@ struct CudaGraphFuser {
     auto outputs = fusion_group->outputs();
     auto soutputs = subgraph->outputs();
     AT_ASSERT(outputs.size() == soutputs.size());
-    for (size_t i = 0; i < outputs.size(); ++i) {
+    for (const auto i : c10::irange(outputs.size())) {
       if (usedOnlyInDtypeAndSize(outputs[i]))
         continue;
       if (soutputs[i]->type()->isSubtypeOf(TensorType::get())) {
@@ -942,7 +942,8 @@ struct CudaGraphFuser {
         continue;
       }
       // TODO: output(1) & output(2) should also be marked
-      if (n->kind() == aten::native_batch_norm) {
+      if (n->kind() == aten::native_batch_norm ||
+          n->kind() == aten::_batch_norm_impl_index) {
         TORCH_INTERNAL_ASSERT(
             shape_of.count(n->input(0)) > 0,
             "buildShapeExpressions failed at accessing input shapes");
@@ -959,6 +960,18 @@ struct CudaGraphFuser {
           shape_of.emplace(n->output(1), shape_of.at(n->input(2)));
           // use shape of weight here for grad_bias
           shape_of.emplace(n->output(2), shape_of.at(n->input(2)));
+        }
+        continue;
+      }
+      if (n->kind() == aten::_batch_norm_impl_index_backward) {
+        TORCH_INTERNAL_ASSERT(
+            shape_of.count(n->input(1)) > 0,
+            "buildShapeExpressions failed at accessing input shapes");
+        shape_of.emplace(n->output(0), shape_of.at(n->input(1)));
+        if (shape_of.count(n->input(3)) > 0) {
+          shape_of.emplace(n->output(1), shape_of.at(n->input(3)));
+          // use shape of weight here for grad_bias
+          shape_of.emplace(n->output(2), shape_of.at(n->input(3)));
         }
         continue;
       }
@@ -1102,11 +1115,25 @@ void removeCudaFusionPathForGuardNode(Node* n) {
   auto uses = n->output()->uses();
   TORCH_INTERNAL_ASSERT(
       uses.size() == 1,
-      "CudaFusionGuard should only be used by a single prim::If");
+      "CudaFusionGuard should only be used once by prim::If or prim::ListConstruct");
   Node* if_node = uses[0].user;
-  TORCH_INTERNAL_ASSERT(
-      if_node->kind() == prim::If,
-      "CudaFusionGuard should only be used by prim::If");
+  if (if_node->kind() != prim::If) {
+    TORCH_INTERNAL_ASSERT(
+        if_node->kind() == prim::ListConstruct,
+        "CudaFusionGuard is not used by neither prim::If or prim::ListConstruct");
+    // break all inputs so producer prim::CudaFusionGuard can be removed later
+    if_node->removeAllInputs();
+    auto list_use = if_node->output()->uses();
+    TORCH_INTERNAL_ASSERT(
+        list_use.size() == 1 && list_use[0].user->kind() == aten::all,
+        "prim::ListConstruct should only be used once by aten::all");
+    auto all_use = list_use[0].user->output()->uses();
+    TORCH_INTERNAL_ASSERT(
+        all_use.size() == 1 && all_use[0].user->kind() == prim::If,
+        "aten::all should only be used once by prim::If");
+    if_node = all_use[0].user;
+  }
+
   auto fall_back_graph = if_node->blocks()[1];
   Node* fallback_node = nullptr;
   for (auto fb_n : fall_back_graph->nodes()) {
@@ -1278,7 +1305,7 @@ void guardFusionGroup(Node* fusion) {
   std::vector<Value*> tensor_inputs_to_check;
   std::set<size_t> profiled_ivalue_indices;
 
-  for (size_t index = 0; index < fusion->inputs().size(); index++) {
+  for (const auto index : c10::irange(fusion->inputs().size())) {
     Value* input = fusion->inputs()[index];
     if (input->type()->cast<TensorType>()) {
       // We only check inputs of the fusion group and expect NNC to infer
@@ -1304,7 +1331,7 @@ void guardFusionGroup(Node* fusion) {
   // insert the if block first;
   auto versioning_if =
       fusion->owningGraph()->create(prim::If, fusion->outputs().size());
-  for (size_t idx = 0; idx < fusion->outputs().size(); ++idx) {
+  for (const auto idx : c10::irange(fusion->outputs().size())) {
     versioning_if->output(idx)->setType(fusion->output(idx)->type());
     fusion->output(idx)->replaceAllUsesWith(versioning_if->output(idx));
   }
@@ -1377,6 +1404,7 @@ void guardFusionGroup(Node* fusion) {
     auto const_true = fusion->owningGraph()->insertConstant(IValue(true));
     const_true->node()->moveBefore(versioning_if);
 
+    std::vector<Value*> check_flags = {};
     for (const auto& original_offset : profiled_ivalue_indices) {
       size_t offset = original_offset - compensation;
 
@@ -1423,12 +1451,8 @@ void guardFusionGroup(Node* fusion) {
       }
       ivalue_check->setType(BoolType::get());
 
-      typecheck_result =
-          fusion->owningGraph()
-              ->create(aten::__and__, {ivalue_check, typecheck_result}, 1)
-              ->insertBefore(versioning_if)
-              ->output();
-      typecheck_result->setType(BoolType::get());
+      // aggregate flags;
+      check_flags.emplace_back(ivalue_check);
 
       // remove inputs to fusion;
       fusion->removeInput(offset);
@@ -1445,6 +1469,19 @@ void guardFusionGroup(Node* fusion) {
       }
       fusion_graph->eraseInput(offset);
       compensation++;
+    }
+
+    if (!check_flags.empty()) {
+      // attaching output from CudaFusionGuard to profile ivalue checks
+      check_flags.emplace_back(typecheck_result);
+      auto graph = fusion->owningGraph();
+      auto bool_list_node =
+          graph->insertNode(graph->createList(BoolType::get(), check_flags));
+      bool_list_node->moveBefore(versioning_if);
+      Value* bool_list = bool_list_node->output();
+      // new typecheck_result
+      typecheck_result = graph->insert(aten::all, {bool_list});
+      typecheck_result->node()->moveBefore(versioning_if);
     }
     // update graph in fusion node
     fusion->g_(attr::Subgraph, fusion_graph);
@@ -1499,7 +1536,7 @@ void alterBatchNormImplIndex(Node* node) {
   std::set<size_t> bn_buffer_out_indices;
 
   auto subgraph = node->g(attr::Subgraph);
-  for (size_t i = 0; i < subgraph->outputs().size(); i++) {
+  for (const auto i : c10::irange(subgraph->outputs().size())) {
     auto val = subgraph->outputs()[i];
     if (val->node()->kind() == aten::_batch_norm_impl_index &&
         val->offset() == 4) {
@@ -1690,9 +1727,9 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
         type_const->node()->moveBefore(fusion_block->return_node());
         fusion_block->replaceOutput(i, type_const);
 
-        // remove the dangling output tensor in CudaFusionGroup
-        fusion_node->eraseOutput(i);
-        fusion_node_graph->eraseOutput(i);
+        // removing the dangling output tensor from CudaFusionGroup would
+        // require tracing output i from block to output j in CudaFusionGroup.
+        // We choose to instead do that later by simply checking uses
       }
 
       {
@@ -1717,6 +1754,18 @@ void removeOutputUsedOnlyInDtype(Node* fusion_node) {
   }
 
   if (updated) {
+    // Remove fusion node output with no uses;
+    for (int64_t i = static_cast<int64_t>(fusion_node->outputs().size()) - 1;
+         i >= 0;
+         --i) {
+      if (fusion_node->output(i)->uses().empty()) {
+        GRAPH_UPDATE(
+            "removing output: ", i, " from fusion node: ", *fusion_node);
+        fusion_node->eraseOutput(i);
+        fusion_node_graph->eraseOutput(i);
+      }
+    }
+
     fusion_node->g_(attr::Subgraph, fusion_node_graph);
   }
 }
@@ -1822,7 +1871,15 @@ void decomposeLinearOps(Block* block) {
         mat0_size.has_value() && mat1_size.has_value(),
         "concrete shape for linear input & weight are required");
     auto out_size = mat0_size.value();
-    out_size[out_size.size() - 1] = mat1_size.value()[0];
+    TORCH_INTERNAL_ASSERT(
+        mat1_size->size() == 2 || mat1_size->size() == 1,
+        "weight dimension for linear is expected to be 1 or 2, but got: ",
+        mat1_size->size());
+    if (mat1_size->size() == 2) {
+      out_size[out_size.size() - 1] = mat1_size.value()[0];
+    } else if (mat1_size->size() == 1) {
+      out_size.pop_back();
+    }
     matmul->output()->setType(input_tensor_type->withSizes(out_size));
 
     // TODO: memory stride should be considered here, our inference above is not
@@ -1834,6 +1891,84 @@ void decomposeLinearOps(Block* block) {
     n->output()->replaceAllUsesWith(bias->output());
     n->destroy();
   }
+}
+
+// break `conv2d` layer into `conv2d` and `add_optional`. This allows us to fuse
+// the binary operation without supporting gemm.
+// Note that we are not breaking `conv2d` layer without bias.
+void decomposeConvOps(Block* block) {
+  std::vector<Node*> conv_nodes;
+  for (Node* n : block->nodes()) {
+    for (Block* b : n->blocks()) {
+      decomposeConvOps(b);
+    }
+    // TODO: expand this to convXd
+    // only decompose `conv2d` layer with bias.
+    if (n->kind() == aten::conv2d &&
+        n->input(2)->type()->isSubtypeOf(TensorType::get())) {
+      conv_nodes.push_back(n);
+    }
+  }
+
+  auto graph = block->owningGraph();
+  for (Node* n : conv_nodes) {
+    // TODO: only handling conv2d at this moment, expand this to convXd
+    WithInsertPoint guard(n);
+
+    auto const_neg_1 = n->owningGraph()->insertConstant(IValue(-1));
+    auto const_none = n->owningGraph()->insertConstant(IValue());
+
+    auto bias_tensor_type = n->input(2)->type()->cast<c10::TensorType>();
+    auto bias_size_opt = bias_tensor_type->sizes().concrete_sizes();
+    TORCH_INTERNAL_ASSERT(
+        bias_size_opt.has_value(),
+        "concrete shape for bias input to conv2d are required");
+    // bias shape (C)
+    auto bias_size = bias_size_opt.value();
+
+    auto tmp = graph->insertNode(
+        graph->create(aten::unsqueeze, {n->input(2), const_neg_1}, 1));
+    // new shape (C, 1)
+    bias_size.emplace_back(1);
+    tmp->output()->setType(bias_tensor_type->withSizes(bias_size));
+
+    auto unsqueezed_bias = graph->insertNode(
+        graph->create(aten::unsqueeze, {tmp->output(), const_neg_1}, 1));
+    // new shape (C, 1, 1)
+    bias_size.emplace_back(1);
+    unsqueezed_bias->output()->setType(bias_tensor_type->withSizes(bias_size));
+
+    // replace bias input to none
+    n->replaceInput(2, const_none);
+
+    // add bias as a new node
+    auto bias_n = graph->insertNode(graph->create(
+        prim::add_optional, {n->output(0), unsqueezed_bias->output()}, 1));
+    bias_n->output()->setType(n->output(0)->type());
+
+    // replace later uses
+    n->output(0)->replaceAllUsesAfterNodeWith(bias_n, bias_n->output());
+  }
+}
+
+bool removeInplaceOperations(const std::shared_ptr<Graph>& graph) {
+  // TODO: we should probably get a list that's close to what our fuser handles
+  static std::unordered_set<Symbol> inplace_ops = []() {
+    std::unordered_set<Symbol> target_ops;
+    for (const auto& iter : activation_type_promotion_mapping) {
+      std::string name = std::string(iter.first.toQualString()) + "_";
+      target_ops.insert(Symbol::fromQualString(name));
+    }
+
+    target_ops.insert(Symbol::fromQualString("aten::add_"));
+    target_ops.insert(Symbol::fromQualString("aten::mul_"));
+    target_ops.insert(Symbol::fromQualString("aten::div_"));
+    target_ops.insert(Symbol::fromQualString("aten::sub_"));
+    return target_ops;
+  }();
+
+  return RemoveTensorMutation(
+      graph, [&](Node* node) { return inplace_ops.count(node->kind()) != 0; });
 }
 
 } // anonymous namespace
@@ -1854,11 +1989,19 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   RemoveProfileNodesAndSpecializeTypes(graph);
   GRAPH_DEBUG("After Profiling Nodes Removed: ", *graph);
 
+  // replace inplace operation to functional version to expose fusion
+  // opportunities
+  removeInplaceOperations(graph);
+  GRAPH_DEBUG("Remove inplace operations: ", *graph);
+
   // TODO: separate passes into different file;
   // TODO: restore decomposition after fusion, in case we are decomposing
   //       operation that can't be fused;
   decomposeLinearOps(graph->block());
-  GRAPH_DEBUG("decompose operations by nvfuser: ", *graph);
+  GRAPH_DEBUG("After decompose Linear Ops by nvfuser: ", *graph);
+
+  decomposeConvOps(graph->block());
+  GRAPH_DEBUG("After decompose decompose Conv Ops by nvfuser: ", *graph);
 
   CudaGraphFuser(graph->block(), graph).run();
   GRAPH_DEBUG("After Fusion: ", *graph);
@@ -1888,8 +2031,11 @@ void CudaFuseGraph(std::shared_ptr<Graph>& graph) {
   // We might have emitted a fair amount of useless shape propagating code, so
   // remove it
   EliminateDeadCode(graph);
+
+  GRAPH_DEBUG("After ECS & Dead code removal: ", *graph);
   // Improve the quality of shape propagation code that was left
   PeepholeOptimizeShapeExpressions(graph->block());
+  GRAPH_DEBUG("After PeepholeOptimizeShapeExpressions: ", *graph);
 
   // TODO: we need to properly restore shape information after fusion.
   // shamelessly use tool from NNC.

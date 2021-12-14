@@ -16,12 +16,16 @@ static CPUCapability compute_cpu_capability() {
       return CPUCapability::VSX;
     }
 #else
+#ifdef HAVE_AVX512_CPU_DEFINITION
     if (strcmp(envar, "avx512") == 0) {
       return CPUCapability::AVX512;
     }
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
     if (strcmp(envar, "avx2") == 0) {
       return CPUCapability::AVX2;
     }
+#endif
 #endif
     if (strcmp(envar, "default") == 0) {
       return CPUCapability::DEFAULT;
@@ -31,13 +35,21 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
+#ifdef HAVE_AVX512_CPU_DEFINITION
+    // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
+    // versions 9 & beyond. So, we want to ensure that only releases built with
+    // supported compilers on supported hardware return CPU Capability AVX512,
+    // if it's supported on the hardware PyTorch is running on.
     if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
         cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX512;
     }
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX2;
     }
+#endif
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION

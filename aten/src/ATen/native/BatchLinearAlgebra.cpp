@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/CPUApplyUtils.h>
 #include <ATen/Dispatch.h>
+#include <ATen/TensorMeta.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/ExpandUtils.h>
 
@@ -203,6 +204,45 @@ extern "C" void strsm_(char *side, char *uplo, char *trans, char *diag, int *n, 
 #endif
 
 namespace at {
+namespace meta {
+
+TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular) {
+  TORCH_CHECK(self.dim() >= 2,
+           "torch.triangular_solve: Expected b to have at least 2 dimensions, but it has ", self.dim(), " dimensions instead");
+  TORCH_CHECK(A.dim() >= 2,
+           "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
+
+  at::native::linearSolveCheckInputs(self, A, "triangular_solve");
+
+  if (A.layout() == Layout::Strided) {
+    std::vector<int64_t> self_broadcast_size, A_broadcast_size;
+    std::tie(self_broadcast_size, A_broadcast_size) = at::native::_linalg_broadcast_batch_dims(self, A);
+
+    auto ndim = self_broadcast_size.size();
+    auto nrows = A.size(-2);
+
+    // make column major strides for BLAS
+    auto solution_strides = at::detail::defaultStrides(self_broadcast_size);
+    solution_strides[ndim - 2] = 1;
+    solution_strides[ndim - 1] = nrows;
+    set_output(0, self_broadcast_size, solution_strides, self.options(), {});
+
+    // make column major strides for BLAS
+    auto clone_A_strides = at::detail::defaultStrides(A_broadcast_size);
+    clone_A_strides[ndim - 2] = 1;
+    clone_A_strides[ndim - 1] = nrows;
+    set_output(1, A_broadcast_size, clone_A_strides, A.options(), {});
+  } else if (A.layout() == Layout::SparseCsr) {
+    // no broadcasting for non-strided layout
+    set_output(0, self.sizes(), {}, self.options(), {}); // make row major strides for Sparse BLAS
+    set_output(1, {0}, {}, self.options(), {}); // return 0-sized tensor
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
+  }
+}
+
+} // namespace meta
+
 namespace native {
 
 #if AT_BUILD_WITH_LAPACK()
@@ -801,15 +841,14 @@ std::tuple<Tensor&,Tensor&> solve_out(const Tensor& self, const Tensor& A, Tenso
 // Solves a system of linear equations matmul(input, x) = other in-place
 // LAPACK/MAGMA error codes are saved in 'infos' tensor, they are not checked here
 static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor& input, const Tensor& other) {
-  checkSameDevice("linalg_solve", result, input);
-  checkSameDevice("linalg_solve", other, input, "other");
-  checkLinalgCompatibleDtype("linalg_solve", result, input);
+  checkSameDevice("linalg.solve", result, input);
+  checkSameDevice("linalg.solve", other, input, "other");
+  checkLinalgCompatibleDtype("linalg.solve", result, input);
 
   TORCH_CHECK(input.scalar_type() == other.scalar_type(),
     "input dtype ", input.scalar_type(), " does not match other dtype ", other.scalar_type());
 
-  TORCH_CHECK(input.dim() >= 2,
-           "input should have at least 2 dimensions, but has ", input.dim(), " dimensions instead");
+  squareCheckInputs(input, "linalg.solve");
   TORCH_CHECK(other.dim() >= 1,
            "other should have at least 1 dimension, but has ", other.dim(), " dimensions instead");
 
@@ -856,7 +895,7 @@ static Tensor& linalg_solve_out_info(Tensor& result, Tensor& infos, const Tensor
   // _linalg_broadcast_batch_dims also includes linearSolveCheckInputs
   // it checks for squareness of 'input' and 'shape' compatibility of 'other' and 'input'
   Tensor other_broadcasted, input_broadcasted;
-  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg_solve");
+  std::tie(other_broadcasted, input_broadcasted) = _linalg_broadcast_batch_dims(other_, input, "linalg.solve");
 
   auto squeezed_other_broadcasted = at::squeeze(other_broadcasted, -1);
   auto squeezed_result_shape = squeezed_other_broadcasted.sizes();
@@ -928,9 +967,9 @@ Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& resul
   // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
   bool vector_case = linalg_solve_is_vector_rhs(input, other);
   if (vector_case ? result.dim() > 1 : result.dim() > 2) {
-    batchCheckErrors(infos, "linalg_solve");
+    batchCheckErrors(infos, "linalg.solve");
   } else {
-    singleCheckErrors(infos.item().toInt(), "linalg_solve");
+    singleCheckErrors(infos.item().toInt(), "linalg.solve");
   }
 
   return result;
@@ -1015,7 +1054,7 @@ Tensor inverse(const Tensor &self) {
   if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  squareCheckInputs(self);
+  squareCheckInputs(self, "inverse");
   return at::_inverse_helper(self);
 }
 
@@ -1042,9 +1081,9 @@ Tensor& _linalg_inv_out_helper_cpu(Tensor &result, Tensor& infos_lu, Tensor& inf
 // Computes the inverse matrix of 'input', it is is saved to 'result' in-place
 // LAPACK/MAGMA/cuSOLVER error codes are saved in 'infos' tensors, they are not checked here
 static Tensor& linalg_inv_out_info(Tensor& result, Tensor& infos_lu, Tensor& infos_getri, const Tensor& input) {
-  squareCheckInputs(input);
-  checkSameDevice("linalg_inv", result, input);
-  checkLinalgCompatibleDtype("linalg_inv", result, input);
+  squareCheckInputs(input, "linalg.inv");
+  checkSameDevice("linalg.inv", result, input);
+  checkLinalgCompatibleDtype("linalg.inv", result, input);
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_lu.scalar_type() == kInt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos_getri.scalar_type() == kInt);
@@ -1137,11 +1176,11 @@ Tensor& linalg_inv_out(const Tensor &input, Tensor &result) {
 
   // Now check LAPACK/MAGMA/cuSOLVER error codes
   if (result.dim() > 2) {
-    batchCheckErrors(infos_lu, "linalg_inv_lu");
-    batchCheckErrors(infos_getri, "linalg_inv_getri");
+    batchCheckErrors(infos_lu, "linalg.inv");
+    batchCheckErrors(infos_getri, "linalg.inv");
   } else {
-    singleCheckErrors(infos_lu.item().toInt(), "linalg_inv_lu");
-    singleCheckErrors(infos_getri.item().toInt(), "linalg_inv_getri");
+    singleCheckErrors(infos_lu.item().toInt(), "linalg.inv");
+    singleCheckErrors(infos_getri.item().toInt(), "linalg.inv");
   }
 
   return result;
@@ -1164,7 +1203,7 @@ Tensor linalg_inv(const Tensor &input) {
 }
 
 std::tuple<Tensor&, Tensor&> linalg_inv_ex_out(const Tensor& input, bool check_errors, Tensor& inverse, Tensor& info) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.inv_ex");
   ScalarType info_output_type = ScalarType::Int;
   TORCH_CHECK(
       info.scalar_type() == info_output_type,
@@ -1191,7 +1230,7 @@ std::tuple<Tensor&, Tensor&> linalg_inv_ex_out(const Tensor& input, bool check_e
 }
 
 std::tuple<Tensor, Tensor> linalg_inv_ex(const Tensor& input, bool check_errors) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.inv_ex");
   Tensor inverse = at::empty(input.sizes(), input.options(), MemoryFormat::Contiguous);
   inverse.transpose_(-2, -1); // make `inverse` tensor with batched column major format
   auto info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
@@ -1287,7 +1326,7 @@ Tensor cholesky(const Tensor &self, bool upper) {
   if (self.numel() == 0) {
     return at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   }
-  squareCheckInputs(self);
+  squareCheckInputs(self, "cholesky");
 
   auto raw_cholesky_output = cloneBatchedColumnMajor(self);
   auto info_shape = IntArrayRef(
@@ -1375,7 +1414,7 @@ void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const T
 }
 
 std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool upper, bool check_errors, Tensor& L, Tensor& info) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.cholesky_ex");
   checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
   checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
   checkSameDevice("torch.linalg.cholesky_ex", info, input, "info");
@@ -1510,7 +1549,7 @@ Tensor& cholesky_inverse_out_info(Tensor& result, Tensor& infos, const Tensor& i
 }
 
 Tensor& cholesky_inverse_out(const Tensor &input, bool upper, Tensor &result) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "cholesky_inverse");
   checkSameDevice("cholesky_inverse", result, input);
   checkLinalgCompatibleDtype("cholesky_inverse", result, input);
 
@@ -1594,31 +1633,32 @@ The result of the computation is saved in-place in 'result' tensor,
 'unitriangular' if true then the diagonal elements of 'input' are assumed to be 1
 and the actual diagonal values are not used.
 */
-static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
-    Tensor& result,
-    Tensor& clone_input,
-    Tensor& infos,
+static void triangular_solve_out_impl(
+    const Tensor& result,
+    const Tensor& clone_input,
     const Tensor& input,
     const Tensor& other,
     bool upper, bool transpose, bool unitriangular) {
+  TORCH_WARN_ONCE(
+    "torch.triangular_solve is deprecated in favor of torch.linalg.solve_triangular",
+    "and will be removed in a future PyTorch release.\n",
+    "torch.linalg.solve_triangular has its arguments reversed and does not return a copy of one of the inputs.\n",
+    "X = torch.triangular_solve(B, A).solution\n",
+    "should be replaced with\n",
+    "X = torch.linalg.solve_triangular(A, B).");
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of
   // the hierarchy of calls
-  TORCH_INTERNAL_ASSERT(input.dim() >= 2);
-  TORCH_INTERNAL_ASSERT(input.size(-2) == input.size(-1));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-2) == input.size(-1));
 
-  TORCH_INTERNAL_ASSERT(input.device() == other.device());
-  TORCH_INTERNAL_ASSERT(input.device() == result.device());
-  TORCH_INTERNAL_ASSERT(input.device() == clone_input.device());
-  TORCH_INTERNAL_ASSERT(input.device() == infos.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == other.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == result.device());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.device() == clone_input.device());
 
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == other.scalar_type());
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == result.scalar_type());
-  TORCH_INTERNAL_ASSERT(input.scalar_type() == clone_input.scalar_type());
-
-  TORCH_INTERNAL_ASSERT(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT(infos.numel() == std::max<int64_t>(1, batchCount(input)));
-  TORCH_INTERNAL_ASSERT(infos.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == other.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == result.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.scalar_type() == clone_input.scalar_type());
 
   // if 'result' has no elements we can modify it
   if (result.numel() == 0) {
@@ -1633,60 +1673,38 @@ static std::tuple<Tensor&, Tensor&> triangular_solve_out_info(
   }
 
   // 'result' and 'clone_input' must be in batched column major order (Fortran contiguous)
-  TORCH_INTERNAL_ASSERT(result.mT().is_contiguous());
-  TORCH_INTERNAL_ASSERT(clone_input.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(clone_input.mT().is_contiguous());
 
   // triangular_solve_stub performs calculations in-place
   // 'result' must be a copy of 'other'
   // 'clone_input' must be a copy of 'input'
-  TORCH_INTERNAL_ASSERT(result.sizes().equals(other.sizes()));
-  TORCH_INTERNAL_ASSERT(clone_input.sizes().equals(input.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(other.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(clone_input.sizes().equals(input.sizes()));
   result.copy_(other);
   clone_input.copy_(input);
 
   triangular_solve_stub(input.device().type(), clone_input, result, /*left=*/true, upper, transpose ? TransposeType::Transpose : TransposeType::NoTranspose, unitriangular);
-
-  return std::tuple<Tensor&, Tensor&>(result, clone_input);
 }
 
-// Supports arbitrary batch dimensions for self and A
-std::tuple<Tensor, Tensor> triangular_solve(const Tensor& self, const Tensor& A,
-                                            bool upper, bool transpose, bool unitriangular) {
-  TORCH_CHECK(self.dim() >= 2,
-           "torch.triangular_solve: Expected b to have at least 2 dimensions, but it has ", self.dim(), " dimensions instead");
-  TORCH_CHECK(A.dim() >= 2,
-           "torch.triangular_solve: Expected A to have at least 2 dimensions, but it has ", A.dim(), " dimensions instead");
+TORCH_IMPL_FUNC(triangular_solve_out)(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, const Tensor& result, const Tensor& clone_A) {
+  Tensor self_broadcast, A_broadcast;
+  std::tie(self_broadcast, A_broadcast) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
 
-  Tensor self_broadcasted, A_broadcasted;
-  std::tie(self_broadcasted, A_broadcasted) = _linalg_broadcast_batch_dims(self, A, "triangular_solve");
+  bool copy_needed = !result.transpose(-2, -1).is_contiguous();
+  copy_needed |= !clone_A.transpose(-2, -1).is_contiguous();
 
-  Tensor result = at::empty({0}, self.options());
-  Tensor clone_A = at::empty({0}, self.options());
-  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self_broadcasted))}, self.options().dtype(kInt));
+  if (copy_needed) {
+    Tensor result_tmp = at::empty({0}, self.options());
+    Tensor clone_A_tmp = at::empty({0}, A.options());
 
-  triangular_solve_out_info(result, clone_A, infos, A_broadcasted, self_broadcasted, upper, transpose, unitriangular);
+    triangular_solve_out_impl(result_tmp, clone_A_tmp, A_broadcast, self_broadcast, upper, transpose, unitriangular);
 
-  if (self_broadcasted.dim() > 2) {
-    batchCheckErrors(infos, "triangular_solve");
+    result.copy_(result_tmp);
+    clone_A.copy_(clone_A_tmp);
   } else {
-    singleCheckErrors(infos.item().toInt(), "triangular_solve");
+    triangular_solve_out_impl(result, clone_A, A_broadcast, self_broadcast, upper, transpose, unitriangular);
   }
-
-  return std::tuple<Tensor, Tensor>(result, clone_A);
-}
-
-std::tuple<Tensor&, Tensor&> triangular_solve_out(const Tensor& self, const Tensor& A, bool upper, bool transpose, bool unitriangular, Tensor& result, Tensor& clone_A) {
-  checkSameDevice("triangular_solve", result, self);
-  checkLinalgCompatibleDtype("triangular_solve", result, self);
-  checkSameDevice("triangular_solve", clone_A, self, "clone_A");
-  checkLinalgCompatibleDtype("triangular_solve", clone_A, self, "clone_A");
-  Tensor result_tmp, clone_A_tmp;
-  std::tie(result_tmp, clone_A_tmp) = at::native::triangular_solve(self, A, upper, transpose, unitriangular);
-  at::native::resize_output(result, result_tmp.sizes());
-  at::native::resize_output(clone_A, clone_A_tmp.sizes());
-  result.copy_(result_tmp);
-  clone_A.copy_(clone_A_tmp);
-  return std::tuple<Tensor&, Tensor&>(result, clone_A);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ qr ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2032,14 +2050,7 @@ Tensor& linalg_householder_product_out(const Tensor& input, const Tensor& tau, T
       tau.scalar_type(),
       " does not match input dtype ",
       input.scalar_type());
-  TORCH_CHECK(
-      input.device() == tau.device(),
-      "torch.linalg.householder_product: Expected input and tau to be on the same device, but found input on ",
-      input.device(),
-      " and tau on ",
-      tau.device(),
-      " instead.");
-
+  checkSameDevice("torch.linalg.householder_product", tau, input, "tau");
   checkSameDevice("torch.linalg.householder_product", result, input);
   checkLinalgCompatibleDtype("torch.linalg.householder_product", result, input);
 
@@ -2312,7 +2323,7 @@ void linalg_eigh_out_info(
 }
 
 std::tuple<Tensor, Tensor> linalg_eigh(const Tensor& input, c10::string_view uplo) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.eigh");
   checkUplo(uplo);
   ScalarType real_dtype = toValueType(input.scalar_type());
   Tensor values = at::empty({0}, input.options().dtype(real_dtype));
@@ -2369,7 +2380,7 @@ Tensor& linalg_eigvalsh_out(const Tensor& input, c10::string_view uplo, Tensor& 
   ScalarType real_dtype = toValueType(input.scalar_type());
   checkLinalgCompatibleDtype("torch.linalg.eigvalsh", result.scalar_type(), real_dtype);
 
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.eigvalsh");
   checkUplo(uplo);
 
   auto expected_result_shape = IntArrayRef(input.sizes().data(), input.dim()-1);  // input.shape[:-1]
@@ -2498,7 +2509,7 @@ std::tuple<Tensor, Tensor> symeig(const Tensor& self, bool eigenvectors, bool up
     "should be replaced with\n",
     "L, V = torch.linalg.eigh(A, UPLO='U' if upper else 'L')"
   );
-  squareCheckInputs(self);
+  squareCheckInputs(self, "linalg.symeig");
   return at::_symeig_helper(self, eigenvectors, upper);
 }
 
@@ -2708,7 +2719,8 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& va
 }
 
 std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values, Tensor& vectors) {
-  squareCheckInputs(input);
+  TORCH_CHECK(input.isfinite().all().item<bool>(), "torch.linalg.eig: input tensor should not contain infs or NaNs.");
+  squareCheckInputs(input, "linalg.eig");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued
   checkLinalgCompatibleDtype("torch.linalg.eig", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
@@ -2805,7 +2817,7 @@ std::tuple<Tensor, Tensor> linalg_eig(const Tensor& input) {
 }
 
 Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
-  squareCheckInputs(input);
+  squareCheckInputs(input, "linalg.eigvals");
 
   // unlike NumPy for real-valued inputs the output is always complex-valued
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
@@ -3094,7 +3106,6 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd(const Tensor& self, bool full_matr
 
     Tensor Vh = V.mH();
     return std::make_tuple(U, S, Vh);
-
 }
 
 static void svd_resize_and_copy(const char *name, const Tensor& src, Tensor &dst) {
@@ -3107,11 +3118,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> linalg_svd_out(const Tensor& self, bool fu
   checkSameDevice("svd", U, self, "U");
   checkSameDevice("svd", S, self, "S");
   checkSameDevice("svd", Vh, self, "Vh");
-  checkLinalgCompatibleDtype("linalg_svd", U, self, "U");
-  checkLinalgCompatibleDtype("linalg_svd", Vh, self, "Vh");
+  checkLinalgCompatibleDtype("linalg.svd", U, self, "U");
+  checkLinalgCompatibleDtype("linalg.svd", Vh, self, "Vh");
   // singular values are always real-valued here
   ScalarType real_dtype = toValueType(self.scalar_type());
-  checkLinalgCompatibleDtype("linalg_svd", S.scalar_type(), real_dtype, "S");
+  checkLinalgCompatibleDtype("linalg.svd", S.scalar_type(), real_dtype, "S");
   Tensor U_tmp, S_tmp, Vh_tmp;
   std::tie(U_tmp, S_tmp, Vh_tmp) = at::native::linalg_svd(self, full_matrices);
   svd_resize_and_copy("U", U_tmp, U);
@@ -3795,6 +3806,262 @@ Tensor _det_lu_based_helper_backward_helper(
     // multiply by p to restore the row order
     return at::matmul(p, d);
   }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ solve_triangular ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+namespace {
+void checkIsMatrix(const Tensor& t,
+                   const char* const f_name,
+                   const char* const t_name) {
+  TORCH_CHECK(t.dim() >= 2, f_name, ": Expected ", t_name,
+                            " to be a tensor of at least 2 dimensions.");
+}
+
+void checkIsSquareMatrix(const Tensor& t,
+                         const char* const f_name,
+                         const char* const t_name) {
+  checkIsMatrix(t, f_name, t_name);
+  TORCH_CHECK(t.size(-1) == t.size(-2),
+              f_name, ": Expected ", t_name,
+              " to be a square matrix or batch of square matrices. "
+              "Got matrices of size (", t.size(-2), ", ", t.size(-1), ").");
+}
+
+void checkInputsSolver(const Tensor& A,
+                       const Tensor& B,
+                       const Tensor& out,
+                       const bool left,
+                       const char* const f_name) {
+  checkIsSquareMatrix(A, f_name, "A");
+  checkIsMatrix(B, f_name, "B");
+  TORCH_CHECK(left ? A.size(-2) == B.size(-2) : A.size(-1) == B.size(-1),
+              f_name, ": Incompatible shapes of A and B for the equation ",
+              left ? "AX = B" : "XA = B",
+              " (", A.size(-2), "x", A.size(-1), " and ", B.size(-2), "x", B.size(-1), ")");
+}
+
+bool is_row_or_column_contiguous(const Tensor& t) {
+  // This could be made more general, similar to how it's checked in matmul, which would allow to
+  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // We choose to be conservative for simplicity
+  return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
+}
+
+TransposeType to_transpose_type(const bool contig, const bool conj) {
+  if (conj) {
+    if (contig) { TORCH_INTERNAL_ASSERT(false, "Invalid transpose type"); }
+    else {        return TransposeType::ConjTranspose; }
+  } else {
+    if (contig) { return TransposeType::NoTranspose; }
+    else {        return TransposeType::Transpose; }
+  }
+}
+} // end of anonymous namespace
+
+/*
+Solves the matrix equation AX = B for A triangular.
+'left' If true solves AX = B, if false solves XA = B
+'upper' controls the portion of input matrix to consider in computations,
+'unitriangular' if true then we assume diag(A) to be ones
+'out' The tensor with the result. If A == out, A will be modified in place
+*/
+Tensor& linalg_solve_triangular_out(
+    const Tensor& A,
+    const Tensor& B,
+    bool upper,
+    bool left,
+    bool unitriangular,
+    Tensor& out) {
+  checkInputsSolver(A, B, out, left, "linalg.solve_triangular");
+  Tensor A_, B_;
+  std::tie(B_, A_) = _linalg_broadcast_batch_dims(B, A, /*don't check errors*/nullptr);
+
+  // We'll write F-contig / F-transpose for FORTRAN contiguous / FORTRAN transpose etc
+  // We say that a matrix is F-ready if it's F-contig OR F-transpose
+  // At this point, A, B have been broadcasted but may or may not be F-ready
+
+  // The following algorithm minimises copies and allocations. In pseudocode:
+  // if out is wrong size:
+  //   resize_output(out)
+  // # Invariant: out is the right size
+  // Tensor out_f; # Tensor that we will pass to FORTRAN
+  // if out is F-ready:
+  //   out_f = out;
+  // else:
+  //   Allocate out_f F-ready
+  // if B != out_f:
+  //   copy B into out_f
+  // # Invariant: out_f F-ready and has B copied into it
+  // if out_f is F-transposed:
+  //   transpose equation
+  // if out_f is conj:
+  //   conjugate equation
+  // # Invariant: out_f is not conjugated and F-contig
+  // Tensor A_f; # Tensor that will be sent to FORTRAN
+  // if A is F-ready:
+  //   if A is conj and A is not transposed:
+  //     # We need to clone A in this case. See [Cloning A]
+  //     clone A F-contig into A_f
+  //   else:
+  //     A_f = A;
+  // else:
+  //   clone A F-contig into A_f
+  // # Invariant: out_f is F-contig and A_f is F-ready
+  // # We pass FORTRAN the flags indicating if A_f is transposed and or conjugated
+  //
+  // # Here we undo the conjugations / transposes on out_f if needed
+  //
+  // if out_f not same out:
+  //   copy out_f into out
+  // return out
+  //
+  // Note: The logic for the negative bit is the same as that for the conjugate bit
+  //
+  // Note: [Cloning A] If we are careful when allocating B when it needs to be allocated at the
+  // beginning of the algorithm, it is possible to always elide the copy of A here.
+  // Via this trick, the algorithm will copy at most one of A or B (never both) whenever A
+  // and B are F-ready and not A.is_neg() (which happens almost always in practice).
+  // When called as f(A, B, out=B) in most practical cases it'll perform no copies.
+
+  const bool avoid_copy_A = A_.transpose(-2, -1).is_contiguous() && A_.is_conj();
+  if (avoid_copy_A) {
+    // See Note: [Cloning A]
+    at::native::resize_output(out, B_.sizes());
+  }
+  else {
+    // poorman's reimplementation of resize_output with result F-contig
+    if (resize_output_check(out, B_.sizes())) {
+      out.resize_(B_.transpose(-2, -1).sizes(), MemoryFormat::Contiguous);
+      out.transpose_(-2, -1);  // make 'out' have Fortran contiguous memory layout
+    }
+  }
+  // Invariant: out has the right size, so we'll be able to copy into it later on
+
+  Tensor out_f; // the out that will go into fortran
+  // We use C10_LIKELY mostly for documentation as it helps following what's the most likely path
+  if C10_LIKELY (is_row_or_column_contiguous(out)) {
+    out_f = out;
+    if C10_LIKELY (!out.is_same(B_)) {
+      out_f.copy_(B_);
+    }
+  } else {
+    if (avoid_copy_A) {
+      // See Note: [Cloning A]
+      out_f = B_.clone(at::MemoryFormat::Contiguous);
+    }
+    else {
+      out_f = cloneBatchedColumnMajor(B_);
+    }
+  }
+  // Invariant: out_f F-ready and has B copied into it
+
+  // out_f is F-transposed
+  bool transpose_A = false;
+  bool transpose_out_f = false;
+  if (out_f.stride(-1) == 1) {
+    left = !left;
+    transpose_A = true;
+    transpose_out_f = true;
+    out_f.transpose_(-2 ,-1);
+  }
+
+  // No need to conjugate anything if out_f is conj as AX = conj(B) <=> conj(A)conj(X) = B
+  // and X = B after the algortihm. We just anotate that A is conjugated later on
+  // The solution will be written into out_f, so it'll be conjugated already
+
+  Tensor A_f = A_;  // The A that will go into fortran
+
+  bool A_is_conj = A_f.is_conj() != out_f.is_conj();
+  bool A_is_neg = A_f.is_neg() != out_f.is_neg();
+  bool A_is_f_contig = (A_f.stride(-1) == 1) == transpose_A;
+  if C10_UNLIKELY (!is_row_or_column_contiguous(A_f)) {
+    // We first anotate with flags on A_f all the conj / transpose / neg coming from out
+    // and then we clone the resulting tensor to resolve all of them in memory
+    if (out_f.is_conj()) {
+      A_f = A_f.conj();
+    }
+    A_is_conj = false;
+
+    if (out_f.is_neg()) {
+      A_f = A_f._neg_view();
+    }
+    A_is_neg = false;
+
+    // This choice is to be consistent with how we flip `upper` later on
+    // Note that this is the same reasoning we apply for neg and conj below
+    // If B has neg or out or transpose, then we need to resolve it in memory
+    A_f = transpose_A ? A_f.clone(at::MemoryFormat::Contiguous)
+                      : cloneBatchedColumnMajor(A_f);
+    A_is_f_contig = true;
+  } else if C10_UNLIKELY (A_is_f_contig && A_is_conj) {
+    if C10_UNLIKELY (A_f.is_neg() || out_f.is_neg()) {
+      // Cases A_is_neg (remember that B.is_neg() iff out_f.is_same(B))
+      // -AX = -B => A(-X) = B. Swap neg of A_f. Nothing to do on X as X.is_same(B).
+      // -AX = B. We resolve the neg in memory
+      // AX = -B => -A -X = B. We resolve the neg in memory for A,
+      //                       Since X.is_same(B), we already have that X.is_neg() == true
+
+      // We do the neg with a view, as this will be resolved in the clone below
+      if (out_f.is_neg()) {
+        A_f = A_f._neg_view();
+      }
+      A_is_neg = false;
+    }
+    // We resolve the transpose if necessary and then leave A_f F-transposed,
+    // as BLAS can handle the case F-transposed and conjugated
+    A_f = at::clone(transpose_A ? A_f.mT() : A_f, at::MemoryFormat::Contiguous);
+    A_is_f_contig = false;
+    if (transpose_A) {
+      upper = !upper;
+    }
+    // As we've already resolved the conj of A in the clone
+    A_is_conj = out_f.is_conj();
+  } else if C10_UNLIKELY (A_is_neg) {
+    // We follow the same logic as above, only that in this case we need to perform the
+    // negation in memory
+    if (out_f.is_neg()) {
+      A_f = -A_f;
+    } else {
+      A_f = A_f.resolve_neg();
+    }
+    A_is_neg = false;
+    // As we've already resolved the conj of A in the negationa bove
+    A_is_conj = out_f.is_conj();
+  }
+  // Invariant: out_f is F-contig and A_f is F-ready
+  // neg has been resolved
+
+  // If we pass the matrix physically F-transposed, we need to change the parity of upper
+  if (A_f.stride(-1) == 1) {
+    upper = !upper;
+  }
+
+  triangular_solve_stub(
+    A_f.device().type(), A_f, out_f,
+    /*left=*/left,
+    /*upper=*/upper,
+    /*transpose*/to_transpose_type(A_is_f_contig, A_is_conj),
+    /*unitriangular=*/unitriangular);
+
+  if (transpose_out_f) {
+    out_f.transpose_(-2, -1);
+  }
+
+  if (!out_f.is_same(out)) {
+    out.copy_(out_f);
+  }
+  return out;
+}
+
+Tensor linalg_solve_triangular(
+    const Tensor& A,
+    const Tensor& B,
+    bool upper,
+    bool left,
+    bool unitriangular) {
+  Tensor out = at::empty({0}, A.options());
+  linalg_solve_triangular_out(A, B, upper, left, unitriangular, out);
+  return out;
 }
 
 }}  // namespace at::native

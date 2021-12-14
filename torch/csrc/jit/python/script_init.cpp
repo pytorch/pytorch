@@ -1,4 +1,5 @@
 #include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -8,12 +9,16 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -29,6 +34,8 @@
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -39,6 +46,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -92,7 +100,7 @@ struct PythonResolver : public Resolver {
 
   std::shared_ptr<SugaredValue> resolveValue(
       const std::string& name,
-      Function& m,
+      GraphFunction& m,
       const SourceRange& loc) override {
     pybind11::gil_scoped_acquire ag;
     py::object obj = rcb_(name);
@@ -531,7 +539,7 @@ static std::shared_ptr<Graph> _propagate_and_assign_input_shapes(
 
 void addFunctionToModule(Module& module, const StrongFunctionPtr& func) {
   // Make a graph with a fake self argument
-  auto graph = func.function_->graph()->copy();
+  auto graph = toGraphFunction(*func.function_).graph()->copy();
   auto v = graph->insertInput(0, "self");
   v->setType(module._ivalue()->type());
   const auto name = QualifiedName(*module.type()->name(), "forward");
@@ -1008,6 +1016,17 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
+  py::class_<UpgraderEntry>(m, "_UpgraderEntry")
+      .def_property_readonly(
+          "bumped_at_version",
+          [](const UpgraderEntry& self) { return self.bumped_at_version; })
+      .def_property_readonly(
+          "upgrader_name",
+          [](const UpgraderEntry& self) { return self.upgrader_name; })
+      .def_property_readonly("old_schema", [](const UpgraderEntry& self) {
+        return self.old_schema;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1414,11 +1433,13 @@ void initJitScriptBindings(PyObject* module) {
           py::arg("_extra_files") = ExtraFilesMap())
       .def_property_readonly(
           "graph",
-          [](const StrongFunctionPtr& self) { return self.function_->graph(); })
+          [](const StrongFunctionPtr& self) {
+            return toGraphFunction(*self.function_).graph();
+          })
       .def_property_readonly(
           "inlined_graph",
           [](const StrongFunctionPtr& self) {
-            auto g = self.function_->graph()->copy();
+            auto g = toGraphFunction(*self.function_).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1440,12 +1461,16 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_debug_state",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().getDebugState();
+            return toGraphFunction(*self.function_)
+                .get_executor()
+                .getDebugState();
           })
       .def(
           "_debug_flush_compilation_cache",
           [](const StrongFunctionPtr& self) {
-            return self.function_->get_executor().debugFlushCompilationCache();
+            toGraphFunction(*self.function_)
+                .get_executor()
+                .debugFlushCompilationCache();
           })
       .def_property_readonly(
           "name",
@@ -1479,7 +1504,7 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "inlined_graph",
           [](const Method& self) {
-            auto g = self.function().graph()->copy();
+            auto g = toGraphFunction(self.function()).graph()->copy();
             Inline(*g);
             return g;
           })
@@ -1586,6 +1611,15 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
+
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
 
   m.def(
       "_jit_script_class_compile",
@@ -1695,7 +1729,15 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
+  m.def("_populate_upgraders_map", &populate_upgraders_map);
+  m.def("_get_upgraders_map_size", &get_upgraders_map_size);
+  m.def("_dump_upgraders_map", &dump_upgraders_map);
+
+  m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
+  m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
+
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
+  m.def("_get_operator_version_map", &get_operator_version_map);
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,
@@ -1930,6 +1972,10 @@ void initJitScriptBindings(PyObject* module) {
   });
 
   m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+
+  m.def(
+      "_enable_mobile_interface_call_export",
+      &torch::jit::enableMobileInterfaceCallExport);
 
   m.def("_create_module_with_type", [](const ClassTypePtr& type) {
      return Module(get_python_cu(), type);

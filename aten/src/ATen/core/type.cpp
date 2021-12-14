@@ -435,11 +435,10 @@ MatchTypeReturn matchTypeVariables(
     return ss.str();
   } else if (auto lt_formal = formal->castRaw<ListType>()) {
     if (auto lt_actual = actual->castRaw<ListType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
         // propagate the errMsg onward
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -462,10 +461,9 @@ MatchTypeReturn matchTypeVariables(
         return MatchTypeReturn("Cannot match tuples of mismatched size");
       }
       for (size_t i = 0; i < tp_formal->elements().size(); ++i) {
-        const auto result = matchTypeVariables(
+        auto result = matchTypeVariables(
             tp_formal->elements()[i], tp_actual->elements()[i], type_env);
         if (!result.success()) {
-          // NOLINTNEXTLINE(performance-no-automatic-move)
           return result;
         }
       }
@@ -477,10 +475,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto lt_formal = formal->castRaw<FutureType>()) {
     if (auto lt_actual = actual->castRaw<FutureType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -491,10 +488,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
     if (auto lt_actual = actual->castRaw<RRefType>()) {
-      const auto innerMatch = matchTypeVariables(
+      auto innerMatch = matchTypeVariables(
           lt_formal->getElementType(), lt_actual->getElementType(), type_env);
       if (!innerMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return innerMatch;
       }
       return MatchTypeReturn::Success();
@@ -505,10 +501,9 @@ MatchTypeReturn matchTypeVariables(
     }
   } else if (auto opt_formal = formal->castRaw<OptionalType>()) {
     if (auto opt_actual = actual->castRaw<OptionalType>()) {
-      const auto optionedMatch = matchTypeVariables(
+      auto optionedMatch = matchTypeVariables(
           opt_formal->getElementType(), opt_actual->getElementType(), type_env);
       if (!optionedMatch.success()) {
-        // NOLINTNEXTLINE(performance-no-automatic-move)
         return optionedMatch;
       }
     } else if (!actual->isSubtypeOf(*NoneType::get())) {
@@ -854,13 +849,13 @@ bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
 // an Optional. This populates `types` with all the types found during
 // flattening. At the end of `flattenUnion`, `types` may have
 // duplicates, but it will not have nested Optionals/Unions
-void flattenUnion(TypePtr& type, std::vector<TypePtr>* to_fill) {
-  if (auto union_type = type->cast<UnionType>()) {
-    for (auto inner : union_type->containedTypes()) {
+static void flattenUnion(const TypePtr& type, std::vector<TypePtr>* to_fill) {
+  if (auto* union_type = type->castRaw<UnionType>()) {
+    for (const auto& inner : union_type->containedTypes()) {
       flattenUnion(inner, to_fill);
     }
-  } else if (auto opt_type = type->cast<OptionalType>()) {
-    auto inner = opt_type->getElementType();
+  } else if (auto* opt_type = type->castRaw<OptionalType>()) {
+    const auto& inner = opt_type->getElementType();
     flattenUnion(inner, to_fill);
     to_fill->emplace_back(NoneType::get());
   } else if (type->kind() == NumberType::Kind) {
@@ -885,7 +880,7 @@ void filterDuplicateSubtypes(std::vector<TypePtr>* types) {
   if (types->empty()) {
     return;
   }
-  auto get_supertype = [](const TypePtr t1, const TypePtr t2) -> c10::optional<TypePtr> {
+  auto get_supertype = [](const TypePtr& t1, const TypePtr& t2) -> c10::optional<TypePtr> {
     // We don't want nested Optionals. Also, prematurely unifying to
     // `Optional` could prevent us from coalescing other types
     if ((t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get()))
@@ -932,7 +927,7 @@ void sortUnion(std::vector<TypePtr>* types) {
   // is guaranteed to be stable since we've already coalesced any
   // possible types
   std::sort(types->begin(), types->end(),
-          [](const TypePtr a, const TypePtr b) -> bool {
+          [](const TypePtr& a, const TypePtr& b) -> bool {
             if (a->kind() != b->kind()) {
               return a->kind() < b->kind();
             }
@@ -941,7 +936,7 @@ void sortUnion(std::vector<TypePtr>* types) {
 }
 
 void standardizeVectorForUnion(std::vector<TypePtr>& reference, std::vector<TypePtr>* to_fill) {
-  for (auto type : reference) {
+  for (const auto& type : reference) {
     flattenUnion(type, to_fill);
   }
   filterDuplicateSubtypes(to_fill);
@@ -1104,8 +1099,8 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   });
 }
 
-
-std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) const {
+std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
+    const {
   std::stringstream ss;
 
   bool can_hold_numbertype = this->canHoldType(*NumberType::get());
@@ -1121,7 +1116,10 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
     return false;
   };
 
-  ss << "Union[";
+  std::string open_delimeter = is_annotation_str ? "[" : "(";
+  std::string close_delimeter = is_annotation_str ? "]" : ")";
+
+  ss << "Union" + open_delimeter;
   bool printed = false;
   for (size_t i = 0; i < types_.size(); ++i) {
     if (!can_hold_numbertype || !is_numbertype(types_[i])) {
@@ -1146,7 +1144,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str) con
       ss << NumberType::get()->str();
     }
   }
-  ss << "]";
+  ss << close_delimeter;
   return ss.str();
 }
 
@@ -2233,7 +2231,7 @@ void ClassType::addAttribute(ClassAttribute classAttribute) {
 
 size_t ClassType::addAttribute(
     const std::string& name,
-    const TypePtr& type,
+    TypePtr type,
     bool is_parameter,
     bool is_buffer) {
   if (is_parameter && is_buffer){
@@ -2253,16 +2251,13 @@ size_t ClassType::addAttribute(
     kind = AttributeKind::BUFFER;
   }
 
-  ClassAttribute ClassAttribute(kind, type, name);
-
-  addAttribute(ClassAttribute);
 
   if (is_parameter || is_buffer) {
     TORCH_INTERNAL_ASSERT(is_module(), "adding a parameter or buffer to a non module");
     TORCH_CHECK(
         (type->kind() == TensorType::Kind) ||
             (type->kind() == OptionalType::Kind &&
-            type->expect<OptionalType>()->getElementType()->kind() ==
+            type->expectRef<OptionalType>().getElementType()->kind() ==
                 TensorType::Kind) ||
             (type->kind() == UnionType::Kind &&
             TensorType::get()->isSubtypeOf(type->expectRef<UnionType>())) ||
@@ -2270,6 +2265,8 @@ size_t ClassType::addAttribute(
         "Expecting parameter or buffer to have either None, Tensor or Optional[Tensor] type, but got: ",
         toString(type));
   }
+
+  addAttribute(ClassAttribute(kind, std::move(type), name));
 
   return slot;
 }

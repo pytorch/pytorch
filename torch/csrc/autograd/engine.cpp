@@ -37,7 +37,6 @@
 #include <typeinfo>
 #include <sstream>
 #include <queue>
-#include <TH/TH.h>
 
 namespace torch { namespace autograd {
 
@@ -51,7 +50,7 @@ static void forked_autograd_child() { in_bad_autograd_fork = true; }
 
 // Should be called before unsafe for forks (thread pool) calls
 static void track_bad_autograd_forks() {
-#ifndef WIN32
+#if !defined(WIN32) && !defined(__XROS__)
   static std::once_flag flag;
   std::call_once(
       flag, [&] { pthread_atfork(nullptr, nullptr, forked_autograd_child); });
