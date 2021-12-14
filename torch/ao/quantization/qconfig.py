@@ -240,7 +240,7 @@ def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
         "object_type": [("reshape", default_reuse_input_qconfig)]
     }
 
-def assert_valid_qconfig(qconfig: Optional[QConfig]],
+def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
