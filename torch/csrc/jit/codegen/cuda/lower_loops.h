@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/compute_at_map.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>

@@ -21,6 +21,7 @@
 #include <c10/core/TensorOptions.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <ciso646>
 #include <algorithm>
@@ -38,6 +39,7 @@ using at::Tensor;
 using at::Scalar;
 using at::IntArrayRef;
 using at::TensorList;
+using at::areAnyTensorSubclassLike;
 
 const char* kCudnnDoubleBackwardMsg = "Double backwards is not supported for CuDNN RNNs due to limitations in the CuDNN API. To run double backwards, please disable the CuDNN backend temporarily while running the forward pass of your RNN. For example: \nwith torch.backends.cudnn.flags(enabled=False):\n    output = model(inputs)";
 
@@ -205,7 +207,12 @@ Tensor norm_backward(Tensor grad, const Tensor& self, const optional<Scalar> & p
     self_scaled = self;
     scale_v = grad / norm;
   } else if (std::isinf(p)) {
-    Tensor is_eq_max = (self.abs() == norm).logical_or_(self.isnan().logical_and_(norm.isnan())).type_as(self);
+    const auto self_isnan = self.isnan();
+    const auto norm_isnan = norm.isnan();
+    const auto& self_and_norm_isnan = areAnyTensorSubclassLike({self, norm}) ?
+      self_isnan.logical_and(norm_isnan) :
+      self_isnan.logical_and_(norm_isnan);
+    Tensor is_eq_max = (self.abs() == norm).logical_or_(self_and_norm_isnan).type_as(self);
     self_scaled = self.sgn() * is_eq_max;
     Tensor nb_max = is_eq_max.count_nonzero(dim);
     if (self.dim() != 0) {
@@ -656,7 +663,12 @@ Tensor clamp_backward(const Tensor & grad, const Tensor &self, const Tensor& min
   // clamp: gradients not defined on min and max, so we return the subgradient 1 for these cases.
   if (max.defined() && min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
-    return where((self >= min).logical_and_(self <= max), grad, zero);
+    const auto self_ge_min = self >= min;
+    const auto self_le_max = self <= max;
+    const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+      self_ge_min.logical_and(self_le_max) :
+      self_ge_min.logical_and_(self_le_max);
+    return where(pred, grad, zero);
   } else if (min.defined()) {
     auto zero = at::scalar_tensor(0., grad.options());
     return where(self >= min, grad, zero);
@@ -680,10 +692,20 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   auto zero = at::scalar_tensor(0., grad.options());
   if (max.defined() && min.defined()) {
     if (grad_input_mask[0]) {
-      std::get<0>(ret) = where((self < min).logical_and_(min < max) , grad, zero);
+      const auto self_lt_min = self < min;
+      const auto min_lt_max = min < max;
+      const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+        self_lt_min.logical_and(min_lt_max) :
+        self_lt_min.logical_and_(min_lt_max);
+      std::get<0>(ret) = where(pred, grad, zero);
     }
     if (grad_input_mask[1]) {
-      std::get<1>(ret) = where((self > max).logical_or_(max < min), grad, zero);
+      const auto self_gt_max = self > max;
+      const auto max_lt_min = max < min;
+      const auto& pred = areAnyTensorSubclassLike({self, min, max}) ?
+        self_gt_max.logical_or(max_lt_min) :
+        self_gt_max.logical_or_(max_lt_min);
+      std::get<1>(ret) = where(pred, grad, zero);
     }
   } else if (min.defined() && grad_input_mask[0]) {
     std::get<0>(ret) = where(self < min, grad, zero);
@@ -947,8 +969,14 @@ Tensor native_dropout_double_backward(const Tensor& ggI, const Tensor& grad, con
 }
 
 Tensor evenly_distribute_backward(Tensor grad, const Tensor & input, const Tensor & value) {
-  if (input.is_cuda()) {
-    auto mask = (input == value).logical_or_(input.isnan().logical_and_(value.isnan()));
+  bool any_tensor_subclass_like = areAnyTensorSubclassLike({grad, input, value});
+  if (any_tensor_subclass_like || input.is_cuda()) {
+    const auto input_isnan = input.isnan();
+    const auto value_isnan = value.isnan();
+    const auto& input_and_value_isnan = any_tensor_subclass_like ?
+      input_isnan.logical_and(value_isnan) :
+      input_isnan.logical_and_(value_isnan);
+    const auto mask = (input == value).logical_or_(input_and_value_isnan);
     return mask * (grad / mask.sum());
   } else {
     auto mask = value.isnan().item<bool>() ? input.isnan() : input == value;
@@ -1411,10 +1439,10 @@ Tensor softmax_double_backward(const Tensor& grad, const Tensor& grad_output, in
 // - If the in-place operation followed some sequence of operations, if the
 //   we want to be able to vmap over the backward formula as-is (this is
 //   usually the case for simple (<15loc) backward formulas), then use
-//   inplaceIsVmapCompatible to guard the operation. For example:
+//   areAnyTensorSubclassLike  to guard the operation. For example:
 //             c = a * b
 //     Before: c.mul_(grad)
-//     After:  c = at::inplaceIsVmapCompatible(c, grad) ? c.mul_(grad) : c * grad
+//     After:  c = !areAnyTensorSubclassLike({c, grad}) ? c.mul_(grad) : c * grad
 //
 // - If we don't want to vmap directly over the backward formula (e.g., if the
 //   backward formula is too complicated or has a lot of vmap-incompatible
@@ -1427,7 +1455,8 @@ Tensor binary_cross_entropy_double_backward(const Tensor & grad_output, const Te
   auto one_m_inp_pl_eps = 1 - input + eps;
   // gradient wrt input
   auto gI = (input * input - 2 * input * target + target) / (inp_pl_eps.pow(2) * one_m_inp_pl_eps.pow(2));
-  if (at::inplaceIsVmapCompatible(gI, grad)) {
+  if (!areAnyTensorSubclassLike({gI, grad})) {
+    // optimization
     gI *= (grad * grad_output);
   } else {
     gI = gI * (grad * grad_output);
@@ -1447,7 +1476,8 @@ Tensor binary_cross_entropy_double_backward_grad_output(const Tensor & grad, con
   auto eps = 1e-12;
   // gradient wrt grad_output
   auto ggO = (input - target) / ((input + eps) * (1 - input + eps));
-  if (at::inplaceIsVmapCompatible(ggO, grad)) {
+  if (!areAnyTensorSubclassLike({ggO, grad})) {
+    // optimization
     ggO *= grad;
   } else {
     ggO = ggO * grad;
