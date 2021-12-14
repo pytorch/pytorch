@@ -7,7 +7,7 @@
 namespace torch {
 namespace lazy {
 
-class AsStrided : public TsNode {
+class TORCH_API AsStrided : public TsNode {
  public:
   AsStrided(
       const Value& input,

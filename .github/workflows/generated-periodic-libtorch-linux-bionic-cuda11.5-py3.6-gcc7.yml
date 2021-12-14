@@ -1,19 +1,17 @@
 # @generated DO NOT EDIT MANUALLY
 # Template is at:    .github/templates/linux_ci_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: libtorch-linux-bionic-cuda11.5-py3.6-gcc7
+name: periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7
 
 on:
   pull_request:
     types: [opened, synchronize, reopened, unassigned]
-  push:
-    branches:
-      - master
-      - release/*
+  schedule:
+    - cron: 45 4,10,16,22 * * *
   workflow_dispatch:
 
 env:
-  BUILD_ENVIRONMENT: libtorch-linux-bionic-cuda11.5-py3.6-gcc7
+  BUILD_ENVIRONMENT: periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7
   DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/pytorch-linux-bionic-cuda11.5-cudnn8-py3-gcc7
   SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
   XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -32,7 +30,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   PYTORCH_RETRY_TEST_CASES: 1
 concurrency:
-  group: libtorch-linux-bionic-cuda11.5-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
@@ -42,12 +40,12 @@ jobs:
     timeout-minutes: 240
     env:
       IS_PROBOT_TRIGGER_EVENT: ${{ (github.event.action == 'unassigned') && (github.event.assigneed.login == 'pytorchbot') }}
-      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') }}
+      LABEL_CONDITIONS: ${{ contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled') }}
       LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     if: ${{ (github.repository == 'pytorch/pytorch') && (
             (github.event_name == 'push') ||
             (github.event_name == 'schedule') ||
-            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux')) ||
+            (contains(github.event.pull_request.labels.*.name, 'ciflow/all') || contains(github.event.pull_request.labels.*.name, 'ciflow/cuda') || contains(github.event.pull_request.labels.*.name, 'ciflow/libtorch') || contains(github.event.pull_request.labels.*.name, 'ciflow/linux') || contains(github.event.pull_request.labels.*.name, 'ciflow/scheduled')) ||
             (false))
          }}
     steps:
@@ -61,7 +59,7 @@ jobs:
     needs: [ciflow_should_run]
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: libtorch-linux-bionic-cuda11.5-py3.6-gcc7-build
+      JOB_BASE_NAME: periodic-libtorch-linux-bionic-cuda11.5-py3.6-gcc7-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
