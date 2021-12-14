@@ -65,7 +65,7 @@ class SelfBinningHistogramOp final : public Operator<Context> {
       total_count += N;
       const auto* x_data = x.template data<T>();
       for (int64_t data_idx = 0; data_idx < N; data_idx++) {
-        const T val = this->abs_ ? abs(x_data[data_idx]) :  x_data[data_idx];
+        const T val = this->abs_ ? std::abs(x_data[data_idx]) :  x_data[data_idx];
         if (!first_seen) {
           max = val;
           min = val;
@@ -132,7 +132,7 @@ class SelfBinningHistogramOp final : public Operator<Context> {
         const int64_t N = x.numel();
         const auto* x_data = x.template data<T>();
         for (int64_t data_idx = 0; data_idx < N; data_idx++) {
-          const T val = this->abs_ ? abs(x_data[data_idx]) :  x_data[data_idx];
+          const T val = this->abs_ ? std::abs(x_data[data_idx]) :  x_data[data_idx];
           const auto bisection_it = std::upper_bound(
               histogram_values_data,
               histogram_values_data + num_edges_,
