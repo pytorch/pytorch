@@ -118,6 +118,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders.cpp",
 ]
 
 torch_unpickler_common = [
@@ -378,12 +379,9 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
     "torch/csrc/lazy/core/lazy_view.cpp",
-    "torch/csrc/lazy/core/metrics.cpp",
-    "torch/csrc/lazy/core/multi_wait.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
-    "torch/csrc/lazy/core/thread_pool.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal.cpp",
@@ -1258,7 +1256,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
     "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
-    "aten/src/TH/THGeneral.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
