@@ -214,7 +214,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 "vector",
             ]],
             'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "lazy_tensor_core/csrc/ops/scalar.h",
+                "torch/csrc/lazy/ts_backend/ops/scalar.h",
                 "lazy_tensor_core/csrc/lazy_graph_executor.h",
                 node_base_hdr if node_base_hdr is not None else None
             ] if path is not None],
