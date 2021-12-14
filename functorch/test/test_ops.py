@@ -462,12 +462,18 @@ class TestOperators(TestCase):
         xfail('_masked.prod'), # calls aten::item
         xfail('stft'),
         xfail('nn.functional.glu'),
-        xfail('nn.functional.conv_transpose1d', device_type='cuda'),
-        skip('nn.functional.conv_transpose2d', device_type='cuda'),
-        xfail('nn.functional.conv_transpose3d', device_type='cuda'),
+
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
+
+        # PyTorch changed its convolution recently.
+        # Maybe it is responsible for all of the following changes.
+        xfail('nn.functional.conv1d'),
+        xfail('nn.functional.conv_transpose1d'),
+        xfail('nn.functional.conv_transpose2d'),
+        xfail('nn.functional.conv_transpose3d'),
+
     })
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
@@ -541,6 +547,16 @@ class TestOperators(TestCase):
 
         # See https://github.com/pytorch/pytorch/issues/66357
         xfail('nn.functional.pad', 'circular'),
+
+        # RuntimeError: expand: the number of sizes provided (1) must be greater or equal to the number of dimensions in the tensor (2)
+        xfail('nanquantile'),
+        xfail('quantile'),
+
+        # RuntimeError: vmap: inplace arithmetic(self, *extra_args)
+        xfail('nn.functional.gelu'),
+
+        # Not implemented
+        xfail('scatter'),
 
         # =============================================
         # NB: The above failures also fail in PyTorch core.
