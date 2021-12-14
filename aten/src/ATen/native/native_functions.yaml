@@ -132,6 +132,17 @@
   dispatch:
     CompositeExplicitAutograd: _new_zeros_with_same_feature_meta
 
+# This function compares the storage numel of self with that of other, where
+# storage numel is cumputed as: `other.storage().nbytes() / other.itemsize()`.
+# We create this function for composite compliance purposes. The batching rule
+# always returns true because vmapped as_strided does not support accessing
+# storage locations not indexable by the input tensor.
+# See the note above for more information.
+- func: _has_same_storage_numel(Tensor self, Tensor other) -> bool
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _has_same_storage_numel
+
 - func: rename_(Tensor(a!) self, Dimname[]? names) -> Tensor(a!)
   variants: method
 
