@@ -67,7 +67,7 @@ ALLOW_LIST = [
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
     ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
-    ("aten::split", datetime.date(2021, 11, 20)),
+    ("aten::split", datetime.date(2021, 12, 20)),
     ("aten::vsplit", datetime.date(2021, 11, 20)),
     ("aten::tensor_split", datetime.date(2021, 11, 20)),
     ("aten::chunk", datetime.date(2021, 11, 20)),
