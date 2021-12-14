@@ -160,10 +160,12 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {
         'includes': [f'#include <{path}>' for path in [
             tensor_class_hdr,
+            "ATen/Functions.h",
             "ATen/MetaFunctions.h",
             "torch/csrc/lazy/core/lazy_graph_executor.h",
             "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
+            "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
             f"{output_dir}/{backend_key}ShapeInference.h",
