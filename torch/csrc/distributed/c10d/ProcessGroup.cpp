@@ -73,11 +73,11 @@ ProcessGroup::Work::Work(
       if (inputTensors) {
         inputs.reserve(inputTensors->size());
         for (const auto& tensor : *inputTensors) {
-          inputs.push_back(tensor);
+          inputs.emplace_back(tensor);
         }
       }
       recordingFunction->before(profilingTitle, inputs);
-      std::function<void()> end_handler = [this, recordingFunction]() {
+      std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
       recordFunctionEndCallback_ = at::wrapPropagateTLSState(end_handler);
@@ -89,7 +89,7 @@ OpType ProcessGroup::Work::retrieveOpType() {
   return opType_;
 }
 
-ProcessGroup::Work::~Work() {}
+ProcessGroup::Work::~Work()=default;
 
 bool ProcessGroup::Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
