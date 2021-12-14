@@ -73,6 +73,10 @@ class SingletonOrSharedTypePtr {
   // we are supposed to be taking shared ownership or not.
   /* implicit */ SingletonOrSharedTypePtr(T* p) = delete;
 
+  SingletonOrSharedTypePtr(const SingletonOrSharedTypePtr&) = default;
+  SingletonOrSharedTypePtr(SingletonOrSharedTypePtr&&) noexcept = default;
+  SingletonOrSharedTypePtr& operator=(const SingletonOrSharedTypePtr&) = default;
+  SingletonOrSharedTypePtr& operator=(SingletonOrSharedTypePtr&&) noexcept = default;
 
   T* get() const {
     return repr_.isSharedAndNonNull() ? repr_.shared_.get() : static_cast<T*>(repr_.rawRepr().first);
@@ -129,13 +133,7 @@ class SingletonOrSharedTypePtr {
       }
     }
 
-    Repr(Repr&& rhs) noexcept(
-#ifdef NDEBUG
-        true
-#else
-        false
-#endif
-    ){
+    Repr(Repr&& rhs) noexcept {
       if (rhs.isSharedAndNonNull()) {
         new (&shared_) std::shared_ptr<T>(std::move(rhs.shared_));
       } else {
@@ -166,13 +164,7 @@ class SingletonOrSharedTypePtr {
       return *this;
     }
 
-  Repr& operator=(Repr&& rhs) noexcept(
-#ifdef NDEBUG
-      true
-#else
-      false
-#endif
-  ){
+  Repr& operator=(Repr&& rhs) noexcept {
       if (&rhs == this) {
         return *this;
       }
@@ -227,7 +219,7 @@ class SingletonOrSharedTypePtr {
    private:
     void destroy() {
       if (isSharedAndNonNull()) {
-        shared_.~shared_ptr();
+        shared_.~shared_ptr<T>();
       }
     }
   } repr_;

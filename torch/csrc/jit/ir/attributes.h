@@ -6,7 +6,7 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/type_ptr.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
