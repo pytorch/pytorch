@@ -741,7 +741,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     SyncTensorCollection* coll,
     PostOrderData* po_data) {
   ComputationCache::TypePtr cached_computation =
-      LookupCachedCompile(*tensors, coll->hash);
+      LookupCachedCompile(coll->hash);
   if (cached_computation == nullptr) {
     return nullptr;
   }
@@ -808,7 +808,8 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
   if (computation) {
     // TODO(whc) should computation be allowed null here? (because it is in one
     // case)
-    TORCH_CHECK(computation->parameters_size() == po_data->parameters_data.size());
+    TORCH_CHECK(
+        computation->parameters_size() == po_data->parameters_data.size());
   }
 
   return {
@@ -825,9 +826,7 @@ LazyGraphExecutor::ComputationCache* LazyGraphExecutor::GetComputationCache() {
 }
 
 LazyGraphExecutor::ComputationCache::TypePtr LazyGraphExecutor::
-    LookupCachedCompile(
-        const std::vector<LazyTensor>& tensors,
-        const hash_t& hash) {
+    LookupCachedCompile(const hash_t& hash) {
   ComputationCache::TypePtr cached_computation =
       GetComputationCache()->Get(hash);
   if (cached_computation == nullptr) {
@@ -871,8 +870,8 @@ void LazyGraphExecutor::BuildInputOutputAliases(
           // {});
           alias_map[output_index] = i;
 
-          VLOG(6) << "Aliased parameter " << i << " with output " << output_index
-                  << ": " << Shape(parameters_data[i]->shape());
+          VLOG(6) << "Aliased parameter " << i << " with output "
+                  << output_index << ": " << Shape(parameters_data[i]->shape());
         }
       }
     }
@@ -930,8 +929,9 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
 
   auto syncfn = [this, async, hash = coll->hash]() {
     // For profiling lazy trace overhead
-    if (noop_execution_mode_)
+    if (noop_execution_mode_) {
       return;
+    }
 
     try {
       VLOG(3) << "Executing IR graph hash " << HashToString(hash)
@@ -960,7 +960,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       // even in case the caller does not wait, and that is accomplished by
       // setting the unlockers status. In that case the exception will be
       // surfaced when the user tries to acquire the device locks the next time.
-      //std::exception_ptr exptr = std::current_exception();
+      // std::exception_ptr exptr = std::current_exception();
       for (auto& unlocker : async->unlocker) {
         std::exception_ptr exptr = std::current_exception();
         unlocker.SetStatus(std::move(exptr));

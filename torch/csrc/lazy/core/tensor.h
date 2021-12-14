@@ -15,19 +15,21 @@ class TORCH_API LazyTensor {
   // held. The lazy tensor is nothing more than a shared pointer to a Data
   // object.
   struct Data {
-    Data(BackendDataPtr handle, const BackendDevice& device)
+    Data(BackendDataPtr handle, BackendDevice device)
         : handle(std::move(handle)),
-          device(device),
+          device(std::move(device)),
           unique_id(GetNextTensorId()) {}
-    Data(Value ir_value, const BackendDevice& device)
+    Data(Value ir_value, BackendDevice device)
         : ir_value(std::move(ir_value)),
-          device(device),
+          device(std::move(device)),
           unique_id(GetNextTensorId()) {}
-    Data(std::shared_ptr<LazyView> view, const BackendDevice& device)
-        : view(std::move(view)), device(device), unique_id(GetNextTensorId()) {}
-    Data(at::Tensor tensor_data, const BackendDevice& device)
+    Data(std::shared_ptr<LazyView> view, BackendDevice device)
+        : view(std::move(view)),
+          device(std::move(device)),
+          unique_id(GetNextTensorId()) {}
+    Data(at::Tensor tensor_data, BackendDevice device)
         : tensor_data(std::move(tensor_data)),
-          device(device),
+          device(std::move(device)),
           unique_id(GetNextTensorId()) {}
 
     ~Data();
@@ -133,8 +135,8 @@ class TORCH_API LazyTensor {
   LazyTensor(const at::Tensor& tensor, const BackendDevice& device);
   LazyTensor(Value ir_value, const BackendDevice& device);
   LazyTensor(std::shared_ptr<LazyView> view, const BackendDevice& device);
-  LazyTensor(BackendDataPtr handle);
-  LazyTensor(std::shared_ptr<Data> data);
+  explicit LazyTensor(BackendDataPtr handle);
+  explicit LazyTensor(std::shared_ptr<Data> data);
 
   static LazyTensor Create(
       std::shared_ptr<LazyView> view,

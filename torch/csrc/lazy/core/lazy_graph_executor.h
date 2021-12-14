@@ -202,9 +202,7 @@ class TORCH_API LazyGraphExecutor {
 
   ComputationCache* GetComputationCache();
 
-  ComputationCache::TypePtr LookupCachedCompile(
-      const std::vector<LazyTensor>& tensors,
-      const hash_t& hash);
+  ComputationCache::TypePtr LookupCachedCompile(const hash_t& hash);
 
   void BuildInputOutputAliases(
       const std::vector<LazyTensor>& tensors,

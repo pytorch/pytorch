@@ -128,7 +128,8 @@ BackendDataPtr LazyTensor::GetDataHandle() {
   if (up_to_date) {
     BackendDataPtr handle = CurrentDataHandle();
     if (handle != nullptr) {
-      TORCH_CHECK(handle->HasValue(),
+      TORCH_CHECK(
+          handle->HasValue(),
           "Trying to access data while an async operation is in flight: ",
           handle->shape().to_string());
       return handle;
@@ -308,8 +309,7 @@ void LazyTensor::ModifyCurrentView(ViewInfo view_info) const {
   // in place, we need to turn this existing tensor into a view.
   Value ir_value = GetIrValue();
   std::shared_ptr<Alias> alias = std::make_shared<Alias>(ir_value);
-  data()->view =
-      std::make_shared<LazyView>(view_info.shape, alias, std::move(view_info));
+  data()->view = std::make_shared<LazyView>(view_info.shape, alias, view_info);
   AssignIrValue(Value());
 }
 
