@@ -981,10 +981,14 @@
 - func: logical_not(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: logical_not
 
 - func: logical_not_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: logical_not_
 
 - func: logical_not.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -994,10 +998,14 @@
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: logical_xor
 
 - func: logical_xor_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: logical_xor_
 
 - func: logical_xor.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1007,10 +1015,14 @@
 - func: logical_and(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: logical_and
 
 - func: logical_and_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: logical_and_
 
 - func: logical_and.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1020,10 +1032,14 @@
 - func: logical_or(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
+  dispatch:
+    CompositeExplicitAutograd: logical_or
 
 - func: logical_or_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method
+  dispatch:
+    CompositeExplicitAutograd: logical_or_
 
 - func: logical_or.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -5945,19 +5961,21 @@
 - func: put(Tensor self, Tensor index, Tensor source, bool accumulate=False) -> Tensor
   variants: function, method
 
-- func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source) -> Tensor(a!)
-  variants: method
-
-- func: index_add_.alpha(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha) -> Tensor(a!)
-  variants: method
+- func: index_add.out(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  variants: function
+  precomputed:
+  - dim -> int dim
   dispatch:
-    CPU: index_add_cpu_
-    CUDA: index_add_cuda_
+    CPU: index_add_cpu_out
+    CUDA: index_add_cuda_out
 
-- func: index_add(Tensor self, int dim, Tensor index, Tensor source) -> Tensor
-  variants: function, method
+- func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
+  structured_delegate: index_add.out
+  variants: method
 
-- func: index_add.alpha(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha) -> Tensor
+- func: index_add(Tensor self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor
+  structured_delegate: index_add.out
   variants: function, method
 
 - func: index_add.dimname(Tensor self, Dimname dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor

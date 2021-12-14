@@ -65,6 +65,8 @@ ALLOW_LIST = [
     ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
     ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
     ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
+    ("aten::index_add.alpha", datetime.date(2021, 12, 31)),
+    ("aten::index_add_.alpha", datetime.date(2021, 12, 31)),
     ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
     ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
     ("aten::split", datetime.date(2021, 12, 20)),
