@@ -5,7 +5,6 @@ set(hdr
 
 set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   )
 # Remember that PARENT_SCOPE variables are not in the current scope
 set(ATen_TH_SRCS ${ATen_TH_SRCS} PARENT_SCOPE)
@@ -34,13 +33,5 @@ install(FILES
   TH.h
   ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateByteType.h
-  THTensor.h
   THHalf.h
-  THTensor.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
-
-install(FILES
-  generic/THTensor.cpp
-  generic/THTensor.h
-  # See Note [TH abstraction violation]
-  DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

@@ -483,7 +483,7 @@ def shard_parameter(
             sharding_spec.dim,  # type: ignore[arg-type]
             local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
             local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-        ).contiguous()
+        ).clone().contiguous()
 
     # Sync requires_grad to local_shard.
     local_shard.requires_grad = tensor.requires_grad
