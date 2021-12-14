@@ -445,6 +445,12 @@ static DispatchKeySet keysForEnteringDynamicLayer(DispatchKey key) {
   }
 }
 
+static void dump_local_tls() {
+  auto tls = c10::impl::tls_local_dispatch_key_set();
+  std::cout << "[Local Include] " << tls.included_ << std::endl;
+  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+}
+
 static DispatchKeySet keysToExcludeWhenEnteringDynamicLayer(DispatchKey key) {
   DispatchKeySet exclude = all_dynlayer_keyset;
   exclude = exclude.remove(kDynamicLayerBackModeKey);
@@ -457,6 +463,7 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
 #ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
   if (c10::show_dispatch_trace_enabled()) {
     std::cout << dynamicLayerStack << std::endl;
+    dump_local_tls();
   }
 #endif
   if (dynamicLayerStack.size() == 0) {
@@ -497,6 +504,12 @@ void dynamicLayerFrontFallback(const c10::OperatorHandle& op, torch::jit::Stack*
   local_keyset.excluded_ = local_keyset.excluded_ | exclude;
   local_keyset.included_ = local_keyset.included_ | hacky_include;
   ForceLocalDispatchKeySet guard(local_keyset);
+
+#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
+  if (c10::show_dispatch_trace_enabled()) {
+    dump_local_tls();
+  }
+#endif
 
   // Re-dispatch
   op.callBoxed(stack);
@@ -593,6 +606,12 @@ void dynamicLayerBackFallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   auto keyset = c10::impl::PODLocalDispatchKeySet();
   c10::impl::_force_tls_local_dispatch_key_set(keyset);
   setDynamicLayerFrontBackKeysIncluded(true);
+
+#ifdef HAS_TORCH_SHOW_DISPATCH_TRACE
+  if (c10::show_dispatch_trace_enabled()) {
+    dump_local_tls();
+  }
+#endif
 
   // Re-dispatch
   if (cur_key == DispatchKey::Autograd && *prev_grad_mode == false) {
