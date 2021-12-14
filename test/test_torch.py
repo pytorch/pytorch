@@ -8189,16 +8189,34 @@ else:
         _test_helper(remove_hook=True)
         _test_helper(remove_hook=False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @skipXLA
     def test_skip_xla(self, device):
         if self.device_type == 'xla':
             # Should not reach here!
             self.assertTrue(False)
 
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
     @expectedFailureXLA
     def test_expected_failure_xla(self, device):
         if self.device_type == 'xla':
             self.assertTrue(False)
+
+    # This test should ideally be in test_testing.py,
+    # but since pytorch/xla runs tests from test_torch.py, we have it here.
+    def test_assertRaisesRegex_ignore_msg_non_native_device(self, device):
+        # Verify that self.assertRaisesRegex only checks the Error and ignores
+        # message for non-native devices.
+        x = torch.randn((10, 3), device=device)
+        t = torch.empty(10, dtype=torch.int64, device=device).random_(0, 3)
+        invalid_weight = torch.randn(4, device=device)
+        msg = "weight tensor should be defined either for all 3 classes or no classes"
+
+        # XLA raises RuntimeError with a different message.
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.nn.functional.nll_loss(x, t, weight=invalid_weight)
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
