@@ -51,13 +51,14 @@ class TestDeviceAnalysis(JitTestCase):
         torch._C._jit_pass_propagate_device(graph)
 
     def assert_device_equal(self, fn, in_devices, expected_device, in_shapes=None):
-        graph = torch.jit.script(fn).graph
-        print(graph)
+        with self.subTest(f"In device: {in_devices}, expected: {expected_device}"):
+            graph = torch.jit.script(fn).graph
+            print(graph)
 
-        self.prop_device_on_graph(graph, in_devices, in_shapes)
-        actual_device = self.node_output_device(graph)
+            self.prop_device_on_graph(graph, in_devices, in_shapes)
+            actual_device = self.node_output_device(graph)
 
-        self.assertEqual(actual_device, expected_device, "Failed Verification")
+            self.assertEqual(actual_device, expected_device, "Failed Verification")
 
     def test_device_apply(self):
         # Test if the device is properly applied to the input
@@ -154,5 +155,4 @@ class TestDeviceAnalysis(JitTestCase):
 
         for fn, out_device in ((set_cuda, self.cuda), (set_cpu, self.cpu)):
             for in_device in self.device_types:
-                with self.subTest(f"In device: {in_device}, fn: {out_device}"):
-                    self.assert_device_equal(fn, [in_device], out_device)
+                self.assert_device_equal(fn, [in_device], out_device)
