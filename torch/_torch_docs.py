@@ -3750,8 +3750,8 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 .. seealso::
 
-    :func:`torch.remainder`. Implements Python's modulus operator, using division rounding 
-    towards the next smallest number.
+    :func:`torch.remainder` which implements Python's modulus operator.
+    This one is defined using division rounding down the result.
 
 Args:
     input (Tensor): the dividend
@@ -8292,8 +8292,9 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Computes `Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_ entrywise.
-The result has the same sign as the divisor :attr:`other` and its absolute value
+Computes
+`Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_
+entrywise.  The result has the same sign as the divisor :attr:`other` and its absolute value
 is less than that of :attr:`other`.
 
 It may also be defined in terms of :func:`torch.div` as
@@ -8312,7 +8313,8 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 
 .. seealso::
 
-    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_. This uses division rounding towards zero.
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_.
+    This one is defined in terms of division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
