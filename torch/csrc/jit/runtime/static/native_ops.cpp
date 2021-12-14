@@ -563,10 +563,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::split, aten_split, [](Node* n) -> SROpera
   };
 });
 
-// See [Increment reference count for returned constants]
+// See [Create owned refs for returned constants]
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
-    static_runtime::incref,
-    static_runtime_incref,
+    static_runtime::create_owned_ref,
+    static_runtime_create_owned_ref,
     [](Node*) -> SROperator {
       return
           [](ProcessedNode* p_node) { p_node->Output(0) = p_node->Input(0); };
