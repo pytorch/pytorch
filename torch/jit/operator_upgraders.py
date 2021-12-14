@@ -10,7 +10,7 @@ requirements:
 """
 import torch
 import yaml
-from typing import List, no_type_check, Optional, Union
+from typing import List, Dict, no_type_check, Optional, Union
 
 # TODO (tugsuu) This context manager
 # forbids the tests to override torch.jit.script
@@ -18,7 +18,7 @@ from typing import List, no_type_check, Optional, Union
 # circular dependency
 with torch._jit_internal._disable_emit_hooks():
     @torch.jit.script
-    def ___get_int_to_dtype_dict() -> dict[int, torch.dtype]:
+    def ___get_int_to_dtype_dict() -> Dict[int, torch.dtype]:
         return {
             0: torch.uint8,
             1: torch.int8,
