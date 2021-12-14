@@ -34,6 +34,9 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("repeat_interleave.self_int", torch::CppFunction::makeFallthrough());
 
+  // See test_metadata_check_when_primal_has_conj_bit in test_autograd.py
+  m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
+
   // linear algebra functions
   m.impl("dot", torch::CppFunction::makeFallthrough());
   m.impl("vdot", torch::CppFunction::makeFallthrough());

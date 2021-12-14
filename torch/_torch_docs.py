@@ -2223,7 +2223,7 @@ Example::
     tensor([[ 2.4112, -0.7486,  1.4551],
             [-0.7486,  1.3544,  0.1294],
             [ 1.4551,  0.1294,  1.6724]])
-    >>> a = torch.randn(3, 2, 2)
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
     >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
     >>> l = torch.cholesky(a)
     >>> z = l @ l.mT
@@ -2272,7 +2272,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[ 0.7747, -1.9549,  1.3086],
             [-1.9549,  6.7546, -5.4114],
@@ -2311,10 +2311,15 @@ triangular such that the returned tensor is
 .. math::
     inv = (u^T u)^{{-1}}
 
+Supports input of float, double, cfloat and cdouble dtypes.
+Also supports batches of matrices, and if :math:`A` is a batch of matrices then the output has the same batch dimensions.
+
 Args:
-    input (Tensor): the input 2-D tensor :math:`u`, a upper or lower triangular
-           Cholesky factor
-    upper (bool, optional): whether to return a lower (default) or upper triangular matrix
+    input (Tensor): the input tensor :math:`A` of size :math:`(*, n, n)`,
+                consisting of symmetric positive-definite matrices
+                where :math:`*` is zero or more batch dimensions.
+    upper (bool, optional): flag that indicates whether to return a
+                upper or lower triangular matrix. Default: False
 
 Keyword args:
     out (Tensor, optional): the output tensor for `inv`
@@ -2323,7 +2328,7 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) + 1e-05 * torch.eye(3) # make symmetric positive definite
-    >>> u = torch.cholesky(a)
+    >>> u = torch.linalg.cholesky(a)
     >>> a
     tensor([[  0.9935,  -0.6353,   1.5806],
             [ -0.6353,   0.8769,  -1.7183],
@@ -2336,6 +2341,12 @@ Example::
     tensor([[ 1.9314,  1.2251, -0.0889],
             [ 1.2251,  2.4439,  0.2122],
             [-0.0889,  0.2122,  0.1412]])
+    >>> a = torch.randn(3, 2, 2) # Example for batched input
+    >>> a = a @ a.mT + 1e-03 # make symmetric positive-definite
+    >>> l = torch.linalg.cholesky(a)
+    >>> z = l @ l.mT
+    >>> torch.dist(z, a)
+    tensor(3.5894e-07)
 """)
 
 add_docstr(torch.clone, r"""
@@ -3713,10 +3724,15 @@ add_docstr(torch.fmod,
            r"""
 fmod(input, other, *, out=None) -> Tensor
 
-Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors, and the modulus operation for integer tensors. The result
-has the same sign as the dividend :attr:`input` and its absolute value
+Applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_ entrywise.
+The result has the same sign as the dividend :attr:`input` and its absolute value
 is less than that of :attr:`other`.
+
+This function may be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.fmod(a, b) == a - a.div(b, rounding_mode="trunc") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -3732,6 +3748,11 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
    Complex inputs are not supported. In some cases, it is not mathematically
    possible to satisfy the definition of a modulo operation with complex numbers.
 
+.. seealso::
+
+    :func:`torch.remainder`. Implements Python's modulus operator, using division rounding 
+    towards the next smallest number.
+
 Args:
     input (Tensor): the dividend
     other (Tensor or Scalar): the divisor
@@ -3746,11 +3767,6 @@ Example::
     >>> torch.fmod(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
-.. seealso::
-
-    :func:`torch.remainder` which is similar to :func:`torch.fmod` except that if the sign
-    of the modulus is different than the sign of the divisor :attr:`other` then the divisor
-    is added to the modulus.
 """.format(**common_args))
 
 add_docstr(torch.frac,
@@ -8276,10 +8292,15 @@ add_docstr(torch.remainder,
            r"""
 remainder(input, other, *, out=None) -> Tensor
 
-Like :func:`torch.fmod` this applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-for floating point tensors and the modulus operation for integer tensors.
-Unlike :func:`torch.fmod`, however, if the sign of the modulus is different
-than the sign of the divisor :attr:`other` then the divisor is added to the modulus.
+Computes `Python's modulus operation <https://docs.python.org/3/reference/expressions.html#binary-arithmetic-operations>`_ entrywise.
+The result has the same sign as the divisor :attr:`other` and its absolute value
+is less than that of :attr:`other`.
+
+It may also be defined in terms of :func:`torch.div` as
+
+.. code:: python
+
+    torch.remainder(a, b) == a - a.div(b, rounding_mode="floor") * b
 
 Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
 :ref:`type promotion <type-promotion-doc>`, and integer and float inputs.
@@ -8289,12 +8310,9 @@ Supports :ref:`broadcasting to a common shape <broadcasting-semantics>`,
     possible to satisfy the definition of a modulo operation with complex numbers.
     See :func:`torch.fmod` for how division by zero is handled.
 
-.. note::
-    This op, like NumPy's `remainder <https://numpy.org/doc/stable/reference/generated/numpy.remainder.html>`_,
-    is equivalent to Python's modulus operation, and different from Python's
-    `math.remainder <https://docs.python.org/dev/library/math.html#math.remainder>`_ and
-    C++'s `std::remainder <https://en.cppreference.com/w/cpp/numeric/math/remainder>`_ which implement
-    the IEEE remainder.
+.. seealso::
+
+    :func:`torch.fmod` which implements C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_. This uses division rounding towards zero.
 
 Args:
     input (Tensor or Scalar): the dividend
@@ -8309,12 +8327,6 @@ Example::
     tensor([ 1.,  0.,  1.,  1.,  0.,  1.])
     >>> torch.remainder(torch.tensor([1, 2, 3, 4, 5]), -1.5)
     tensor([ -0.5000, -1.0000,  0.0000, -0.5000, -1.0000 ])
-
-.. seealso::
-
-    :func:`torch.fmod` which just computes the modulus for integer inputs and
-    applies C++'s `std::fmod <https://en.cppreference.com/w/cpp/numeric/math/fmod>`_
-    for floating point inputs.
 """.format(**common_args))
 
 add_docstr(torch.renorm,
