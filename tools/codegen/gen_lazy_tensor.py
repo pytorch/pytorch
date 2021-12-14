@@ -161,9 +161,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
         'includes': [f'#include <{path}>' for path in [
             tensor_class_hdr,
             "ATen/MetaFunctions.h",
+            "torch/csrc/lazy/core/metrics.h",
             "torch/csrc/lazy/core/shape.h",
             "lazy_tensor_core/csrc/aten_ltc_bridge.h",
-            "lazy_tensors/computation_client/metrics.h",
+            "lazy_tensor_core/csrc/lazy_graph_executor.h",
             f"{output_dir}/{backend_key}NativeFunctions.h",
             f"{output_dir}/{backend_key}LazyIr.h",
             f"{output_dir}/{backend_key}ShapeInference.h",
@@ -205,10 +206,10 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
             "c10/util/Optional.h",
             "torch/csrc/lazy/core/hash.h",
             "torch/csrc/lazy/core/ir.h",
+            "torch/csrc/lazy/ts_backend/ops/scalar.h",
             "vector",
         ]],
         'lazy_ir_inc': [f'#include "{path}"' for path in [
-            "lazy_tensor_core/csrc/ops/scalar.h",
             node_base_hdr if node_base_hdr is not None else None
         ] if path is not None],
         'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
