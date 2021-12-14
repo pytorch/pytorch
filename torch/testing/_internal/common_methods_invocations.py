@@ -13938,8 +13938,10 @@ op_db: List[OpInfo] = [
            supports_out=False,
            sample_inputs_func=sample_cumulative_trapezoid,
            skips=(
-               # RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
-               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
+               # Two failures:
+               # 1. (CUDA) RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+               # 2. (ROCm) Memory exception on virtual address 0x7f6a2216f000, node id 4: Page not present
+               DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
            )),
     OpInfo('unsqueeze',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
