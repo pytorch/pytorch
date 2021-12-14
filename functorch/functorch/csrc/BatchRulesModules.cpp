@@ -23,8 +23,9 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   // If we have a batched bias or weight, we need to perform the computation separately.
   optional<Tensor> unbatched_bias;
   bool separate_bias;
-  if ((rhs_bdim && bias) || bias_bdim) {
+  if ((rhs_bdim && bias && bias->defined()) || bias_bdim) {
     TORCH_INTERNAL_ASSERT(bias.has_value());
+    TORCH_INTERNAL_ASSERT(bias->defined());
     unbatched_bias = nullopt;
     separate_bias = true;
   } else {
