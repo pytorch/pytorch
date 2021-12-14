@@ -511,12 +511,22 @@ torch::lazy::Value LazyGraphExecutor::GetDeviceDataIrValue(
   return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(data));
 }
 
+torch::lazy::Value LazyGraphExecutor::GetIrValueForScalarFromCodegen (const at::Scalar& value) {
+  if (torch::lazy::IsSpecialScalar(value)) {
+    return torch::lazy::MakeNode<torch::lazy::Scalar>(value, value.type());
+  }
+  auto cpu_device = torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0));
+  torch::lazy::BackendDataPtr data = torch::lazy::getBackend()->MakeComputationDataFromScalar(value, cpu_device);
+  data->SetInfo(std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
+  return torch::lazy::MakeNode<torch::lazy::DeviceData>(std::move(data));
+}
+
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
     const at::Scalar& value, c10::ScalarType type, const torch::lazy::BackendDevice& device) {
   if (torch::lazy::IsSpecialScalar(value)) {
     return torch::lazy::MakeNode<torch::lazy::Scalar>(value, type);
   }
-  return GetDeviceDataIrValue(value, type, device);
+  return GetDeviceDataIrValue(value, type, torch::lazy::getBackend()->GetBackendDevice(c10::Device(c10::kCPU, 0)));
 }
 
 torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
@@ -524,23 +534,19 @@ torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
   return GetIrValueForScalar(value, value.type(), device);
 }
 
-torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
-    const at::Scalar& value, c10::ScalarType type,
-    c10::ArrayRef<int64_t> dimensions, const torch::lazy::BackendDevice& device) {
-  torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
-  if (!dimensions.empty()) {
-    ir_value = torch::lazy::MakeNode<torch::lazy::Expand>(
-        ir_value, dimensions.vec(),
-        /*is_scalar_expand=*/true);
-  }
-  return ir_value;
-}
-
-torch::lazy::Value LazyGraphExecutor::GetIrValueForScalar(
+torch::lazy::Value LazyGraphExecutor::GetIrValueForExpandedScalar(
     const at::Scalar& value, const torch::lazy::Shape& shape,
     const torch::lazy::BackendDevice& device) {
-  return GetIrValueForScalar(value, shape.scalar_type(), shape.sizes(),
-                             device);
+
+  c10::ArrayRef<int64_t> dimensions = shape.sizes();
+  auto type = shape.scalar_type();
+  torch::lazy::Value ir_value = GetIrValueForScalar(value, type, device);
+  if (!dimensions.empty()) {
+      ir_value = torch::lazy::MakeNode<torch::lazy::Expand>(
+          ir_value, dimensions.vec(),
+          /*is_scalar_expand=*/true);
+  }
+  return ir_value;
 }
 
 LazyGraphExecutor::Async::Async(

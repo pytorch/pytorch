@@ -22,9 +22,8 @@ def ts_lowering_body(f: Union[NativeFunctionsGroup, NativeFunction]) -> str:
 
     emplace_arguments_str = "\n    ".join(
         [f"arguments.emplace_back({a});" for a in emplace_arguments])
-    emplace_kwarg_values = [f'loctx->GetOutputOp(operand({i}))' for i in range(len(schema.keyword_values))]
+    emplace_kwarg_values = [f'"{t.name}", loctx->GetOutputOp(operand(i++))' for t in schema.keyword_values]
     emplace_kwarg_scalars = [f'"{t.name}", {t.name}_' for t in schema.keyword_scalars]
-    assert len(schema.keyword_values) == 0, "TODO the logic for operand(i) is broken if there are kw values"
     emplace_kwarguments = "\n    ".join(
         [f"kwarguments.emplace_back({a});" for a in emplace_kwarg_values + emplace_kwarg_scalars])
     return f"""\

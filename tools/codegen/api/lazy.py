@@ -33,7 +33,9 @@ def process_ir_type(typ: Type) -> Union[BaseCType, VectorCType, OptionalCType, L
         if typ.name == BaseTy.Tensor:
             return BaseCType(valueT)
         elif typ.name == BaseTy.Scalar:
-            return BaseCType(scalarT)
+            # at::scalar has special handling,
+            # and is wrapped in an IR value just like at::tensor
+            return BaseCType(valueT)
         elif typ.name == BaseTy.ScalarType:
             return BaseCType(scalarTypeT)
         elif typ.name == BaseTy.int:
@@ -65,11 +67,29 @@ def isValueType(typ: Union[Type, BaseCType, OptionalCType, ConstRefCType, MutRef
     being Tensor-like, but assumes the type has already been transformed.
     """
     if isinstance(typ, BaseCType):
-        return typ.type == valueT
+        # I am regretting my naming conventions, but now we are wrapping at::scalar in
+        # lazy value, while preserving other 'scalar' types as scalars in the IR
+        return typ.type == valueT or typ.type == scalarT
     elif isinstance(typ, (OptionalCType, ListCType, VectorCType)):
         return isValueType(typ.elem)
     else:
         return False
+
+def isWrappedScalarType(typ: Type) -> bool:
+    """
+    Given a type, determine if it is a c10::scalar which we will wrap in a lazy Value.
+    Since we literally change the type from scalarT to valueT, information is lost.
+    This function helps build a list of wrapped scalars to save that information
+    """
+    if isinstance(typ, BaseType):
+        # I am regretting my naming conventions, but now we are wrapping at::scalar in
+        # lazy value, while preserving other 'scalar' types as scalars in the IR
+        return typ.name == BaseTy.Scalar
+    elif isinstance(typ, (OptionalType, ListType)):
+        return isWrappedScalarType(typ.elem)
+    else:
+        return False
+
 
 # Inspired by a FunctionSchema object, a LazyIrSchema holds the schema of a Lazy IR node.
 # Unlike a FunctionSchema, it has no round-trippable string form (relating to the YAML),
@@ -86,6 +106,8 @@ class LazyIrSchema:
 
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple['Return', ...]
+
+    wrapped_scalar_names: List[str]
 
     def __init__(self, func: FunctionSchema):
 
@@ -116,6 +138,7 @@ class LazyIrSchema:
         self.keyword_arg_types = tuple(keyword_arg_types)
         self.name = func.name
         self.returns = func.returns
+        self.wrapped_scalar_names = [arg.name for arg in func.schema_order_arguments() if isWrappedScalarType(arg.type)]
 
     @property
     def node_name(self) -> str:

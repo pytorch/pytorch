@@ -78,7 +78,7 @@ torch::lazy::Value GetIrValueOrDefault(const LazyTensor& input,
                                        const at::Scalar& default_value,
                                        const torch::lazy::Shape& default_shape,
                                        const torch::lazy::BackendDevice& device) {
-  return input.is_null() ? LazyGraphExecutor::Get()->GetIrValueForScalar(
+  return input.is_null() ? LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
                                default_value, default_shape, device)
                          : input.GetIrValue();
 }
@@ -128,7 +128,7 @@ void as_strided_(LazyTensor& input, std::vector<int64_t> size,
 LazyTensor bernoulli(const LazyTensor& input, double probability) {
   auto input_shape = input.shape();
   return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::Bernoulli>(
-      LazyGraphExecutor::Get()->GetIrValueForScalar(probability, input_shape,
+      LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(probability, input_shape,
                                                     input.GetDevice()),
       LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
       input_shape.Get()), input.GetDevice());
@@ -144,7 +144,7 @@ LazyTensor bernoulli(const LazyTensor& input) {
 void bernoulli_(LazyTensor& input, double probability) {
   auto input_shape = input.shape();
   input.SetInPlaceIrValue(torch::lazy::MakeNode<ir::ops::Bernoulli>(
-      LazyGraphExecutor::Get()->GetIrValueForScalar(probability, input_shape,
+      LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(probability, input_shape,
                                                     input.GetDevice()),
       LazyGraphExecutor::Get()->GetRngSeed(input.GetDevice()),
       input_shape.Get()));
@@ -220,7 +220,7 @@ LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {
 }
 
 void fill_(LazyTensor& input, const at::Scalar& value) {
-  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
+  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
       value, input.shape(), input.GetDevice());
   input.SetInPlaceIrValue(std::move(constant));
 }
@@ -230,7 +230,7 @@ LazyTensor mul(const LazyTensor& input, const LazyTensor& other) {
 }
 
 LazyTensor mul(const LazyTensor& input, const at::Scalar& other) {
-  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
+  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
       other, input.shape(), input.GetDevice());
   return LazyTensor::Create(input.GetIrValue() * constant, input.GetDevice());
 }
@@ -336,9 +336,9 @@ LazyTensor repeat(const LazyTensor& input, std::vector<int64_t> repeats) {
 
 LazyTensor rsub(const LazyTensor& input, const at::Scalar& other,
                 const at::Scalar& alpha) {
-  torch::lazy::Value alpha_ir = LazyGraphExecutor::Get()->GetIrValueForScalar(
+  torch::lazy::Value alpha_ir = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
       alpha, input.shape(), input.GetDevice());
-  torch::lazy::Value other_ir = LazyGraphExecutor::Get()->GetIrValueForScalar(
+  torch::lazy::Value other_ir = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
       other, input.shape(), input.GetDevice());
   return LazyTensor::Create(other_ir - alpha_ir * input.GetIrValue(), input.GetDevice());
 }
@@ -427,7 +427,7 @@ LazyTensor stack(c10::ArrayRef<LazyTensor> tensors, int64_t dim) {
 
 LazyTensor sub(const LazyTensor& input, const LazyTensor& other,
                const at::Scalar& alpha) {
-  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForScalar(
+  torch::lazy::Value constant = LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
       alpha, other.shape(), other.GetDevice());
   return LazyTensor::Create(input.GetIrValue() - other.GetIrValue() * constant, input.GetDevice());
 }
@@ -435,10 +435,10 @@ LazyTensor sub(const LazyTensor& input, const LazyTensor& other,
 LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
                const at::Scalar& alpha) {
   torch::lazy::Value other_constant =
-      LazyGraphExecutor::Get()->GetIrValueForScalar(other, input.shape(),
+      LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(other, input.shape(),
                                                     input.GetDevice());
   torch::lazy::Value alpha_constant =
-      LazyGraphExecutor::Get()->GetIrValueForScalar(alpha, input.shape(),
+      LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(alpha, input.shape(),
                                                     input.GetDevice());
   return LazyTensor::Create(input.GetIrValue() - other_constant * alpha_constant, input.GetDevice());
 }
@@ -457,7 +457,8 @@ LazyTensor tanh_backward(const LazyTensor& grad_output,
   // Shape stays the same since pow is a unary op
   std::vector<torch::lazy::Shape> shapes{output.shape().Get()};
   torch::lazy::NodePtr pow_node =
-      torch::lazy::MakeNode<ir::ops::PowTensorScalar>(output.GetIrValue(), 2,
+      torch::lazy::MakeNode<ir::ops::PowTensorScalar>(output.GetIrValue(), 
+                                                      LazyGraphExecutor::Get()->GetIrValueForScalar(2, output.GetDevice()),
                                                       std::move(shapes));
   return mul(grad_output,
              rsub(LazyTensor::Create(pow_node, output.GetDevice()), 1, 1));

@@ -1,5 +1,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
-
+#include "c10/core/ScalarType.h"
+#include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 #include "lazy_tensor_core/csrc/ts_backend/ts_shape_inference.h"
 
 namespace torch {
@@ -31,14 +32,25 @@ void TSLoweringContext::AssignOutputOp(const Output& output,
 }
 
 torch::jit::Value* TSLoweringContext::GetParameter(BackendDataPtr data) {
-  BackendData::Handle handle = data->GetHandle();
+  const auto ts_data = std::static_pointer_cast<torch_lazy_tensors::compiler::TSData>(data);
+  BackendData::Handle handle = ts_data->GetHandle();
   auto it = parameters_map_.find(handle);
   if (it == parameters_map_.end()) {
     torch::jit::Value* param =
         graph_->addInput(c10::str("p", parameters_.size()));
+    if (ts_data->scalar.has_value()) {
+      auto scalarType = ts_data->scalar.value().type();
+      if (isFloatingType(scalarType)){
+        param->setType(c10::FloatType::get());
+      } else if (isIntegralType(scalarType) || (scalarType == c10::kBool)) {
+        param->setType(c10::IntType::get());
+      } else {
+        TORCH_CHECK(false, "Unhandled scalar type: ", c10::toString(scalarType));
+      }
+    }
     it = parameters_map_.emplace(handle, Parameter{param, parameters_.size()})
              .first;
-    parameters_.push_back(data);
+    parameters_.push_back(ts_data);
   }
   parameter_sequence_.push_back(it->second.index);
   return it->second.param;
