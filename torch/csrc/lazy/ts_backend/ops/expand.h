@@ -15,7 +15,7 @@ class TORCH_API Expand : public TsNode {
 
   const std::vector<int64_t>& size() const {
     return size_;
-  };
+  }
 
   bool is_scalar_expand() const {
     return is_scalar_expand_;
