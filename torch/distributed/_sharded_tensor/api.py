@@ -646,6 +646,9 @@ class ShardedTensor(object):
             )
         return self._remote_shards
 
+    def __hash__(self):
+        return id(self)
+
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
 
