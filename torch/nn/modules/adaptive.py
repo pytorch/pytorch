@@ -260,7 +260,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
         return self._get_full_log_prob(input, head_output)
 
     def predict(self, input: Tensor) -> Tensor:
-        r""" This is equivalent to `self.log_pob(input).argmax(dim=1)`,
+        r""" This is equivalent to `self.log_prob(input).argmax(dim=1)`,
         but is more efficient in some cases.
 
         Args:

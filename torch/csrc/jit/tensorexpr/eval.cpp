@@ -766,6 +766,11 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     if (!func_registry.count(v->func_name())) {
       throw unimplemented_lowering(v);
     }
+    GRAPH_DEBUG(
+        "EXTERNAL CALL: func=",
+        v->func_name(),
+        ", buf=",
+        v->buf()->name_hint());
 
     std::vector<BufPtr> bufs(v->buf_args());
     bufs.insert(bufs.begin(), v->buf());
@@ -900,6 +905,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       total_byte_size *= value_.intValue();
     }
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
+    GRAPH_DEBUG(
+        "ALLOCATE: buf=", v->buf()->name_hint(), ", size=", total_byte_size);
     std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
@@ -913,6 +920,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
 
   void visit(FreePtr v) override {
     BufPtr b = v->buf();
+    GRAPH_DEBUG("FREE: buf=", v->buf()->name_hint());
     int count = internal_buffers_.erase(b);
     if (count == 0) {
       throw std::runtime_error(

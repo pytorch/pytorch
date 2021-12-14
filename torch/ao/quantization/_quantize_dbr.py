@@ -29,6 +29,12 @@ def prepare(model, example_inputs, inplace=False, allow_list=None,
         # TODO: also delete _auto_quant_staate of all children
         if hasattr(model, '_auto_quant_state'):
             del model._auto_quant_state
+        # the model hierarchy might have changed during fusion, so we
+        # have to delete the cached module hook types
+        for k, v in model.named_modules():
+            if hasattr(v, '_auto_quant_module_hook_type'):
+                del v._auto_quant_module_hook_type
+
         model.__class__ = old_class
 
     # Automatically assign qconfigs for modules where the defaults do not
