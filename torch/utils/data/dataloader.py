@@ -33,14 +33,16 @@ _worker_init_fn_t = Callable[[int], None]
 _collate_fn_t = Callable[[List[T]], Any]
 
 
-# This function used to be defined in this file. However, it was moved to
+# These functions used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
 default_collate: _collate_fn_t = _utils.collate.default_collate
+default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
 
 class _DatasetKind(object):
     Map = 0
