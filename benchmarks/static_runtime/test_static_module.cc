@@ -976,7 +976,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(sigmoid_fn.f());
   EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
   EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
 
@@ -985,7 +984,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       transpose_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(transpose_fn.f());
   EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
   EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
 }
@@ -1232,9 +1230,8 @@ void testAssignStorageToManagedTensors(
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
   auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
-  std::vector<StorageGroup> groups;
-  assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor, groups);
+  auto groups = assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
   checkStorageGroups(
       groups, ranges, tensor_value_to_tensor, min_reused_tensors);
