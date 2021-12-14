@@ -61,6 +61,7 @@
 #include <torch/csrc/jit/passes/onnx/scalar_type_analysis.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
+#include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/quantization/dedup_module_uses.h>
@@ -282,6 +283,9 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_onnx_lint", ONNXLintGraph)
       .def("_jit_pass_onnx_function_extraction", onnx::ONNXFunctionExtraction)
       .def("_jit_pass_fuse", FuseGraph)
+      .def(
+          "_jit_pass_replace_upgraders",
+          [](std::shared_ptr<Graph>& g) { return ApplyOldOpsUpgraders(g); })
       .def(
           "_jit_pass_dce",
           [](std::shared_ptr<Graph>& g) {
