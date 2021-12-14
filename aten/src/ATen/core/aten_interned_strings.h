@@ -271,10 +271,6 @@ _(aten, cudnn_affine_grid_generator_backward) \
 _(aten, cudnn_batch_norm) \
 _(aten, cudnn_batch_norm_backward) \
 _(aten, cudnn_convolution) \
-_(aten, cudnn_convolution_backward) \
-_(aten, cudnn_convolution_backward_bias) \
-_(aten, cudnn_convolution_backward_input) \
-_(aten, cudnn_convolution_backward_weight) \
 _(aten, cudnn_convolution_transpose) \
 _(aten, cudnn_convolution_transpose_backward) \
 _(aten, cudnn_convolution_transpose_backward_bias) \
