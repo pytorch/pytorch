@@ -11827,8 +11827,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            supports_forward_ad=True,
-           skips=(
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),),
+           ),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
