@@ -687,6 +687,29 @@ class TestCommon(TestCase):
             kwargs = sample.kwargs
             _check_composite_compliance(op, args, kwargs)
 
+    @onlyCPU
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    def test_floating_inputs_are_differentiable(self, device, dtype, op):
+        # Nothing to check if the operation it's not differentiable
+        if not op.supports_autograd:
+            return
+
+        floating_dtypes = list(floating_and_complex_types_and(torch.bfloat16, torch.float16))
+
+        def check_tensor_floating_is_differentiable(t):
+            if isinstance(t, torch.Tensor) and t.dtype in floating_dtypes:
+                msg = (f"Found a sampled tensor of floating-point dtype {t.dtype} sampled with "
+                       "requires_grad=False. If this is intended, please skip/xfail this test.")
+                self.assertTrue(t.requires_grad, msg)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        for sample in samples:
+            check_tensor_floating_is_differentiable(sample.input)
+            for arg in sample.args:
+                check_tensor_floating_is_differentiable(arg)
+            for arg in sample.kwargs.values():
+                check_tensor_floating_is_differentiable(arg)
+
 
 # gradcheck requires double precision
 _gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
