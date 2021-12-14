@@ -2,8 +2,8 @@
 
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <c10/util/Exception.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Exception.h>
 
 #include <unordered_map>
 

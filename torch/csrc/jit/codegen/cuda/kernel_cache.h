@@ -7,8 +7,8 @@
 #include <torch/csrc/jit/codegen/cuda/scheduler/all_schedulers.h>
 #include <torch/csrc/jit/codegen/cuda/scheduler/registry.h>
 
-#include <c10/util/ArrayRef.h>
 #include <c10/macros/Export.h>
+#include <c10/util/ArrayRef.h>
 
 #include <mutex>
 #include <type_traits>

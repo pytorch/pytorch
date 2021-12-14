@@ -9,8 +9,8 @@
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/parallel_type_bitmap.h>
 
-#include <c10/util/Optional.h>
 #include <c10/macros/Export.h>
+#include <c10/util/Optional.h>
 
 #include <cstdint>
 #include <string>
