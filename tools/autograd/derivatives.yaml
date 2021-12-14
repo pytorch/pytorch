@@ -2253,10 +2253,10 @@
   log_probs: _cudnn_ctc_loss_backward(grad, result0, result1, zero_infinity)
 
 - name: cudnn_convolution_transpose(Tensor self, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
-  self, weight: "_cudnn_convolution_transpose_backward(self, grad, weight, padding, output_padding, stride, dilation, groups, {grad_input_mask[0], grad_input_mask[1]})"
+  self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, output_padding, stride, dilation, true, groups, {grad_input_mask[0], grad_input_mask[1]})"
 
 - name: cudnn_convolution(Tensor self, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
-  self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, {grad_input_mask[0], grad_input_mask[1]})"
+  self, weight: "_cudnn_convolution_backward(self, grad, weight, padding, std::vector<int64_t>(padding.size(), 0), stride, dilation, false, groups, {grad_input_mask[0], grad_input_mask[1]})"
 
 - name: cudnn_grid_sampler(Tensor self, Tensor grid) -> Tensor output
   self, grid: "grad.defined() ? cudnn_grid_sampler_backward(self, grid, grad) : std::tuple<Tensor, Tensor>()"

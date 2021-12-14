@@ -4747,25 +4747,11 @@ Tensor warn_backwards(const Tensor &grad_output) {
 }
 
 // This function only exists because cuDNN does not support bias gradient computation and it's not easy
-// to slice a std::tuple to return only grad_input / grad_weight from convolution_backward.
+// to slice a std::tuple to return only grad_input / grad_weight from convolution_backward. It will
+// be removed when the cudnn_convolution and cudnn_convolution_transpose go away.
 std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
-    at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups, ::std::array<bool,2> output_mask) {
-  if (!grad_output.defined()) {
-    return std::tuple<Tensor, Tensor>();
-  }
-
-  // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::native::convolution_backward(
-      grad_output, self, weight, c10::nullopt, stride, padding, dilation, /*transposed=*/ false,
-      std::vector<int64_t>(padding.size(), 0), groups, {output_mask[0], output_mask[1], false});
-  std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
-  return result;
-}
-
-std::tuple<Tensor, Tensor> _cudnn_convolution_transpose_backward(
-    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
-    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask) {
   if (!grad_output.defined()) {
     return std::tuple<Tensor, Tensor>();
@@ -4773,7 +4759,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_transpose_backward(
 
   // Just call the general backward and ignore the bias gradient part.
   std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::native::convolution_backward(
-      grad_output, self, weight, c10::nullopt, stride, padding, dilation, /*transposed=*/ true,
+      grad_output, self, weight, c10::nullopt, stride, padding, dilation, transposed,
       output_padding, groups, {output_mask[0], output_mask[1], false});
   std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
   return result;

@@ -388,11 +388,7 @@ Tensor warn_backwards(const Tensor &grad_output);
 
 std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
     const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
-    at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups, ::std::array<bool,2> output_mask);
-
-std::tuple<Tensor, Tensor> _cudnn_convolution_transpose_backward(
-    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
-    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
     ::std::array<bool,2> output_mask);
 
 } // namespace details
