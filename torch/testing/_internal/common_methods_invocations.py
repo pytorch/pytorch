@@ -10019,8 +10019,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_autograd=False,
                    skips=(
-                       # Pre-existing condition; Needs to be fixed
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
                        # >>> t = torch.randn(3)
@@ -10372,8 +10370,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_and does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10384,8 +10380,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_or does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10396,8 +10390,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_xor does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -11472,7 +11464,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            decorators=[
                # Derivative wrt first tensor not implemented
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_floating_inputs_are_differentiable"),
+               DecorateInfo(unittest.expectedFailure, "TestCommon",
+                            "test_floating_inputs_are_differentiable"),
            ],
            skips=(
                # test does not work with passing lambda for op
@@ -11504,7 +11497,8 @@ op_db: List[OpInfo] = [
            supports_inplace_autograd=False,
            decorators=[
                # Derivative wrt first tensor not implemented
-               DecorateInfo(unittest.expectedFailure, "TestCommon", "test_floating_inputs_are_differentiable"),
+               DecorateInfo(unittest.expectedFailure, "TestCommon",
+                            "test_floating_inputs_are_differentiable"),
            ],
            skips=(
                # test does not work with passing lambda for op
@@ -11666,8 +11660,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            supports_forward_ad=True,
-           skips=(
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),),
+           ),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -12797,6 +12790,8 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           # An `out=` variant exists but is not exposed to the Python API
+           # see: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
            supports_out=False,
            supports_forward_ad=True,
            # https://github.com/pytorch/pytorch/issues/66357
@@ -13629,12 +13624,15 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and(torch.bool),
            supports_autograd=True,
            safe_casts_outputs=True,
+           decorators=[
+               # Derivative wrt first tensor not implemented
+               DecorateInfo(unittest.expectedFailure, "TestCommon",
+                            "test_floating_inputs_are_differentiable"),
+           ],
            skips=(
                # Lambda doesn't work in JIT test
                # AssertionError: JIT Test does not execute any logic
-               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),
-               DecorateInfo(unittest.skip("Derivative wrt second tensor not implemented"), "TestCommon", "test_floating_inputs_are_differentiable"),
-           ),
+               DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"),),
            sample_inputs_func=sample_inputs_zeta),
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
@@ -14768,6 +14766,10 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
+        decorators=[
+            # FIXME: Derivative wrt. weight not implemented
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
+                         "test_floating_inputs_are_differentiable")],
         skips=(
             # RuntimeError:
             # undefined value tensor:
@@ -14776,7 +14778,6 @@ op_db: List[OpInfo] = [
             #     return torch.nn.functional.nll_loss(i0, i1, weight=tensor([8.4784, 1.7658, 4.3228], dtype=torch.float32))
             #                                                        ~~~~~~ <--- HERE
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
-            DecorateInfo(unittest.skip("FIXME: Derivative wrt. weight not implemented"), "TestCommon", "test_floating_inputs_are_differentiable"),
         ),
     ),
     OpInfo(
