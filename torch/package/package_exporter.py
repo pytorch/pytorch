@@ -551,8 +551,7 @@ class PackageExporter:
     def save_pickle(
         self, package: str,
         resource: str, obj: Any,
-        dependencies: bool = True,
-        save_mocked_and_used: bool = False
+        dependencies: bool = True
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -594,16 +593,15 @@ class PackageExporter:
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
-                    if not save_mocked_and_used:
-                        for pattern, pattern_info in self.patterns.items():
-                            if pattern_info.action == _ModuleProviderAction.MOCK:
-                                if pattern.matches(module):
-                                    raise NotImplementedError(
-                                        f"Object '{field}' from module {module} was mocked out during packaging "
-                                        f"but is being used in resource - {resource} in package {package}"
-                                        "If this error is happening during 'save_pickle', please ensure that your "
-                                        "pickled object doesn't contain any mocked objects."
-                                    )
+                    for pattern, pattern_info in self.patterns.items():
+                        if pattern_info.action == _ModuleProviderAction.MOCK:
+                            if pattern.matches(module):
+                                raise NotImplementedError(
+                                    f"Object '{field}' from module {module} was mocked out during packaging "
+                                    f"but is being used in resource - {resource} in package {package}"
+                                    "If this error is happening during 'save_pickle', please ensure that your "
+                                    "pickled object doesn't contain any mocked objects."
+                                )
 
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
