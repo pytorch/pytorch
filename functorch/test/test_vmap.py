@@ -2873,7 +2873,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(lambda x, y: x / y, device)
 
     @allowVmapFallbackUsage
-    @unittest.expectedFailure
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -3163,7 +3162,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('cdist'),
         xfail('complex'),
         xfail('copysign'),
-        xfail('diag_embed'),
         xfail('dsplit'),
         xfail('eig'),
         xfail('fft.fftn'),
@@ -3223,7 +3221,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.multi_dot'),
         xfail('nanmean'),
         xfail('vstack'),
-        xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('nn.functional.conv2d', ''),
         xfail('nn.functional.batch_norm'),
