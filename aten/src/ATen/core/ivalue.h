@@ -6,7 +6,7 @@
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 #include <typeindex>
 
 namespace torch {
@@ -647,7 +647,7 @@ struct TORCH_API IValue final {
   }
   c10::intrusive_ptr<ivalue::Object> toObject() &&;
   c10::intrusive_ptr<ivalue::Object> toObject() const&;
-  const ivalue::Object& toObjectRef() const;
+  ivalue::Object& toObjectRef() const;
 
   torch::jit::Module toModule() const;
   bool isModule() const;
@@ -1239,7 +1239,8 @@ c10::ClassTypePtr getCustomClassTypeImpl() {
     auto class_name = std::string(tindex.name());
     for(const auto &it: tmap) {
       if (class_name == it.first.name()) {
-          tmap[tindex] = it.second;
+          // Do not modify existing type map here as this template is supposed to be called only once per type
+          // from getCustomClassTypeImpl()
           return it.second;
       }
     }

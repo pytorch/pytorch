@@ -4,8 +4,7 @@ from typing import Callable, List, Tuple
 import torch
 import torch.fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt.fx2trt import (
-    create_inputs_from_specs,
+from torch.fx.experimental.fx2trt import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
@@ -139,7 +138,6 @@ class TRTTestCase(unittest.TestCase):
             ops_in_mod >= ops, f"expected ops {ops}, actuall ops {ops_in_mod}"
         )
 
-
     def assert_unexpected_op(self, mod, ops):
         for node in mod.graph.nodes:
             if (node.op == "call_module"):
@@ -241,7 +239,7 @@ class AccTestCase(TRTTestCase):
         atol=1e-03,
     ):
         mod.eval()
-        inputs = create_inputs_from_specs(input_specs)
+        inputs = InputTensorSpec.create_inputs_from_specs(input_specs)
         mod = acc_tracer.trace(mod, inputs)
         interp = TRTInterpreter(mod, input_specs, explicit_batch_dimension=True)
         super().run_test(mod, inputs, expected_ops, unexpected_ops, interp, rtol, atol)

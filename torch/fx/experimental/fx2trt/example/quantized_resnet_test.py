@@ -1,6 +1,6 @@
 import torch.fx
 import torchvision.models as models
-from torch.fx.experimental.fx2trt.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
+from torch.fx.experimental.fx2trt import TRTInterpreter, InputTensorSpec, TRTModule
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_fx
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
 import copy
