@@ -22,6 +22,27 @@ namespace test {
 
 namespace {
 
+class GraphExecutorWrapper {
+ public:
+  GraphExecutorWrapper() = default;
+
+  explicit GraphExecutorWrapper(const std::shared_ptr<Graph>& graph)
+      : graph_exec_(graph, "") {}
+
+  c10::IValue operator()(const std::vector<c10::IValue>& args) {
+    Stack stack(args);
+    graph_exec_.run(stack);
+
+    if (stack.size() == 1) {
+      return stack[0];
+    }
+    return c10::ivalue::Tuple::create(stack);
+  }
+
+ private:
+  GraphExecutor graph_exec_;
+};
+
 // Test scripts passed to testStaticRuntime can either be IR or JIT.
 // The logic for running the script and producing a corresponding StaticModule
 // is a bit different for each case. This logic is encapsulated within concrete
@@ -62,17 +83,11 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
     std::unordered_map<std::string, Value*> vmap;
     parseIR(source_ir, graph_.get(), vmap);
 
-    graph_exec_ = GraphExecutor(graph_, "");
+    graph_exec_ = GraphExecutorWrapper(graph_);
   }
 
   IValue getExpected(const std::vector<IValue>& args) override {
-    Stack stack(args);
-    graph_exec_.run(stack);
-
-    if (stack.size() == 1) {
-      return stack[0];
-    }
-    return c10::ivalue::Tuple::create(stack);
+    return graph_exec_(args);
   }
 
   StaticModule makeStaticModule(const StaticModuleOptions& opt) const override {
@@ -81,7 +96,7 @@ class GraphStaticRuntimeContext : public StaticRuntimeTestContext {
 
  private:
   std::shared_ptr<Graph> graph_;
-  GraphExecutor graph_exec_;
+  GraphExecutorWrapper graph_exec_;
 };
 
 std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
@@ -206,6 +221,19 @@ std::shared_ptr<Graph> getGraphFromIR(const std::string& ir) {
   std::unordered_map<std::string, Value*> vmap;
   parseIR(ir, graph.get(), vmap);
   return graph;
+}
+
+void compareResultsWithJIT(
+    StaticRuntime& runtime,
+    const std::shared_ptr<Graph>& graph,
+    const std::vector<c10::IValue>& args,
+    const bool use_allclose,
+    const bool use_equalnan) {
+  GraphExecutorWrapper graph_exec(graph);
+  auto expected = graph_exec(args);
+  auto actual = runtime(args, {});
+  runtime.check_for_memory_leak();
+  compareResults(expected, actual, use_allclose, use_equalnan);
 }
 
 void testStaticRuntime(

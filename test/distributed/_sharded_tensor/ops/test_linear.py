@@ -95,10 +95,11 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
 
         # Test optimizer.
         previous = local_linear.weight.clone().detach()
-        optim = torch.optim.SGD([local_linear.weight], lr=0.1)
+        optim = torch.optim.SGD(local_linear.parameters(), lr=0.1)
         optim.step()
         self.assertNotEqual(previous, local_linear.weight)
-        previous_sharded = sharded_weight.clone().detach()
+        previous_sharded_weight = sharded_weight.clone()
+        previous_sharded_bias = sharded_linear.bias.clone()
         sharded_optim = ShardedOptimizer(dict(named_params_with_sharded_tensor(sharded_linear)), torch.optim.SGD, lr=0.1)
         sharded_optim.step()
         sharded_weight = sharded_linear.weight.local_shards()[0].tensor
@@ -106,9 +107,10 @@ class TestShardedTensorOpsLinear(ShardedTensorTestBase):
             sharded_dim, start_pos, chunk_size
         )
         self.assertEqual(sharded_weight.size(), local_weight_narrowed.size())
-        with torch.no_grad():
-            self.assertNotEqual(previous_sharded, sharded_weight)
-            self.assertEqual(sharded_weight, local_weight_narrowed)
+        self.assertNotEqual(previous_sharded_weight, sharded_weight)
+        self.assertEqual(sharded_weight, local_weight_narrowed)
+        self.assertNotEqual(previous_sharded_bias, sharded_linear.bias)
+        self.assertEqual(sharded_linear.bias, local_linear.bias)
 
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(TEST_GPU_NUM)
