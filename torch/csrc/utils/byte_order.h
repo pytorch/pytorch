@@ -2,7 +2,7 @@
 
 #include <TH/THHalf.h>
 #include <c10/util/BFloat16.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <cstddef>
 #include <cstdint>
 
