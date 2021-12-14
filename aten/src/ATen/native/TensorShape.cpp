@@ -99,6 +99,8 @@ static bool should_skip(const Tensor& t) {
 }
 
 Tensor & _cat_out_cpu(TensorList tensors, int64_t dim, Tensor& result) {
+  check_cat_no_zero_dim(tensors);
+  dim = legacy_cat_wrap_dim(dim, tensors);
   // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
@@ -258,17 +260,7 @@ Tensor _cat_cpu(TensorList tensors, int64_t dim) {
   return native::_cat_out_cpu(tensors, dim, result);
 }
 
-static void check_cat_no_zero_dim(TensorList tensors) {
-  for(const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
-    TORCH_CHECK(t.dim() > 0,
-             "zero-dimensional tensor (at position ", i, ") cannot be concatenated");
-  }
-}
-
 Tensor & cat_out(TensorList tensors, int64_t dim, Tensor & result) {
-  check_cat_no_zero_dim(tensors);
-  dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   {
     NoNamesGuard guard;
@@ -455,8 +447,6 @@ Tensor cat(TensorList tensors, int64_t dim) {
     return cat_sparse(tensors, dim);
   }
 
-  check_cat_no_zero_dim(tensors);
-  dim = legacy_cat_wrap_dim(dim, tensors);
   auto maybe_outnames = namedinference::compute_cat_outnames(tensors);
   Tensor result;
   {
@@ -1495,6 +1485,7 @@ bool inline can_use_native_serial_stack(Tensor& result, TensorList tensors, int6
 }
 
 bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) {
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   if (can_use_native_serial_stack(result, tensors, dim)) {
     // compute the size of the result
     auto result_sizes = tensors[0].sizes().vec();
@@ -1516,14 +1507,12 @@ bool inline maybe_native_stack(Tensor& result, TensorList tensors, int64_t dim) 
 }
 
 Tensor _stack(TensorList tensors, int64_t dim) {
-  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out(get_stack_inputs(tensors, dim), dim, result);
 }
 
 Tensor _stack_cpu(TensorList tensors, int64_t dim) {
-  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   ScalarType high_type = result_type(tensors);
   Tensor result = at::empty({0}, tensors[0].options().dtype(high_type));
   return at::native::_stack_out_cpu(tensors, dim, result);
@@ -1533,7 +1522,6 @@ Tensor _stack_cpu(TensorList tensors, int64_t dim) {
 Tensor stack(TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
-  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
@@ -1555,7 +1543,6 @@ Tensor& _stack_out(TensorList tensors, int64_t dim, Tensor& result) {
 Tensor& stack_out(TensorList tensors, int64_t dim, Tensor& result) {
   TORCH_CHECK(tensors.size() > 0,
            "stack expects a non-empty TensorList");
-  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
   return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
 }
 
