@@ -10,7 +10,7 @@
 #include <forward_list>
 #include <tuple>
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32
 #include <ctime>
@@ -357,6 +357,7 @@ struct TORCH_API LegacyEvent {
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,modernize-use-equals-default)
   RangeEventList() {
     events_.reserve(kReservedCapacity);
   }
@@ -369,6 +370,7 @@ struct RangeEventList {
 
   std::vector<LegacyEvent> consolidate() {
     std::lock_guard<std::mutex> lock(mutex_);
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<LegacyEvent> result;
     result.insert(
         result.begin(),
@@ -393,7 +395,7 @@ struct RangeEventList {
 };
 
 std::string getNvtxStr(
-    const at::StringView& name,
+    const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes);
 

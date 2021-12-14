@@ -2561,4 +2561,27 @@ std::vector<Tensor> unflatten_dense_tensors(const Tensor& flat, TensorList tenso
   return outputs;
 }
 
-}} // at::native
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+    auto output = self.clone();
+    auto slice = output.slice(dim, start, end, step);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor select_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, int64_t index) {
+    auto output = self.clone();
+    auto slice = output.select(dim, index);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64_t offset, int64_t dim1, int64_t dim2) {
+    auto output = self.clone();
+    auto slice = output.diagonal(offset, dim1, dim2);
+    TORCH_CHECK(slice.sizes() == src.sizes(), "expected src to have a size equal to the slice of self. src size = ", src.sizes(), ", slice size = ", slice.sizes());
+    slice.copy_(src);
+    return output;
+}
+
+} // namespace native
+} // namespace at

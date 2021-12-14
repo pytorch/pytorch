@@ -5,6 +5,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <c10/util/irange.h>
+#include <c10/macros/Export.h>
 
 #define CUDABLAS_POSINT_CHECK(FD, X)         \
   TORCH_CHECK(                               \
@@ -96,7 +97,7 @@ namespace at {
 namespace cuda {
 namespace blas {
 
-const char* _cublasGetErrorEnum(cublasStatus_t error) {
+C10_EXPORT const char* _cublasGetErrorEnum(cublasStatus_t error) {
   if (error == CUBLAS_STATUS_SUCCESS) {
     return "CUBLAS_STATUS_SUCCESS";
   }
@@ -135,7 +136,7 @@ const char* _cublasGetErrorEnum(cublasStatus_t error) {
 /* LEVEL 3 BLAS FUNCTIONS */
 
 #ifndef USE_ROCM
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11200
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 11020
 #define cublasGemmStridedBatchedExFix cublasGemmStridedBatchedEx
 #else
 // Workaround for https://github.com/pytorch/pytorch/issues/45724
@@ -451,6 +452,13 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
     // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
     // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH));
+#else
+    cublasMath_t cublas_flags = CUBLAS_DEFAULT_MATH;
+    if (!at::globalContext().allowFP16ReductionCuBLAS()) {
+      cublas_flags = static_cast<cublasMath_t>(cublas_flags | CUBLAS_MATH_DISALLOW_REDUCED_PRECISION_REDUCTION);
+    }
+    // Disallow fp16 reductions that could lead to unexpected overflow issues.
+    TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, cublas_flags));
 #endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
     TORCH_CUDABLAS_CHECK(cublasGemmEx(
         handle,
@@ -472,11 +480,7 @@ void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half)) {
         ldc,
         CUDA_R_32F,
         CUBLAS_GEMM_DFALT_TENSOR_OP));
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-    // On CUDA versions prior to 11, users are required to set the math mode to CUBLAS_TENSOR_OP_MATH
-    // manually to be able to use tensor cores for FP16. On CUDA 11, this is no longer required.
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));
-#endif  // defined(CUDA_VERSION) && CUDA_VERSION < 11000
   } else {
     TORCH_CUDABLAS_CHECK(cublasSgemmEx(
         handle,

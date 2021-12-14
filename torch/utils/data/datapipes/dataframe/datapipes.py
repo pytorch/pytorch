@@ -33,13 +33,13 @@ class PerRowDataFramesPipe(DFIterDataPipe):
 class ConcatDataFramesPipe(DFIterDataPipe):
     def __init__(self, source_datapipe, batch=3):
         self.source_datapipe = source_datapipe
-        self.batch = batch
+        self.n_batch = batch
 
     def __iter__(self):
         buffer = []
         for df in self.source_datapipe:
             buffer.append(df)
-            if len(buffer) == self.batch:
+            if len(buffer) == self.n_batch:
                 yield df_wrapper.concat(buffer)
                 buffer = []
         if len(buffer):

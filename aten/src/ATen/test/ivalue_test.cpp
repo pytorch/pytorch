@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 #include <torch/torch.h>
 #include <c10/util/intrusive_ptr.h>
+#include <c10/util/irange.h>
 #include <ATen/core/Dict.h>
 
 // Snippets for checking assembly.
@@ -51,7 +52,10 @@ TEST(IValueTest, Basic) {
       at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);
   ASSERT_TRUE(the_list.isTuple());
-  auto first = the_list.toTuple()->elements()[1];
+  auto first = the_list.toTupleRef().elements()[1];
+  ASSERT_EQ(first.toInt(), 4);
+  // Make sure toTupleRef has test coverage too.
+  first = the_list.toTupleRef().elements()[1];
   ASSERT_EQ(first.toInt(), 4);
   at::Tensor tv = at::rand({3, 4});
   IValue ten(tv);
@@ -86,8 +90,8 @@ TEST(IValueTest, Basic) {
   IValue complex_tuple(
       at::ivalue::Tuple::create({IValue(c10::complex<double>(3.4, 4.7)), IValue(foo1)}));
   ASSERT_TRUE(complex_tuple.isTuple());
-  ASSERT_EQ(complex_tuple.toTuple()->elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
-  ASSERT_EQ(complex_tuple.toTuple()->elements()[1], foo1);
+  ASSERT_EQ(complex_tuple.toTupleRef().elements()[0].toComplexDouble(), c10::complex<double>(3.4, 4.7));
+  ASSERT_EQ(complex_tuple.toTupleRef().elements()[1], foo1);
 }
 
 TEST(IValueTest, BasicStorage) {
@@ -640,7 +644,7 @@ TEST(IValueTest, IdentityComparisonAndHashing) {
   auto moreSampleIValues = makeMoreSampleIValues();
 
   ASSERT_EQ(sampleIValues.size(), moreSampleIValues.size());
-  for (int ii = 0; ii < sampleIValues.size(); ++ii) {
+  for (const auto ii : c10::irange(sampleIValues.size())) {
     if (sampleIValues[ii].isComplexDouble() ||
         sampleIValues[ii].isBlob() ||
         sampleIValues[ii].isList() ||

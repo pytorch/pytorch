@@ -286,6 +286,24 @@ struct TORCH_API TupleElements {
   explicit TupleElements(std::vector<IValue> elements)
   : inlineSize_(0), elementsVector_(std::move(elements)) {}
 
+  explicit TupleElements(c10::ArrayRef<IValue> elements)
+  : inlineSize_(elements.size() <= 3 ? elements.size() : 0) {
+    switch (inlineSize_) {
+      case 3:
+        new (&elementsInline_[2]) IValue(elements[2]);
+        C10_FALLTHROUGH;
+      case 2:
+        new (&elementsInline_[1]) IValue(elements[1]);
+        C10_FALLTHROUGH;
+      case 1:
+        new (&elementsInline_[0]) IValue(elements[0]);
+        break;
+      case 0:
+        new (&elementsVector_) std::vector<IValue>(elements.begin(), elements.end());
+        break;
+    }
+  }
+
   explicit TupleElements(IValue&& e1)
   : inlineSize_(1) {
     new (&elementsInline_[0]) IValue(std::move(e1));
@@ -314,7 +332,7 @@ struct TORCH_API TupleElements {
 
   // It would be nice to make this noncopyable to prevent people from
   // writing code like `auto output =
-  // forward(...).toTuple()->elements()` (which does refcount bumps on
+  // forward(...).toTupleRef().elements()` (which does refcount bumps on
   // each element, unlike the more efficient but verbose
   // ```
   // auto outputIntrusivePtr = forward(...).toTuple();
@@ -567,25 +585,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
   static c10::intrusive_ptr<Tuple> createNamed(
       std::vector<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
+    return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
   static c10::intrusive_ptr<Tuple> createNamed(
       TupleElements elements_,
       std::shared_ptr<TupleType> type_) {
-    return c10::make_intrusive<Tuple>(std::move(elements_), type_);
+    return c10::make_intrusive<Tuple>(std::move(elements_), std::move(type_));
   }
 
   static c10::intrusive_ptr<Tuple> createNamed(
       std::initializer_list<IValue> elements_,
       std::shared_ptr<TupleType> type_) {
-    return createNamed(std::vector<IValue>(elements_), std::move(type_));
+    return createNamed(TupleElements(c10::ArrayRef<IValue>(elements_)), std::move(type_));
   }
 
   // MSVC apparently can't disambiguate the other two overloads of
   // create when passed an initializer_list without this.
   static c10::intrusive_ptr<Tuple> create(std::initializer_list<IValue> elements_) {
-    return create(std::vector<IValue>(elements_));
+    return create(c10::ArrayRef<IValue>(elements_));
   }
 
   static c10::intrusive_ptr<Tuple> create(std::vector<IValue> elements_) {
@@ -594,6 +612,10 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
 
   static c10::intrusive_ptr<Tuple> create(TupleElements elements_) {
     return c10::make_intrusive<Tuple>(std::move(elements_));
+  }
+
+  static c10::intrusive_ptr<Tuple> create(c10::ArrayRef<IValue> elements_) {
+    return create(TupleElements(elements_));
   }
 
   static c10::intrusive_ptr<Tuple> create(IValue e1) {
@@ -608,10 +630,25 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
     return c10::make_intrusive<Tuple>(std::move(e1), std::move(e2), std::move(e3));
   }
 
+ private:
+  // Workaround inability to use `>` operator in template argument list.
+  template <typename... Args>
+  static constexpr bool hasMoreThanThreeArgs() {
+    return sizeof...(Args) > 3;
+  }
+
+ public:
   template <typename... Args>
   static c10::intrusive_ptr<Tuple> create(Args&&... elements_) {
-    return c10::make_intrusive<Tuple>(
-        std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    switch (sizeof...(Args)) {
+      case 1:
+      case 2:
+      case 3:
+        return create(IValue(std::forward<Args>(elements_))...);
+      default:
+        return create(
+            std::vector<IValue>{IValue(std::forward<Args>(elements_))...});
+    }
   }
 
   // Again, it would be nice to make this noncopyable, but there's a
@@ -657,19 +694,39 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       const ivalue::Tuple& rhs);
 
  private:
-  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+  // NOTE: If we try to avoid the overloads without
+  // `std::shared_ptr<TupleType> type` by defaulting it to nullptr, we
+  // end up having to call (part of) the shared_ptr destructor for
+  // `type` even though we should know statically it won't do
+  // anything.
+  explicit Tuple(std::vector<IValue> elements)
+    : elements_(std::move(elements)){}
+
+  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(TupleElements&& elements)
+    : elements_(std::move(elements)) {}
+
+  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1)
+    : elements_(std::move(e1)) {}
+
+  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2)
+    : elements_(std::move(e1), std::move(e2)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3)
+    : elements_(std::move(e1), std::move(e2), std::move(e3)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2), std::move(e3)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
@@ -844,7 +901,12 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
   const IValue& constValue() const {
     std::unique_lock<std::mutex> lock(mutex_);
     AT_ASSERT(completed());
-    AT_ASSERT(!eptr_);
+    TORCH_INTERNAL_ASSERT(
+      !eptr_,
+      "value() accessor should only be used when future is not completed with ",
+      "an error, but future had the following error: ",
+      tryRetrieveErrorMessageInternal(eptr_)
+    );
     return value_;
   }
 
@@ -1429,10 +1491,10 @@ using _guarded_unsigned_long = std::conditional_t<
 
 } // namespace detail
 
-inline const ivalue::Object& IValue::toObjectRef() const {
+inline ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
-  return *static_cast<const c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
+  return *static_cast<c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
@@ -1646,7 +1708,7 @@ std::unordered_map<K, V> generic_to(
   std::unordered_map<K, V> specialized_dict;
 
   for (const auto& item : std::move(ivalue).toGenericDict()) {
-    specialized_dict[item.key().to<K>()] = item.value().to<V>();
+    specialized_dict[item.key().template to<K>()] = item.value().template to<V>();
   }
 
   return specialized_dict;
@@ -1679,7 +1741,7 @@ template <
             guts::negation<std::is_constructible<IValue, Args>>...>::value,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(IValue ivalue, _fake_type<std::tuple<Args...>>) {
-  const auto& vals = ivalue.toTuple()->elements();
+  const auto& vals = ivalue.toTupleRef().elements();
   TORCH_CHECK(vals.size() == sizeof...(Args));
   return detail::generic_to_tuple_impl<std::tuple<Args...>>(vals, Indices{});
 }
@@ -1805,6 +1867,14 @@ inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() && {
 inline c10::intrusive_ptr<ivalue::Tuple> IValue::toTuple() const& {
   AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
   return toIntrusivePtr<ivalue::Tuple>();
+}
+inline ivalue::Tuple& IValue::toTupleRef() const {
+  AT_ASSERT(isTuple(), "Expected Tuple but got ", tagKind());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(),
+      "called toTupleRef on null intrusive_ptr IValue");
+  return *static_cast<c10::ivalue::Tuple*>(
+      payload.u.as_intrusive_ptr);
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
@@ -2094,4 +2164,50 @@ IValue from(T&& x) {
 }
 
 } // namespace ivalue
+
+
+template <>
+struct MaybeOwnedTraits<IValue> {
+  using owned_type = IValue;
+  using borrow_type = IValue;
+
+  static borrow_type createBorrow(const owned_type& from) {
+    if (!from.isPtrType()) {
+      return from;
+    }
+    if (from.isTensor()) {
+      return IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(from.toTensor()));
+    } else {
+      return IValue(from.payload, from.tag, from.is_intrusive_ptr);
+    }
+  }
+
+  static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
+    lhs.clearToNone();
+    if (!rhs.isPtrType()) {
+      lhs = rhs;
+    } else if (rhs.isTensor()) {
+      lhs = IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(rhs.toTensor()));
+    } else {
+      lhs = IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr);
+    }
+  }
+
+  static void destroyBorrow(borrow_type& toDestroy) {
+    toDestroy.clearToNone();
+  }
+
+  static const owned_type& referenceFromBorrow(const borrow_type& borrow) {
+    return borrow;
+  }
+
+  static const owned_type* pointerFromBorrow(const borrow_type& borrow) {
+    return &borrow;
+  }
+
+  static bool debugBorrowIsValid(const borrow_type&) {
+    return true;
+  }
+};
+
 } // namespace c10

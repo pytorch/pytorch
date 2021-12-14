@@ -10,6 +10,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/Math.cuh>
+#include <ATen/native/cuda/jit_utils.h>
 #include <ATen/NumericUtils.h>
 #include <c10/core/Scalar.h>
 #include <c10/cuda/CUDAMathCompat.h>
@@ -32,7 +33,10 @@ void exp2_kernel_cuda(TensorIteratorBase& iter) {
 void i0_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return calc_i0(a);
+      using opmath_t = at::opmath_type<scalar_t>;
+      // implicit conversion of a to opmath_t will happen here,
+      //   but as far as TI is concerned, it's still a no-dynamic-cast kernel because lambda input is scalar_t
+      return calc_i0<opmath_t>(a);
     });
   });
 }
@@ -40,17 +44,29 @@ void i0_kernel_cuda(TensorIteratorBase& iter) {
 void i0e_kernel_cuda(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0e_cuda", [&]() {
     gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return calc_i0e(a);
+      using opmath_t = at::opmath_type<scalar_t>;
+      return calc_i0e<opmath_t>(a);
     });
   });
 }
 
+// See note [Jiterator]
+const char i1_name[] = "i1";
 void i1_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      return calc_i1(a);
+  #ifdef USE_JITERATOR
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
+      jitted_gpu_kernel</*name=*/i1_name,
+                        /*return_dtype=*/ scalar_t,
+                        /*common_dtype=*/ scalar_t,
+                        /*arity=*/ 1>(iter, i1_string);
     });
-  });
+  #else
+    AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "i1_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        return calc_i1(a);
+      });
+    });
+  #endif // USE_JITERATOR
 }
 
 void i1e_kernel_cuda(TensorIteratorBase& iter) {
@@ -156,13 +172,13 @@ void erfcx_kernel_cuda(TensorIteratorBase& iter) {
 
 void kaiser_window_kernel_cuda(TensorIteratorBase& iter, int64_t window_length, double beta_){
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.dtype(), "kaiser_window_cuda", [&](){
-    using T_ACC = acc_type<scalar_t, true>;
-    const T_ACC inv_alpha = static_cast<T_ACC>(2.0 / (window_length - 1));
-    const T_ACC beta = static_cast<T_ACC>(beta_);
-    const T_ACC inv_i0_beta = 1.0 / calc_i0(beta);
+    using opmath_t = at::opmath_type<scalar_t>;
+    const opmath_t inv_alpha = static_cast<opmath_t>(2.0 / (window_length - 1));
+    const opmath_t beta = static_cast<opmath_t>(beta_);
+    const opmath_t inv_i0_beta = 1.0 / calc_i0(beta);
     gpu_kernel(iter, [=]GPU_LAMBDA(scalar_t a) -> scalar_t {
-      T_ACC x = static_cast<T_ACC>(a) * inv_alpha - 1;
-      T_ACC y = std::max<T_ACC>(0, 1 - x * x);
+      opmath_t x = static_cast<opmath_t>(a) * inv_alpha - 1;
+      opmath_t y = std::max<opmath_t>(0, 1 - x * x);
       return calc_i0(beta * ::sqrt(y)) * inv_i0_beta;
     });
   });

@@ -47,12 +47,9 @@ typedef struct {
 
 struct pytorch_qnnp_operator {
   size_t batch_size;
-  uint32_t input_padding_front;
-  uint32_t input_padding_back;
-  uint32_t input_padding_top;
-  uint32_t input_padding_right;
-  uint32_t input_padding_bottom;
-  uint32_t input_padding_left;
+  uint32_t input_padding_depth;
+  uint32_t input_padding_height;
+  uint32_t input_padding_width;
   uint32_t adjustment_height;
   uint32_t adjustment_width;
   uint32_t kernel_depth;

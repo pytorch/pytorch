@@ -31,21 +31,21 @@ struct TORCH_API SugaredValue
 
   // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
-  virtual Value* asValue(const SourceRange& loc, Function& m) {
+  virtual Value* asValue(const SourceRange& loc, GraphFunction& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";
   }
 
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
 
   virtual bool hasAttr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
@@ -53,7 +53,7 @@ struct TORCH_API SugaredValue
   // assign an attribute on it, e.g. `this.field = newValue`
   virtual void setAttr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field,
       Value* newValue) {
     throw ErrorReport(loc) << "attribute assignment is not defined on "
@@ -64,13 +64,15 @@ struct TORCH_API SugaredValue
   // a method invocation
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const c10::optional<size_t>& size_hint = {}) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuple";
   }
 
   // TODO @wconstab refactor to use ModuleValue::asTuple instead of new API
-  virtual SugaredValuePtr asTupleValue(const SourceRange& loc, Function& m) {
+  virtual SugaredValuePtr asTupleValue(
+      const SourceRange& loc,
+      GraphFunction& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a tuplevalue";
   }
 
@@ -83,7 +85,7 @@ struct TORCH_API SugaredValue
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
@@ -109,7 +111,7 @@ struct TORCH_API SugaredValue
   // For example, when iterating through a Dict we iterate over its keys
   virtual std::shared_ptr<SugaredValue> iter(
       const SourceRange& loc,
-      Function& m) {
+      GraphFunction& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as an iterable";
   }
 
@@ -131,7 +133,7 @@ struct TORCH_API SugaredValue
   // If it does not have a statically-determinable length, then it cannot
   // be iterated over with a modulelist. If it does it must return a constant
   // Value *
-  virtual Value* len(const SourceRange& loc, Function& m) {
+  virtual Value* len(const SourceRange& loc, GraphFunction& m) {
     throw ErrorReport(loc) << "'" << kind() << "'"
                            << " object is not iterable";
   }
@@ -139,7 +141,7 @@ struct TORCH_API SugaredValue
   // expression for ith elemement for iterable value
   virtual std::shared_ptr<SugaredValue> getitem(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) {
     throw ErrorReport(loc) << "'" << kind() << "'"
@@ -159,46 +161,48 @@ struct TORCH_API SimpleValue : public SugaredValue {
     ss << "value of type '" << value_->type()->annotation_str() << "'";
     return ss.str();
   }
-  Value* asValue(const SourceRange& range, Function& m) override {
+  Value* asValue(const SourceRange& range, GraphFunction& m) override {
     return value_;
   }
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const c10::optional<size_t>& size_hint = {}) override;
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override;
 
-  bool hasAttr(const SourceRange& loc, Function& m, const std::string& field)
-      override;
+  bool hasAttr(
+      const SourceRange& loc,
+      GraphFunction& m,
+      const std::string& field) override;
 
   void setAttr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field,
       Value* newValue) override;
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       // note: names for args will be 'argument 0', 'argument 1', etc..
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
-  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override;
 
   Value* getValue() const {
     return value_;
   }
 
-  Value* len(const SourceRange& loc, Function& m) override;
+  Value* len(const SourceRange& loc, GraphFunction& m) override;
   SugaredValuePtr getitem(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) override;
 
@@ -220,7 +224,7 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
@@ -239,12 +243,12 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   std::vector<std::shared_ptr<SugaredValue>> asTuple(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const c10::optional<size_t>& size_hint = {}) override {
     return tup_;
   };
 
-  Value* asValue(const SourceRange& loc, Function& m) override {
+  Value* asValue(const SourceRange& loc, GraphFunction& m) override {
     std::vector<Value*> vec;
     for (const auto& sv : tup_) {
       vec.push_back(sv->asValue(loc, m));
@@ -259,7 +263,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
 
   SugaredValuePtr getitem(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) override {
     if (!(idx->type()->cast<IntType>() && toIValue(idx))) {
@@ -281,7 +285,7 @@ struct TORCH_API SugaredTupleValue : public SugaredValue {
   // This function is called when a SugaredValue is used to convert a
   // SugaredValue to its iterator. For example, when iterating through a Dict we
   // iterate over its keys
-  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override {
     return shared_from_this();
   };
@@ -305,7 +309,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override {
     if (field == "autograd") {
       // When refering torch.autograd, it is also considered to be a
@@ -340,14 +344,14 @@ struct TORCH_API ClassValue : public SugaredValue {
   //    n = Foo(constructor_arg)
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
 
   std::shared_ptr<SugaredValue> attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override;
 
   std::string kind() const override {
@@ -362,7 +366,7 @@ struct TORCH_API NamedTupleConstructor : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
@@ -392,7 +396,7 @@ struct FunctionValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& f,
+      GraphFunction& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
@@ -431,7 +435,7 @@ struct TORCH_API ClosureValue : public SugaredValue {
   std::string kind() const override {
     return "closure";
   }
-  Value* asValue(const SourceRange& range, Function& m) override {
+  Value* asValue(const SourceRange& range, GraphFunction& m) override {
     return value_;
   }
   Value* value_;
@@ -450,7 +454,7 @@ struct MethodValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& f,
+      GraphFunction& f,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
@@ -493,7 +497,7 @@ struct TORCH_API PrintValue : public SugaredValue {
   }
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
@@ -507,7 +511,7 @@ struct TORCH_API CastValue : public BuiltinFunction {
       : BuiltinFunction(method, c10::nullopt), type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
@@ -545,7 +549,7 @@ struct TORCH_API TensorCastValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override {
@@ -578,7 +582,7 @@ struct TORCH_API MagicMethod : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> kwargs,
       size_t n_binders) override;
@@ -615,20 +619,20 @@ struct TORCH_API SpecialFormValue : public SugaredValue {
 struct TORCH_API RangeValue : SugaredValue {
   RangeValue(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       std::vector<Value*> input,
       c10::optional<int64_t> static_len = c10::nullopt);
 
   std::string kind() const override {
     return "range";
   }
-  Value* len(const SourceRange& loc, Function& m) override;
+  Value* len(const SourceRange& loc, GraphFunction& m) override;
   SugaredValuePtr getitem(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) override;
-  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override;
 
   // When Range is instantiated via enumerate(iterable_with_static_len),
@@ -665,7 +669,7 @@ struct TORCH_API IterableTree : SugaredValue {
   IterableTree() = default;
   IterableTree(
       const SourceRange& range,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<SugaredValuePtr> children) {
     for (const auto& child : children) {
       addChild(range, m, child);
@@ -675,14 +679,14 @@ struct TORCH_API IterableTree : SugaredValue {
     return "iterabletree";
   }
 
-  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, Function& m)
+  std::shared_ptr<SugaredValue> iter(const SourceRange& loc, GraphFunction& m)
       override {
     return shared_from_this();
   }
 
   void addChild(
       const SourceRange& range,
-      Function& m,
+      GraphFunction& m,
       const SugaredValuePtr& iter_value);
 
   std::vector<SugaredValuePtr> get_children() {
@@ -701,10 +705,10 @@ struct TORCH_API IterableTree : SugaredValue {
   // with len() and getitem()
   std::vector<SugaredValuePtr> get_base_iterables();
 
-  Value* len(const SourceRange& loc, Function& m) override;
+  Value* len(const SourceRange& loc, GraphFunction& m) override;
   SugaredValuePtr getitem(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       Value* idx,
       TypePtr type_hint = nullptr) override;
 
@@ -759,7 +763,7 @@ struct TORCH_API ExceptionValue : public SugaredValue {
 
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       at::ArrayRef<NamedValue> args,
       at::ArrayRef<NamedValue> /*attributes*/,
       size_t /*n_binders*/) override {
@@ -789,10 +793,10 @@ struct TORCH_API SugaredEnumClass : public SugaredValue {
 
   SugaredValuePtr attr(
       const SourceRange& loc,
-      Function& m,
+      GraphFunction& m,
       const std::string& field) override;
 
-  SugaredValuePtr iter(const SourceRange& loc, Function& m) override;
+  SugaredValuePtr iter(const SourceRange& loc, GraphFunction& m) override;
 
  private:
   EnumTypePtr enum_type_;

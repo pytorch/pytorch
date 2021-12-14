@@ -47,7 +47,7 @@ Operation createStaticSubgraphRuntime(const Node* node) {
     torch::jit::drop(stack, num_inputs);
 
     if (module->num_outputs() > 1) {
-      for (auto& o : outputs.toTuple()->elements()) {
+      for (auto& o : outputs.toTupleRef().elements()) {
         push_one(stack, std::move(o));
       }
     } else {

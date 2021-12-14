@@ -195,7 +195,6 @@ class _ConvNd(nn.Module):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -204,9 +203,13 @@ class _ConvNd(nn.Module):
                     mod.stride, mod.padding, mod.dilation, mod.groups,
                     mod.bias is not None, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-        return qconv
+        if activation_post_process is None or activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
+            act_scale, act_zp = activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
     @staticmethod
     def from_float(cls, mod):
@@ -227,7 +230,8 @@ class _ConvNd(nn.Module):
                 cls._FLOAT_MODULE.__name__ + " but got:" + str(type(mod))
             assert hasattr(mod, "qconfig"), \
                 "Input float module must have qconfig defined."
-            activation_post_process = mod.activation_post_process
+            activation_post_process = None if not hasattr(
+                mod, "activation_post_process") else mod.activation_post_process
             if type(mod) == cls._NNI_CONV_RELU_MODULE:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
@@ -575,7 +579,6 @@ class _ConvTransposeNd(_ConvNd):
             'Input float module must have qconfig defined.'
         weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        act_scale, act_zp = mod.activation_post_process.calculate_qparams()
         assert weight_post_process.dtype == torch.qint8, \
             'Weight observer must have a dtype of qint8'
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
@@ -584,10 +587,13 @@ class _ConvTransposeNd(_ConvNd):
                     mod.stride, mod.padding, mod.output_padding, mod.groups,
                     mod.bias is not None, mod.dilation, mod.padding_mode)
         qconv.set_weight_bias(qweight, mod.bias)
-        qconv.scale = float(act_scale)
-        qconv.zero_point = int(act_zp)
-
-        return qconv
+        if not hasattr(mod, "activation_post_process") or mod.activation_post_process.dtype == torch.float:
+            return qconv  # dynamic quantization doesn't need scale/zero_point
+        else:
+            act_scale, act_zp = mod.activation_post_process.calculate_qparams()
+            qconv.scale = float(act_scale)
+            qconv.zero_point = int(act_zp)
+            return qconv
 
 
 class ConvTranspose1d(_ConvTransposeNd):
@@ -637,11 +643,11 @@ class ConvTranspose1d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _single(kernel_size)
+        stride = _single(stride)
+        padding = _single(padding)
+        dilation = _single(dilation)
+        output_padding = _single(output_padding)
 
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
@@ -806,11 +812,11 @@ class ConvTranspose3d(_ConvTransposeNd):
                  padding=0, output_padding=0, groups=1, bias=True,
                  dilation=1, padding_mode='zeros', device=None, dtype=None):
         factory_kwargs = {'device': device, 'dtype': dtype}
-        kernel_size = _pair(kernel_size)
-        stride = _pair(stride)
-        padding = _pair(padding)
-        dilation = _pair(dilation)
-        output_padding = _pair(output_padding)
+        kernel_size = _triple(kernel_size)
+        stride = _triple(stride)
+        padding = _triple(padding)
+        dilation = _triple(dilation)
+        output_padding = _triple(output_padding)
 
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
