@@ -5,7 +5,7 @@ import yaml
 from collections import namedtuple
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey, FunctionSchema,
+from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader, FileManager
