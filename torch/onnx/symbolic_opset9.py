@@ -3231,10 +3231,15 @@ def fill(g, self, value):
     return full_like(g, self, value, dtype)
 
 
-def index_add(g, self, dim, index, other):
+def index_add(g, self, dim, index, other, alpha=None):
     warnings.warn("Warning: ONNX export does not support duplicated values in 'index' field, " +
                   "this will cause the ONNX model to be incorrect.")
     from torch.onnx.symbolic_opset9 import scatter_add
+
+    # ONNX does not support "alpha" argument, unlike aten index_add
+    # See: https://github.com/pytorch/pytorch/pull/65993#issuecomment-953151102 for more context
+    if alpha and sym_help._scalar(sym_help._maybe_get_scalar(alpha)) != 1:
+        return _unimplemented("index_add", "alpha != 1")
 
     dim = sym_help._maybe_get_const(dim, "i")
     if dim is None:
