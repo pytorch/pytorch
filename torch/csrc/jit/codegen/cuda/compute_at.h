@@ -3,7 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <c10/util/Exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <c10/macros/Export.h>
 
 #include <deque>
 #include <unordered_map>
