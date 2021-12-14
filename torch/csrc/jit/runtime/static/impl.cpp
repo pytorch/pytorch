@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
+#include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
@@ -131,6 +132,11 @@ void OptimizeGraph(
   EliminateNoOps(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   GRAPH_DUMP("Final graph after optimizations: ", graph);
+}
+
+bool IsSelfInGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+  return graph->inputs().size() > 0 &&
+      graph->inputs().at(0)->type()->is_module();
 }
 
 // remove unused input 0 from graph
@@ -560,20 +566,27 @@ FastMap<const Value*, std::vector<const Value*>> GenerateSameStorageValues(
 
 void PrepareGraphForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
+  if (!sample_inputs.empty() && opts.enable_te_fusion) {
+    VLOG(1) << "Performing TensorExpr fusion";
+    performTEFusion(graph, std::move(sample_inputs));
+  }
   OptimizeGraph(graph, opts);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
   VLOG(1) << "StaticModuleOptions: cleanup_activations "
           << opts.cleanup_activations << ", enable_out_variant "
           << opts.enable_out_variant << ", optimize_memory "
           << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors;
+          << opts.manage_output_tensors << ", enable_te_fusion "
+          << opts.enable_te_fusion;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -584,15 +597,21 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
   Method method = module.get_method("forward");
   auto graph = module.get_method("forward").graph();
 
-  PrepareGraphForStaticModule(graph, opts);
+  if (!sample_inputs.empty()) {
+    if (IsSelfInGraphInput(graph)) {
+      sample_inputs.insert(sample_inputs.begin(), m._ivalue());
+    }
+  }
+  PrepareGraphForStaticModule(graph, std::move(sample_inputs), opts);
 
   return std::make_pair(graph, module);
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     std::shared_ptr<torch::jit::Graph> graph,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts) {
-  PrepareGraphForStaticModule(graph, opts);
+  PrepareGraphForStaticModule(graph, std::move(sample_inputs), opts);
   return std::make_pair(graph, c10::nullopt);
 }
 
@@ -818,14 +837,20 @@ std::vector<const Value*> ManagedTensorRanges::
 
 StaticModule::StaticModule(
     std::shared_ptr<torch::jit::Graph> g,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(g->copy(), opts), opts) {}
+    : StaticModule(
+          PrepareForStaticModule(g->copy(), std::move(sample_inputs), opts),
+          opts) {}
 
 StaticModule::StaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
+    std::vector<IValue> sample_inputs,
     const StaticModuleOptions& opts)
-    : StaticModule(PrepareForStaticModule(m, is_frozen, opts), opts) {}
+    : StaticModule(
+          PrepareForStaticModule(m, is_frozen, std::move(sample_inputs), opts),
+          opts) {}
 
 StaticModule::StaticModule(
     std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>

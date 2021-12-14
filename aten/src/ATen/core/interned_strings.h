@@ -45,6 +45,7 @@ namespace c10 {
   _(prim, add_optional)              \
   _(prim, DifferentiableGraph)       \
   _(prim, TensorExprGroup)           \
+  _(prim, TensorExprDynamicGroup)    \
   _(prim, StaticSubgraph)            \
   _(prim, If)                        \
   _(prim, Jump) /* debug */          \
