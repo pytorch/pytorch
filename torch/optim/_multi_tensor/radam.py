@@ -1,7 +1,6 @@
 import torch
 from . import _functional as F
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class RAdam(Optimizer):
     r"""Implements RAdam algorithm with multi tensor APIs.

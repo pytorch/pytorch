@@ -1,7 +1,6 @@
 import math
 import torch
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class AdamW(Optimizer):
     r"""Implements AdamW algorithm.

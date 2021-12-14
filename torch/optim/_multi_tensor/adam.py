@@ -1,7 +1,6 @@
 import math
 import torch
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm with multi tensor APIs.
@@ -44,7 +43,7 @@ class Adam(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, amsgrad=amsgrad, foreach=True)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -110,7 +109,7 @@ class Adam(Optimizer):
             bias_correction1 = [1 - beta1 ** state['step'] for state in states]
             bias_correction2 = [1 - beta2 ** state['step'] for state in states]
             if group['weight_decay'] != 0:
-                grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'], foreach=True)
+                grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
 
             #
             # Decay the first and second moment running average coefficient

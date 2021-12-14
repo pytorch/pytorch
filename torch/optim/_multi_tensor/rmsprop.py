@@ -1,6 +1,5 @@
 import torch
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class RMSprop(Optimizer):
     r"""Implements RMSprop algorithm.
@@ -43,7 +42,7 @@ class RMSprop(Optimizer):
         if not 0.0 <= alpha:
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
-        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, 
+        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered,
                         weight_decay=weight_decay, foreach=True)
         super(RMSprop, self).__init__(params, defaults)
 

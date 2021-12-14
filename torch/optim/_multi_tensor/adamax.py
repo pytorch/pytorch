@@ -1,7 +1,6 @@
 import torch
 from . import _functional as F
 from ..optimizer import Optimizer
-from collections import defaultdict
 
 class Adamax(Optimizer):
     """Implements Adamax algorithm (a variant of Adam based on infinity norm).
@@ -93,4 +92,3 @@ class Adamax(Optimizer):
                      eps=group['eps'])
 
         return loss
-
