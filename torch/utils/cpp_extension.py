@@ -1639,11 +1639,14 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
-    # Use same defaults from file cmake/public/LoadHIP.cmake.
-    # Must keep in sync if defaults change.
+    # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
-    archs = os.environ.get('PYTORCH_ROCM_ARCH', 'gfx803;gfx900;gfx906;gfx908')
-    flags = ['--amdgpu-target=%s' % arch for arch in archs.split(';')]
+    _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
+    if not _archs:
+        archs = torch.cuda.get_arch_list()
+    else:
+        archs = _archs.replace(' ', ';').split(';')
+    flags = ['--amdgpu-target=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 
