@@ -15,7 +15,7 @@
 #include <ATen/VmapMode.h>
 #include <ATen/dlpack.h>
 #include <ATen/core/Vitals.h>
-#include <TH/TH.h>
+#include <torch/csrc/THConcat.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <cstdlib>
