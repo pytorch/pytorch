@@ -17,23 +17,23 @@ def relu_replacement(x, scale, zero_point):
     x = torch.nn.functional.relu(x)
     return x
 
-def relu_op_pattern(x, scale, zero_point):
+def relu_method_pattern(x, scale, zero_point):
     x = x.dequantize()
     x = x.relu()
     x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
     return x
 
-def relu_op_replacement(x, scale, zero_point):
+def relu_method_replacement(x, scale, zero_point):
     x = x.relu()
     return x
 
-def relu_inplace_op_pattern(x, scale, zero_point):
+def relu_inplace_method_pattern(x, scale, zero_point):
     x = x.dequantize()
     x = x.relu_()
     x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
     return x
 
-def relu_inplace_op_replacement(x, scale, zero_point):
+def relu_inplace_method_replacement(x, scale, zero_point):
     x = x.relu_()
     return x
 
@@ -56,12 +56,18 @@ def relu6_replacement(x, scale, zero_point):
 
 def hardtanh_pattern(x, scale, zero_point):
     x = x.dequantize()
+    x = torch.nn.functional.hardtanh(x, inplace=True)
+    x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+    return x
+
+def hardtanh_non_inplace_pattern(x, scale, zero_point):
+    x = x.dequantize()
     x = torch.nn.functional.hardtanh(x, inplace=False)
     x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
     return x
 
 def hardtanh_replacement(x, scale, zero_point):
-    x = torch.nn.functional.hardtanh(x, inplace=False)
+    x = torch.nn.functional.hardtanh(x)
     return x
 
 def hardtanh_inplace_pattern(x, scale, zero_point):
@@ -104,13 +110,13 @@ def mean_replacement(x, scale, zero_point):
     x = torch.mean(x)
     return x
 
-def mean_op_pattern(x, scale, zero_point):
+def mean_method_pattern(x, scale, zero_point):
     x = x.dequantize()
     x = x.mean()
     x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
     return x
 
-def mean_op_replacement(x, scale, zero_point):
+def mean_method_replacement(x, scale, zero_point):
     x = x.mean()
     return x
 
@@ -122,6 +128,16 @@ def flatten_pattern(x, scale, zero_point):
 
 def flatten_replacement(x, scale, zero_point):
     x = torch.flatten(x)
+    return x
+
+def clamp_pattern(x, scale, zero_point):
+    x = x.dequantize()
+    x = torch.clamp(x)
+    x = torch.quantize_per_tensor(x, scale, zero_point, torch.quint8)
+    return x
+
+def clamp_replacement(x, scale, zero_point):
+    x = torch.clamp(x)
     return x
 
 #
@@ -336,17 +352,19 @@ def _get_all_patterns_and_replacements():
         *get_binary_op_pattern_and_replacements(),
         (relu_inplace_pattern, relu_replacement, []),
         (relu_non_inplace_pattern, relu_replacement, []),
-        (relu_op_pattern, relu_op_replacement, []),
-        (relu_inplace_op_pattern, relu_inplace_op_replacement, []),
+        (relu_method_pattern, relu_method_replacement, []),
+        (relu_inplace_method_pattern, relu_inplace_method_replacement, []),
         (relu6_inplace_pattern, relu6_replacement, []),
         (relu6_non_inplace_pattern, relu6_replacement, []),
         (hardtanh_pattern, hardtanh_replacement, []),
+        (hardtanh_non_inplace_pattern, hardtanh_replacement, []),
         (hardtanh_inplace_pattern, hardtanh_inplace_replacement, []),
         (min_pattern, min_replacement, []),
         (max_pattern, max_replacement, []),
         (mean_pattern, mean_replacement, []),
-        (mean_op_pattern, mean_op_replacement, []),
+        (mean_method_pattern, mean_method_replacement, []),
         (flatten_pattern, flatten_replacement, []),
+        (clamp_pattern, clamp_replacement, []),
     ]
 
 
