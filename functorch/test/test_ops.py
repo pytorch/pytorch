@@ -236,8 +236,8 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
-        xfail('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
-        xfail('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
+        skip('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
+        skip('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
 
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
@@ -503,7 +503,8 @@ class TestOperators(TestCase):
     # The below tests (2) only.
     @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapjvp', {
-        xfail('nn.functional.dropout'),  # randomness
+        skip('nn.functional.dropout'),  # randomness
+        skip('nn.functional.rrelu'),  # randomness
 
         # TODO: fails in core due to in-place batched nto non-batched
         # but fails here for a different reason
