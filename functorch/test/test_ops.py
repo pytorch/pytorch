@@ -171,6 +171,27 @@ def get_jvp_variant(f, sample):
 
     return wrapped, tangents
 
+def get_jvp_variant_primals_tangents(f, sample):
+    # We want this higher-order variant of jvp, so that it can
+    # be used to wrap vmap
+    fn, primals = normalize_op_input_output(f, sample, requires_grad=False)
+    tangents = _as_tuple(
+        tree_map(lambda x: torch.randn_like(x), primals))
+
+    @functools.wraps(f)
+    def wrapped(*args):
+        primals_in = args[:len(primals)]
+        tangents_in = args[len(primals):]
+        primals_out, tangents_out = jvp(fn, primals_in, tangents_in)
+
+        if isinstance(primals_out, torch.Tensor):
+            return (primals_out, tangents_out)
+        else:
+            flat_primals_out, _ = tree_flatten(primals_out)
+            flat_tangents_out, _ = tree_flatten(tangents_out)
+            return tuple(flat_primals_out + flat_tangents_out)
+
+    return wrapped, primals + tangents
 
 def is_inplace(op, variant):
     if hasattr(variant, "__wrapped__"):
@@ -596,6 +617,84 @@ class TestOperators(TestCase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}, bdims=(0,)):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
+    @ops(functorch_lagging_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestOperators', 'test_vmapjvpall', {
+        skip('nn.functional.dropout'),  # randomness
+        skip('nn.functional.rrelu'),  # randomness
+
+        # Causing a CUDA assert, needs investigation
+        skip('div', 'floor_rounding', device_type='cuda'),
+        skip('div', 'no_rounding_mode', device_type='cuda'),
+        skip('div', 'trunc_rounding', device_type='cuda'),
+        skip('true_divide', device_type='cuda'),
+
+        # xfail list
+        xfail('linalg.inv'),
+        xfail('masked_fill'),
+        xfail('__rpow__'),
+        xfail('logit'),
+        xfail('linalg.tensorinv'),
+        xfail('nn.functional.pad', 'circular'),
+        xfail('linalg.matrix_power'),
+        xfail('cumprod'),
+        xfail('maximum'),
+        xfail('corrcoef'),
+        xfail('linalg.householder_product'),
+        xfail('tensor_split'),
+        xfail('nn.functional.gelu'),
+        xfail('quantile'),
+        xfail('var_mean'),
+        xfail('index_add'),
+        xfail('as_strided'),
+        xfail('linalg.eigvalsh'),
+        xfail('clamp', 'scalar'),
+        xfail('pow'),
+        xfail('fill_'),
+        xfail('linalg.cholesky'),
+        xfail('max', 'binary'),
+        xfail('nn.functional.gaussian_nll_loss'),
+        xfail('min', 'binary'),
+        xfail('index_fill'),
+        xfail('index_put'),
+        xfail('std_mean'),
+        xfail('double', 'channels_last'),
+        xfail('block_diag'),
+        xfail('float_power'),
+        xfail('diag_embed'),
+        xfail('fmin'),
+        xfail('minimum'),
+        xfail('scatter'),
+        xfail('fmax'),
+        xfail('matrix_exp'),
+        xfail('nanquantile'),
+        xfail('lu'),
+        xfail('nn.functional.linear'),
+        xfail('index_copy'),
+        xfail('masked_scatter'),
+        xfail('view_as_complex'),
+    })
+    # This is technically a superset of test_vmapjvp. We should either delete test_vmapjvp
+    # or figure out if we can split vmapjvpall. It's useful to keep test_vmapjvp intact
+    # because that coresponds to "batched forward-mode AD" testing in PyTorch core
+    def test_vmapjvpall(self, device, dtype, op):
+        if is_inplace(op, op.get_op()):
+            # TODO: test in-place
+            self.skipTest("Skipped! NYI: inplace-testing not supported.")
+            return
+
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+
+        if not op.supports_forward_ad:
+            self.skipTest("Skipped! Forward AD not supported.")
+            return
+
+        for sample in samples:
+            arg_values = [sample.input] + list(sample.args)
+            kwarg_values = sample.kwargs
+            args = tuple([*arg_values, *kwarg_values])
+            fn, args = get_jvp_variant_primals_tangents(op, sample)
+            for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
+                self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
@@ -839,6 +938,7 @@ class TestDecompositionOpInfo(TestCase):
         skip('tensor_split'),
         skip('mvlgamma'),
         skip('tanh', device_type='cuda'), # cuda bfloat16 failure
+        skip('nn.functional.tanhshrink', device_type='cuda'), # cuda bfloat16 failure
         skip('eig'),
         skip('nn.functional.dropout'),
         skip('_masked.softmin'),
