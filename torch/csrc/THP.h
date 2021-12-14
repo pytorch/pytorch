@@ -3,7 +3,6 @@
 
 #include <torch/csrc/python_headers.h>
 #include <TH/TH.h>
-#include <TH/THTensor.hpp>
 
 #include <torch/csrc/Export.h>
 
@@ -16,15 +15,6 @@
 #define PyInt_AsLong            PyLong_AsLong
 #define PyInt_Type              PyLong_Type
 #endif
-
-// By default, don't specify library state (TH doesn't use one)
-#define LIBRARY_STATE
-#define LIBRARY_STATE_NOARGS
-#define LIBRARY_STATE_TYPE
-#define LIBRARY_STATE_TYPE_NOARGS
-
-#define THWTensor THTensor
-#define THWTensor_(NAME) THTensor_(NAME)
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Generator.h>
