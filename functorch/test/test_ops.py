@@ -469,7 +469,6 @@ class TestOperators(TestCase):
 
         # PyTorch changed its convolution recently.
         # Maybe it is responsible for all of the following changes.
-        xfail('nn.functional.conv1d'),
         xfail('nn.functional.conv_transpose1d'),
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.conv_transpose3d'),
@@ -479,7 +478,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
         # These are too annoying to put into the list above
-        if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
+        if op.name in {'nn.functional.linear'}:
             self.skipTest("Skipped! ExpectedF failures")
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
