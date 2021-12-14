@@ -407,7 +407,6 @@ class TestOperators(TestCase):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
     vmapvjp_fail = vjp_fail.union({
         # All of the following are bugs and need to be fixed
-        xfail('clamp', ''),
         xfail('diag_embed'),
         xfail('eig'),
         xfail('view_as_complex'),
@@ -433,10 +432,6 @@ class TestOperators(TestCase):
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('matrix_exp'),
-        xfail('max', 'reduction_no_dim', device_type='cpu'),
-        xfail('median', device_type='cpu'),
-        xfail('min', 'reduction_no_dim', device_type='cpu'),
-        xfail('nanmedian', device_type='cpu'),
         xfail('nanquantile'),
         xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
@@ -602,7 +597,6 @@ class TestOperators(TestCase):
         xfail('__getitem__'),
         xfail('cdist'),
         xfail('cholesky'),
-        xfail('clamp'),
         xfail('clamp', 'scalar'),
         xfail('complex'),
         xfail('copysign'),
