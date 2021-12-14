@@ -1154,19 +1154,6 @@ class TestMathBits(TestCase):
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         inplace_variant = op.inplace_variant
 
-        # helper function to physically conjugate/negate the tensor
-        def math_physical(input):
-            if isinstance(input, torch.Tensor):
-                tensor_requires_grad = input.requires_grad
-                with torch.no_grad():
-                    input = math_op_physical(input)
-                return input.requires_grad_(tensor_requires_grad)
-
-            if isinstance(input, Sequence):
-                out = list(map(clone_input_helper, input))
-                out[0] = math_physical(out[0])
-                return tuple(out)
-
         # helper function to clone and conjugate/negate the input if its a tensor
         # else clone the sequence and conjugate/negate the first element in the sequence
         # If a requires_grad argument is provided the tensor being conjugated/negated will
@@ -1175,7 +1162,8 @@ class TestMathBits(TestCase):
             if isinstance(input, torch.Tensor):
                 requires_grad = kwargs.get('requires_grad', input.requires_grad)
                 with torch.no_grad():
-                    input = input.clone()
+                    # Ensure view represents the original sample input
+                    input = math_op_physical(input)
                 # Note: .conj() is not called under no_grad mode since it's not allowed to modify a
                 # view created in no_grad mode. Here it's ok to do so, so as a workaround we call conj
                 # before resetting the requires_grad field for input
@@ -1191,7 +1179,6 @@ class TestMathBits(TestCase):
         for sample in samples:
             tensor = sample.input if isinstance(sample.input, torch.Tensor) else sample.input[0]
             cloned1 = clone_and_perform_view(sample.input)
-            sample.input = math_physical(sample.input)
 
             # Computes function forward value with a physically conjugated/negated tensor and
             # a conj/neg view tensor and verifies that the output in both case are equal.
@@ -1228,8 +1215,8 @@ class TestMathBits(TestCase):
                     # a repeat of the above test if output is not complex valued
                     if (out_type(expected_forward)):
                         grad = torch.randn_like(expected_forward)
-                        expected_forward.backward(math_op_physical(grad))
-                        forward_with_mathview.backward(math_op_view(grad))
+                        expected_forward.backward(grad)
+                        forward_with_mathview.backward(math_op_view(math_op_physical(grad)))
 
                         self.assertEqual(tensor.grad, cloned1_tensor.grad)
 
@@ -1247,13 +1234,10 @@ class TestMathBits(TestCase):
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
-
-        # The view op here is an identity, but math_op_physical's output is
-        # modified inplace, so we must at least clone
-        math_op_physical = torch.clone
+        math_op_physical = torch.neg
 
         def math_op_view(x):
-            return torch.conj(x * -1j).imag
+            return torch.conj(x * 1j).imag
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         is_bit_set = torch.is_neg
         self._test_math_view(device, dtype, op, _requires_grad, math_op_physical, math_op_view, is_bit_set,
