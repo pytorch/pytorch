@@ -8,6 +8,7 @@
 #include <queue>
 #include <utility>
 #include <vector>
+#include <ATen/core/interned_strings.h>
 
 namespace torch {
 namespace jit {
@@ -242,6 +243,7 @@ bool printerHasSpecialCaseFor(Symbol sym) {
       prim::CudaFusionGuard, // optimization pass adds it
       prim::TensorExprGroup, // optimization pass adds it
       prim::TensorExprDynamicGroup, // optimization pass adds it
+      prim::VarTensorSizeIndex, // optimization pass adds it
       prim::StaticSubgraph, // optimization pass adds it
       prim::ConstantMKLDNNTensor, // optimization pass adds it
       prim::BroadcastMKLDNNTensors, // optimization pass adds it

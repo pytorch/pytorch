@@ -30,6 +30,7 @@ namespace c10 {
   _(prim, ChunkSizes)                \
   _(prim, ConstantMKLDNNTensor)      \
   _(prim, BroadcastMKLDNNTensors)    \
+  _(prim, VarTensorSizeIndex)        \
   _(prim, MKLDNNGroup)               \
   _(prim, MKLDNNHardSwish)           \
   _(prim, MKLDNNHardSigmoid)         \

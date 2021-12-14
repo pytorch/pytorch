@@ -163,7 +163,7 @@ static bool texpr_dynamic_shape_fuser_enabled_ = false;
 
 bool tensorExprDynamicShapeFusionEnabled() {
   return FLAGS_torch_jit_enable_dynamic_shape_fusion ||
-      texpr_dynamic_shape_fuser_enabled_;
+      texpr_dynamic_shape_fuser_enabled_ || true;
 }
 
 void setTensorExprDynamicShapeFusionEnabled(bool val) {

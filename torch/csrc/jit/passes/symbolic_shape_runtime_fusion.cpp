@@ -14,6 +14,9 @@
 namespace torch {
 namespace jit {
 
+
+void joinTensorSizeAccesses(Block *block);
+
 // Inserts the Compute for Each Symbolic Shape in the TensorExpr Graph
 // and returns back a map from Symbolic Shape Value to its runtime Value *
 std::map<int64_t, Value*> InsertSymbolicShapesCompute(
@@ -221,6 +224,7 @@ void insertDynamicShapesGuard(
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
   guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
+  joinTensorSizeAccesses(guarded_node->owningBlock());
 
   if (add_composed_op) {
     // Create a TensorExprDynamicGroup node
@@ -404,6 +408,96 @@ RegisterOperators TensorExprDynamicOp({
         createTensorExprDynamicGroup,
         AliasAnalysisKind::INTERNAL_SPECIAL_CASE),
 });
+
+// see description below of operator
+Operation VarTensorSizeIndex(const Node* node) {
+  std::vector<int64_t> input_list_access = node->is(Symbol::attr("input_list_access"));
+  std::vector<int64_t> num_accesses = node->is(Symbol::attr("num_accesses"));
+
+  // for each output, we have the tensor input it corresponds to,
+  // and the dimension it is indexing to
+  auto num_ten_inputs = node->inputs().size();
+  return [input_list_access, num_accesses, num_ten_inputs](Stack& stack) {
+    std::vector<IValue> tensors = pop(stack, num_ten_inputs);
+    size_t input_index_offset = 0;
+    for (const auto i : c10::irange(num_ten_inputs)) {
+      auto tensor = tensors[i].toTensor();
+      ArrayRef<int64_t> sizes = tensor.sizes();
+      size_t indexes = num_accesses[i];
+
+      for (size_t j = 0; j < indexes; j++) {
+        int64_t index = input_list_access[j + input_index_offset];
+        index = index >= 0 ? index : index + sizes.size();
+        push(stack, sizes.at(index));
+      }
+      input_index_offset += indexes;
+    }
+    return 0;
+  };
+}
+
+// replace the aten::size and __getitem__ calls that are inserted in shape graph computation with one variadic operator that takes a list of tensors and gathers all of the size accesses we need to compute
+// Node will have the format:
+// %size_1, %size_2, ... = prim::VarTensorSizeIndex[input_list_accesses[0, 1, ..], num_accesses=[2, 3])(%v1, %v2 ...)
+// where input_list_access are the indices into the tensors we are gathering,
+// and num_accesses it the number of indexes we are gathering for each input tensor
+// E.g.
+// %6 : int, %7 : int, %8 : int, %9 : int = prim::VarTensorSizeIndex[input_list_access=[0, 1, 2, 0], num_accesses=[3, 1]](%x.1, %z.1)
+void joinTensorSizeAccesses(Block *block) {
+  // nb: invariant of size graphs than inputs are not modified, so we dont check for mutations here
+  std::unordered_map<Value*, std::vector<Node*>> list_accesses;
+  for (Node * n: block->nodes()) {
+    if (n->matches("aten::size(Tensor self) -> int[]")) {
+      list_accesses[n->output()] = {};
+    }
+    if (n->kind() == aten::__getitem__ && list_accesses.count(n->input(0)) && toIValue(n->input(1))) {
+      auto& vec = list_accesses[n->input(0)];
+      vec.push_back(n);
+    }
+  }
+  Node * var_size_op = block->owningGraph()->create(Symbol::prim("VarTensorSizeIndex"), 0);
+  std::vector<int64_t> input_list_index;
+  std::vector<int64_t> num_values;
+  block->prependNode(var_size_op);
+  for (auto& pair: list_accesses) {
+    auto& li = pair.first;
+    auto& vec = pair.second;
+    if (vec.size() == 0) {
+      continue;
+    }
+    auto tensor_input = li->node()->input();
+    var_size_op->addInput(tensor_input);
+
+    for (Node* li_access: vec) {
+      auto index = constant_as<int64_t>(li_access->inputs().at(1));
+      input_list_index.push_back(*index);
+      auto new_value = var_size_op->addOutput()->setType(IntType::get());
+      li_access->output()->replaceAllUsesWith(new_value);
+      auto inps = li_access->inputs();
+      li_access->destroy();
+      for (Value * v: inps) {
+        if (!v->hasUses()) {
+          v->node()->destroy();
+        }
+      }
+    }
+    num_values.push_back(vec.size());
+  }
+  if (var_size_op->outputs().size() == 0) {
+    var_size_op->destroy();
+  }
+  var_size_op->is_(Symbol::attr("input_list_access"), input_list_index);
+  var_size_op->is_(Symbol::attr("num_accesses"), num_values);
+};
+
+
+RegisterOperators VarTensorSizeIndexOp({
+    torch::jit::Operator(
+        Symbol::prim("VarTensorSizeIndex"),
+        VarTensorSizeIndex,
+        AliasAnalysisKind::PURE_FUNCTION),
+});
+
 
 } // namespace jit
 } // namespace torch
