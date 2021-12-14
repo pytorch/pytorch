@@ -646,7 +646,6 @@ struct to_ir {
         typeParser_(resolver),
         environment_stack(nullptr) {
     AT_ASSERT(resolver);
-
     pushFrame(graph->block(), /*starts_def=*/true);
 
     // Type annotations exclude explicitly typing the "self" parameter, so in
