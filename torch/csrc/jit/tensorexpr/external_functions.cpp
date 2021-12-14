@@ -575,8 +575,6 @@ void nnc_aten_quantized_sigmoid(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  const double out_qscale = ((double*)extra_args)[3];
-  const int64_t out_qzero = extra_args[4];
   auto tensors = constructTensors(
       bufs_num,
       buf_data,
@@ -612,8 +610,7 @@ void nnc_aten_quantized_cat(
     const int64_t qzero = extra_args[3 * i + 1];
     const c10::ScalarType qdtype =
         static_cast<c10::ScalarType>(extra_args[3 * i + 2]);
-    qdata.emplace_back(
-        std::make_pair(i + 1u, std::make_tuple(qscale, qzero, qdtype)));
+    qdata.emplace_back(i + 1u, std::make_tuple(qscale, qzero, qdtype));
   }
   auto tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
