@@ -39,7 +39,7 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
   return c10::Symbol::fromQualString(qual_string);
 }
 
-// [Increment reference count for returned constants]
+// [Create owned refs for returned constants]
 // StaticRuntimeBlockRunner moves its outputs to the return value at the end of
 // run_impl. However, there's a corner case where this can cause problems. If
 // we return a constant, then the only reference in the constants_ array can
@@ -48,7 +48,7 @@ inline c10::Symbol fromQualString(const std::string& qual_string) {
 // relatively rare corner case, it's simpler to just add an op that does nothing
 // but create an owned reference to its input. This owned reference can be
 // safely moved out of StaticRuntimeBlockRunner.
-void AddIncrefs(Graph& graph);
+void CreateOwnedRefs(Graph& graph);
 
 // [Force non-empty outputs]
 // It is technically possible for sub-blocks to not return anything. This is

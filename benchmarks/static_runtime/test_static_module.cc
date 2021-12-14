@@ -1315,3 +1315,63 @@ TEST(AssignStorageToManagedTensors, MultipleUnused) {
   testAssignStorageToManagedTensors(
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
 }
+
+TEST(CreateOwnedRefs, TopLevel) {
+  const auto src = R"IR(
+    graph():
+        %c: int = prim::Constant[value=42]()
+        return (%c)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefs(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(CreateOwnedRefs, ValueFromOuterScope) {
+  const auto src = R"IR(
+    graph(%cond: bool, %1: int):
+        %c: int = aten::add(%1, %1)
+        %x: int = prim::If(%c)
+          block0():
+            -> (%c)
+          block1():
+            -> (%c)
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  CreateOwnedRefs(*graph);
+  EXPECT_TRUE(hasNodeWithKind(graph, "static_runtime::create_owned_ref"));
+}
+
+TEST(ForceSubBlocksToReturnValue, IfBlocks) {
+  const auto src = R"IR(
+    graph(%c: bool):
+        %1: int = prim::Constant[value=1]()
+        %2: int = prim::Constant[value=2]()
+        %x: int[] = prim::ListConstruct(%1)
+        prim::If(%c)
+          block0():
+              aten::append(%x, %1)
+              -> ()
+          block1():
+              aten::append(%x, %2)
+              -> ()
+        return (%x)
+  )IR";
+
+  auto graph = getGraphFromIR(src);
+  ForceNonEmptyOutputs(*graph);
+
+  for (auto* node : graph->nodes()) {
+    if (node->blocks().empty()) {
+      continue;
+    }
+    const auto num_outputs = node->outputs().size();
+    EXPECT_NE(num_outputs, 0);
+    for (auto* block : node->blocks()) {
+      EXPECT_EQ(num_outputs, block->outputs().size());
+    }
+  }
+}
