@@ -20,10 +20,9 @@ class AllModuleTracer(torch.fx.Tracer):
 
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
-                 enable_cpatching: bool = False,
                  param_shapes_constant: bool = False) -> None:
         super().__init__(
-            autowrap_modules, autowrap_functions, enable_cpatching,
+            autowrap_modules, autowrap_functions,
             param_shapes_constant)
         self.node_name_to_dtype = {}
 
