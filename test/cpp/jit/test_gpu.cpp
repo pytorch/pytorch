@@ -19604,6 +19604,31 @@ TEST(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+TEST(NVFuserTest, Issue1305Repro_CUDA) {
+  std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
+  Fusion& fusion = *fusion_ptr.get();
+  FusionGuard fg(&fusion);
+
+  auto t0 = makeContigTensor(1);
+  auto t1 = makeContigTensor(2);
+
+  fusion.addInput(t0);
+  fusion.addInput(t1);
+
+  auto t2 = broadcast(t0, {true, false});
+  auto t3 = add(t1, t2);
+  auto t4 = add(t3, t2);
+  auto t5 = sum(t4, {1});
+  auto t6 = broadcast(t5, {false, true});
+  auto t7 = add(t3, t6);
+
+  fusion.addOutput(t7);
+
+  t3->computeAt(t7, -1, ComputeAtMode::MostInlined);
+
+  TORCH_INTERNAL_ASSERT(t3->getComputeAtPosition() == 1);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
