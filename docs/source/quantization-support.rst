@@ -191,7 +191,7 @@ during QAT.
 torch.quantization.qconfig
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This module defines `QConfig` and `QConfigDynamic` objects which are used
+This module defines `QConfig` objects which are used
 to configure quantization settings for individual ops.
 
 .. currentmodule:: torch.quantization.qconfig
@@ -202,7 +202,6 @@ to configure quantization settings for individual ops.
     :template: classtemplate.rst
 
     QConfig
-    QConfigDynamic
     default_qconfig
     default_debug_qconfig
     default_per_channel_qconfig
