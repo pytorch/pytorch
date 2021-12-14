@@ -143,6 +143,12 @@ class TestVmapAPI(TestCase):
         output = vmap(vmap(vmap(torch.mul)))(x, y)
         self.assertEqual(output, x * y)
 
+    def test_nested_with_diag_embed(self):
+        # diag_embed requires special testing because it is registered with conditional functionalization.
+        x = torch.randn(3, 3, 5)
+        output = vmap(vmap(torch.diag_embed))(x)
+        self.assertEqual(output, torch.diag_embed(x))
+
     def test_nested_with_different_map_dim(self):
         x = torch.randn(2, 3)
         y = torch.randn(5, 3)
@@ -3089,7 +3095,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('vstack'),
         xfail('dstack'),
         xfail('linalg.multi_dot'),
-        xfail('block_diag'),
         xfail('nn.functional.dropout'),
         xfail('view_as_complex'),
         xfail('H'),
