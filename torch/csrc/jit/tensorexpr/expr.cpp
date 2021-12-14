@@ -375,16 +375,32 @@ std::vector<ExprPtr> make_contiguous_strides(
 std::vector<ExprPtr> make_channels_last_strides(
     const std::vector<ExprHandle>& dims) {
   std::vector<ExprPtr> strides;
-  TORCH_INTERNAL_ASSERT(dims.size() == 4, "got size:", dims.size());
-  strides.resize(dims.size());
-  ExprHandle handle = ExprHandle(immLike(dims[0], 1));
-  strides[1] = handle.node();
-  handle = handle * dims[1];
-  strides[3] = handle.node();
-  handle = handle * dims[3];
-  strides[2] = handle.node();
-  handle = handle * dims[2];
-  strides[0] = handle.node();
+  TORCH_INTERNAL_ASSERT(
+      dims.size() == 4 || dims.size() == 3, "got size:", dims.size());
+  if (dims.size() == 4) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:               n   c    h  w
+    // strides(nhwc):  w*c*h   1  w*c  c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[3] = handle.node();
+    handle = handle * dims[3];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
+  if (dims.size() == 3) {
+    strides.resize(dims.size());
+    ExprHandle handle = ExprHandle(immLike(dims[0], 1));
+    // dims:              n   c    l
+    // strides(nlc):    c*l   1    c
+    strides[1] = handle.node();
+    handle = handle * dims[1];
+    strides[2] = handle.node();
+    handle = handle * dims[2];
+    strides[0] = handle.node();
+  }
   return strides;
 }
 

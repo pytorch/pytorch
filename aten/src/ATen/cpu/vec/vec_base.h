@@ -58,8 +58,8 @@
 
 namespace at {
 namespace vec {
-// See Note [Acceptable use of anonymous namespace in header]
-namespace {
+// See Note [CPU_CAPABILITY namespace]
+inline namespace CPU_CAPABILITY {
 // at::Half and at::BFloat16 should be treated as floating point
 template <typename T>
 struct is_floating_point:

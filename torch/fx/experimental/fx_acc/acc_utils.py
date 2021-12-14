@@ -15,6 +15,34 @@ from torch.fx.passes import graph_drawer
 from torch.fx.passes.shape_prop import TensorMetadata
 
 
+def get_target_from_module(mod: torch.nn.Module, target: str):
+    """
+    Gets `target` from `mod` and returns it. If `target` is empty then returns `mod.`
+    """
+    if target == "":
+        return mod
+
+    target_atoms = target.split(".")
+    curr_obj = mod
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(curr_obj, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target '{'.'.join(target_atoms[:i])}'; "
+                f" original whole target: '{target}'"
+            )
+        curr_obj = getattr(curr_obj, atom)
+    return curr_obj
+
+
+def get_attr(node: torch.fx.Node) -> Any:
+    """
+    Returns the underlying attr for a given node which
+    must be of type get_attr.
+    """
+    assert node.op == "get_attr", "Expected a get_attr node"
+    return get_target_from_module(node.graph.owning_module, str(node.target))
+
+
 def is_acc_op(node_or_target: Union[Callable, torch.fx.Node]) -> bool:
     """
     Returns whether `node_or_target` is an acc_op. If it's a node, then checks whether
