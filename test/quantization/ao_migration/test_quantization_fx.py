@@ -186,7 +186,6 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
 
     def test_function_import_fx_utils(self):
         function_list = [
-            '_parent_name',
             'graph_pretty_str',
             'get_per_tensor_qparams',
             'quantize_node',
