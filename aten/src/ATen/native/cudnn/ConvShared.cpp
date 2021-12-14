@@ -1,3 +1,4 @@
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
 #include <ATen/native/ConvUtils.h>
 
@@ -456,10 +457,10 @@ std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
     }
   } else {
     if (output_mask[0]) {
-      grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+      grad_input = cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     }
     if (output_mask[1]) {
-      grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+      grad_weight = cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
     }
   }
 
