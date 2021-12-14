@@ -45,7 +45,7 @@ inline NodePtr GenericOp(
     size_t num_outputs = 1,
     hash_t hash_seed = static_cast<uint32_t>(0x5a2d296e9)) {
   return MakeNode<Generic>(
-      std::move(op), operands, std::move(shape), num_outputs, hash_seed);
+      op, operands, std::move(shape), num_outputs, hash_seed);
 }
 
 } // namespace lazy

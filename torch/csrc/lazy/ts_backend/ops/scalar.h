@@ -3,8 +3,6 @@
 #include <c10/core/Scalar.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
 
-#include <iostream>
-
 namespace torch {
 namespace lazy {
 
