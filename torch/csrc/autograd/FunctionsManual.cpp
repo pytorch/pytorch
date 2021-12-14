@@ -2283,10 +2283,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads,
   auto v = Vh.mH();
   auto gu = grads[0];
   // grads[2] has the gradient wrt Vh
-  auto gv = grads[2];
-  if (gv.defined()) {
-    gv = gv.mH();
-  }
+  auto gv = grads[2].defined() ? grads[2].mH() : grads[2];
 
   if (full_matrices) {
     // We ignore the free subspace here because possible base vectors cancel
@@ -3012,14 +3009,12 @@ Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) 
 
     auto vh_det_grad = grad * (u_det * s_prod).conj();
     auto vh_grad = det_backward_nonsingular(vh_det_grad, vh, vh_det);
-    auto v = vh.mH();
-    auto v_grad = vh_grad.mH();
 
     // svd_backward is written for a function
     // svd: self -> (U, S, V), which is different
     // from torch.linalg.svd which is a map self -> (U, S, Vh), where
     // Vh = V.mH()
-    return svd_backward({u_grad, s_grad, v_grad}, false, u, s, v);
+    return svd_backward({u_grad, s_grad, vh_grad}, false, u, s, vh);
   };
 
   auto eps = at::native::_get_epsilon(c10::toValueType(self.scalar_type()));
@@ -3107,10 +3102,9 @@ Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& lo
   auto singular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
     Tensor u, sigma, vh;
     std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    Tensor v = vh.mH();
     // logdet = \sum log(sigma)
     auto gsigma = grad.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, false, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, false, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad, const Tensor& self) -> Tensor {
@@ -3168,7 +3162,7 @@ Tensor slogdet_backward(const Tensor& grad_logabsdet,
     // so logabsdet = \sum log(abs(sigma))
     // but det = 0, so backward logabsdet = \sum log(sigma)
     auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
-    return svd_backward({{}, gsigma, {}}, false, u, sigma, v);
+    return svd_backward({{}, gsigma, {}}, false, u, sigma, vh);
   };
 
   auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet, const Tensor& self) -> Tensor {
