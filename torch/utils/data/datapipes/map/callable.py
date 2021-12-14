@@ -35,8 +35,6 @@ class MapperMapDataPipe(MapDataPipe[T_co]):
     args:
         datapipe: Source Map DataPipe
         fn: Function called over each item
-        fn_args: Positional arguments for `fn`
-        fn_kwargs: Keyword arguments for `fn`
     """
     datapipe: MapDataPipe
     fn: Callable

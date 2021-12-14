@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import floating_and_complex_types_and,
 from torch.testing._internal.common_utils import \
     (TestCase, is_iterable_of_tensors, run_tests, IS_SANDCASTLE, clone_input_helper,
      gradcheck, gradgradcheck, IS_IN_CI, suppress_warnings, noncontiguous_like,
-     TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE)
+     TEST_WITH_ASAN, IS_WINDOWS, IS_FBCODE, first_sample)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, _NOTHING, UnaryUfuncInfo, ReductionOpInfo, SpectralFuncInfo)
 from torch.testing._internal.common_device_type import \
@@ -86,7 +86,7 @@ class TestCommon(TestCase):
             # tries to acquire samples - failure indicates lack of support
             requires_grad = (dtype in allowed_backward_dtypes and op.supports_autograd)
             try:
-                samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
+                samples = list(op.sample_inputs(device, dtype, requires_grad=requires_grad))
             except Exception as e:
                 unsupported(dtype)
                 continue
@@ -191,7 +191,7 @@ class TestCommon(TestCase):
             cuda_device = torch.device(cuda_device_str)
             # NOTE: only tests on first sample
             samples = op.sample_inputs(cuda_device, dtype)
-            sample = samples[0]
+            sample = first_sample(self, samples)
             result = op(sample.input, *sample.args, **sample.kwargs)
 
             if isinstance(result, torch.Tensor):
@@ -304,7 +304,7 @@ class TestCommon(TestCase):
 
         # NOTE: only tests on first sample
         samples = op.sample_inputs(device, dtype)
-        sample = samples[0]
+        sample = first_sample(self, samples)
 
         # calls it normally to get the expected result
         expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -406,7 +406,7 @@ class TestCommon(TestCase):
 
         # NOTE: only tests on first sample
         samples = op.sample_inputs(device, dtype)
-        sample = samples[0]
+        sample = first_sample(self, samples)
 
         # calls it normally to get the expected result
         expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -574,6 +574,7 @@ class TestCommon(TestCase):
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
+        samples = list(samples)
 
         def _test_consistency_helper(samples, variants):
             for sample in samples:
@@ -841,12 +842,14 @@ class TestGradients(TestCase):
             self.skipTest("Skipped! Operation does not support inplace autograd.")
         self._gradgrad_test_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
 
-    def _forward_grad_helper(self, device, dtype, op, variant):
+    def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
         def call_grad_test_helper():
+            check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
+                                          (op.check_inplace_batched_forward_grad and is_inplace))
             self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
                                    check_undefined_grad=False, check_batched_grad=False,
-                                   check_batched_forward_grad=op.check_batched_forward_grad)
+                                   check_batched_forward_grad=check_batched_forward_grad)
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
@@ -860,7 +863,7 @@ class TestGradients(TestCase):
     def test_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
-        self._forward_grad_helper(device, dtype, op, op.get_op())
+        self._forward_grad_helper(device, dtype, op, op.get_op(), is_inplace=False)
 
     @_gradcheck_ops(op_db)
     def test_inplace_forward_mode_AD(self, device, dtype, op):
@@ -869,7 +872,7 @@ class TestGradients(TestCase):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
 
-        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()))
+        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True)
 
     # Functions that do not support autograd should not fail in forward mode
     # Inplace functions (such as "resize_") are expected to fail in forward mode and should be skipped
@@ -878,7 +881,7 @@ class TestGradients(TestCase):
     def test_nondifferentiable(self, device, dtype, op):
         # Expecting no errors
         samples = op.sample_inputs(device, dtype, requires_grad=True)
-        sample = samples[0]
+        sample = first_sample(self, samples)
         result = op(sample.input, *sample.args, **sample.kwargs)
 
 # types.LambdaType gave false positives
@@ -1040,12 +1043,9 @@ class TestJit(JitCommonTestCase):
         # Required to avoid undefined value: tensor error in JIT compilation of the function template
         tensor = torch.tensor
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True)
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         # NOTE: only tests on first sample
-        sample = samples[0]
+        samples = op.sample_inputs(device, dtype, requires_grad=True)
+        sample = first_sample(self, samples)
 
         # [Scripting Data Preparation]
         # Prepare data for test scripting

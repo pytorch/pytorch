@@ -654,8 +654,16 @@ def _fake_fn(data):
     return data
 
 
+def _fake_add(constant, data):
+    return constant + data
+
+
 def _fake_filter_fn(data):
     return data >= 5
+
+
+def _fake_filter_fn_constant(constant, data):
+    return data >= constant
 
 
 def _worker_init_fn(worker_id):
@@ -670,9 +678,11 @@ class TestFunctionalIterDataPipe(TestCase):
         picklable_datapipes: List[Tuple[Type[IterDataPipe], IterDataPipe, Tuple, Dict[str, Any]]] = [
             (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (), {}),
             (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
+            (dp.iter.Mapper, dp.iter.IterableWrapper(arr), (partial(_fake_add, 1), (0,)), {}),
             (dp.iter.Collator, dp.iter.IterableWrapper(arr), (), {}),
             (dp.iter.Collator, dp.iter.IterableWrapper(arr), (_fake_fn, (0, )), {}),
             (dp.iter.Filter, dp.iter.IterableWrapper(arr), (_fake_filter_fn, (0, )), {}),
+            (dp.iter.Filter, dp.iter.IterableWrapper(arr), (partial(_fake_filter_fn, 5), (0,)), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -746,15 +756,14 @@ class TestFunctionalIterDataPipe(TestCase):
 
         self.assertEqual(list(concat_dp), list(range(10)) + list(range(5)))
 
-
     def test_fork_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
         with self.assertRaises(ValueError):
             input_dp.fork(num_instances=0)
 
-        dp1 = input_dp.fork(num_instances=1)
-        self.assertEqual(dp1, input_dp)
+        dp0 = input_dp.fork(num_instances=1)
+        self.assertEqual(dp0, input_dp)
 
         # Test Case: making sure all child DataPipe shares the same reference
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
@@ -1036,9 +1045,6 @@ class TestFunctionalIterDataPipe(TestCase):
             pass
         traverse(dp2)  # This should not raise any error either
 
-
-
-    @suppress_warnings  # Suppress warning for lambda fn
     def test_map_datapipe(self):
         input_dp = dp.iter.IterableWrapper(range(10))
 
@@ -1051,7 +1057,6 @@ class TestFunctionalIterDataPipe(TestCase):
         for x, y in zip(map_dp, input_dp):
             self.assertEqual(x, torch.tensor(y, dtype=torch.float))
 
-        from functools import partial
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
         for x, y in zip(map_dp, input_dp):
@@ -1329,7 +1334,6 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(batch_size=3, drop_last=True, batch_num=2, sort_key=_sort_fn)
         _helper(batch_size=3, drop_last=True, batch_num=2, bucket_num=2, sort_key=_sort_fn)
 
-
     def test_filter_datapipe(self):
         input_ds = dp.iter.IterableWrapper(range(10))
 
@@ -1338,7 +1342,6 @@ class TestFunctionalIterDataPipe(TestCase):
                 return data >= val
             return True
 
-        from functools import partial
         filter_dp = input_ds.filter(partial(_filter_fn, val=5))
         for data, exp in zip(filter_dp, range(10)):
             self.assertEqual(data, exp)
@@ -1425,6 +1428,7 @@ class TestFunctionalMapDataPipe(TestCase):
         ] = [
             (dp.map.Mapper, dp.map.SequenceWrapper(arr), (), {}),
             (dp.map.Mapper, dp.map.SequenceWrapper(arr), (_fake_fn, (0,)), {}),
+            (dp.map.Mapper, dp.map.SequenceWrapper(arr), (partial(_fake_add, 1), (0,)), {}),
         ]
         for dpipe, input_dp, dp_args, dp_kwargs in picklable_datapipes:
             p = pickle.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
@@ -1537,7 +1541,6 @@ class TestFunctionalMapDataPipe(TestCase):
         shuffler_dp = input_dp1.shuffle()
         self.assertEqual(10, len(shuffler_dp))
 
-
     def test_map_datapipe(self):
         arr = range(10)
         input_dp = dp.map.SequenceWrapper(arr)
@@ -1553,7 +1556,6 @@ class TestFunctionalMapDataPipe(TestCase):
                 map_dp[index], torch.tensor(input_dp[index], dtype=torch.float)
             )
 
-        from functools import partial
         map_dp = input_dp.map(partial(fn, dtype=torch.int, sum=True))
         self.assertEqual(len(input_dp), len(map_dp))
         for index in arr:
