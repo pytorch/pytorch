@@ -102,10 +102,20 @@ def parse_native_yaml(path: str) -> ParsedYaml:
         error_check_native_functions(rs)
         # Default dict is to prevent the codegen from barfing when we have a dispatch key that has no kernels yet.
         indices: Dict[DispatchKey, BackendIndex] = defaultdict(lambda: BackendIndex(
-            dispatch_key=DispatchKey.Undefined, use_out_as_primary=True, external=False, index={}))
+            dispatch_key=DispatchKey.Undefined,
+            use_out_as_primary=True,
+            external=False,
+            device_guard=False,
+            index={}))
         for k, v in bs.items():
             # All structured in-tree operators are implemented in terms of their out operator.
-            indices[k] = BackendIndex(dispatch_key=k, use_out_as_primary=True, external=False, index=v)
+            indices[k] = BackendIndex(
+                dispatch_key=k,
+                use_out_as_primary=True,
+                external=False,
+                # Only cuda-like devices in tree require device guards
+                device_guard=is_cuda_dispatch_key(k),
+                index=v)
         _GLOBAL_PARSE_NATIVE_YAML_CACHE[path] = ParsedYaml(rs, indices)
 
     return _GLOBAL_PARSE_NATIVE_YAML_CACHE[path]
