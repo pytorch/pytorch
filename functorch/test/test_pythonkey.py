@@ -220,6 +220,7 @@ make_fx_failures = {
     xfail('randint_like'), # randomness
     skip('new_empty'), # nondeterministic
     skip('empty_like'), # nondeterministic
+    skip('linalg.lstsq', 'grad_oriented'), # flaky
 }
 class TestPythonKeyOperatorsOpInfo(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
