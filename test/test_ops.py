@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from functools import partial, wraps
 import warnings
 import unittest
+import itertools
 
 import torch
 
@@ -1264,7 +1265,7 @@ class TestMathBits(TestCase):
         _requires_grad = (op.supports_autograd and op.supports_complex_autograd(torch.device(device).type))
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
         # Only test one sample
-        samples = samples[:1]
+        samples = itertools.islice(samples, 1)
         self._test_math_view(device, dtype, op, samples, math_op_physical, math_op_view, is_bit_set,
                              torch.is_complex)
 
