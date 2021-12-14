@@ -384,6 +384,11 @@ at::Tensor & LazyNativeFunctions::normal_(at::Tensor & self, double mean, double
     // Unconditionally fall back.
     // implementing normal_ via lazy tensor caused differences in results compared to eager.
     return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
+    
+    // if (force_eager_fallback(c10::Symbol::fromQualString("aten::normal_"))) {
+    //   return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
+    // }
+
     // if (generator.has_value()) {
     //   return at::native::call_fallback_fn<&ltc_eager_fallback, ATEN_OP(normal_)>::call(self, mean, std, generator);
     // }

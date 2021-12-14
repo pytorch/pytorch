@@ -13,6 +13,17 @@ namespace torch_lazy_tensors {
 static std::unordered_map<std::string, ::torch::lazy::Counter*>
     _eager_fallback_counters;
 
+bool force_eager_fallback(c10::Symbol op) {
+  static char* force_str = std::getenv("LTC_FORCE_FALLBACK");
+  if (force_str != nullptr) {
+    static auto force_sym = c10::Symbol::fromQualString(std::string(force_str));
+    if (op == force_sym) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void ltc_eager_fallback(const c10::OperatorHandle& op,
                         torch::jit::Stack* stack) {
   LTC_FN_TRACK(3);
