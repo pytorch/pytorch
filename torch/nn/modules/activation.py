@@ -989,7 +989,7 @@ class MultiheadAttention(Module):
             the attention weight.
 
     Outputs:
-        - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched, 
+        - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
           :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
           where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the embedding dimension ``embed_dim``.
         - **attn_output_weights** - Attention output weights of shape :math:`(L, S)` when input is unbatched or :math:`(N, L, S)`,
