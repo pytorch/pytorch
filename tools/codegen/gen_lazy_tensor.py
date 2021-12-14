@@ -5,7 +5,7 @@ import yaml
 from collections import namedtuple
 from typing import List, Dict, Union, Sequence, Optional, Callable, Iterable, Iterator, Tuple
 from tools.codegen.gen import get_grouped_native_functions, parse_native_yaml
-from tools.codegen.model import (DispatchKey, FunctionSchema,
+from tools.codegen.model import (FunctionSchema,
                                  NativeFunction, NativeFunctionsGroup, OperatorName)
 from tools.codegen.selective_build.selector import SelectiveBuilder
 from tools.codegen.utils import concatMap, YamlLoader, FileManager
@@ -178,51 +178,31 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
                 dest.GenLazyNativeFuncDefinition(f'{backend_dispatch_key}NativeFunctions',
                                                  backend_indices[backend_dispatch_key],
                                                  tensor_class),
-                grouped_native_functions,
-                codegenInplaceVariant=True
-            )),
-        })
-        # Generate headers for shape/dtype funcs for non-meta kernels
-        fm.write_with_template(f'{backend_dispatch_key}ShapeInference.h', 'ShapeInference.h', lambda: {
-            'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-                "ATen/Tensor.h",
-                "c10/core/ScalarType.h",
-                "c10/util/Optional.h",
-                "torch/csrc/lazy/core/ir.h",
-                "torch/csrc/lazy/core/shape.h",
-                "vector",
-            ]],
-            'lazy_ir_inc': [],
-            'DispatchKey': backend_dispatch_key,
-            'dispatch_namespace': backend_dispatch_key.lower(),
-            'func_declarations': list(concat_map_codegen(
-                dest.GenLazyShapeInferenceDefinition(backend_indices[backend_dispatch_key],
-                                                     tensor_class),
-                grouped_native_functions
-            )),
-        })
-        # Generate IR node classes
-        fm.write_with_template(f'{backend_dispatch_key}LazyIr.h', 'LazyIr.h', lambda: {
-            'lazy_ir_sysinc': [f'#include <{path}>' for path in [
-                "c10/core/ScalarType.h",
-                "c10/util/Optional.h",
-                "torch/csrc/lazy/core/hash.h",
-                "torch/csrc/lazy/core/ir.h",
-                "vector",
-            ]],
-            'lazy_ir_inc': [f'#include "{path}"' for path in [
-                "lazy_tensor_core/csrc/ops/scalar.h",
-                node_base_hdr if node_base_hdr is not None else None
-            ] if path is not None],
-            'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
-            'namespaced_headers': '',
-            'DispatchKey': backend_dispatch_key,
-            'dispatch_namespace': backend_dispatch_key.lower(),
-            'ir_declarations': list(concat_map_codegen(
-                dest.LazyIR(backend_indices[backend_dispatch_key], node_base),
-                grouped_native_functions
-            )),
-        })
+            grouped_native_functions
+        )),
+    })
+    # Generate IR node classes
+    fm.write_with_template(f'{backend_key}LazyIr.h', 'LazyIr.h', lambda: {
+        'lazy_ir_sysinc': [f'#include <{path}>' for path in [
+            "ATen/core/Formatting.h",
+            "c10/core/ScalarType.h",
+            "c10/util/Optional.h",
+            "torch/csrc/lazy/core/hash.h",
+            "torch/csrc/lazy/core/ir.h",
+            "vector",
+        ]],
+        'lazy_ir_inc': [f'#include "{path}"' for path in [
+            node_base_hdr if node_base_hdr is not None else None
+        ] if path is not None],
+        'external_backend_headers': f'#include "{output_dir}/{backend_key}NativeFunctions.h"',
+        'namespaced_headers': '',
+        'DispatchKey': backend_key,
+        'dispatch_namespace': backend_key.lower(),
+        'ir_declarations': list(concat_map_codegen(
+            dest.LazyIR(backend_indices[backend_key], node_base),
+            grouped_native_functions
+        )),
+    })
 
 
 if __name__ == '__main__':
