@@ -6,7 +6,7 @@
 #include <ATen/Tensor.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/ThreadLocalState.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>

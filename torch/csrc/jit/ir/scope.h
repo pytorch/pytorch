@@ -3,7 +3,7 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <unordered_map>
 
