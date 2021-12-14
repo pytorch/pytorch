@@ -552,26 +552,20 @@ BLAS and LAPACK Operations
     addr
     baddbmm
     bmm
-    chain_matmul
-    cholesky
     cholesky_inverse
     cholesky_solve
     dot
-    eig
     geqrf
-    ger
     inner
     inverse
     det
     logdet
     slogdet
-    lstsq
     lu
     lu_solve
     lu_unpack
     matmul
     matrix_power
-    matrix_rank
     matrix_exp
     mm
     mv
@@ -579,12 +573,9 @@ BLAS and LAPACK Operations
     ormqr
     outer
     pinverse
-    qr
-    solve
     svd
     svd_lowrank
     pca_lowrank
-    symeig
     lobpcg
     trapz
     trapezoid

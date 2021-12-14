@@ -276,7 +276,6 @@ Tensor class reference
     Tensor.ceil
     Tensor.ceil_
     Tensor.char
-    Tensor.cholesky
     Tensor.cholesky_inverse
     Tensor.cholesky_solve
     Tensor.chunk
@@ -342,7 +341,6 @@ Tensor class reference
     Tensor.dot
     Tensor.double
     Tensor.dsplit
-    Tensor.eig
     Tensor.element_size
     Tensor.eq
     Tensor.eq_
@@ -388,7 +386,6 @@ Tensor class reference
     Tensor.greater_equal_
     Tensor.geometric_
     Tensor.geqrf
-    Tensor.ger
     Tensor.get_device
     Tensor.gt
     Tensor.gt_
@@ -479,7 +476,6 @@ Tensor class reference
     Tensor.logit
     Tensor.logit_
     Tensor.long
-    Tensor.lstsq
     Tensor.lt
     Tensor.lt_
     Tensor.less
@@ -553,7 +549,6 @@ Tensor class reference
     Tensor.pow_
     Tensor.prod
     Tensor.put_
-    Tensor.qr
     Tensor.qscheme
     Tensor.quantile
     Tensor.nanquantile
@@ -618,7 +613,6 @@ Tensor class reference
     Tensor.size
     Tensor.slogdet
     Tensor.slice_scatter
-    Tensor.solve
     Tensor.sort
     Tensor.split
     Tensor.sparse_mask
@@ -644,7 +638,6 @@ Tensor class reference
     Tensor.svd
     Tensor.swapaxes
     Tensor.swapdims
-    Tensor.symeig
     Tensor.t
     Tensor.t_
     Tensor.tensor_split
