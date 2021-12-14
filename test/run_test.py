@@ -4,7 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
-from setuptools import distutils
+from distutils.version import LooseVersion
 import functools
 import os
 import pathlib
@@ -97,7 +97,6 @@ TESTS = discover_tests(
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
-        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
@@ -911,7 +910,7 @@ def get_selected_tests(options):
 
         # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
-        if distutils.version.LooseVersion(torch.version.cuda) >= "11.5":
+        if LooseVersion(torch.version.cuda) >= "11.5":
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
