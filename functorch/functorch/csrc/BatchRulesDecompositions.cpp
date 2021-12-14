@@ -7,11 +7,86 @@
 
 #include <functorch/csrc/BatchRulesHelper.h>
 #include <ATen/Operators.h>
+#include <ATen/FunctionalTensorWrapper.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at { namespace functorch {
+
+at::Tensor sync_and_unwrap_functional_output(at::Tensor out_functional) {
+  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(out_functional));
+  auto out_wrapper_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(out_functional);
+  out_wrapper_impl->sync_();
+  auto out_unwrapped = out_wrapper_impl->value();
+  return out_unwrapped;
+}
+
+c10::List<at::Tensor> sync_and_unwrap_functional_output(const c10::List<at::Tensor>& t_list) {
+  c10::List<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(sync_and_unwrap_functional_output(t_list[i]));
+  }
+  return outputs;
+}
+
+void decompose_functional(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments = torch::jit::last(stack, num_arguments);
+  const auto arguments_begin = stack->size() - num_arguments;
+  //
+  // Step 1: Wrap any tensor inputs into Functional tensors
+  // and put them on the stack at the correct indices.
+  for (const auto idx : c10::irange(arguments.size())) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      auto functional_ivalue = at::functionalization::impl::to_functional_tensor(ivalue.toTensor());
+      (*stack)[arguments_begin + idx] = std::move(functional_ivalue);
+    } else if (ivalue.isTensorList()) {
+      auto functional_ivalue = at::functionalization::impl::to_functional_tensor(ivalue.toTensorList());
+      (*stack)[arguments_begin + idx] = std::move(functional_ivalue);
+    }
+  }
+
+  // Step 2: set up TLS such that we hit the functionalization kernels before the batching rules.
+  // Note: this relies on the fact that Functionalization > BatchMode in DispatchKey.h
+  c10::impl::IncludeDispatchKeyGuard include_guard(c10::DispatchKeySet(c10::DispatchKey::Functionalize));
+
+  // Step 3: redispatch to native kernel
+  // TODO: this is technically kind of sketchy, since we're relying on the fact
+  // that the composite kernel is registered to a particular dispatch key.
+  // In reality, a C++ extension could register their own custom kernels to any dispatch key, which would override
+  // the composite kernel entry.
+  // I'm using CPU because C++ extensions that register custom kernels to existing composite operators are pretty uncommon,
+  // and only really matter for out-of-tree keys like XLA.
+  // I wonder if we should make "alias dispatch key kernels" a runtime-accessible property on the OperatorHandle?
+  op.redispatchBoxed(c10::DispatchKeySet(c10::DispatchKey::CPU), stack);
+
+  const auto& schema_returns = op.schema().returns();
+  const auto& num_returns = schema_returns.size();
+  auto returns = torch::jit::last(stack, num_returns);
+  const auto returns_begin = stack->size() - num_returns;
+
+  // Step 4: Unwrap each functional output tensor, syncing any pending updates
+  for (const auto idx : c10::irange(returns.size())) {
+    if (returns[idx].isTensor()) {
+      const auto& out_functional = returns[idx].toTensor();
+      auto out_unwrapped = sync_and_unwrap_functional_output(out_functional);
+      (*stack)[returns_begin + idx] = c10::IValue(out_unwrapped);
+    } else if (returns[idx].isTensorList()) {
+      const auto& out_functional = returns[idx].toTensorList();
+      auto out_unwrapped = sync_and_unwrap_functional_output(out_functional);
+      (*stack)[returns_begin + idx] = c10::IValue(out_unwrapped);
+    }
+  }
+}
+
+#define DECOMPOSE_FUNCTIONAL(op) \
+  m.impl(#op, torch::CppFunction::makeFromBoxedFunction<&decompose_functional>());
+
 
 #define OP_DECOMPOSE(op)  m.impl(#op, static_cast<decltype(&ATEN_FN(op))>(native::op));
 #define OP_DECOMPOSE2(op, overload)  m.impl(#op"."#overload, static_cast<decltype(&ATEN_FN2(op, overload))>(native::op));
@@ -149,6 +224,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(arctan2);
   OP_DECOMPOSE(layer_norm);
   OP_DECOMPOSE(diag_backward);
+  DECOMPOSE_FUNCTIONAL(diag_embed);
+  DECOMPOSE_FUNCTIONAL(block_diag);
 }
 
 }}

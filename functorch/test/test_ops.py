@@ -749,7 +749,6 @@ class TestOperators(TestCase):
         xfail('index_put'),
         xfail('linalg.multi_dot'),
         xfail('vstack'),
-        xfail('block_diag'),
         xfail('nn.functional.batch_norm'),
         xfail('cdist'),
         xfail('lu_solve'),
