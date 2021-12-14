@@ -110,7 +110,7 @@ class Adam(Optimizer):
             bias_correction1 = [1 - beta1 ** state['step'] for state in states]
             bias_correction2 = [1 - beta2 ** state['step'] for state in states]
             if group['weight_decay'] != 0:
-                grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'])
+                grads = torch._foreach_add(grads, params_with_grad, alpha=group['weight_decay'], foreach=True)
 
             #
             # Decay the first and second moment running average coefficient
@@ -140,26 +140,3 @@ class Adam(Optimizer):
             torch._foreach_addcdiv_(params_with_grad, exp_avg, denom, step_size)
 
         return loss
-
-    # TODO: refactor to a base class once foreach ops are in a good shape.
-    def zero_grad(self, set_to_none: bool = False):
-        per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
-        for group in self.param_groups:
-            for p in group['params']:
-                if p.grad is not None:
-                    if set_to_none:
-                        p.grad = None
-                    else:
-                        if p.grad.grad_fn is not None:
-                            p.grad.detach_()
-                        else:
-                            p.grad.requires_grad_(False)
-
-                        if p.grad.is_sparse:
-                            p.grad.zero_()
-                        else:
-                            per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
-
-            for _, per_dtype_grads in per_device_and_dtype_grads.items():
-                for grads in per_dtype_grads.values():
-                    torch._foreach_zero_(grads)
