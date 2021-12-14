@@ -177,13 +177,6 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
 }
 
 template<>
-void THPPointer<THTensor>::free() {
-  if (ptr) {
-    c10::raw::intrusive_ptr::decref(ptr);
-  }
-}
-
-template<>
 void THPPointer<THPStorage>::free() {
   if (ptr)
     Py_DECREF(ptr);
