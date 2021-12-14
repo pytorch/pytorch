@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Operators.h>
 #include <ATen/native/CPUFallback.h>
 
 namespace torch_lazy_tensors {

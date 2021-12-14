@@ -1,7 +1,7 @@
 #include "lazy_tensor_core/csrc/ts_backend/EagerFallback.h"
 
 #include <sstream>
-
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include <ATen/Functions.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/native/CPUFallback.h>
@@ -10,47 +10,37 @@
 namespace torch_lazy_tensors {
 namespace {
 
-std::vector<at::Tensor> _to_eager(at::TensorList tensors,
-                                  c10::DeviceType device_type) {
-  switch (device_type) {
-    case at::kCPU: {
-      return at::_to_cpu(tensors);
-    }
-    default: {
-      std::vector<at::Tensor> eager_tensors;
-      for (const auto& t : tensors) {
-        c10::TensorOptions options = t.options().device(device_type);
-        at::Tensor eager_tensor = t.to(options,
-                                       /*non_blocking*/ false, /*copy*/ false);
-        eager_tensors.push_back(eager_tensor);
-      }
-      return eager_tensors;
-    }
-  }
-}
-
-// convenience helper for converting tensors to cpu
-
 std::vector<at::Tensor> to_eager(const at::TensorList& tensors,
-                                 c10::DeviceType device_type) {
-  // We can't just call _to_eager() on the entire list of Tensors because it
-  // will break on undefined tensors. Separate out undefined tensors first.
+                                 c10::DeviceType eager_device_type) {
+  // Tensors may originate on different devices, or be undefined.
+  // We identify the true 'lazy tensors' and transfer them as a group,
+  // and we avoid copying tensors already on the correct eager device.
   std::vector<at::Tensor> eager_tensors(tensors.size());
-  std::vector<at::Tensor> valid_tensors;
+  std::vector<LazyTensor> lazy_tensors;
   std::vector<bool> to_translate(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
     const at::Tensor& tensor = tensors[i];
-    // Explicitly handling undefined tensors here instead of letting `_to_eager`
-    // handle it. Otherwise, we'd need to require all backends with their own
-    // implementation of _to_eager to properly handle undefined tensors.
-    if (tensor.defined()) {
-      to_translate[i] = true;
-      valid_tensors.push_back(tensor);
+
+    if (tensor.defined() && tensor.device().type() != eager_device_type) {
+      if (tensor.device().type() == c10::kLazy) {
+        to_translate[i] = true;
+        lazy_tensors.emplace_back(GetLtcTensor(tensor));
+      } else {
+        // Non-lazy tensors on the wrong device
+        // TODO(whc) when does this happen?
+        eager_tensors[i] = tensor.to(eager_device_type);
+      }
     } else {
+      // Undefined tensors or tensors already on the correct eager device
+      // can simply be left alone
+      // TODO(whc) is it really OK if undefined tensors on 'lazy' device are not .to'd?
       eager_tensors[i] = tensor;
     }
   }
-  auto eager_valid_tensors = _to_eager(valid_tensors, device_type);
+
+  // Transfer all the lazy tensors as one computation rather than calling .to on each one
+  auto eager_valid_tensors = LazyGraphExecutor::Get()->GetTensors(&lazy_tensors);
+
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
     if (to_translate[i]) {
       eager_tensors[i] = std::move(eager_valid_tensors[defined_pos++]);
@@ -121,8 +111,7 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
       tensorlist_args.push_back(ivalue.toTensorList());
     }
   }
-  // XLA requires all of the tensor arguments to be gathered up and converted to
-  // CPU together.
+
   auto eager_tensors = to_eager(tensor_args, device_type);
 
   for (auto i = 0; i < tensor_args_indices.size(); ++i) {

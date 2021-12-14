@@ -42,6 +42,9 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   auto& args = op.schema().arguments();
   auto arguments = torch::jit::last(stack, args.size());
 
+  // TODO(whc) why do we do this at all?  And if we want to log the tensors,
+  // why don't we log them after we have already transferred them to eager tensors
+  // inside `eager_fallback`?
   // Log each tensor argument.
   for (int64_t idx = 0; idx < arguments.size(); ++idx) {
     const auto& ivalue = arguments[idx];
