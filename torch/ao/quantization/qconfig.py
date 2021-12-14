@@ -1,5 +1,5 @@
 from collections import namedtuple
-from typing import Union, Optional, Any
+from typing import Optional, Any
 
 import torch
 import torch.nn as nn
