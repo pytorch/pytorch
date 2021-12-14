@@ -3,6 +3,7 @@ astunparse
 expecttest
 future
 numpy
+packaging
 psutil
 pyyaml
 requests
