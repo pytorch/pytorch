@@ -26,11 +26,21 @@ def default_convert(data):
             return data
         return torch.as_tensor(data)
     elif isinstance(data, collections.abc.Mapping):
-        return {key: default_convert(data[key]) for key in data}
+        try:
+            return elem_type({key: default_convert(data[key]) for key in data})
+        except TypeError:
+            # The mapping type may not support `__init__(iterable)`.
+            return {key: default_convert(data[key]) for key in data}
     elif isinstance(data, tuple) and hasattr(data, '_fields'):  # namedtuple
         return elem_type(*(default_convert(d) for d in data))
+    elif isinstance(data, tuple):
+        return [default_convert(d) for d in data]  # Backwards compatibility.
     elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
-        return [default_convert(d) for d in data]
+        try:
+            return elem_type([default_convert(d) for d in data])
+        except TypeError:
+            # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+            return [default_convert(d) for d in data]
     else:
         return data
 
@@ -71,7 +81,11 @@ def default_collate(batch):
     elif isinstance(elem, string_classes):
         return batch
     elif isinstance(elem, collections.abc.Mapping):
-        return {key: default_collate([d[key] for d in batch]) for key in elem}
+        try:
+            return elem_type({key: default_collate([d[key] for d in batch]) for key in elem})
+        except TypeError:
+            # The mapping type may not support `__init__(iterable)`.
+            return {key: default_collate([d[key] for d in batch]) for key in elem}
     elif isinstance(elem, tuple) and hasattr(elem, '_fields'):  # namedtuple
         return elem_type(*(default_collate(samples) for samples in zip(*batch)))
     elif isinstance(elem, collections.abc.Sequence):
@@ -80,7 +94,15 @@ def default_collate(batch):
         elem_size = len(next(it))
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError('each element in list of batch should be of equal size')
-        transposed = zip(*batch)
-        return [default_collate(samples) for samples in transposed]
+        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+
+        if isinstance(elem, tuple):
+            return [default_collate(samples) for samples in transposed]  # Backwards compatibility.
+        else:
+            try:
+                return elem_type([default_collate(samples) for samples in transposed])
+            except TypeError:
+                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                return [default_collate(samples) for samples in transposed]
 
     raise TypeError(default_collate_err_msg_format.format(elem_type))
