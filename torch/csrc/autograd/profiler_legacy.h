@@ -10,7 +10,7 @@
 #include <forward_list>
 #include <tuple>
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32
 #include <ctime>
@@ -395,7 +395,7 @@ struct RangeEventList {
 };
 
 std::string getNvtxStr(
-    const at::StringView& name,
+    const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes);
 

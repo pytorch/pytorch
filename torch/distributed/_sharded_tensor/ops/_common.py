@@ -8,6 +8,10 @@ from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
 )
+from torch.distributed.nn.functional import (
+    all_gather,
+    all_to_all_single,
+)
 
 
 def _handle_col_wise_sharding_base(
@@ -58,8 +62,7 @@ def _handle_col_wise_sharding_base(
     """
     if gathered_inputs is None:
         # allgather the inputs first.
-        gathered_inputs = [torch.zeros_like(input) for _ in range(world_size)]
-        dist.all_gather(gathered_inputs, input, group=pg)
+        gathered_inputs = all_gather(input, group=pg)
 
     # run the operator's function for all the inputs.
     results = []
@@ -130,7 +133,7 @@ def _result_distribute_with_col_rearrange(
         )
 
     # distribute the outputs using all2all.
-    dist.all_to_all_single(
+    output = all_to_all_single(
         output, combined_results, output_split_sizes=output_split_sizes, group=pg
     )
 
