@@ -4923,7 +4923,7 @@ class SpectralFuncInfo(OpInfo):
         self.ndimensional = ndimensional
 
 
-def sample_inputs_stft(op_info, device, dtype, requires_grad):
+def sample_inputs_stft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
@@ -4943,7 +4943,7 @@ def sample_inputs_stft(op_info, device, dtype, requires_grad):
             mt((10, 100)), kwargs=dict(n_fft=16, window=window, onesided=False))
 
 
-def sample_inputs_istft(op_info, device, dtype, requires_grad):
+def sample_inputs_istft(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         real_shape = shape if dtype.is_complex else shape + (2,)
         return make_tensor(real_shape, device=device, dtype=dtype,
@@ -4967,7 +4967,7 @@ def sample_inputs_istft(op_info, device, dtype, requires_grad):
     yield SampleInput(mt((10, 5, 6)), kwargs=dict(n_fft=8, window=real_window[:8], center=center))
 
 
-def sample_inputs_fftshift(op_info, device, dtype, requires_grad):
+def sample_inputs_fftshift(op_info, device, dtype, requires_grad, **kwargs):
     def mt(shape, **kwargs):
         return make_tensor(shape, device=device, dtype=dtype,
                            requires_grad=requires_grad, **kwargs)
@@ -10654,8 +10654,8 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cpu",
             ),
-            # FIXMEDerivative wrt weights is not implemented
-            DecorateInfo(unittest.expectedFailure, "TestCommon", 
+            # FIXME Derivative wrt weights is not implemented
+            DecorateInfo(unittest.expectedFailure, "TestCommon",
                          "test_floating_inputs_are_differentiable"),
         ),
         skips=(

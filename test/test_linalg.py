@@ -5805,10 +5805,6 @@ class TestLinalg(TestCase):
         from torch.testing._internal.common_utils import random_matrix
 
         def run_test(A, pivot, singular, fn):
-            print(A.shape)
-            print(pivot)
-            print(singular)
-            print(getattr(fn, "__name__", "torch.lu"))
             k = min(A.shape[-2:])
             batch = A.shape[:-2]
             check_errors = (fn == torch.linalg.lu_factor)
@@ -5827,13 +5823,8 @@ class TestLinalg(TestCase):
 
             if not pivot:
                 self.assertEqual(pivots, torch.arange(1, 1 + k, device=device, dtype=torch.int32).expand(batch + (k, )))
-            print(LU)
-            print(pivots)
 
             P, L, U = torch.lu_unpack(LU, pivots)
-            print(P)
-            print(L)
-            print(U)
 
             self.assertEqual(P @ L @ U, A)
 
