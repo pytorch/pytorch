@@ -80,11 +80,13 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
 #if !defined(USE_ROCM)
 #include <ATen/native/cuda/CUDALoops.cuh>
+#define USE_JITERATOR
 #else
 #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {
+#ifdef USE_JITERATOR
 
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
@@ -204,7 +206,7 @@ void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::
     jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
   }
 }
-
+#endif //USE_JITERATOR
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {

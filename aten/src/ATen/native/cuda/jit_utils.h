@@ -13,7 +13,6 @@
     // pass -- jiterator not supported on HIP platforms
     #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
 #else
-    #define USE_JITERATOR
     #define jiterator_stringify(...) std::string(#__VA_ARGS__);
 #endif
 
