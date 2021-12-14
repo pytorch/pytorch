@@ -56,7 +56,7 @@ SKIP_TRAIN_ONLY = {
 current_name = ""
 current_device = ""
 
-@functools.lru_cache
+@functools.lru_cache(maxsize=None)
 def output_csv(name, headers):
     output = csv.writer(
         io.TextIOWrapper(
