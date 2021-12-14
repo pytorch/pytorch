@@ -48,10 +48,6 @@ def parse_backend_yaml(
     assert isinstance(use_out_as_primary, bool), \
         f'You must provide either True or False for use_out_as_primary. Provided: {use_out_as_primary}'
 
-    use_device_guard = yaml_values.pop('device_guard', False)
-    assert isinstance(use_device_guard, bool), \
-        f'You must provide either True or False for device_guard. Provided: {use_device_guard}'
-
     supported = yaml_values.pop('supported', [])
     if supported is None:
         supported = []  # Allow an empty list of supported ops
@@ -68,13 +64,7 @@ def parse_backend_yaml(
         f'{backend_yaml_path} contains unexpected keys: {", ".join(yaml_values.keys())}. \
 Only the following keys are supported: {", ".join(valid_keys)}'
 
-    def create_backend_index(
-            backend_ops: List[str],
-            dispatch_key: DispatchKey,
-            *,
-            use_out_as_primary: bool,
-            use_device_guard: bool
-    ) -> BackendIndex:
+    def create_backend_index(backend_ops: List[str], dispatch_key: DispatchKey, *, use_out_as_primary: bool) -> BackendIndex:
         metadata: Dict[OperatorName, BackendMetadata] = {}
         for op in backend_ops:
             op_name = OperatorName.parse(op)
@@ -88,7 +78,6 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             dispatch_key=dispatch_key,
             use_out_as_primary=use_out_as_primary,
             external=True,
-            device_guard=use_device_guard,
             index=metadata)
 
     backend_key: Optional[DispatchKey] = None
@@ -96,8 +85,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
         with context(lambda: f'The provided value for "backend" must be a valid DispatchKey, but got {backend}.'):
             backend_key = DispatchKey.parse(backend)
 
-        backend_idx = create_backend_index(
-            supported, backend_key, use_out_as_primary=use_out_as_primary, use_device_guard=use_device_guard)
+        backend_idx = create_backend_index(supported, backend_key, use_out_as_primary=use_out_as_primary)
         assert backend_key not in backend_indices
         backend_indices[backend_key] = backend_idx
 
@@ -107,8 +95,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
 the behavior of autograd for some operators on your backend. However "Autograd{backend}" is not a valid DispatchKey.'):
             autograd_key = DispatchKey.parse(f'Autograd{backend}')
 
-        autograd_idx = create_backend_index(
-            supported_autograd, autograd_key, use_out_as_primary=use_out_as_primary, use_device_guard=use_device_guard)
+        autograd_idx = create_backend_index(supported_autograd, autograd_key, use_out_as_primary=use_out_as_primary)
         assert autograd_key not in backend_indices
         backend_indices[autograd_key] = autograd_idx
 
