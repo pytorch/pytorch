@@ -233,6 +233,12 @@ static void dump_dls() {
   std::cout << getDynamicLayerStack() << std::endl;
 }
 
+static void dump_local_tls() {
+  auto tls = c10::impl::tls_local_dispatch_key_set();
+  std::cout << "[Local Include] " << tls.included_ << std::endl;
+  std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
+}
+
 } // namespace functorch
 }
 
@@ -268,6 +274,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("tls_set_vmap_excluded", &at::functorch::tls_set_vmap_excluded);
   m.def("tls_set_is_included", &at::functorch::tls_set_is_included);
   m.def("dump_dls", &at::functorch::dump_dls);
+  m.def("dump_local_tls", &at::functorch::dump_local_tls);
   at::functorch::initPointwiseOperatorCompileCacheBindings(m.ptr());
   at::functorch::initCompileCacheBindings(m.ptr());
   initDispatchBindings(m.ptr());
