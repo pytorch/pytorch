@@ -293,15 +293,17 @@ class C10_API DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-extern C10_API DispatchKeySet autograd_dispatch_keyset;
-extern C10_API DispatchKeySet autocast_dispatch_keyset;
-extern C10_API DispatchKeySet default_included_set;
-extern C10_API DispatchKeySet default_excluded_set;
-extern C10_API DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
-extern C10_API DispatchKeySet autogradother_backends;
-extern C10_API DispatchKeySet after_autograd_keyset;
-extern C10_API DispatchKeySet after_ADInplaceOrView_keyset;
-extern C10_API DispatchKeySet after_func_keyset;
+C10_API extern DispatchKeySet autograd_dispatch_keyset;
+C10_API extern DispatchKeySet autocast_dispatch_keyset;
+C10_API extern DispatchKeySet default_included_set;
+C10_API extern DispatchKeySet default_excluded_set;
+C10_API extern DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
+C10_API extern DispatchKeySet autogradother_backends;
+C10_API extern DispatchKeySet after_autograd_keyset;
+C10_API extern DispatchKeySet after_ADInplaceOrView_keyset;
+C10_API extern DispatchKeySet after_func_keyset;
+C10_API extern DispatchKeySet backend_dispatch_keyset;
+C10_API extern DispatchKeySet math_dispatch_keyset;
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW,
@@ -341,8 +343,6 @@ C10_API DispatchKeySet getAutocastRelatedKeySetFromBackend(DispatchKey t);
 // getRuntimeDispatchKeySet(alias).has(DispatchKey::Undefined)
 // in OperatorEntry.cpp but we disallow it in has() API.
 C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
-
-C10_API uint64_t getDispatchTableIndexForDispatchKeySet(DispatchKeySet ks);
 
 // Historically, every tensor only had a single DispatchKey, and it was always
 // something like CPU, and there wasn't any of this business where TLS

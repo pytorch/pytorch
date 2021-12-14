@@ -5,102 +5,147 @@ namespace c10 {
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with CompositeImplicitAutograd
-DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutogradFunctionality,
-    DispatchKey::AutogradOther,
-}) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+DispatchKeySet _autograd_dispatch_keyset() {
+    static DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+        DispatchKey::AutogradFunctionality,
+        DispatchKey::AutogradOther,
+    }) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    return autograd_dispatch_keyset;
+}
 
-DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-});
+DispatchKeySet _autocast_dispatch_keyset() {
+    static DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
+        DispatchKey::AutocastCPU,
+        DispatchKey::AutocastCUDA,
+    });
+    return autocast_dispatch_keyset;
+}
 
 // See Note [TLS Initialization]
-DispatchKeySet default_included_set = DispatchKeySet({
-    DispatchKey::BackendSelect,
-    DispatchKey::ADInplaceOrView,
-});
+DispatchKeySet _default_included_set() {
+    static DispatchKeySet default_included_set = DispatchKeySet({
+        DispatchKey::BackendSelect,
+        DispatchKey::ADInplaceOrView,
+    });
+    return default_included_set;
+}
 
-DispatchKeySet default_excluded_set = DispatchKeySet({
-    DispatchKey::AutocastCPU,
-    DispatchKey::AutocastCUDA,
-});
+DispatchKeySet _default_excluded_set() {
+    static DispatchKeySet default_excluded_set = DispatchKeySet({
+        DispatchKey::AutocastCPU,
+        DispatchKey::AutocastCUDA,
+    });
+    return default_excluded_set;
+}
 
-DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
-    autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
+DispatchKeySet _autograd_dispatch_keyset_with_ADInplaceOrView() {
+    static DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
+        autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
+    return autograd_dispatch_keyset_with_ADInplaceOrView;
+}
 
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
-DispatchKeySet autogradother_backends = DispatchKeySet(
-    // TODO: delete commented code before landing.
-    // HIP and VE now have their own backend bits, which means that
-    // they can now have their own Autograd keys.
-    // Technically, HIP will now redispatch to its own custom AutogradHIP slot
-    // in the runtime table.
-    //{DispatchKey::HIP,
-     //DispatchKey::VE,
-     {DispatchKey::FPGA,
-     DispatchKey::ORT,
-     DispatchKey::Vulkan,
-     DispatchKey::Metal,
-     DispatchKey::SparseCsrCPU,
-     DispatchKey::SparseCsrCUDA,
-     DispatchKey::CustomRNGKeyId,
-     DispatchKey::MkldnnCPU,
-     DispatchKey::Meta});
+DispatchKeySet _autogradother_backends() {
+    static DispatchKeySet autogradother_backends = DispatchKeySet(
+        // TODO: delete commented code before landing.
+        // HIP and VE now have their own backend bits, which means that
+        // they can now have their own Autograd keys.
+        // Technically, HIP will now redispatch to its own custom AutogradHIP slot
+        // in the runtime table.
+        //{DispatchKey::HIP,
+        //DispatchKey::VE,
+        {DispatchKey::FPGA,
+        DispatchKey::ORT,
+        DispatchKey::Vulkan,
+        DispatchKey::Metal,
+        DispatchKey::SparseCsrCPU,
+        DispatchKey::SparseCsrCUDA,
+        DispatchKey::CustomRNGKeyId,
+        DispatchKey::MkldnnCPU,
+        DispatchKey::Meta});
+    return autogradother_backends;
+}
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
 // Autograd key
-DispatchKeySet after_autograd_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+DispatchKeySet _after_autograd_keyset() {
+    static DispatchKeySet after_autograd_keyset =
+        DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+    return after_autograd_keyset;
+}
 
 // The set of dispatch keys that come after ADInplaceOrView
-DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
-    DispatchKeySet::FULL_AFTER,
-    c10::DispatchKey::ADInplaceOrView);
+DispatchKeySet _after_ADInplaceOrView_keyset() {
+    static DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::ADInplaceOrView);
+    return after_ADInplaceOrView_keyset;
+}
 
 // The set of dispatch keys that come after Functionalize
-DispatchKeySet after_func_keyset =
-    DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
-        .removeFunctionalityKey(
-            // NOTE: we also need to remove ADInplaceOrView from the keyset when
-            // redispatching after the func kernels. This is because we're not
-            // calling the same op; we originally called an inplace op, and now
-            // we aren't. The original key calculation figured out which keys
-            // were Fallthrough based on the inplace op. That means that it did
-            // not include the ADInPlaceOrView kernel as a fallthrough key.
-            // However, we WANT the ADInPlaceOrView kernel to be ignored now
-            // that we're calling an out-of-place op. Re-invoking
-            // Dispatcher::call would re-run the Fallthrough key calculation and
-            // get us that, But at::redispatch is more performant. We can get
-            // away with it by explicitly removing the key here.
-            c10::DispatchKey::ADInplaceOrView);
+DispatchKeySet _after_func_keyset() {
+    static DispatchKeySet after_func_keyset =
+        DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
+            .removeFunctionalityKey(
+                // NOTE: we also need to remove ADInplaceOrView from the keyset when
+                // redispatching after the func kernels. This is because we're not
+                // calling the same op; we originally called an inplace op, and now
+                // we aren't. The original key calculation figured out which keys
+                // were Fallthrough based on the inplace op. That means that it did
+                // not include the ADInPlaceOrView kernel as a fallthrough key.
+                // However, we WANT the ADInPlaceOrView kernel to be ignored now
+                // that we're calling an out-of-place op. Re-invoking
+                // Dispatcher::call would re-run the Fallthrough key calculation and
+                // get us that, But at::redispatch is more performant. We can get
+                // away with it by explicitly removing the key here.
+                c10::DispatchKey::ADInplaceOrView);
+    return after_func_keyset;
+}
 
 // backend_dispatch_keyset should include all runtime backend keys.
 // Alias key DispatchKey::CompositeExplicitAutograd maps to
 // backend_dispatch_keyset NestedTensor has been explicitly removed due to
 // incompatibility with some kernels, such as structured kernels, that use the
 // DefaultBackend key.
-DispatchKeySet backend_dispatch_keyset = autogradother_backends |
-    DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
-    DispatchKeySet({
-        DispatchKey::Dense,
-        DispatchKey::Sparse,
-        DispatchKey::Quantized,
-    });
+DispatchKeySet _backend_dispatch_keyset() {
+    static DispatchKeySet backend_dispatch_keyset = autogradother_backends |
+        DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
+        DispatchKeySet({
+            DispatchKey::Dense,
+            DispatchKey::Sparse,
+            DispatchKey::Quantized,
+        });
+    return backend_dispatch_keyset;
+}
+
+// math_dispatch_keyset contains all keys in backend_dispatch_keyset and
+// autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
+// maps to math_dispatch_keyset.
+DispatchKeySet _math_dispatch_keyset() {
+    static DispatchKeySet math_dispatch_keyset =
+        backend_dispatch_keyset | autograd_dispatch_keyset;
+    return math_dispatch_keyset;
+}
+
+DispatchKeySet autograd_dispatch_keyset = _autograd_dispatch_keyset();
+DispatchKeySet autocast_dispatch_keyset = _autocast_dispatch_keyset();
+DispatchKeySet default_included_set = _default_included_set();
+DispatchKeySet default_excluded_set = _default_excluded_set();
+DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView = _autograd_dispatch_keyset_with_ADInplaceOrView();
+DispatchKeySet autogradother_backends = _autogradother_backends();
+DispatchKeySet after_autograd_keyset = _after_autograd_keyset();
+DispatchKeySet after_ADInplaceOrView_keyset = _after_ADInplaceOrView_keyset();
+DispatchKeySet after_func_keyset = _after_func_keyset();
+DispatchKeySet backend_dispatch_keyset = _backend_dispatch_keyset();
+DispatchKeySet math_dispatch_keyset = _math_dispatch_keyset();
 
 bool isBackendDispatchKey(DispatchKey t) {
   return t != DispatchKey::Undefined
       // See Note [No Alias Keys in DispatchKeySet]
       && !isAliasDispatchKey(t) && backend_dispatch_keyset.has(t);
 }
-
-// math_dispatch_keyset contains all keys in backend_dispatch_keyset and
-// autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
-// maps to math_dispatch_keyset.
-DispatchKeySet math_dispatch_keyset =
-    backend_dispatch_keyset | autograd_dispatch_keyset;
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -352,7 +397,32 @@ initializeFunctionalityOffsetsAndMasks() {
         auto prev_offset_and_mask = offsets_and_masks[functionality_idx - 1];
         auto k = static_cast<DispatchKey>(k_idx);
 
-
+#if defined(C10_MOBILE_TRIM_DISPATCH_KEYS)
+// [Note: Trimmed Mobile Dispatch Keys]
+        uint16_t mask = 0;
+        uint16_t offset = -1;
+        switch (k) {
+          case DispatchKey::Undefined:
+            offset = 0;
+          case DispatchKey::CPU:
+            offset = 1;
+          case DispatchKey::QuantizedCPU:
+            offset = 2;
+          case DispatchKey::SparseCPU:
+            offset = 3;
+          case DispatchKey::BackendSelect:
+            offset = 4;
+          case DispatchKey::ADInplaceOrView:
+            offset = 5;
+          case DispatchKey::AutogradOther:
+            offset = 6;
+          case DispatchKey::AutogradCPU:
+            offset = 7;
+          default:
+            offset = -1;
+        }
+        offsets_and_masks[functionality_idx] = FunctionalityOffsetAndMask(offset, 0);
+#else
         // If the previous functionality was not per-backend, then we can just increment the previous offset.
         // Otherwise, the next offset = previous_offset + num_backends.
         auto next_offset = prev_offset_and_mask.offset +
@@ -368,6 +438,7 @@ initializeFunctionalityOffsetsAndMasks() {
     TORCH_INTERNAL_ASSERT(offsets_and_masks[num_functionality_keys - 1].offset == (num_runtime_entries - 1),
         "num_runtime_entries: ", num_runtime_entries,
         "last_offset: ", offsets_and_masks[num_functionality_keys - 1].offset);
+#endif
     return offsets_and_masks;
 }
 
