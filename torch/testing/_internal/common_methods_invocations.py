@@ -11666,6 +11666,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_dist),
     OpInfo('outer',
            op=torch.outer,
+           aliases=('ger', ),
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_outer,),

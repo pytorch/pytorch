@@ -386,6 +386,7 @@ Tensor class reference
     Tensor.greater_equal_
     Tensor.geometric_
     Tensor.geqrf
+    Tensor.ger
     Tensor.get_device
     Tensor.gt
     Tensor.gt_

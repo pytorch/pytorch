@@ -2830,6 +2830,25 @@ void nnc_aten_outer(
   } catch (...) {
   }
 }
+void nnc_aten_ger(
+    int64_t bufs_num,
+    void** buf_data,
+    int64_t* buf_ranks,
+    int64_t* buf_dims,
+    int64_t* buf_strides,
+    int8_t* buf_dtypes,
+    int64_t args_num,
+    int64_t* extra_args) {
+  std::vector<at::Tensor> tensors = constructTensors(
+      bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
+  at::Tensor& r = tensors[0];
+  const at::Tensor& self = tensors[1];
+  const at::Tensor& vec2 = tensors[2];
+  try {
+    at::ger_out(r, self, vec2);
+  } catch (...) {
+  }
+}
 void nnc_aten_linalg_svdvals(
     int64_t bufs_num,
     void** buf_data,
@@ -3269,6 +3288,7 @@ const static RegisterNNCExternalFunction nnc_inner(
 const static RegisterNNCExternalFunction nnc_outer(
     "nnc_aten_outer",
     nnc_aten_outer);
+const static RegisterNNCExternalFunction nnc_ger("nnc_aten_ger", nnc_aten_ger);
 const static RegisterNNCExternalFunction nnc_linalg_svdvals(
     "nnc_aten_linalg_svdvals",
     nnc_aten_linalg_svdvals);

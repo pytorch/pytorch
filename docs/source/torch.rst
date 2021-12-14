@@ -556,6 +556,7 @@ BLAS and LAPACK Operations
     cholesky_solve
     dot
     geqrf
+    ger
     inner
     inverse
     det
