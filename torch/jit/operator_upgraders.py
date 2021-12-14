@@ -53,9 +53,9 @@ with torch._jit_internal._disable_emit_hooks():
     # type here.
     @no_type_check
     @torch.jit.script
-    def full_names_0_4(size: List[int], fill_value: Union[int, float], *,
-                       dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
-                       pin_memory: Optional[bool]) -> torch.Tensor:
+    def full_0_4(size: List[int], fill_value: Union[int, float], *,
+                 dtype: Optional[int], layout: Optional[int], device: Optional[torch.device],
+                 pin_memory: Optional[bool]) -> torch.Tensor:
         if dtype is None:
             fill_value = float(fill_value)
         return torch.full(size, fill_value, dtype=dtype, layout=layout,
