@@ -102,6 +102,7 @@ std::vector<at::Tensor> constructTensors(
   if (!qdataArg.has_value()) {
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
@@ -127,6 +128,7 @@ std::vector<at::Tensor> constructTensors(
     }
     for (const auto i : c10::irange(buf_data_vec.size())) {
       auto options = at::TensorOptions()
+                         // NOLINTNEXTLINE
                          .dtype(buf_dtypes_vec[i])
                          .layout(at::kStrided)
                          .device(at::kCPU) // TODO: support GPUs too
@@ -321,6 +323,7 @@ void nnc_aten_quantized_conv1d(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto qx = tensors[1].unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
   auto r = convPackedParams->apply(qx, out_qscale, out_qzero);
   r = r.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
@@ -351,6 +354,7 @@ void nnc_aten_quantized_conv2d(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -379,6 +383,7 @@ void nnc_aten_quantized_conv2d_relu(
       reinterpret_cast<ConvPackedParamsBase<2>*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = convPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -407,6 +412,7 @@ void nnc_aten_quantized_linear(
       reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = linearPackedParams->apply(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -435,6 +441,7 @@ void nnc_aten_quantized_linear_relu(
       reinterpret_cast<LinearPackedParamsBase*>(buf_data[2]);
   const double out_qscale = ((double*)extra_args)[3];
   const int64_t out_qzero = extra_args[4];
+  // NOLINTNEXTLINE
   auto r = linearPackedParams->apply_relu(tensors[1], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -469,6 +476,7 @@ void nnc_aten_quantized_add(
 
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
+  // NOLINTNEXTLINE
   auto r = quantized_add(tensors[1], tensors[2], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -499,6 +507,7 @@ void nnc_aten_quantized_mul(
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
   const double out_qscale = ((double*)extra_args)[6];
   const int64_t out_qzero = extra_args[7];
+  // NOLINTNEXTLINE
   auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -524,6 +533,7 @@ void nnc_aten_quantized_mul_scalar(
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
   const double scalar = ((double*)extra_args)[3];
+  // NOLINTNEXTLINE
   auto r = quantized_mul_scalar(tensors[1], scalar);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -548,6 +558,7 @@ void nnc_aten_quantized_relu(
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+  // NOLINTNEXTLINE
   auto r = at::relu(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -580,6 +591,7 @@ void nnc_aten_quantized_sigmoid(
   // is missing as it is not presented in the original model.
   // TODO: Use the same operators or add to the models ops list?
   // auto r = quantized_sigmoid(qx, out_qscale, out_qzero);
+  // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -600,7 +612,7 @@ void nnc_aten_quantized_cat(
     const int64_t qzero = extra_args[3 * i + 1];
     const c10::ScalarType qdtype =
         static_cast<c10::ScalarType>(extra_args[3 * i + 2]);
-    qdata.push_back(
+    qdata.emplace_back(
         std::make_pair(i + 1u, std::make_tuple(qscale, qzero, qdtype)));
   }
   auto tensors = constructTensors(
@@ -698,6 +710,7 @@ void nnc_aten_dequantize(
       buf_dtypes,
       {{1u,
         {qscale, qzero, toQIntType(static_cast<c10::ScalarType>(qdtype))}}});
+  // NOLINTNEXTLINE
   auto r = at::dequantize(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }

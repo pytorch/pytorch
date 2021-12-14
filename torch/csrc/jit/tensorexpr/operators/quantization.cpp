@@ -205,8 +205,6 @@ Tensor computeQuantizePerTensorExternalCall(
     }
     throw malformed_input("Expected quantized dtype");
   }(qdtype);
-  const auto xIsNHWC = isNHWC(x);
-  const auto xIsNLC = isNLC(x);
   auto ResultBuf = [&]() {
     if (isNHWC(x)) {
       return makeQBufHandleNHWC(
