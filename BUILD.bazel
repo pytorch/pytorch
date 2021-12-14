@@ -6,7 +6,7 @@ load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -19,6 +19,7 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
+    "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -118,7 +119,7 @@ py_binary(
     ],
 )
 
-genrule(
+generate_aten(
     name = "generated_cpp",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
@@ -136,6 +137,7 @@ genrule(
         "aten/src/ATen/RegisterQuantizedCPU.cpp",
         "aten/src/ATen/RegisterSparseCPU.cpp",
         "aten/src/ATen/RegisterSparseCsrCPU.cpp",
+        "aten/src/ATen/RegisterZeroTensor.cpp",
         "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
         "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
         "aten/src/ATen/RegisterMeta.cpp",
@@ -161,13 +163,12 @@ genrule(
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
-        "aten/src/ATen/NativeMetaFunctions.h",
+        "aten/src/ATen/MethodOperators.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
-    tools = [":gen"],
+    generator=":gen",
 )
 
 py_library(
@@ -238,6 +239,7 @@ libtorch_python_generated_sources = [
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
+        "torch/csrc/autograd/generated/python_return_types.cpp",
 ]
 
 genrule(
@@ -346,14 +348,6 @@ filegroup(
 )
 
 filegroup(
-    name = "th_srcs",
-    srcs = [
-        "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THTensor.cpp",
-    ],
-)
-
-filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
@@ -384,28 +378,6 @@ filegroup(
         "aten/src/ATen/native/sparse/cuda/SparseCUDATensor.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlas.cpp",
         "aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp",
-    ],
-)
-
-filegroup(
-    name = "thc_srcs_cu",
-    srcs = [
-        "aten/src/THC/THCReduceApplyUtils.cu.cc",
-        "aten/src/THC/THCSleep.cu.cc",
-        "aten/src/THC/THCSortUtils.cu.cc",
-        "aten/src/THC/THCTensor.cu.cc",
-        "aten/src/THC/THCTensorCopy.cu.cc",
-        "aten/src/THC/THCTensorMathScan.cu.cc",
-        "aten/src/THC/THCTensorScatterGather.cu.cc",
-        "aten/src/THC/THCTensorSort.cu.cc",
-        "aten/src/THC/generated/THCTensorSortByte.cu.cc",
-        "aten/src/THC/generated/THCTensorSortChar.cu.cc",
-        "aten/src/THC/generated/THCTensorSortDouble.cu.cc",
-        "aten/src/THC/generated/THCTensorSortFloat.cu.cc",
-        "aten/src/THC/generated/THCTensorSortHalf.cu.cc",
-        "aten/src/THC/generated/THCTensorSortInt.cu.cc",
-        "aten/src/THC/generated/THCTensorSortLong.cu.cc",
-        "aten/src/THC/generated/THCTensorSortShort.cu.cc",
     ],
 )
 
@@ -531,26 +503,16 @@ header_template_rule(
     },
 )
 
-header_template_rule(
-    name = "aten_src_TH_THGeneral",
-    src = "aten/src/TH/THGeneral.h.in",
-    out = "aten/src/TH/THGeneral.h",
-    substitutions = {
-    },
-)
-
 cc_library(
     name = "aten_headers",
     hdrs = [
-        "torch/csrc/WindowsTorchApiMacro.h",
+        "torch/csrc/Export.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
         "aten/src/**/*.h",
         "aten/src/**/*.hpp",
         "aten/src/TH/**/*.cpp",
-        "aten/src/THC/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu.cc",
     ],
     exclude = [
         "aten/src/ATen/Config.h",
@@ -564,7 +526,6 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
-        ":aten_src_TH_THGeneral",
     ],
 )
 
@@ -584,20 +545,6 @@ intern_build_aten_ops(
     deps = [
         ":aten_headers",
         "@sleef",
-        "@fbgemm",
-    ],
-)
-
-cc_library(
-    name = "th",
-    srcs = [
-        ":th_srcs",
-    ],
-    copts = ATEN_COPTS + [
-        "-mavx",
-    ],
-    deps = [
-        ":aten_headers",
         "@fbgemm",
     ],
 )
@@ -629,7 +576,6 @@ cc_library(
         ":ATen_CPU",
         ":aten_headers",
         ":caffe2_for_aten_headers",
-        ":th",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
@@ -690,7 +636,6 @@ cu_library(
     name = "aten_cuda",
     srcs = [
         ":aten_srcs_cu",
-        ":thc_srcs_cu",
     ],
     copts = ATEN_COPTS + torch_cuda_half_options,
     visibility = ["//visibility:public"],

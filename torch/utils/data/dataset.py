@@ -80,7 +80,7 @@ class Dataset(Generic[T_co]):
             function = functools.partial(Dataset.functions[attribute_name], self)
             return function
         else:
-            raise AttributeError
+            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
 
     @classmethod
     def register_function(cls, function_name, function):
@@ -224,7 +224,7 @@ class IterableDataset(Dataset[T_co], metaclass=_DataPipeMeta):
             function = functools.partial(IterableDataset.functions[attribute_name], self)
             return function
         else:
-            raise AttributeError
+            raise AttributeError("'{0}' object has no attribute '{1}".format(self.__class__.__name__, attribute_name))
 
     def __getstate__(self):
         if IterableDataset.getstate_hook is not None:

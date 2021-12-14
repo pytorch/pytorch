@@ -24,7 +24,7 @@ from torch.distributed.distributed_c10d import _get_default_group
 from torch.nn.parameter import Parameter
 
 from .flatten_params_wrapper import FlattenParamsWrapper
-from .wrap import ConfigAutoWrap
+from .wrap import _recursive_wrap
 
 from .utils import (
     _apply_to_tensors,
@@ -32,7 +32,6 @@ from .utils import (
 
 if TYPE_CHECKING:
     from collections import OrderedDict  # noqa: F401
-
 
 
 @dataclass
@@ -123,34 +122,22 @@ class FullyShardedDataParallel(nn.Module):
                 check_fn=lambda mod: not isinstance(mod, FullyShardedDataParallel),
                 err_fn=lambda mod: f"Expected {mod} to NOT be FullyShardedDataParallel if auto_wrap is enabled.",
             )
-            # TODO: refactor recursive_wrap so that it is not dependent on
-            # ConfigAutoWrap.
-            config_auto_wrap = ConfigAutoWrap(
+            _recursive_wrap(
+                module,
                 auto_wrap_policy=fsdp_auto_wrap_policy,
-                wrapper_cls=FullyShardedDataParallel  # type: ignore[arg-type]
+                wrapper_cls=FullyShardedDataParallel,
+                # Note that we have the recursive_wrap skip wrapping for
+                # the outermost (this) module otherwise it will result in a
+                # double-wrap causing issues.
+                only_wrap_children=True,
+                # FSDP arguments follow.
+                process_group=process_group,
+                cpu_offload=cpu_offload,
+                # Note that recursive_wap should not call FSDP with wrapping
+                # enabled, as this recursive call handles all wrapping,
+                # including for nested children.
+                fsdp_auto_wrap_policy=None,
             )
-            with config_auto_wrap:
-                assert ConfigAutoWrap.in_autowrap_context
-                assert ConfigAutoWrap.wrapper_cls == FullyShardedDataParallel
-                assert ConfigAutoWrap.auto_wrap_policy == fsdp_auto_wrap_policy
-                # This will only wrap the children, and then constructor will
-                # run for root module.
-                ConfigAutoWrap.recursive_wrap(
-                    module,
-                    auto_wrap_policy=fsdp_auto_wrap_policy,
-                    # Note that we have the recursive_wrap skip wrapping for
-                    # the outermost (this) module otherwise it will result in a
-                    # double-wrap causing issues.
-                    only_wrap_children=True,
-                    # FSDP arguments follow.
-                    process_group=process_group,
-                    cpu_offload=cpu_offload,
-                    # Note that recursive_wap should not call FSDP with wrapping
-                    # enabled, as this recursive call handles all wrapping,
-                    # including for nested children.
-                    fsdp_auto_wrap_policy=None,
-                )
-            assert not ConfigAutoWrap.in_autowrap_context
 
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
@@ -158,7 +145,6 @@ class FullyShardedDataParallel(nn.Module):
         # device for computation, if module is on GPU, use module.device;
         # if module is on CPU, use current device;
         self.compute_device = _get_default_cuda_device(module)
-        self.compute_dtype = _get_data_type(module)
 
         # Free full params and keep shard only after forward
         self.reshard_after_forward = True
@@ -434,7 +420,15 @@ class FullyShardedDataParallel(nn.Module):
         assert hasattr(p, "_is_sharded") and hasattr(
             p, "_orig_size"
         ), "Parameters should have been sharded during construction."
+        # If _local_shard has been set in the first lazy init and
+        # current parameter is pointed to _local_shard, no need to
+        # set the _local_shard again.
         if hasattr(p, "_local_shard"):
+            assert p.data_ptr() == p._local_shard.data_ptr(), (  # type: ignore[attr-defined]
+                "Parameter storage is changed after first iteration outside FSDP, this use case "
+                "is not supported right now as parameter may be mutated and "
+                "is pointed to a non-sharded tensor or an invalid shard."
+            )
             # If CPU offloading, p._local_shard should have been placed on CPU
             # during its first lazy construction.
             if self.cpu_offload.offload_params:
@@ -467,8 +461,7 @@ class FullyShardedDataParallel(nn.Module):
             # CPU grad shard in pinned memory so that we can do a non-blocking
             # transfer.
             p._cpu_grad = torch.zeros_like(  # type: ignore[attr-defined]
-                p,
-                device=torch.device("cpu")
+                p, device=torch.device("cpu")
             ).pin_memory()
 
         # We also maintain a full-sized parameter of type self.compute_dtype.
@@ -480,7 +473,7 @@ class FullyShardedDataParallel(nn.Module):
             p._full_param_padded = torch.zeros(  # type: ignore[attr-defined]
                 p.numel() * self.world_size,
                 device=self.compute_device,
-                dtype=self.compute_dtype,
+                dtype=p.dtype,
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
@@ -549,8 +542,6 @@ class FullyShardedDataParallel(nn.Module):
         # All-gather full parameters, moving them to compute_device if
         # necessary.
         self._rebuild_full_params()
-        # Wait for all_gather full parameters to finish before computation
-        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
         # Register backward hooks to reshard params and reduce-scatter grads.
         # These need to be re-registered every forward pass in some cases where grad_fn
@@ -613,20 +604,7 @@ class FullyShardedDataParallel(nn.Module):
 
             # All-gather full parameters, moving them to compute device if
             # necessary.
-            # Always wait for all_gather before rebuilding full params, just
-            # in case full params are prefetched, if full params are not prefetched,
-            # it is no-op to wait for all gather stream
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
             self._rebuild_full_params()
-            # Wait for all_gather to finish before computation
-            torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
-
-            # Prefetch previous layer's full params in backward pass
-            if (
-                self._fsdp_graph_order is not None
-                and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
-            ):
-                self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
             self._pre_backward_hook_has_run = True
             # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
@@ -733,6 +711,14 @@ class FullyShardedDataParallel(nn.Module):
         # Wait for all work in the current stream to finish, then start the
         # reductions in post_backward stream.
         self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
+
+        # Prefetch previous layer's full params in backward pass
+        if (
+            self._fsdp_graph_order is not None
+            and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
+        ):
+            self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+
         with torch.cuda.stream(self._streams["post_backward"]):
             orig_grad_data = param.grad.data
 
@@ -922,6 +908,8 @@ class FullyShardedDataParallel(nn.Module):
                     # Set p.data = output_tensor (with padding trimmed)
                     update_p_data(output_tensor)
 
+        torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
+
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
         """Make sure p.grad has the correct size/device, otherwise set it to None."""
@@ -958,15 +946,17 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _use_param_local_shard(self, params: Optional[List[Parameter]] = None) -> None:
         """Use local shard for a list of params. Also implicitly offloads
-           parameters back to CPU if we are CPU offloading."""
+        parameters back to CPU if we are CPU offloading."""
         if params is None:
             params = self.params
         for p in params:
             if self.cpu_offload.offload_params:
                 # Ensure local_shard resides in CPU if we are offloading params.
-                assert (
-                    p._local_shard.device == torch.device("cpu")  # type: ignore[attr-defined]
-                ), "Expected p._local_shard to be on CPU"  # type: ignore[attr-defined]
+                assert p._local_shard.device == torch.device(  # type: ignore[attr-defined]
+                    "cpu"
+                ), (
+                    "Expected p._local_shard to be on CPU"
+                )
             p.data = p._local_shard  # type: ignore[attr-defined]
 
     def _assert_state(self, state: Union[TrainingState_, List[TrainingState_]]) -> None:
@@ -1003,17 +993,6 @@ def _get_default_cuda_device(module: nn.Module) -> torch.device:
     # Fall back to current CUDA device
     return torch.device("cuda")
 
-def _get_data_type(module: nn.Module) -> torch.dtype:
-    """Try to infer data type from module parameters."""
-    try:
-        dtype = next(module.parameters()).dtype
-        return dtype
-    # e.g., if module does not have parameters, it will throw StopIteration,
-    # in this case, instead of raising exception, return torch.float32.
-    except StopIteration:
-        pass
-    # Fall back to torch.float32
-    return torch.float32
 
 def _free_storage(data: torch.Tensor) -> None:
     """Free underlying storage of a Tensor."""

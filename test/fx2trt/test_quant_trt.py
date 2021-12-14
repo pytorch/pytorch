@@ -2,7 +2,7 @@
 
 import torch
 import torch.fx.experimental.fx_acc.acc_tracer as acc_tracer
-from torch.fx.experimental.fx2trt.fx2trt import (
+from torch.fx.experimental.fx2trt import (
     TRTInterpreter,
     InputTensorSpec,
     TRTModule,
