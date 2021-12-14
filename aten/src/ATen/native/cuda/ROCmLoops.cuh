@@ -292,9 +292,9 @@ static void launch_kernel(int64_t N, const func_t& f, array_t data) {
   if (N == 0) {
     return;
   }
-  int64_t grid = (N + block_work_size() - 1) / block_work_size();
+  int64_t grid = (N + block_work_size_dynamic() - 1) / block_work_size_dynamic();
   auto stream = at::cuda::getCurrentCUDAStream();
-  elementwise_kernel<func_t, array_t><<<grid, num_threads(), 0, stream>>>(N, f, data);
+  elementwise_kernel<func_t, array_t><<<grid, num_threads_dynamic(), 0, stream>>>(N, f, data);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
