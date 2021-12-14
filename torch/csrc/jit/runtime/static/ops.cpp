@@ -764,7 +764,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::tanh, aten_tanh, [](Node* n) -> SROperator {
 REGISTER_OPERATOR_FUNCTOR(
     prim::TensorExprDynamicGroup,
     prim_TensorExprDynamicGroup,
-    [](Node* n) -> SROperator {
+    [](Node*) -> SROperator {
       return [](ProcessedNode* p_node) {
         auto graph = p_node->node()->g(attr::Subgraph);
         auto num_outputs = p_node->num_outputs();
