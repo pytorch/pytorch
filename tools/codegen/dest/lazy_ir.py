@@ -49,6 +49,22 @@ def node_ctor_inputs(schema: LazyIrSchema) -> str:
     node_ctor_values = [node_ctor_arg_rvalue_string(arg, schema) for arg in schema.filtered_types()]
     return ",\n                              ".join(node_ctor_values)
 
+def gen_fallback_code(schema: LazyIrSchema, overload_name: str) -> str:
+    """
+    Generate code that falls back to eager conditioned on a predicate
+    """
+    fallback_args = ",\n                ".join([arg.name for arg in schema.filtered_types()])
+    if len(overload_name):
+        aten_op_str = f"ATEN_OP2({schema.aten_name}, {overload_name})"
+    else:
+        aten_op_str = f"ATEN_OP({schema.aten_name})"
+    return f"""
+        if (force_eager_fallback(at::aten::{schema.aten_name})) {{
+            return at::native::call_fallback_fn<&ltc_eager_fallback, {aten_op_str}>::call(
+                {fallback_args}
+            );
+        }}
+"""
 
 def aten_symbol(schema: LazyIrSchema) -> str:
     missing_interned_strings = {
@@ -178,6 +194,7 @@ class GenLazyNativeFuncDefinition:
         scalar_types = schema.filtered_types(values=False, scalars=True)
         returns_length = len(schema.returns)
 
+        fallback_str = gen_fallback_code(schema, overload_name=func.func.name.overload_name)
         value_types_names = ", ".join([f"{t.name}" for t in value_types])
         get_device_str = f"""auto device = torch::lazy::GetBackendDevice({value_types_names});"""
         lazy_tensor_decls_str = lazy_tensor_decls(value_types, self.tensor_class, schema)
@@ -223,6 +240,7 @@ class GenLazyNativeFuncDefinition:
         return [f"""\
     // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
     {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
+        {fallback_str}
         TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
