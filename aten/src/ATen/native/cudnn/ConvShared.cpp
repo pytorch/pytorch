@@ -629,6 +629,7 @@ Tensor cudnn_convolution_add_relu(
 }
 
 REGISTER_CUDA_DISPATCH(cudnn_convolution_backward_stub, &cudnn_convolution_backward);
+REGISTER_CUDA_DISPATCH(cudnn_convolution_transpose_backward_stub, &cudnn_convolution_transpose_backward);
 
 }}
 

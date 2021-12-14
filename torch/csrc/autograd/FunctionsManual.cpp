@@ -4763,6 +4763,22 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   return result;
 }
 
+std::tuple<Tensor, Tensor> _cudnn_convolution_transpose_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups,
+    ::std::array<bool,2> output_mask) {
+  if (!grad_output.defined()) {
+    return std::tuple<Tensor, Tensor>();
+  }
+
+  // Just call the general backward and ignore the bias gradient part.
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::native::convolution_backward(
+      grad_output, self, weight, c10::nullopt, stride, padding, dilation, /*transposed=*/ true,
+      output_padding, groups, {output_mask[0], output_mask[1], false});
+  std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
+  return result;
+}
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
