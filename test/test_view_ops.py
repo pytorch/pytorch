@@ -516,6 +516,9 @@ class TestViewOps(TestCase):
             g_expected = torch.stack([gi if j == i else torch.zeros_like(gi)
                                       for j in range(3)], dim=0)
             self.assertEqual(g, g_expected)
+        # Check with gradcheck
+        stacked = torch.randn(3, 10, 10, dtype=torch.double, requires_grad=True)
+        gradcheck(lambda x: x.unbind(), (stacked,), check_forward_ad=True)
 
     def test_expand_view(self, device) -> None:
         t = torch.ones((5, 1), device=device)

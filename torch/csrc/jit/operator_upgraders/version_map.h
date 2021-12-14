@@ -17,10 +17,6 @@ const static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperat
       {{4,
         "div_Tensor_0_3",
         "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},
-     {"aten::_test_serialization_subcmul",
-      {{3,
-        "_test_serialization_subcmul_0_2",
-        "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"}}},
      {"aten::div.Scalar",
       {{4,
         "div_Scalar_0_3",
@@ -40,11 +36,11 @@ const static std::unordered_map<std::string, std::vector<UpgraderEntry>> kOperat
      {"aten::full.names",
       {{5,
         "full_names_0_4",
-        "aten::full.names(int{} size, Scalar fill_value, *, Dimname{}? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
+        "aten::full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor"}}},
      {"aten::full.out",
       {{5,
         "full_out_0_4",
-        "aten::full.out(int{} size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
+        "aten::full.out(int[] size, Scalar fill_value, *, Tensor(a!) out) -> Tensor(a!)"}}}});
 
 inline std::unordered_map<std::string, std::vector<UpgraderEntry>>
 get_operator_version_map() {

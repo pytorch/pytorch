@@ -31,14 +31,12 @@ inline c10::optional<UpgraderEntry> findUpgrader(
 }
 
 inline bool isOpEntryCurrent(
-    std::vector<UpgraderEntry> upgraders_for_schema,
+    const std::vector<UpgraderEntry>& upgraders_for_schema,
     size_t current_version) {
-
   for (const auto& entry: upgraders_for_schema) {
     if (entry.bumped_at_version > current_version) {
       return false;
     }
-
   }
   return true;
 }
