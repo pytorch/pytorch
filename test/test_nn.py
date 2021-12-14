@@ -13520,6 +13520,15 @@ class TestNNDeviceType(NNTestCase):
             input = input.bfloat16()
             self._test_dropout(nn.Dropout, device, input)
 
+    def _test_dropoutNd_no_batch(self, dropout, input):
+        with freeze_rng_state():
+            res_no_batch = dropout(input)
+
+        with freeze_rng_state():
+            res_batched = dropout(input.unsqueeze(0)).squeeze(0)
+
+        self.assertEqual(res_no_batch, res_batched)
+
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
@@ -13532,9 +13541,15 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout2d, device)
         self._test_dropout_discontiguous(nn.Dropout2d, device, memory_format=torch.channels_last)
 
+        with self.assertRaisesRegex(AssertionError,
+                                    r"Input should be 3-D \(unbatched\) or 4-D \(batched\) but received"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, 2, 2, device=device))
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
+
         # no batch dims
-        input = torch.empty(20, 64, 64)
-        self._test_dropout(nn.Dropout2d, device, input)
+        input = torch.rand(50, 2, 2, device=device)
+        dropout2d = nn.Dropout2d(p=0.5)
+        self._test_dropoutNd_no_batch(dropout2d, input)
 
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
@@ -13548,9 +13563,15 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropout_discontiguous(nn.Dropout3d, device)
         self._test_dropout_discontiguous(nn.Dropout3d, device, memory_format=torch.channels_last)
 
+        with self.assertRaisesRegex(AssertionError,
+                                    r"Input should be 4-D \(unbatched\) or 5-D \(batched\) but received"):
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, 2, 2, 2, device=device))
+            nn.Dropout3d(p=0.5)(torch.rand(1, 2, 2, device=device))
+
         # no batch dims
-        input = torch.empty(50, 20, 64, 64)
-        self._test_dropout(nn.Dropout3d, device, input)
+        input = torch.rand(50, 2, 2, 2, device=device)
+        dropout3d = nn.Dropout3d(p=0.5)
+        self._test_dropoutNd_no_batch(dropout3d, input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)

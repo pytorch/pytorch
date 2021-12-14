@@ -1303,7 +1303,14 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         return handle_torch_function(dropout2d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
-    return _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    inp_dim = input.dim()
+    msg = f"dropout2d: Input should be 3-D (unbatched) or 4-D (batched) but received {inp_dim}-D tensor"
+    assert inp_dim in (3, 4), msg
+    is_batched = inp_dim == 4
+    if not is_batched:
+        input = input.unsqueeze(0)
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    return result if is_batched else result.squeeze(0)
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
@@ -1321,13 +1328,18 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
         training: apply dropout if is ``True``. Default: ``True``
         inplace: If set to ``True``, will do this operation in-place. Default: ``False``
     """
-    # This is 100% the same code as dropout2d. We duplicate this code so that
-    # stack traces are not confusing.
     if has_torch_function_unary(input):
         return handle_torch_function(dropout3d, (input,), input, p=p, training=training, inplace=inplace)
     if p < 0.0 or p > 1.0:
         raise ValueError("dropout probability has to be between 0 and 1, " "but got {}".format(p))
-    return _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    inp_dim = input.dim()
+    msg = f"dropout3d: Input should be 4-D (unbatched) or 5-D (batched) but received {inp_dim}-D tensor"
+    assert inp_dim in (4, 5), msg
+    is_batched = inp_dim == 5
+    if not is_batched:
+        input = input.unsqueeze(0)
+    result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
+    return result if is_batched else result.squeeze(0)
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
