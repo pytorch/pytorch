@@ -40,10 +40,27 @@ std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rul
     const Tensor& self, optional<int64_t> self_bdim,
     const Tensor& other, optional<int64_t> other_bdim,
     int64_t self_num_batch_dims) {
-  TORCH_CHECK(!other_bdim.has_value(),
-      "NYI: vmap over jvp of the primal. Please file an issue.");
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::_new_zeros_with_same_feature_meta(self, other, self_num_batch_dims + 1);
+  // The "self, other" naming is too confusing
+  // What this function really says is "create a new tangent for this base".
+  const auto& base = other;
+  const auto& base_bdim = other_bdim;
+  const auto& tangent = self;
+  const auto& tangent_bdim = self_bdim;
+
+  // Three case:
+  //          Case 1  Case 2  Case 3
+  // base        [6]  [B, 6]  [B, 6]
+  // tangent  [B, 5]     [5]  [B, 5]
+
+  // Case 2 & 3: it doesn't matter at all what `tangent` is.
+  if (base_bdim) {
+    const auto result = at::_new_zeros_with_same_feature_meta(tangent, base, self_num_batch_dims);
+    return std::make_tuple(result, base_bdim);
+  }
+
+  // Case 1:
+  auto tangent_ = moveBatchDimToFront(tangent, tangent_bdim);
+  auto result = at::_new_zeros_with_same_feature_meta(tangent_, base, self_num_batch_dims + 1);
   return std::make_tuple(result, 0);
 }
 

@@ -30,6 +30,7 @@ base_names = {
     'test_op_has_batch_rule_',
     'test_jvp_',
     'test_vmapjvp_',
+    'test_vmapjvpall_',
     'test_decomposition_',
     'test_make_fx_',
 }
