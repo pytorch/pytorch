@@ -186,11 +186,11 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
-  VLOG(1) << "StaticModuleOptions: cleanup_activations "
-          << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory "
-          << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors;
+  LOG(INFO) << "StaticModuleOptions: cleanup_activations "
+            << opts.cleanup_activations << ", enable_out_variant "
+            << opts.enable_out_variant << ", optimize_memory "
+            << opts.optimize_memory << ", manage_output_tensors "
+            << opts.manage_output_tensors;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -519,9 +519,9 @@ StaticModule::StaticModule(
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
 
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + num_inputs();
-  const auto values_index_offset = constants_index_offset + constants().size();
+  const auto inputs_index_offset = inputs_offset();
+  const auto constants_index_offset = constants_offset();
+  const auto values_index_offset = intermediate_values_offset();
 
   // Map node_idx to index offset in values_. Can't reserve space
   // because we don't know how many non-constant nodes there are yet.
@@ -595,6 +595,15 @@ StaticModule::StaticModule(
     }
     node_idx++;
   }
+
+  num_intermediate_values_ = std::accumulate(
+      nodes_.begin(),
+      nodes_.end(),
+      0,
+      [](uint32_t sum, const ProcessedNode& pnode) {
+        return sum + pnode.num_outputs();
+      });
+
   for (auto& pnode : nodes_) {
     if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
@@ -723,17 +732,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
-  const auto total_num_node_outputs = std::accumulate(
-      nodes_.begin(),
-      nodes_.end(),
-      0,
-      [](uint32_t sum, const ProcessedNode& pnode) {
-        return sum + pnode.num_outputs();
-      });
-  values_.resize(
-      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
+  values_.resize(sm.total_num_values());
+  const auto constants_index_offset = sm.constants_offset();
   const auto constants_begin_it = values_.begin() + constants_index_offset;
   const auto constants_end_it = constants_begin_it + sm.constants().size();
   std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
@@ -1013,7 +1013,7 @@ StaticRuntime::Deallocator::~Deallocator() {
   // Assume cleanup cannot throw.
   cleanupImpl();
 #ifndef NDEBUG
-  runtime_.check_for_memory_leak(false);
+  runtime_.check_for_memory_leak(/*output_returned*/ false);
 #endif
 }
 
@@ -1074,8 +1074,11 @@ c10::IValue StaticRuntime::run_impl(
   if (static_module_.num_outputs() > 1) {
     return move_outputs_to_tuple(static_module_.num_outputs());
   }
+
+  DCHECK(check_for_memory_leak(/*output_returned*/ false));
   // The exact output tensor should never be managed.
   DCHECK(!isManagedOutputTensor(*outputs_[0]));
+
   // use move here. Otherwise, clean up outputs_[0] explicitly
   return std::move(*outputs_[0]);
 }
@@ -1437,9 +1440,7 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
         output = move_outputs_to_tuple(static_module_.num_outputs());
       }
 
-#ifndef NDEBUG
-      check_for_memory_leak(false);
-#endif
+      DCHECK(check_for_memory_leak(/*output_returned*/ false));
 
       // use move here. Otherwise, clean up outputs_[0] explicitly
       output = std::move(*outputs_[0]);
@@ -1478,9 +1479,9 @@ StaticRuntime::IndividualMetrics StaticRuntime::benchmark_individual_ops(
   return results;
 }
 
-void StaticRuntime::check_for_memory_leak(bool output_returned) {
+bool StaticRuntime::check_for_memory_leak(bool output_returned) {
   if (!static_module_.opts().cleanup_activations) {
-    return;
+    return true;
   }
 
   // check for inputs
@@ -1531,6 +1532,7 @@ void StaticRuntime::check_for_memory_leak(bool output_returned) {
     }
   }
   VLOG(1) << "Finished checking for memory leak";
+  return true;
 }
 
 void StaticRuntime::deallocateOutputTensors() {
