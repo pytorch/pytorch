@@ -179,8 +179,8 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
-    xfail('nn.functional.dropout'),  # randomness testing artifact
-    xfail('nn.functional.rrelu'),  # randomness testing artifact
+    skip('nn.functional.dropout'),  # randomness testing artifact
+    skip('nn.functional.rrelu'),  # randomness testing artifact
     xfail('linalg.cholesky'),
     xfail('linalg.inv'),
     xfail('linalg.matrix_power'),
