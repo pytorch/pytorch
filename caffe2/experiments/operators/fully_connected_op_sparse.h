@@ -35,7 +35,7 @@ template <int N>
 const std::vector<int64_t>& shape(Shape<N> vs) {
   static thread_local std::vector<int64_t> cache;
   cache.resize(vs.size());
-  for (auto i = 0; i < vs.size(); ++i) {
+  for (const auto i : c10::irange(vs.size())) {
     cache[i] = vs[i];
   }
   return cache;
@@ -71,8 +71,8 @@ void trans_mat<float, CPUContext>(
     int m,
     int n,
     CPUContext* /*context*/) {
-  for (int i = 0; i < m; ++i) {
-    for (int j = 0; j < n; ++j) {
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
       t[j * m + i] = o[i * n + j];
     }
   }

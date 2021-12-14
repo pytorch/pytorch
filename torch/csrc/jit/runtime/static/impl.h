@@ -269,6 +269,18 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
+  size_t num_constants() const {
+    return constants_.size();
+  }
+
+  size_t num_intermediate_values() const {
+    return num_intermediate_values_;
+  }
+
+  size_t total_num_values() const {
+    return num_inputs() + num_constants() + num_intermediate_values();
+  }
+
   C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
   }
@@ -330,6 +342,18 @@ class TORCH_API StaticModule {
     return module_.has_value();
   }
 
+  size_t inputs_offset() const {
+    return 0;
+  }
+
+  size_t constants_offset() const {
+    return inputs_offset() + num_inputs();
+  }
+
+  size_t intermediate_values_offset() const {
+    return constants_offset() + num_constants();
+  }
+
   StaticRuntime& runtime();
 
  private:
@@ -361,6 +385,8 @@ class TORCH_API StaticModule {
   FastSet<const Value*> managed_output_tensor_values_{};
   FastSet<const Value*> leaked_values_{};
   ManagedTensorRanges managed_tensor_ranges_{};
+
+  size_t num_intermediate_values_ = 0;
 };
 
 class TORCH_API StaticRuntime {
