@@ -65,7 +65,6 @@ class ObservedStandaloneGraphModule(ObservedGraphModule):
 def is_observed_standalone_module(module: Any) -> bool:
     return isinstance(module, ObservedStandaloneGraphModule)
 
-
 def _save_packed_weight(self, destination, prefix, keep_vars):
     for attr_name in dir(self):
         if "_packed_weight" in attr_name and \
@@ -105,4 +104,4 @@ class QuantizedGraphModule(GraphModule):
     def __deepcopy__(self, memo):
         fake_mod = torch.nn.Module()
         fake_mod.__dict__ = copy.deepcopy(self.__dict__)
-        return ObservedStandaloneGraphModule(fake_mod, self.graph, self.preserved_attr_names)
+        return QuantizedGraphModule(fake_mod, self.graph, self.preserved_attr_names)
