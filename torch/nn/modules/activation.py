@@ -965,12 +965,12 @@ class MultiheadAttention(Module):
             or :math:`(N, L, E_q)` when ``batch_first=True``, where :math:`L` is the target sequence length,
             :math:`N` is the batch size, and :math:`E_q` is the query embedding dimension ``embed_dim``.
             Queries are compared against key-value pairs to produce the output. See "Attention Is All You Need" for more details.
-        key: Key embeddings of shape :math:`(S, E_k)` for unbatched input, :math:`(S, N, E_k)` when ``batch_first=False`` or :math:`(N, S, E_k)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_k` is the key embedding dimension ``kdim``. See "Attention Is All You Need" for more details.
-        value: Value embeddings of shape :math:`(S, E_v)` for unbatched input, :math:`(S, N, E_v)` when ``batch_first=False`` or :math:`(N, S, E_v)` when
-            ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size, and
-            :math:`E_v` is the value embedding dimension ``vdim``. See "Attention Is All You Need" for more details.
+        key: Key embeddings of shape :math:`(S, E_k)` for unbatched input, :math:`(S, N, E_k)` when ``batch_first=False``
+            or :math:`(N, S, E_k)` when ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size,
+            and :math:`E_k` is the key embedding dimension ``kdim``. See "Attention Is All You Need" for more details.
+        value: Value embeddings of shape :math:`(S, E_v)` for unbatched input, :math:`(S, N, E_v)` when ``batch_first=False``
+            or :math:`(N, S, E_v)` when ``batch_first=True``, where :math:`S` is the source sequence length, :math:`N` is the batch size,
+            and :math:`E_v` is the value embedding dimension ``vdim``. See "Attention Is All You Need" for more details.
         key_padding_mask: If specified, a mask of shape :math:`(N, S)` indicating which elements within ``key``
             to ignore for the purpose of attention (i.e. treat as "padding"). For unbatched `query`, shape should be :math:`(S)`.
             Binary and byte masks are supported.
@@ -991,7 +991,8 @@ class MultiheadAttention(Module):
     Outputs:
         - **attn_output** - Attention outputs of shape :math:`(L, E)` when input is unbatched,
           :math:`(L, N, E)` when ``batch_first=False`` or :math:`(N, L, E)` when ``batch_first=True``,
-          where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the embedding dimension ``embed_dim``.
+          where :math:`L` is the target sequence length, :math:`N` is the batch size, and :math:`E` is the
+          embedding dimension ``embed_dim``.
         - **attn_output_weights** - Attention output weights of shape :math:`(L, S)` when input is unbatched or :math:`(N, L, S)`,
           where :math:`N` is the batch size, :math:`L` is the target sequence length, and :math:`S` is the source sequence length.
           Only returned when ``need_weights=True``.
