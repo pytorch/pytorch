@@ -43,8 +43,12 @@ struct OldOpsReplacer {
           }
           auto upgrader_entry_val = upgrader_entry.value();
           auto upgrader_name = upgrader_entry_val.upgrader_name;
-          auto upgrader_graph_entry = upgraders_graph.find(upgrader_name);
-          TORCH_INTERNAL_ASSERT(upgrader_graph_entry != upgraders_graph.end(), "Corresponding upgrader graph for ", upgrader_name, " must exist");
+          auto upgrader_graph_entry = dump_upgraders_map().find(upgrader_name);
+          TORCH_INTERNAL_ASSERT(
+              upgrader_graph_entry != dump_upgraders_map().end(),
+              "Corresponding upgrader graph for ",
+              upgrader_name,
+              " must exist");
           Graph upgrader_graph;
           parseIR(upgrader_graph_entry->second, &upgrader_graph);
           // inline the upgrader function body
