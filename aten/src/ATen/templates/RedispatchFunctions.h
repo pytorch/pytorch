@@ -14,6 +14,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Context.h>
 #include <ATen/TracerMode.h>
+#include <ATen/Operators.h>
 
 namespace at {
 
