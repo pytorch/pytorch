@@ -229,7 +229,7 @@ struct DeviceTypePropagationPass {
     processBlock(false_block);
 
     mergeAndApplyTensorProps(
-        true_block->inputs(), false_block->outputs(), node->outputs());
+        true_block->outputs(), false_block->outputs(), node->outputs());
   }
   // for efficiency
   void processAtenOps(Node* n) {
