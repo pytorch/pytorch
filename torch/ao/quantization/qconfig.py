@@ -278,6 +278,9 @@ def assert_valid_qconfig(qconfig: Optional[Union[QConfig, QConfigDynamic]],
         isinstance(mod, torch.nn.ConvTranspose2d) or
         isinstance(mod, torch.nn.ConvTranspose3d))
     if is_conv_transpose_mod:
+        if qconfig.weight is None:
+            # for now, we assume that any qconfig for ConvTranspose without a weight is valid
+            return
         example_observer = qconfig.weight()
         is_per_channel = (
             isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
