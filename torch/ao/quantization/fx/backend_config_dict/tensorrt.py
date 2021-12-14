@@ -1,5 +1,7 @@
 import torch
 from .observation_type import ObservationType
+import torch.nn.intrinsic as nni
+from ...fuser_method_mappings import reverse2
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend
@@ -42,23 +44,29 @@ def get_tensorrt_backend_config_dict():
     # TODO: maybe make "pattern" to be a list of patterns
     # TODO: current patterns are the ones after fusion, we will want to expose fusion
     # here as well in the future, maybe we need to
-    # linear_relu_mm_config = {
-    #     "pattern": (torch.nn.ReLU, torch.nn.Linear),
-    #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-    #     "dtype_configs": [
-    #         weighted_op_qint8_dtype_config,
-    #     ]
-    # }
-    # linear_relu_mf_config = {
-    #     "pattern": (torch.nn.functional.relu, torch.nn.Linear),
-    #     "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
-    #     "dtype_configs": [
-    #         weighted_op_qint8_dtype_config,
-    #     ]
-    # }
+    linear_relu_mm_config = {
+        "pattern": (torch.nn.ReLU, torch.nn.Linear),
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "fuser_method": reverse2(nni.LinearReLU),
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+    }
+    linear_relu_mf_config = {
+        "pattern": (torch.nn.functional.relu, torch.nn.Linear),
+        "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+        "dtype_configs": [
+            weighted_op_qint8_dtype_config,
+        ],
+        "fuser_method": reverse2(nni.LinearReLU),
+        "root_module": torch.nn.Linear,
+        "reference_quantized_module_for_root": torch.nn.quantized._reference.Linear,
+    }
 
     linear_relu_fused_config = {
-        "pattern": torch.nn.intrinsic.LinearReLU,
+        "pattern": nni.LinearReLU,
         "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
         "dtype_configs": [
             weighted_op_qint8_dtype_config,
@@ -135,6 +143,8 @@ def get_tensorrt_backend_config_dict():
         "configs": [
             linear_module_config,
             linear_relu_fused_config,
+            linear_relu_mm_config,
+            linear_relu_mf_config,
             conv_module_config,
             # conv1d is not supported in fx2trt
             # conv_relu_1d_fused_config,
