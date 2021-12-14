@@ -179,6 +179,8 @@ def is_inplace(op, variant):
 
 
 vjp_fail = {
+    xfail('nn.functional.dropout'),  # randomness testing artifact
+    xfail('nn.functional.rrelu'),  # randomness testing artifact
     xfail('linalg.cholesky'),
     xfail('linalg.inv'),
     xfail('linalg.matrix_power'),
@@ -234,6 +236,9 @@ class TestOperators(TestCase):
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_jvp', set({
+        xfail('nn.functional.dropout'),  # randomness testing artifact; not actually a problem
+        xfail('nn.functional.rrelu'),  # randomness testing artifact; not actually a problem
+
         # See https://github.com/pytorch/pytorch/issues/69034
         # RuntimeError: expected scalar type double but found float
         xfail('minimum'),
