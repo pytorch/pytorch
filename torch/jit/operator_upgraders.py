@@ -86,9 +86,7 @@ def collect_available_upgraders():
     # in the torch/csrc/operator_upgraders/version_map.h
 
     entries = globals()
-    # ignore test operators
-    version_map = {k : v for k, v in torch._C._get_operator_version_map().items()
-                   if not k.startswith("aten::_test")}
+    version_map = torch._C._get_operator_version_map()
 
     # 1. Check if everything in version_map.h is defined here
     available_upgraders_in_version_map = set()
@@ -103,11 +101,11 @@ def collect_available_upgraders():
     for entry in entries:
         if isinstance(entries[entry], torch.jit.ScriptFunction):
             if entry not in available_upgraders_in_version_map:
-                raise AssertionError("The upgrader {} is not registered in the version_map.h".format(entry))
+                raise AssertionError("The upgrader {} is not registered in the version_map.h")
 
     return available_upgraders_in_version_map
 
-def generate_bytecode(file_name):
+def generate_bytecode() -> List:
     upgrader_set = collect_available_upgraders()
     yaml_content = []
     for upgrader_name in upgrader_set:
@@ -115,9 +113,7 @@ def generate_bytecode(file_name):
         upgrader_bytecode = torch._C._compile_graph_to_code_table(upgrader_name, upgrader_graph)
         entry = {upgrader_name: format_bytecode(upgrader_bytecode)}
         yaml_content.append(entry)
-
-    with open(file_name, 'w') as stream:
-        yaml.dump(yaml_content, stream)
+    return yaml_content
 
 def populate_upgraders_map():
     upgrader_set = collect_available_upgraders()
