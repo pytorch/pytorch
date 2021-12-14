@@ -519,9 +519,9 @@ StaticModule::StaticModule(
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
 
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + num_inputs();
-  const auto values_index_offset = constants_index_offset + constants().size();
+  const auto inputs_index_offset = inputs_offset();
+  const auto constants_index_offset = constants_offset();
+  const auto values_index_offset = intermediate_values_offset();
 
   // Map node_idx to index offset in values_. Can't reserve space
   // because we don't know how many non-constant nodes there are yet.
@@ -595,6 +595,15 @@ StaticModule::StaticModule(
     }
     node_idx++;
   }
+
+  num_intermediate_values_ = std::accumulate(
+      nodes_.begin(),
+      nodes_.end(),
+      0,
+      [](uint32_t sum, const ProcessedNode& pnode) {
+        return sum + pnode.num_outputs();
+      });
+
   for (auto& pnode : nodes_) {
     if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
@@ -723,17 +732,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
-  const auto total_num_node_outputs = std::accumulate(
-      nodes_.begin(),
-      nodes_.end(),
-      0,
-      [](uint32_t sum, const ProcessedNode& pnode) {
-        return sum + pnode.num_outputs();
-      });
-  values_.resize(
-      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
+  values_.resize(sm.total_num_values());
+  const auto constants_index_offset = sm.constants_offset();
   const auto constants_begin_it = values_.begin() + constants_index_offset;
   const auto constants_end_it = constants_begin_it + sm.constants().size();
   std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
