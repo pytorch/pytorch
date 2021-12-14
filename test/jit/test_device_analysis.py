@@ -143,16 +143,3 @@ class TestDeviceAnalysis(JitTestCase):
             (self.cuda, self.cuda),
         ]
         self.zerodim_test_core(device_pairs)
-
-    def test_custom_device_op(self):
-        # Test both of the custom functions and check that the devicetype is
-        # correctly applied
-        def set_cuda(x):
-            return x.cuda()
-
-        def set_cpu(x):
-            return x.cpu()
-
-        for fn, out_device in ((set_cuda, self.cuda), (set_cpu, self.cpu)):
-            for in_device in self.device_types:
-                self.assert_device_equal(fn, [in_device], out_device)

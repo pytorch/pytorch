@@ -189,27 +189,10 @@ struct DeviceTypePropagationPass {
     if (!op) {
       return;
     }
-    auto prop_fn = device_prop_registry_->find(*op);
-    if (prop_fn) {
-      PropRule rule = *prop_fn;
-      changed_ |= rule(n);
-      return;
-    }
     changed_ |= defaultDeviceProp(n);
   }
 
-  void buildRuleRegistry() {
-    // building a registry for all of the custom Device Type rules
-    device_prop_registry_ = std::make_unique<OperatorMap<PropRule>>();
 
-    /*
-    device_prop_registry_->insert(
-        *nn_ops_first_input_preserving(), setIfAllDeviceTypeMatch);
-    device_prop_registry_->insert(
-        *ops_one_tensor_in_shape_transform(), setIfAllDeviceTypeMatch);
-    */
-  }
-  std::unique_ptr<OperatorMap<PropRule>> device_prop_registry_;
   std::shared_ptr<Graph> graph_;
   bool changed_ = false;
 };
