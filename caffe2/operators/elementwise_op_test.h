@@ -62,7 +62,7 @@ void elementwiseAnd() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), N);
     std::vector<bool> result{true, false, false, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -83,7 +83,7 @@ void elementwiseAnd() {
     EXPECT_EQ(Z.numel(), M * N);
     std::vector<bool> result{
         true, false, false, false, true, false, false, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -108,7 +108,7 @@ void elementwiseOr() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), N);
     std::vector<bool> result{true, true, true, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -128,7 +128,7 @@ void elementwiseOr() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), M * N);
     std::vector<bool> result{true, true, true, false, true, true, true, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -153,7 +153,7 @@ void elementwiseXor() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), N);
     std::vector<bool> result{false, true, true, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -174,7 +174,7 @@ void elementwiseXor() {
     EXPECT_EQ(Z.numel(), M * N);
     std::vector<bool> result{
         false, true, true, false, false, true, true, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -198,7 +198,7 @@ void elementwiseNot() {
   caffe2::Tensor Y(blob->Get<caffe2::Tensor>(), caffe2::CPU);
   EXPECT_EQ(Y.numel(), N);
   std::vector<bool> result{false, true};
-  for (size_t i = 0; i < Y.numel(); ++i) {
+  for (const auto i : c10::irange(Y.numel())) {
     EXPECT_EQ(Y.template data<bool>()[i], result[i]);
   }
 }
@@ -220,7 +220,7 @@ void elementwiseEQ() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), N);
     std::vector<bool> result{false, true, false, true};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -237,7 +237,7 @@ void elementwiseEQ() {
     caffe2::Tensor Z(blob->Get<caffe2::Tensor>(), caffe2::CPU);
     EXPECT_EQ(Z.numel(), N);
     std::vector<bool> result{true, true, false, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
@@ -257,7 +257,7 @@ void elementwiseEQ() {
     EXPECT_EQ(Z.numel(), M * N);
     std::vector<bool> result{
         true, false, false, true, false, true, true, false};
-    for (size_t i = 0; i < Z.numel(); ++i) {
+    for (const auto i : c10::irange(Z.numel())) {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
