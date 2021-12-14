@@ -49,6 +49,7 @@
 // where & and * represent the C-style address-of and indirection operations.
 
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 
 #include <ATen/ATen.h>

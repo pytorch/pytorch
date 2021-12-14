@@ -219,6 +219,11 @@ class BytecodeDeserializer final {
   std::unique_ptr<PyTorchStreamReader> reader_{};
   c10::optional<at::Device> device_;
   uint64_t module_load_options_;
+  // From `version` or `.data/version` in model.ptl and it's compute
+  // dynamically. It's used for finding the minimum required runtime to run all
+  // operators from the given model. If it's less than the current runtime,
+  // upgrader will be applied at loading stage.
+  uint64_t operator_version_;
 };
 
 BytecodeDeserializer::BytecodeDeserializer(
@@ -371,16 +376,24 @@ void BytecodeDeserializer::parseMethods(
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
 
-    parseInstructions(
-        function_name,
-        std::move(ins_list),
-        debug_handles_m_tuple,
-        function.get());
-
+    // 1. First pass all operators from models
     parseOperators(
         std::move(ops_list),
         model_version,
         module_load_options_,
+        function.get());
+
+    // 2. Decides if upgrader is needed
+    bool use_upgrader =
+        (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
+
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    parseInstructions(
+        function_name,
+        std::move(ins_list),
+        debug_handles_m_tuple,
         function.get());
 
     parseConstants(consts_list, function.get());
@@ -443,6 +456,7 @@ mobile::Module BytecodeDeserializer::deserialize(
             .elements();
     has_debug_handles = true;
   }
+  operator_version_ = reader_->version();
   parseMethods(std::move(bvals), std::move(debug_handles), *mcu);
   auto m = mobile::Module(readArchive("data", mcu).toObject(), mcu);
   m.setHasDebugHandles(has_debug_handles);
