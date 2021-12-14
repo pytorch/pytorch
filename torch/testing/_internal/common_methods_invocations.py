@@ -9758,7 +9758,11 @@ op_db: List[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.bfloat16, torch.float16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   safe_casts_outputs=True),
+                   safe_casts_outputs=True,
+                   skips=(
+                       # Dispatch stub: unsupported device typemeta
+                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
+                   )),
     BinaryUfuncInfo('floor_divide',
                     dtypes=all_types_and(torch.half, torch.bfloat16),
                     sample_inputs_func=sample_inputs_binary_pwise,
@@ -10002,6 +10006,8 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            decorators=[skipCUDAIfNoMagma, skipCUDAIfRocm, skipCPUIfNoLapack],
            skips=(
+               # NotImplementedError: the derivative for 'eigh' with complex inputs is not implemented.
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
                # Gradcheck for complex is not implemented yet
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_forward_mode_AD', dtypes=complex_types()),
                # Pre-existing condition; Needs to be fixed
@@ -14201,11 +14207,7 @@ op_db: List[OpInfo] = [
                    dtypes=all_types_and(torch.bool),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
-                   safe_casts_outputs=True,
-                   skips=(
-                       # Dispatch stub: unsupported device typemeta
-                       DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='meta'),
-                   )),
+                   safe_casts_outputs=True),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else _NOTHING,
                    aliases=('special.erf', ),
