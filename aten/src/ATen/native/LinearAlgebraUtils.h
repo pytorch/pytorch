@@ -30,6 +30,14 @@ static char to_blas(TransposeType trans) {
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
+static inline c10::MaybeOwned<Tensor> expect_resolved_conj(const Tensor& tensor) {
+  if (tensor.is_conj()) {
+    return c10::MaybeOwned<Tensor>::owned(tensor.resolve_conj());
+  } else {
+    return c10::MaybeOwned<Tensor>::borrowed(tensor);
+  }
+}
+
 /*
  * Clones a Tensor so that the following conditions hold:
  * If we think of a Tensor of having size (B, M, N), where B is any number

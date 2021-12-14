@@ -766,10 +766,12 @@ class ChainedScheduler(_LRScheduler):
                 )
         self._schedulers = list(schedulers)
         self.optimizer = schedulers[0].optimizer
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def step(self):
         for scheduler in self._schedulers:
             scheduler.step()
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
