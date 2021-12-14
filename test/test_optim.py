@@ -279,7 +279,11 @@ class TestOptim(TestCase):
         real_param = torch.view_as_real(complex_param).detach().clone().requires_grad_()
         complex_opt = optimizer_constructor(complex_param)
         real_opt = optimizer_constructor(real_param)
-
+        #Handles https://github.com/pytorch/pytorch/issues/69698
+        if 'Adadelta' in str(type(complex_opt)):
+            atol, rtol = 2e-2, 1.3e-6
+        else:
+            atol, rtol = None, None
         for i in range(3):
             complex_param.grad = torch.randn_like(complex_param)
             real_param.grad = torch.view_as_real(complex_param.grad)
@@ -287,7 +291,7 @@ class TestOptim(TestCase):
             complex_opt.step()
             real_opt.step()
 
-            self.assertEqual(torch.view_as_real(complex_param), real_param)
+            self.assertEqual(torch.view_as_real(complex_param), real_param, atol=atol, rtol=rtol)
 
     def _build_params_dict(self, weight, bias, **kwargs):
         return [{'params': [weight]}, dict(params=[bias], **kwargs)]
