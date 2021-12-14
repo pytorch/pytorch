@@ -42,8 +42,8 @@ inline bool isOpEntryCurrent(
 }
 
 inline bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
-  auto it = get_operator_version_map().find(name);
-  if (it != get_operator_version_map().end()) {
+  auto it = kOperatorVersionMap.find(name);
+  if (it != kOperatorVersionMap.end()) {
     return isOpEntryCurrent(it->second, current_version);
   }
   return true;
