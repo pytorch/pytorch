@@ -97,7 +97,6 @@ TESTS = discover_tests(
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
-        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
@@ -204,6 +203,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -216,6 +216,7 @@ ROCM_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
@@ -353,6 +354,7 @@ DISTRIBUTED_TESTS = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
@@ -911,7 +913,7 @@ def get_selected_tests(options):
 
         # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
         # This below code should be removed once this issue is solved
-        if LooseVersion(torch.version.cuda) >= "11.5":
+        if LooseVersion(torch.version.cuda) >= LooseVersion("11.5"):
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
             WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
