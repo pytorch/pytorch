@@ -63,6 +63,7 @@ ALLOW_LIST = [
     ("aten::linalg_svd_out", datetime.date(2022, 1, 31)),
     ("aten::linalg_svdvals", datetime.date(2022, 1, 31)),
     ("aten::linalg_svdvals_out", datetime.date(2022, 1, 31)),
+    ("aten::_svd_helper", datetime.date(2022, 1, 31)),
     ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
     ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
