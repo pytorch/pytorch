@@ -10241,8 +10241,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_autograd=False,
                    skips=(
-                       # Pre-existing condition; Needs to be fixed
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
                        # >>> t = torch.randn(3)
@@ -10602,8 +10600,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_and does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10614,8 +10610,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_or does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10626,8 +10620,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_xor does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -11876,8 +11868,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
            sample_inputs_func=sample_inputs_pow,
            supports_forward_ad=True,
-           skips=(
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),),
+           ),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -12993,6 +12984,8 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           # An `out=` variant exists but is not exposed to the Python API
+           # see: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
            supports_out=False,
            supports_forward_ad=True,
            # https://github.com/pytorch/pytorch/issues/66357
