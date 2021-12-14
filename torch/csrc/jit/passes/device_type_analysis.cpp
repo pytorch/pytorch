@@ -218,7 +218,7 @@ struct DeviceTypePropagationPass {
 
 // This analysis propagates input device types (if any) throughout the
 // graph.
-bool DeviceTypePropagation(std::shared_ptr<Graph>& graph) {
+bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
   DeviceTypePropagationPass tp = DeviceTypePropagationPass(graph);
   bool changed = tp.run();
   if (changed) {
