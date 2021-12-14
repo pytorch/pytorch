@@ -9,7 +9,7 @@ namespace jit {
 // and converts it into a matmul
 
 // Should support everything except for when the device type is passed in as an arg
-TORCH_API bool DeviceTypePropagation(std::shared_ptr<Graph>& graph);
+TORCH_API bool DeviceTypePropagation(std::shared_ptr<Graph> graph);
 
 } // namespace jit
 } // namespace torch
