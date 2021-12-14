@@ -205,7 +205,12 @@ class TestOptim(TestCase):
         for _i in range(20):
             optimizer.step(fn)
             optimizer_cuda.step(fn_cuda)
-            self.assertEqual(weight, weight_cuda)
+            #Handles https://github.com/pytorch/pytorch/issues/69698
+            if type(optimizer) == "<class 'torch.optim.adadelta.Adadelta'>":
+                atol, rtol = 3e-5, 1.3e-6
+            else:
+                atol, rtol = None, None
+            self.assertEqual(weight, weight_cuda, atol=atol, rtol=rtol)
             self.assertEqual(bias, bias_cuda)
 
         # validate deepcopy() copies all public attributes
