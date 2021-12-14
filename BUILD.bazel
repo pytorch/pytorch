@@ -6,7 +6,7 @@ load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -19,6 +19,7 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
+    "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -118,7 +119,7 @@ py_binary(
     ],
 )
 
-genrule(
+generate_aten(
     name = "generated_cpp",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
@@ -162,13 +163,12 @@ genrule(
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
-        "aten/src/ATen/NativeMetaFunctions.h",
+        "aten/src/ATen/MethodOperators.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
-    tools = [":gen"],
+    generator=":gen",
 )
 
 py_library(
@@ -348,14 +348,6 @@ filegroup(
 )
 
 filegroup(
-    name = "th_srcs",
-    srcs = [
-        "aten/src/TH/THGeneral.cpp",
-        "aten/src/TH/THTensor.cpp",
-    ],
-)
-
-filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
@@ -511,19 +503,10 @@ header_template_rule(
     },
 )
 
-header_template_rule(
-    name = "aten_src_TH_THGeneral",
-    src = "aten/src/TH/THGeneral.h.in",
-    out = "aten/src/TH/THGeneral.h",
-    substitutions = {
-    },
-)
-
 cc_library(
     name = "aten_headers",
     hdrs = [
         "torch/csrc/Export.h",
-        "torch/csrc/WindowsTorchApiMacro.h",
         "torch/csrc/jit/frontend/function_schema_parser.h",
     ] + glob([
         "aten/src/**/*.h",
@@ -543,7 +526,6 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
-        ":aten_src_TH_THGeneral",
     ],
 )
 
@@ -563,20 +545,6 @@ intern_build_aten_ops(
     deps = [
         ":aten_headers",
         "@sleef",
-        "@fbgemm",
-    ],
-)
-
-cc_library(
-    name = "th",
-    srcs = [
-        ":th_srcs",
-    ],
-    copts = ATEN_COPTS + [
-        "-mavx",
-    ],
-    deps = [
-        ":aten_headers",
         "@fbgemm",
     ],
 )
@@ -608,7 +576,6 @@ cc_library(
         ":ATen_CPU",
         ":aten_headers",
         ":caffe2_for_aten_headers",
-        ":th",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
