@@ -88,6 +88,18 @@ TORCH_API Tensor computeQuantizedMulScalar(
     const c10::optional<ScalarType>& outputType,
     at::Device device);
 
+TORCH_API Tensor computeQuantizedCat(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+
+TORCH_API Tensor computeQuantizedRelu(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device);
+
 TORCH_API Tensor computeDequantize(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
