@@ -476,7 +476,7 @@ class TestOperators(TestCase):
         xfail('double', 'channels_last'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.poisson_nll_loss'),
-        xfail('nn.functional.conv1d', device_type='cuda'),
+        skip('nn.functional.conv1d', device_type='cuda'),
         xfail('fft.rfft2'),
         xfail('lu'),
         skip('qr'),  # Nondetermistic
@@ -786,7 +786,7 @@ class TestOperators(TestCase):
         xfail('cross'),
         xfail('double', 'channels_last'),
         xfail('linalg.cross'),
-        xfail('nn.functional.conv1d'),
+        skip('nn.functional.conv1d'),
         xfail('nn.functional.gaussian_nll_loss'),
         xfail('nn.functional.hardsigmoid'),
         xfail('nn.functional.huber_loss'),
