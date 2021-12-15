@@ -97,6 +97,7 @@ TESTS = discover_tests(
         'test_bundled_images',
         'test_cpp_extensions_aot',
         'test_determination',
+        'test_gen_backend_stubs',
         'test_jit_fuser',
         'test_jit_simple',
         'test_jit_string',
