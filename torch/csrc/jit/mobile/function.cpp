@@ -125,6 +125,10 @@ const Code& Function::get_code() const {
   return code_;
 }
 
+Code& Function::get_code() {
+  return code_;
+}
+
 const std::vector<int64_t>& Function::getExceptionDebugHandles() const {
   return getInterpretersExceptionDebugHandles();
 }
