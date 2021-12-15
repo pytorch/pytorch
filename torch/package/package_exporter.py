@@ -25,6 +25,7 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
+import sys
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -585,24 +586,42 @@ class PackageExporter:
             is_pickle=True,
         )
 
+        def _check_mocked_error(module: str, field: str):
+            for pattern, pattern_info in self.patterns.items():
+                if pattern_info.action == _ModuleProviderAction.MOCK:
+                    if pattern.matches(module):
+                        raise NotImplementedError(
+                            f"Object '{field}' from module {module} was mocked out during packaging "
+                            f"but is being used in resource - {resource} in package {package}"
+                            "If this error is happening during 'save_pickle', please ensure that your "
+                            "pickled object doesn't contain any mocked objects."
+                        )
+
         if dependencies:
             all_dependencies = []
+            module = None
+            field = None
             for opcode, arg, pos in pickletools.genops(data_value):
-                if opcode.name == "GLOBAL":  # a global reference
+                if sys.version_info >= (3, 4):
+                    if opcode.name == "SHORT_BINUNICODE" or opcode.name == "BINUNICODE8":
+                        assert isinstance(arg, str)
+                        module = field
+                        field = arg
+                    elif opcode.name == "BINGET_LONG" or opcode.name == "BINGET" or opcode.name == "GET":
+                        module = field
+                        field = None
+                    elif opcode.name == "STACK_GLOBAL":
+                        if module is None:
+                            continue
+                        elif module not in all_dependencies:
+                            all_dependencies.append(module)
+                        _check_mocked_error(module, field)
+                elif opcode.name == "GLOBAL":  # a global reference
                     assert isinstance(arg, str)
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
                         all_dependencies.append(module)
-                    for pattern, pattern_info in self.patterns.items():
-                        if pattern_info.action == _ModuleProviderAction.MOCK:
-                            if pattern.matches(module):
-                                raise NotImplementedError(
-                                    f"Object '{field}' from module {module} was mocked out during packaging "
-                                    f"but is being used in resource - {resource} in package {package}"
-                                    "If this error is happening during 'save_pickle', please ensure that your "
-                                    "pickled object doesn't contain any mocked objects."
-                                )
-
+                    _check_mocked_error(module, field)
             for module_name in all_dependencies:
                 self.dependency_graph.add_edge(name_in_dependency_graph, module_name)
                 self.add_dependency(module_name)
