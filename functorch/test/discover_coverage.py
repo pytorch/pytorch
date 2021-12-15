@@ -359,9 +359,13 @@ def print_coverage_info(th=100, nn=25):
     statuses = transpose_statuses(get_top_ops(th, nn), invert=True)
     top_ops_not_covered_by_opinfo = get_top_ops_not_covered_by_opinfo(th, nn)
 
+    # testing problems
+    exemptions = {
+        'torch.nn.functional.dropout', # randomness
+    }
+
     # Allowed exemptions
     vmap_exemptions = {
-        'torch.nn.functional.dropout', # randomness
         'torch.randn_like', # randomness
         'torch.allclose', # number output
         'torch.unique', # dynamic
@@ -374,6 +378,8 @@ def print_coverage_info(th=100, nn=25):
     remove_from_set(statuses['test_vmapvjp_has_batch_rule'], vmap_exemptions)
     remove_from_set(statuses['test_op_has_batch_rule'], vmap_exemptions)
     remove_from_set(statuses['test_vmapjvp'], vmap_exemptions)
+    for test in tests:
+        remove_from_set(statuses[test], exemptions)
 
     print(f"total ops in set: {th + nn}")
     print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
