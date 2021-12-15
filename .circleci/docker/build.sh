@@ -252,7 +252,7 @@ case "$image" in
     VISION=yes
     ROCM_VERSION=4.3.1
     ;;
-  pytorch-linux-bionic-rocm4.5.2-py3.6)
+  pytorch-linux-bionic-rocm4.5-py3.6)
     ANACONDA_PYTHON_VERSION=3.6
     GCC_VERSION=9
     PROTOBUF=yes
