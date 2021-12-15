@@ -361,11 +361,13 @@ difficult to write a CompositeImplicitAutograd function than writing regular
 PyTorch code.
 
 If you wish to do something that is banned (you may wish to do this for perf
-reasons), please write a backwards formula for your operator so it is no longer
-CompositeImplicitAutograd or hide parts of the operator in a new operator
-that is not CompositeImplicitAutograd.
+reasons), you have three options:
+1. write a backwards formula for your operator so it is no longer
+CompositeImplicitAutograd
+2. hide parts of the operator in a new operator that is not CompositeImplicitAutograd.
+3. Guard code with `areAnyTensorSubclassLike` (see Note [Tensor-subclass-like Tensors])
 
-CompositeImplicitAutograd operators must not:
+In the general path, CompositeImplicitAutograd operators must not:
 - call `resize_` or moral equivalents. These are tricky to handle for
 many backends, like vmap and meta.
 - call `out=` operations. These are impossible to handle for vmap and can cause
@@ -378,6 +380,10 @@ allowed. These operations do not go through the dispatcher.
 - `copy_` is a marginal case. If you're able to rewrite your operation without
 `copy_` you should definitely do so; this should be trivial if you're not copy-ing
 into a view. Otherwise, it is fine to leave the code as-is.
+
+Certain in-place operations may be incompatible with tensor subclasses. For example,
+`return torch.zeros(blah).inplace_(tensor_subclass)` is a problem because the
+tensor being returned is a regular Tensor, not a tensor subclass!
 
 We have CompositeImplicitAutograd compliance tests in `test/test_ops.py`. These
 tests aren't perfect (it's pretty difficult to check for all of the above) so if

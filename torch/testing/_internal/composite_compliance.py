@@ -184,6 +184,10 @@ def _check_composite_compliance(op, args, kwargs):
     args = tree_map(wrap, args)
     kwargs = tree_map(wrap, kwargs)
     try:
+        # Yes, we want to run once with python mode and once without.
+        # The run without python mode catches problems where we do things like:
+        # torch.zeros(blah).in_place_(tensor_subclass):
+        op(*args, **kwargs)
         with enable_python_mode(CompositeCompliantTensor):
             op(*args, **kwargs)
     except RuntimeError as err:
