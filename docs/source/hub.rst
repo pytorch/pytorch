@@ -141,7 +141,7 @@ Torch hub works by importing the package as if it was installed. There are some 
 introduced by importing in Python. For example, you can see new items in Python caches
 ``sys.modules`` and ``sys.path_importer_cache`` which is normal Python behavior.
 This also means that you may have import errors when importing different models
-from different repos, if the repo have the same sub-package names (typically, a
+from different repos, if the repos have the same sub-package names (typically, a
 ``model`` subpackage). A workaround for these kinds of import errors is to
 remove the offending sub-package from the ``sys.modules`` dict; more details can
 be found in `this github issue
