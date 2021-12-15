@@ -1,7 +1,7 @@
 r"""Functional interface"""
 import torch
 from torch import Tensor
-from typing import List, Dict
+from typing import List
 from ._single_tensor_functional import single_tensor_adagrad
 
 def multi_tensor_adagrad(params: List[Tensor],
@@ -20,7 +20,14 @@ def multi_tensor_adagrad(params: List[Tensor],
     """
 
     if has_sparse_grad:
-        return single_tensor_adagrad(params, grads, state_sums, state_steps, lr, weight_decay, lr_decay, eps)
+        return single_tensor_adagrad(params,
+                                     grads,
+                                     state_sums,
+                                     state_steps,
+                                     lr=lr,
+                                     weight_decay=weight_decay,
+                                     lr_decay=lr_decay,
+                                     eps=eps)
 
     if weight_decay != 0:
         if has_sparse_grad:
