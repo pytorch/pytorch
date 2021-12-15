@@ -5,7 +5,6 @@ import re
 import builtins
 import torch
 import warnings
-import pdb
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
@@ -15,6 +14,7 @@ from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
     NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
 
+
 from textwrap import dedent
 from torch._sources import get_source_lines_and_file
 from typing import Type
@@ -22,6 +22,7 @@ from typing import Type
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
+
 from torch._ops import OpOverloadPacket
 
 class Module(object):
@@ -115,6 +116,7 @@ def get_param_names(fn, n_args):
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
+
     if is_function_or_method(fn):
         if is_ignored_fn(fn):
             fn = inspect.unwrap(fn)

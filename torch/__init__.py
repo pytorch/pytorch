@@ -198,8 +198,6 @@ else:
         _load_global_deps()
     from torch._C import *  # noqa: F403
 
-# torch.Argument.__module__ = 'torch'
-
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:

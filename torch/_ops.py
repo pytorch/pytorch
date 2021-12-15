@@ -1,4 +1,3 @@
-from typing import overload
 import torch._C
 
 import contextlib
@@ -134,28 +133,6 @@ class _OpNamespace(types.ModuleType):
         opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
         setattr(self, op_name, opoverloadpacket)
         return opoverloadpacket
-
-'''
-FYI:
-torch.ops.aten.add -> attribute query invokes getattr (fn pointer)
-indexing on attribute lookup (torch.ops.aten.add['Tensor']) then the attribute should return a dict
-torch.ops.aten.add.Tensor -> attribute of an attribute
-torch.ops.aten.add.Scalar -> shouldn't be exposed in Python (since it can never be called from python) (can be used from __torch_dispatch__)
-
-First way:
-torch.ops.aten.add -> Returns a DisambiguateOpOverloads class object which can be called (overload __call__) -- same behavior as before
-torch.ops.aten.add.overload_name -> Returns an OpOverload class object which contains the overload name, op name and fn_ptr to the overload.
-add.default -> out-of-place (make the attribute name (here default) a reserved keyword to avoid conflict in future)
-
-Second way:
-torch.ops.aten.add -> Returns a DisambiguateOpOverloads (same as above)
-torch.ops.aten.add[overload_name] -> Returns an OpOverload class object (same as above)
-torch.ops.aten.add[""] -> Returns an OpOverload with overload_name set to an empty string and call method calling the out-of-place fn
-                         as in case without empty sstring indexing ...
-
-Third way:
-Allow both attribute lookup and indexing
-'''
 
 class _Ops(types.ModuleType):
     __file__ = '_ops.py'
