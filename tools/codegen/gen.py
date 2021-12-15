@@ -35,6 +35,7 @@ from tools.codegen.context import (method_with_native_function,
                                    with_native_function)
 import tools.codegen.dest as dest
 from tools.codegen.gen_functionalization_type import (
+    needs_functionalization,
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration
@@ -1418,20 +1419,35 @@ def gen_source_files(
         for k, v in d.items()
     }
 
+
+    def functionalization_env_callable(
+            g: Union[NativeFunction, NativeFunctionsGroup]
+    ) -> Dict[str, List[str]]:
+        functions = [g] if isinstance(g, NativeFunction) else list(g.functions())
+        functions_needing_functionalization = [
+            fn for fn in functions if needs_functionalization(selector, fn)]
+        return {
+            'ops_headers': ([
+                f"#include <ATen/ops/{functions[0].root_name}_native.h>",
+                f"#include <ATen/ops/{functions[0].root_name}_ops.h>",
+            ] if functions_needing_functionalization else []),
+            'func_definitions': list(mapMaybe(
+                lambda f: gen_functionalization_definition(selector, f, to_functional_op[f.func.name]),
+                functions_needing_functionalization)),
+            'func_registrations': list(mapMaybe(
+                lambda f: gen_functionalization_registration(
+                    selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
+                functions_needing_functionalization)),
+        }
+
+
     cpu_fm.write_sharded(
         'RegisterFunctionalization.cpp',
         grouped_native_functions,
         key_fn=key_func,
-        env_callable=lambda g: {
-            'func_definitions': list(mapMaybe(lambda f: gen_functionalization_definition(
-                selector, f, to_functional_op[f.func.name]),
-                [g] if isinstance(g, NativeFunction) else g.functions())),
-            'func_registrations': list(mapMaybe(lambda f: gen_functionalization_registration(
-                selector, f, backend_indices[DispatchKey.CompositeImplicitAutograd]),
-                [g] if isinstance(g, NativeFunction) else g.functions()))
-        },
+        env_callable=functionalization_env_callable,
         num_shards=4,
-        sharded_keys={'func_definitions', 'func_registrations'}
+        sharded_keys={'ops_headers', 'func_definitions', 'func_registrations'}
     )
 
 
