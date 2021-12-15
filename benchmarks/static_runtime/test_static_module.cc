@@ -1362,3 +1362,67 @@ TEST(AssignStorageToManagedTensors, MultipleUnused) {
   testAssignStorageToManagedTensors(
       src, std::move(managed_tensor_name_to_tensor), min_reused_tensors);
 }
+
+namespace {
+void testStaticModuleThrows(
+    const std::string& src,
+    const std::vector<IValue>& args,
+    const std::unordered_map<std::string, IValue>& kwargs) {
+  auto static_module = makeStaticModuleFromScript(src);
+  EXPECT_THROW(static_module(args, kwargs), c10::Error);
+}
+} // namespace
+
+TEST(StaticModule, IncorrectTypesPassed) {
+  const std::string args_bool_script = R"JIT(
+    def forward(self, x: bool):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_bool_script, {at::randn({1})}, {});
+
+  const std::string args_tensor_script = R"JIT(
+    def forward(self, x: Tensor):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_tensor_script, {false}, {});
+
+  const std::string kwargs_int_script = R"JIT(
+    def forward(self, x: bool = True):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_int_script, {}, {{"x", at::randn({1})}});
+
+  const std::string kwargs_tensor_script = R"JIT(
+    def forward(self, x: Tensor = torch.randn((1, ))):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_tensor_script, {}, {{"x", 1.0}});
+}
+
+TEST(StaticModule, TooManyArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {0, 1}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, x: int = 1):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {{"y", 0}, {"x", 1}});
+}
+
+TEST(StaticModule, NotEnoughArgs) {
+  const std::string args_src = R"JIT(
+    def forward(self, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(args_src, {}, {});
+
+  const std::string kwargs_src = R"JIT(
+    def forward(self, *, x: int):
+        return x
+  )JIT";
+  testStaticModuleThrows(kwargs_src, {}, {});
+}
