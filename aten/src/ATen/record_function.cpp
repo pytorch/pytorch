@@ -130,7 +130,7 @@ struct GlobalRecordFunctionCallbacksEntry {
 };
 
 using GlobalRecordFunctionCallbacks =
-  std::vector<GlobalRecordFunctionCallbacksEntry>;
+  c10::SmallVector<GlobalRecordFunctionCallbacksEntry, kSoftLimitCallbacks>;
 
 } // namespace
 
