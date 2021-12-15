@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
+#include <memory>
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
@@ -34,17 +35,6 @@ bool testCanEnableStaticRuntime(const std::string& jit_script) {
 
   // here we do not freeze graph
   return canEnableStaticRuntime(graph);
-}
-
-bool testHasInplaceOp(const std::string& jit_script) {
-  script::Module module("module");
-  module.define(jit_script);
-
-  Method method = module.get_method("forward");
-  auto graph = module.get_method("forward").graph();
-
-  AliasDb alias_db(graph);
-  return HasInplaceOp(graph, alias_db);
 }
 
 bool testModuleHasOp(const std::string& jit_script, const char* op_name) {
@@ -214,18 +204,85 @@ TEST(StaticModule, RValueInputs) {
   EXPECT_TRUE(expected.toTensor().equal(actual.toTensor()));
 }
 
-TEST(StaticRuntime, InPlace) {
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script));
-  EXPECT_TRUE(testHasInplaceOp(reshape_inplace_script_1));
-  EXPECT_TRUE(testHasInplaceOp(sigmoid_inplace_script));
-  EXPECT_FALSE(testHasInplaceOp(sigmoid_out_script));
-}
-
 TEST(StaticRuntime, ModuleHasOp) {
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script, "aten::sigmoid_"));
   EXPECT_TRUE(testModuleHasOp(reshape_inplace_script_1, "aten::reshape"));
   EXPECT_TRUE(testModuleHasOp(sigmoid_inplace_script, "aten::clone"));
   EXPECT_FALSE(testModuleHasOp(reshape_inplace_script_1, "aten::add_"));
+}
+
+TEST(StaticRuntime, ReplaceWithCopy_replaces_reshape) {
+  auto ExpectToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // aten::reshape -> static_runtime::reshape_copy
+    EXPECT_FALSE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_TRUE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        return (a)
+  )JIT");
+  ExpectToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp * 2
+        b = inp * 3
+        c = inp.reshape(shape)
+        return (a, b, c)
+  )JIT");
+}
+
+TEST(
+    StaticRuntime,
+    ReplaceWithCopy_does_not_replace_reshape_if_input_has_writters) {
+  auto ExpectNotToReplaceWithCopy = [](const std::string& jit_script) {
+    auto graph = getGraphFromScript(jit_script);
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+
+    ReplaceWithCopy(graph);
+
+    // No Replacement
+    EXPECT_TRUE(graphHasOp(graph, "aten::reshape"));
+    EXPECT_FALSE(graphHasOp(graph, "static_runtime::reshape_copy"));
+  };
+
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        inp *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        return (a)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, inp2: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        a *= 2
+        b = a.reshape(shape)
+        return (b)
+  )JIT");
+  ExpectNotToReplaceWithCopy(R"JIT(
+    def forward(self, inp: Tensor, shape: List[int]):
+        a = inp.reshape(shape)
+        b = a.reshape(shape)
+        c = b.reshape(shape)
+        d = c.reshape(shape)
+        e = b.sigmoid_()
+        return (d)
+  )JIT");
+  ExpectNotToReplaceWithCopy(reshape_inplace_script);
+  ExpectNotToReplaceWithCopy(reshape_inplace_script_1);
 }
 
 TEST(StaticRuntime, CanEnableStaticRuntime) {
@@ -976,7 +1033,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       sigmoid_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(sigmoid_fn.f());
   EXPECT_EQ(sigmoid_fn.kind(), ProcessedFunction::Kind::kOutVariant);
   EXPECT_FALSE(sigmoid_fn.checkMemoryOverlap());
 
@@ -985,7 +1041,6 @@ TEST(ProcessedFunction, ProcessedFunction) {
       transpose_node,
       /*enable_out_variant=*/true,
       /*check_memory_overlap=*/false);
-  EXPECT_TRUE(transpose_fn.f());
   EXPECT_EQ(transpose_fn.kind(), ProcessedFunction::Kind::kNativeFunction);
   EXPECT_FALSE(transpose_fn.checkMemoryOverlap());
 }
@@ -1232,9 +1287,8 @@ void testAssignStorageToManagedTensors(
   ASSERT_EQ(managed_tensor_values.size(), tensor_value_to_tensor.size());
 
   auto ranges = ManagedTensorRanges(graph, managed_tensor_values);
-  std::vector<StorageGroup> groups;
-  assignStorageToManagedTensors(
-      graph->block()->nodes(), ranges, tensor_value_to_tensor, groups);
+  auto groups = assignStorageToManagedTensors(
+      graph->block()->nodes(), ranges, tensor_value_to_tensor);
 
   checkStorageGroups(
       groups, ranges, tensor_value_to_tensor, min_reused_tensors);
