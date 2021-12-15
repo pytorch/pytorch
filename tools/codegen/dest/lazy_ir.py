@@ -252,7 +252,7 @@ class GenLazyNativeFuncDefinition:
         hashes = [f"static_cast<uint32_t>(at::aten::{schema.aten_name})"]
         hashes += [f"{f.name}" for f in scalar_types]
         node_hash = f"torch::lazy::hash_t node_hash = torch::lazy::MHash({', '.join(hashes)});"
-        ir_values = [lazy_value_string_from_optionals(v) for v in value_types] 
+        ir_values = [lazy_value_string_from_optionals(v) for v in value_types if v.name not in schema.wrapped_scalar_names]
         dag_hash = f"torch::lazy::hash_t dag_hash = torch::lazy::OperandHashes({{{', '.join(ir_values)}}}, node_hash);"
         hash_str = node_hash + "\n        " + dag_hash
 
