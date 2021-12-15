@@ -1,5 +1,4 @@
 #pragma once
-
 #include <c10/core/DispatchKey.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
@@ -8,7 +7,28 @@
 #include <array>
 
 namespace c10 {
-C10_API uint64_t keyset_ctr(DispatchKey);
+
+struct FunctionalityOffsetAndMask {
+    // empty constructor shouldn't be used; only needed to initialize
+    // the array before populating it.
+    FunctionalityOffsetAndMask() {}
+    FunctionalityOffsetAndMask(uint16_t offset, uint16_t mask) :
+        offset(offset), mask(mask) {}
+    // This needs to big enough to cover the size of the operator table.
+    uint16_t offset;
+    // This mask needs to be big enough to mask all of the backend bits.
+    // We probably don't ever want to have more than 16 backend bits, so uint16_t should be enough.
+    uint16_t mask;
+};
+
+C10_API std::array<FunctionalityOffsetAndMask, num_functionality_keys>
+initializeFunctionalityOffsetsAndMasks();
+
+C10_ALWAYS_INLINE static std::array<FunctionalityOffsetAndMask, num_functionality_keys>&
+offsetsAndMasks() {
+    static auto offsets_and_masks_ = initializeFunctionalityOffsetsAndMasks();
+    return offsets_and_masks_;
+}
 
 // A representation of a set of DispatchKeys.  A tensor may have multiple
 // tensor type ids, e.g., a Variable tensor can also be a CPU tensor; the
@@ -63,8 +83,54 @@ class C10_API DispatchKeySet final {
   constexpr DispatchKeySet(Raw, uint64_t x) : repr_(x) {}
 
   // This is difficult to make constexpr: toFunctionalityKey and toBackendKey will need to be constexpr too
-  explicit DispatchKeySet(DispatchKey k) {
-      repr_ = keyset_ctr(k);
+  constexpr explicit DispatchKeySet(DispatchKey k) {
+    // Technically it would be possible to add alias dispatch keys to a DispatchKeySet,
+    // but the semantics are a little confusing and this currently isn't needed anywhere.
+    if (isAliasDispatchKey(k)) {
+      throw std::invalid_argument("invalid key");
+    }
+
+    if (k == DispatchKey::Undefined) {
+      // Case 1: handle Undefined specifically
+      repr_ = 0;
+    } else if (k <= DispatchKey::EndOfBackendKeys) {
+      // Case 2: handle "backend-only" keys
+      // These keys (e.g. DispatchKey::CPUBit) have a backend bit set, but no functionality bits.
+      uint64_t backend_val = 1ULL << static_cast<uint8_t>(k);
+      repr_ = backend_val;
+    } else if (isPerBackendFunctionalityKey(k)) {
+      // Case 3: handle "per-backend-functionality" keys
+      // E.g. for DispatchKey::Dense, or DispatchKey::Sparse,
+      // we'll only set the functionality bit and not set any backend bits.
+      // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
+      // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
+      uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(k) - 1);
+      repr_ = functionality_val;
+    } else {
+      // Case 4: "runtime" keys that have a functionality bit.
+      // First compute which bit to flip for the functionality.
+      auto functionality_k = toFunctionalityKey(k);
+      // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
+      // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
+      uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(functionality_k) - 1);
+
+      // then compute which bit to flip for the backend
+      if (k > DispatchKey::EndOfFunctionalityKeys) {
+        // Case 4a: handle the runtime instances of "per-backend functionality" keys
+        // For example, given DispatchKey::CPU, we should set:
+        // - the Dense functionality bit
+        // - the CPUBit backend bit
+        // first compute which bit to flip for the backend
+        auto backend_k = toBackendKey(k);
+        uint64_t backend_val = 1ULL << static_cast<uint8_t>(backend_k);
+        repr_ = functionality_val + backend_val;
+      } else {
+        // Case 4b handle the runtime functionality keys that are not per-backend.
+        // In this case, the functionality key is not per-backend, so we don't set any backend bits.
+        // e.g. DispatchKey::FuncTorchBatched.
+        repr_ = functionality_val;
+      }
+    }
   }
 
   explicit constexpr DispatchKeySet(std::initializer_list<DispatchKey> ks)
@@ -156,8 +222,27 @@ class C10_API DispatchKeySet final {
     return repr_;
   }
 
-  DispatchKey highestFunctionalityKey() const;
-  DispatchKey highestBackendKey() const;
+  DispatchKey highestFunctionalityKey() const {
+    auto functionality_idx = indexOfHighestBit();
+    // This means that none of the functionality bits were set.
+    if (functionality_idx <= static_cast<uint8_t>(DispatchKey::Undefined)) return DispatchKey::Undefined;
+    // Add 1 to deal with undefined being a dispatch key below all functionality keys.
+    return static_cast<DispatchKey>(functionality_idx);
+  }
+
+  // This is effectively like toBackendKey(DispatchKey), but less restrictive.
+  // toBackendKey() errors out if the key that it was passed has no backend bits,
+  // which is useful for error checking.
+  // We need a version of that here that can also handle "fake" backends like FPGA,
+  // because they need to map to the AutogradOther key.
+  DispatchKey highestBackendKey() const {
+    // mask to mask out functionality bits
+    auto backend_idx = DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit();
+    // all zeros across the backend bits means that no backend bits are set.
+    if (backend_idx == 0) return DispatchKey::Undefined;
+    // Subtract 1 because backend_idx=1 --> the CPU key, which has value 0 in the enum.
+    return static_cast<DispatchKey>(backend_idx - 1);
+  }
 
   // returns the DispatchKey of highest priority in the set.
   DispatchKey highestPriorityTypeId() const {
@@ -190,7 +275,17 @@ class C10_API DispatchKeySet final {
   // returns the index in the operator table of highest priority key in the the keyset
   // Note that we could in theory implement this using highestPriorityTypeId(),
   // but this code is very hotpath and we can do it faster without it.
-  uint64_t getDispatchTableIndexForDispatchKeySet() const;
+  uint64_t getDispatchTableIndexForDispatchKeySet() const {
+    auto functionality_idx =
+        DispatchKeySet(repr_ >> (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1))
+           .indexOfHighestBit();
+    auto offset_and_mask = offsetsAndMasks()[functionality_idx];
+    // Mask the functionality bits out first, then right-shift by 1.
+    // right-shifting by 1 because everything is zero-indexed.
+    // E.g. 000001 (CPU) should give us an offset of 0, 000010 (CUDA) should give us an offset of 1, etc.
+    auto backend_idx = DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit();
+    return offset_and_mask.offset + backend_idx;
+  }
 
  private:
   constexpr DispatchKeySet(uint64_t repr) : repr_(repr) {}
@@ -293,17 +388,126 @@ class C10_API DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-C10_API extern DispatchKeySet autograd_dispatch_keyset;
-C10_API extern DispatchKeySet autocast_dispatch_keyset;
-C10_API extern DispatchKeySet default_included_set;
-C10_API extern DispatchKeySet default_excluded_set;
-C10_API extern DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
-C10_API extern DispatchKeySet autogradother_backends;
-C10_API extern DispatchKeySet after_autograd_keyset;
-C10_API extern DispatchKeySet after_ADInplaceOrView_keyset;
-C10_API extern DispatchKeySet after_func_keyset;
-C10_API extern DispatchKeySet backend_dispatch_keyset;
-C10_API extern DispatchKeySet math_dispatch_keyset;
+constexpr DispatchKeySet autograd_dispatch_keyset;
+constexpr DispatchKeySet autocast_dispatch_keyset;
+constexpr DispatchKeySet default_included_set;
+constexpr DispatchKeySet default_excluded_set;
+constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
+constexpr DispatchKeySet autogradother_backends;
+constexpr DispatchKeySet after_autograd_keyset;
+constexpr DispatchKeySet after_ADInplaceOrView_keyset;
+constexpr DispatchKeySet after_func_keyset;
+constexpr DispatchKeySet backend_dispatch_keyset;
+constexpr DispatchKeySet math_dispatch_keyset;
+
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+// NB: keys in this set also get associated with CompositeImplicitAutograd
+constexpr DispatchKeySet _autograd_dispatch_keyset() {
+    static DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+        DispatchKey::AutogradFunctionality,
+        DispatchKey::AutogradOther,
+    }) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+    return autograd_dispatch_keyset;
+}
+
+constexpr DispatchKeySet _autocast_dispatch_keyset() {
+    static DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
+        DispatchKey::AutocastCPU,
+        DispatchKey::AutocastCUDA,
+    });
+    return autocast_dispatch_keyset;
+}
+
+// See Note [TLS Initialization]
+constexpr DispatchKeySet _default_included_set() {
+    static DispatchKeySet default_included_set = DispatchKeySet({
+        DispatchKey::BackendSelect,
+        DispatchKey::ADInplaceOrView,
+    });
+    return default_included_set;
+}
+
+constexpr DispatchKeySet _default_excluded_set = DispatchKeySet({
+        DispatchKey::AutocastCPU,
+        DispatchKey::AutocastCUDA,
+    });
+}
+
+constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
+        autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
+
+// backend dispatch keys that map to DispatchKey::AutogradOther
+// NB: keys in this set also get associated with CompositeImplicitAutograd
+constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
+        // TODO: delete commented code before landing.
+        // HIP and VE now have their own backend bits, which means that
+        // they can now have their own Autograd keys.
+        // Technically, HIP will now redispatch to its own custom AutogradHIP slot
+        // in the runtime table.
+        //{DispatchKey::HIP,
+        //DispatchKey::VE,
+        {DispatchKey::FPGA,
+        DispatchKey::ORT,
+        DispatchKey::Vulkan,
+        DispatchKey::Metal,
+        DispatchKey::SparseCsrCPU,
+        DispatchKey::SparseCsrCUDA,
+        DispatchKey::CustomRNGKeyId,
+        DispatchKey::MkldnnCPU,
+        DispatchKey::Meta});
+    return autogradother_backends;
+}
+
+// The set of dispatch keys that come after autograd
+// n.b. this relies on the fact that AutogradOther is currently the lowest
+// Autograd key
+constexpr DispatchKeySet after_autograd_keyset =
+        DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+}
+
+// The set of dispatch keys that come after ADInplaceOrView
+constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::ADInplaceOrView);
+}
+
+// The set of dispatch keys that come after Functionalize
+constexpr DispatchKeySet after_func_keyset =
+        DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
+            .removeFunctionalityKey(
+                // NOTE: we also need to remove ADInplaceOrView from the keyset when
+                // redispatching after the func kernels. This is because we're not
+                // calling the same op; we originally called an inplace op, and now
+                // we aren't. The original key calculation figured out which keys
+                // were Fallthrough based on the inplace op. That means that it did
+                // not include the ADInPlaceOrView kernel as a fallthrough key.
+                // However, we WANT the ADInPlaceOrView kernel to be ignored now
+                // that we're calling an out-of-place op. Re-invoking
+                // Dispatcher::call would re-run the Fallthrough key calculation and
+                // get us that, But at::redispatch is more performant. We can get
+                // away with it by explicitly removing the key here.
+                c10::DispatchKey::ADInplaceOrView);
+
+// backend_dispatch_keyset should include all runtime backend keys.
+// Alias key DispatchKey::CompositeExplicitAutograd maps to
+// backend_dispatch_keyset NestedTensor has been explicitly removed due to
+// incompatibility with some kernels, such as structured kernels, that use the
+// DefaultBackend key.
+constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
+        DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
+        DispatchKeySet({
+            DispatchKey::Dense,
+            DispatchKey::Sparse,
+            DispatchKey::Quantized,
+        });
+
+// math_dispatch_keyset contains all keys in backend_dispatch_keyset and
+// autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
+// maps to math_dispatch_keyset.
+constexpr DispatchKeySet math_dispatch_keyset =
+        backend_dispatch_keyset | autograd_dispatch_keyset;
+
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(
     DispatchKeySet::RAW,

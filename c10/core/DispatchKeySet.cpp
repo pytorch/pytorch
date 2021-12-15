@@ -254,57 +254,6 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
   return os;
 }
 
-C10_API uint64_t keyset_ctr(DispatchKey k) {
-    uint64_t repr_ = 0;
-    // Technically it would be possible to add alias dispatch keys to a DispatchKeySet,
-    // but the semantics are a little confusing and this currently isn't needed anywhere.
-    TORCH_INTERNAL_ASSERT(!isAliasDispatchKey(k));
-
-    if (k == DispatchKey::Undefined) {
-      // Case 1: handle Undefined specifically
-      repr_ = 0;
-    } else if (k <= DispatchKey::EndOfBackendKeys) {
-      // Case 2: handle "backend-only" keys
-      // These keys (e.g. DispatchKey::CPUBit) have a backend bit set, but no functionality bits.
-      uint64_t backend_val = 1ULL << static_cast<uint8_t>(k);
-      repr_ = backend_val;
-    } else if (isPerBackendFunctionalityKey(k)) {
-      // Case 3: handle "per-backend-functionality" keys
-      // E.g. for DispatchKey::Dense, or DispatchKey::Sparse,
-      // we'll only set the functionality bit and not set any backend bits.
-      // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
-      // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
-      uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(k) - 1);
-      repr_ = functionality_val;
-    } else {
-      // Case 4: "runtime" keys that have a functionality bit.
-      // First compute which bit to flip for the functionality.
-      auto functionality_k = toFunctionalityKey(k);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functionality_k > DispatchKey::EndOfBackendKeys);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(functionality_k <= DispatchKey::EndOfFunctionalityKeys);
-      // The - 1 is because Undefined is technically a "functionality" that doesn't show up in the bitset.
-      // So e.g. Dense is technically the second functionality, but the lowest functionality bit.
-      uint64_t functionality_val = 1ULL << (static_cast<uint8_t>(functionality_k) - 1);
-
-      // then compute which bit to flip for the backend
-      if (k > DispatchKey::EndOfFunctionalityKeys) {
-        // Case 4a: handle the runtime instances of "per-backend functionality" keys
-        // For example, given DispatchKey::CPU, we should set:
-        // - the Dense functionality bit
-        // - the CPUBit backend bit
-        // first compute which bit to flip for the backend
-        auto backend_k = toBackendKey(k);
-        uint64_t backend_val = 1ULL << static_cast<uint8_t>(backend_k);
-        repr_ = functionality_val + backend_val;
-      } else {
-        // Case 4b handle the runtime functionality keys that are not per-backend.
-        // In this case, the functionality key is not per-backend, so we don't set any backend bits.
-        // e.g. DispatchKey::FuncTorchBatched.
-        repr_ = functionality_val;
-      }
-    }
-    return repr_;
-}
 DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
       TORCH_INTERNAL_ASSERT(
           functionality_mask_ > static_cast<uint8_t>(DispatchKey::EndOfBackendKeys));
@@ -370,20 +319,7 @@ DispatchKeySet::iterator& DispatchKeySet::iterator::operator++() {
       return *this;
     }
 
-struct FunctionalityOffsetAndMask {
-    // empty constructor shouldn't be used; only needed to initialize
-    // the array before populating it.
-    FunctionalityOffsetAndMask() {}
-    FunctionalityOffsetAndMask(uint16_t offset, uint16_t mask) :
-        offset(offset), mask(mask) {}
-    // This needs to big enough to cover the size of the operator table.
-    uint16_t offset;
-    // This mask needs to be big enough to mask all of the backend bits.
-    // We probably don't ever want to have more than 16 backend bits, so uint16_t should be enough.
-    uint16_t mask;
-};
-
-static std::array<FunctionalityOffsetAndMask, num_functionality_keys>
+std::array<FunctionalityOffsetAndMask, num_functionality_keys>
 initializeFunctionalityOffsetsAndMasks() {
     std::array<FunctionalityOffsetAndMask, num_functionality_keys>
     offsets_and_masks;
@@ -441,46 +377,5 @@ initializeFunctionalityOffsetsAndMasks() {
 #endif
     return offsets_and_masks;
 }
-
-static std::array<FunctionalityOffsetAndMask, num_functionality_keys>
-offsetsAndMasks() {
-    static auto offsets_and_masks_ = initializeFunctionalityOffsetsAndMasks();
-    return offsets_and_masks_;
-}
-
-
-DispatchKey DispatchKeySet::highestFunctionalityKey() const {
-    auto functionality_idx = indexOfHighestBit();
-    // This means that none of the functionality bits were set.
-    if (functionality_idx <= static_cast<uint8_t>(DispatchKey::Undefined)) return DispatchKey::Undefined;
-    // Add 1 to deal with undefined being a dispatch key below all functionality keys.
-    return static_cast<DispatchKey>(functionality_idx);
-}
-// This is effectively like toBackendKey(DispatchKey), but less restrictive.
-// toBackendKey() errors out if the key that it was passed has no backend bits,
-// which is useful for error checking.
-// We need a version of that here that can also handle "fake" backends like FPGA,
-// because they need to map to the AutogradOther key.
-DispatchKey DispatchKeySet::highestBackendKey() const {
-    // mask to mask out functionality bits
-    auto backend_idx = DispatchKeySet(repr_ & full_backend_mask).indexOfHighestBit();
-    // all zeros across the backend bits means that no backend bits are set.
-    if (backend_idx == 0) return DispatchKey::Undefined;
-    // Subtract 1 because backend_idx=1 --> the CPU key, which has value 0 in the enum.
-    return static_cast<DispatchKey>(backend_idx - 1);
-}
-
-uint64_t DispatchKeySet::getDispatchTableIndexForDispatchKeySet() const {
-    auto functionality_idx =
-        DispatchKeySet(repr_ >> (static_cast<uint8_t>(DispatchKey::EndOfBackendKeys) + 1))
-           .indexOfHighestBit();
-    auto offset_and_mask = offsetsAndMasks()[functionality_idx];
-    // Mask the functionality bits out first, then right-shift by 1.
-    // right-shifting by 1 because everything is zero-indexed.
-    // E.g. 000001 (CPU) should give us an offset of 0, 000010 (CUDA) should give us an offset of 1, etc.
-    auto backend_idx = DispatchKeySet((repr_ & offset_and_mask.mask) >> 1).indexOfHighestBit();
-    return offset_and_mask.offset + backend_idx;
-}
-
 
 } // namespace c10
