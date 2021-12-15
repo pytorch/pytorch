@@ -306,10 +306,11 @@ class CallbackManager {
 
     // otherwise potentially do the sampling
     double sampling_prob = cb.sampling_prob_;
+    const double kLowProbInv = 1 / kLowProb;
     if (pre_sampled) {
       // adjust the sampling rate to account for kLowProb pre-sampling of
       // the RecordFunction
-      sampling_prob /= kLowProb;
+      sampling_prob *= kLowProbInv;
     }
 
     if (sampling_prob < 1.0) {
@@ -321,7 +322,7 @@ class CallbackManager {
       if (sampling_prob < kLowProb) {
         if (coinflip_tls().tries_left_ == 0) {
           coinflip_tls().tries_left_ = sample_geometric();
-          return (sample_zero_one() < sampling_prob / kLowProb);
+          return (sample_zero_one() < sampling_prob * kLowProbInv);
         } else {
           --coinflip_tls().tries_left_;
           return false;
