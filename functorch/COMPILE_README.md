@@ -5,7 +5,7 @@ The primary compilation API we provide is something called AOTAutograd.
 This is currently a prototype feature.
 
 For example, here are some examples of how to use it.
-```
+```python
 from functorch.compile import aot_function, aot_module, draw_graph
 import torch.fx as fx
 import torch
