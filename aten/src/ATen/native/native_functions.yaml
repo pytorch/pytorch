@@ -6994,12 +6994,6 @@
   dispatch:
     CPU, CUDA: linalg_solve_triangular
 
-- func: _symeig_helper(Tensor self, bool eigenvectors, bool upper) -> (Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU: _symeig_helper_cpu
-    CUDA: _symeig_helper_cuda
-
 - func: svd.U(Tensor self, bool some=True, bool compute_uv=True, *, Tensor(a!) U, Tensor(b!) S, Tensor(c!) V) -> (Tensor(a!) U, Tensor(b!) S, Tensor(c!) V)
 
 - func: svd(Tensor self, bool some=True, bool compute_uv=True) -> (Tensor U, Tensor S, Tensor V)

@@ -2298,42 +2298,6 @@ static void apply_magma_eigh(const Tensor& values, const Tensor& vectors, const 
 #endif
 }
 
-std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-  Tensor infos = at::zeros({std::max<int64_t>(1, batchCount(self))}, self.options().dtype(kInt).device(at::kCPU));
-
-  auto eigvals_shape = IntArrayRef(self.sizes().data(), self.dim()-1);  // self.shape[:-1]
-  ScalarType real_dtype = toValueType(self.scalar_type());
-
-  // magmaSyevd uses a hybrid CPU-GPU algorithm to compute the eigenvalues and eigenvectors.
-  // The driver routine magma_(d/s)syev_gpu accepts a tensor on the CPU for eigvalenvalues.
-  // The data is later moved to the appropriate device.
-  // In the case where self.numel() == 0, we just return an empty tensor of
-  // dimensions on the CUDA (to avoid the unnecessary "to(at::kCUDA)")
-  auto eigvals_working_copy = self.numel() == 0
-                              ? at::empty(eigvals_shape, self.options().dtype(real_dtype))
-                              : at::empty(eigvals_shape, self.options().dtype(real_dtype).device(at::kCPU));
-
-  if (self.numel() == 0) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy, at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT));
-  }
-
-  auto self_working_copy = cloneBatchedColumnMajor(self);
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "symeig_cuda", [&]{
-    apply_magma_eigh<scalar_t>(eigvals_working_copy, self_working_copy, infos, upper, eigenvectors);
-  });
-
-  if (self.dim() > 2) {
-    batchCheckErrors(infos, "symeig_cuda");
-  } else {
-    singleCheckErrors(infos.item().toInt(), "symeig_cuda");
-  }
-  if (eigenvectors) {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), self_working_copy);
-  } else {
-    return std::tuple<Tensor, Tensor>(eigvals_working_copy.to(self.device()), at::empty({0}, self.options()));
-  }
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eigh ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // This is a type dispatch function for 'apply_magma_eigh'
