@@ -918,6 +918,9 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
       output_scale,
       output_zero_point,
       c10::nullopt);
+  if (output.numel() == 0) {
+    return output;
+  }
   ideep::tensor dst({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
                     output.data_ptr());
   // Parameters

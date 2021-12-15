@@ -26,7 +26,10 @@ from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MAC
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
-from torch.testing._internal.common_quantized import qengine_is_qnnpack
+from torch.testing._internal.common_quantized import (
+    qengine_is_qnnpack,
+    qengine_is_onednn,
+)
 from torch.ao.quantization import PerChannelMinMaxObserver
 
 from typing import Optional
@@ -2563,7 +2566,7 @@ class TestQuantizedOps(TestCase):
             ]
 
             q_data = []
-            reduce_range = (qengine == 'fbgemm')
+            reduce_range = (qengine in ('fbgemm', 'onednn'))
             for idx, x in enumerate(fp_data):
                 scale, zero_point = _calculate_dynamic_qparams(
                     x, dtype=dtype, reduce_range=reduce_range)
@@ -2585,6 +2588,10 @@ class TestQuantizedOps(TestCase):
 
                     # Prepare
                     mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
+                    if qengine_is_onednn():
+                        # Use `reduce_range = True` in qconfig here for ONEDNN
+                        # Otherwise the test fails on machines without VNNI
+                        mha.qconfig = torch.ao.quantization.get_default_qconfig()
                     mha_prepared = torch.ao.quantization.prepare(
                         mha, prepare_custom_config_dict=custom_module_config)
 
@@ -2677,7 +2684,7 @@ class TestDynamicQuantizedOps(TestCase):
             (b_value_max - b_value_min) + b_value_min
         ).astype(np.int32) if use_bias else None
 
-        if torch.backends.quantized.engine == 'fbgemm':
+        if torch.backends.quantized.engine in ('fbgemm', 'onednn'):
             avoid_vpmaddubsw_overflow_linear(
                 batch_size,
                 input_channels,
@@ -4187,9 +4194,9 @@ class TestQuantizedConv(TestCase):
             use_bias):
         if qengine_is_qnnpack() and (IS_PPC or TEST_WITH_UBSAN):
             return  # QNNPACK doesn't support these
-        # ONEDNN does not support non-zero output padding
-        if torch.backends.quantized.engine == 'onednn':
-            o_pad_h, o_pad_w = 0, 0
+        # ONEDNN does not support output paddings
+        if qengine_is_onednn() and (o_pad_h, o_pad_w) != (0, 0):
+            return
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
 
@@ -4309,8 +4316,9 @@ class TestQuantizedConv(TestCase):
             use_bias):
         if qengine_is_qnnpack():
             return  # QNNPACK doesn't support this
-        if torch.backends.quantized.engine == 'onednn':
-            o_pad_t, o_pad_h, o_pad_w = 0, 0, 0
+        # ONEDNN doesn't support output paddings
+        if qengine_is_onednn() and (o_pad_t, o_pad_h, o_pad_w) != (0, 0, 0):
+            return
         assume(o_pad_t < stride_t or o_pad_t < dilation)
         assume(o_pad_h < stride_h or o_pad_h < dilation)
         assume(o_pad_w < stride_w or o_pad_w < dilation)
