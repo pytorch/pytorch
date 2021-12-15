@@ -307,7 +307,7 @@ void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
     // registerer size and etc), except operator. The operator function is also
     // static initialized and is available later. The oprator for the upgrader
     // function will be initialized when the first module is loaded.
-    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
             op.name,
