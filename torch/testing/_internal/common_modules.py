@@ -390,7 +390,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 make_input(shape=(2, 3, 4))
             ),
             desc='gelu_activation'
-        ),]
+        ), ]
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
