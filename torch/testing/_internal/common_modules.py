@@ -253,20 +253,19 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
-    dim = 0 if kwargs.get('batch_first', True) else 1
+    batch_dim = 0 if kwargs.get('batch_first', True) else 1
     if 'batch_first' in kwargs:
         kwargs.pop('batch_first')
     if 'key_padding_mask' in kwargs and kwargs['key_padding_mask'] is not None:
         kwargs['key_padding_mask'] = kwargs['key_padding_mask'].unsqueeze(0)
-    single_batch_input_args = [input.unsqueeze(dim) for input in args]
+    single_batch_input_args = [input.unsqueeze(batch_dim) for input in args]
     with freeze_rng_state():
         output = m(*single_batch_input_args, **kwargs)
-        return (output[0].squeeze(dim), output[1].squeeze(0))
+        return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
 def no_batch_dim_reference_transformerencoderlayer(m, p, *args, **kwargs):
     """Reference function for TransformerEncoderLayer supporting no batch dimensions.
-
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
@@ -393,12 +392,14 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
             desc='gelu_activation'
         ),]
 
+    # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
     attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((2, 3, 3)))
     for src_mask, src_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
         samples.append(
             ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, 0.0, batch_first=True, norm_first=norm_first),
+                constructor_input=FunctionInput(d_model=4, nhead=2, dim_feedforward=8,
+                                                dropout=0.0, batch_first=True, norm_first=norm_first),
                 forward_input=FunctionInput(
                     make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
@@ -408,7 +409,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
 
         samples.append(
             ModuleInput(
-                constructor_input=FunctionInput(4, 2, 8, 0.0, batch_first=False, norm_first=norm_first),
+                constructor_input=FunctionInput(4, 2, 8, dropout=0.0, batch_first=False, norm_first=norm_first),
                 forward_input=FunctionInput(
                     make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
@@ -435,6 +436,7 @@ def module_inputs_torch_nn_Embedding(module_info, device, dtype, requires_grad, 
 
 
 def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     samples = []
     bool_vals = (True, False)
