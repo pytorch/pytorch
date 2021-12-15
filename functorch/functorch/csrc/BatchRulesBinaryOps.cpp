@@ -334,7 +334,9 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
 #define LOGICAL_COMPARISON_POINTWISE(op) \
   VMAP_SUPPORT(#op, \
-      SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN(op)), &ATEN_FN(op)>));
+      SINGLE_ARG(comparison_pointwise_batch_rule<decltype(&ATEN_FN(op)), &ATEN_FN(op)>)); \
+  m.impl(#op "_", inplacePlumbing2< \
+     DECLTYPE_AUTO(&binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor:: op ## _ >)>);
 
   LOGICAL_COMPARISON_POINTWISE(logical_and);
   LOGICAL_COMPARISON_POINTWISE(logical_or);
