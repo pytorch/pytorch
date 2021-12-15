@@ -6,7 +6,9 @@
 from ... import Generator as Generator, Tensor as Tensor
 from torch import default_generator as default_generator, randperm as randperm
 from torch.utils.data._typing import _DataPipeMeta
-from typing import Any, Callable, Dict, Generic, Iterable, Iterator, List, Optional, Sequence, Tuple, TypeVar
+from typing import Any, Callable, Dict, Generic, Iterable, Iterator, List, Optional, Sequence, Tuple, TypeVar, Union
+${TorchDataImports}
+
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
