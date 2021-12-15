@@ -284,24 +284,6 @@ Tensor cudnn_convolution_transpose_backward_input(
     grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
-std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
-  Tensor grad_input, grad_weight;
-  if (output_mask[0]) {
-    grad_input = cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-  }
-  if (output_mask[1]) {
-    grad_weight = cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-  }
-
-  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
-}
-
 // ---------------------------------------------------------------------
 //
 // Convolution backward / Transposed convolution forward
@@ -478,6 +460,24 @@ Tensor cudnn_convolution_transpose_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, input_t, grad_output_t,
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+}
+
+std::tuple<at::Tensor,at::Tensor> cudnn_convolution_transpose_backward(
+    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
+
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+
+  Tensor grad_input, grad_weight;
+  if (output_mask[0]) {
+    grad_input = cudnn_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  }
+  if (output_mask[1]) {
+    grad_weight = cudnn_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+  }
+
+  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
 }
 
 Tensor cudnn_convolution_relu(
