@@ -13590,7 +13590,7 @@ class TestNNDeviceType(NNTestCase):
 
     def _test_dropoutNd_channel_zero(self, dropout, input):
         # Verify the number of zeros in a channel is 0 or the number of elements in the channel
-        # for a non-zero input tensor
+        # for a fully positive input tensor
         shape = input.shape
         B = shape[0]
         C = shape[1]
