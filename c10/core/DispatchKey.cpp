@@ -128,6 +128,9 @@ const char* toString(DispatchKey t) {
     case DispatchKey::Autocast:
       return "Autocast";
 
+    case DispatchKey::AutocastCPU:
+      return "AutocastCPU";
+
     case DispatchKey::Batched:
       return "Batched";
 
