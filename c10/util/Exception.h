@@ -553,8 +553,8 @@ namespace detail {
 
 // Report an error with a specific argument
 // NOTE: using the argument name in TORCH_CHECK's message is preferred
-#define TORCH_CHECK_ARG(cond, argN, ...)                            \
-  TORCH_CHECK(cond,  "invalid argument ", argN, ": ", __VA_ARGS__)
+#define TORCH_CHECK_ARG(cond, argN, ...) \
+  TORCH_CHECK(cond, "invalid argument ", argN, ": ", __VA_ARGS__)
 
 // ----------------------------------------------------------------------------
 // Deprecated macros
