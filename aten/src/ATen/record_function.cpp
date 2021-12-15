@@ -72,6 +72,66 @@ double sample_zero_one() {
   return coinflip_tls().distZeroOne_(coinflip_tls().genZeroOne_);
 }
 
+struct GlobalRecordFunctionCallbacksEntry {
+  RecordFunctionCallback callback;
+ private:
+  std::atomic<bool> enabled;
+ public:
+  CallbackHandle handle;
+
+  GlobalRecordFunctionCallbacksEntry(RecordFunctionCallback&& cb, CallbackHandle h)
+      : callback(std::move(cb)), enabled(true), handle(h) {}
+
+  // Copying is fine despite std::atomic<bool> not being supposed to
+  // have a copy/move constructor: adding & removing callbacks is
+  // already not thread-safe.
+  GlobalRecordFunctionCallbacksEntry(
+      const GlobalRecordFunctionCallbacksEntry& rhs)
+      : callback(rhs.callback), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(const GlobalRecordFunctionCallbacksEntry& rhs) {
+    callback = rhs.callback;
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  GlobalRecordFunctionCallbacksEntry(
+      GlobalRecordFunctionCallbacksEntry&& rhs) noexcept
+      : callback(std::move(rhs.callback)), enabled(rhs.enabled.load()), handle(rhs.handle) {}
+
+  GlobalRecordFunctionCallbacksEntry& operator=(GlobalRecordFunctionCallbacksEntry&& rhs) noexcept {
+    callback = std::move(rhs.callback);
+    enabled = rhs.enabled.load();
+    handle = rhs.handle;
+    return *this;
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool disable() {
+    bool expected = true;
+    // NOTE: we use sequentially consistent access here and in
+    // enable() because updating further atomic flags depends on this
+    // operation.
+    return enabled.compare_exchange_strong(expected, false);
+  }
+
+  // Returns true if the status changed, false otherwise.
+  bool enable() {
+    bool expected = false;
+    return enabled.compare_exchange_strong(expected, true);
+  }
+
+  // Read the flag. Note that it is neither necessary nor correct to
+  // check this before calling enable() or disable().
+  bool isEnabled() const {
+    return enabled.load(std::memory_order_relaxed);
+  }
+};
+
+using GlobalRecordFunctionCallbacks =
+  std::vector<GlobalRecordFunctionCallbacksEntry>;
+
 } // namespace
 
 const RecordFunctionTLS& get_record_function_tls_() {
