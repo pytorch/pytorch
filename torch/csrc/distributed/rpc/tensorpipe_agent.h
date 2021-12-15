@@ -167,8 +167,6 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       worker_id_t selfId,
       int worldSize,
       TensorPipeRpcBackendOptions opts,
-      std::unordered_map<std::string, DeviceMap> reverseDeviceMaps,
-      std::vector<c10::Device> devices,
       std::unique_ptr<RequestCallback> cb);
 
   TensorPipeAgent(const TensorPipeAgent&) = delete;
@@ -192,6 +190,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   const WorkerInfo& getWorkerInfo(const std::string& workerName) const override;
   const WorkerInfo& getWorkerInfo(worker_id_t workerId) const override;
   std::vector<WorkerInfo> getWorkerInfos() const override;
+  void setReverseDeviceMaps(
+      const std::unordered_map<std::string, DeviceMap>& reverseDeviceMaps);
 
   std::unordered_map<std::string, std::string> getMetrics() override;
 
@@ -308,11 +308,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   };
 
   const TensorPipeRpcBackendOptions opts_;
-  const std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
+  std::unordered_map<std::string, DeviceMap> reverseDeviceMaps_;
   // Local devices used by this agent. If application didn't specify this
   // field, it will be initialized using corresponding local devices in
   // opts_.deviceMaps and reverseDeviceMaps_;
-  const std::vector<c10::Device> devices_;
+  std::vector<c10::Device> devices_;
 
   ThreadPool threadPool_;
   std::shared_ptr<tensorpipe::Context> context_;

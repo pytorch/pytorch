@@ -26,8 +26,6 @@ FaultyTensorPipeAgent::FaultyTensorPipeAgent(
           selfId,
           worldSize,
           std::move(opts),
-          std::move(reverseDeviceMaps),
-          std::move(devices),
           std::move(callback)),
       numFailSends_(opts.numFailSends),
       messageTypesToFail_(parseMessagesToFailInput(opts.messagesToFail)),
