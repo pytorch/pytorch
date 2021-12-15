@@ -30,7 +30,7 @@ struct BuildFeatureTracer final {
   BuildFeatureTracer() {
     auto recorder_cb = [](const at::RecordFunction& fn)
         -> std::unique_ptr<at::ObserverContext> {
-      std::string name = fn.name().str();
+      std::string name = fn.name();
       getBuildFeatures().insert(name);
       return nullptr;
     };
