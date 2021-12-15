@@ -573,9 +573,7 @@ TEST(Expr, OutOfBounds) {
 }
 
 TEST(Expr, OutOfBounds2d) {
-  std::vector<std::pair<int, int>> size_options = {
-    {10, 15}, {15, 10}
-  };
+  std::vector<std::pair<int, int>> size_options = {{10, 15}, {15, 10}};
   for (auto sizes : size_options) {
     ExprHandle N(sizes.first);
     ExprHandle M(sizes.second);
