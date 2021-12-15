@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 
-#include <caffe2/serialize/versions.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/irparser.h>
@@ -30,16 +29,17 @@ struct OldOpsReplacer {
       if (auto schema = node->maybeSchema()) {
         auto schema_name = getFullSchemaName(*schema);
         // this implies there was a version bump because of this operator
-        auto version_entry = operatorVersionMap.find(schema_name);
-        std::cout << (operatorVersionMap.find("aten::_test_serialization_subcmul") != operatorVersionMap.end()) << std::endl;
-        if (version_entry != operatorVersionMap.end()) {
+        auto version_entry = get_operator_version_map().find(schema_name);
+        if (version_entry != get_operator_version_map().end()) {
           const auto& entry = version_entry->second;
-          updated_version = std::max(updated_version, entry[entry.size() - 1].bumped_at_version);
+          updated_version = std::max(
+              updated_version, entry[entry.size() - 1].bumped_at_version);
           auto upgrader_entry =
               findUpgrader(version_entry->second, current_version);
           if (!upgrader_entry.has_value()) {
             if (!isOpSymbolCurrent(schema_name, current_version)) {
-              TORCH_INTERNAL_ASSERT(false, "Upgrader must be present for ", schema_name);
+              TORCH_INTERNAL_ASSERT(
+                  false, "Upgrader must be present for ", schema_name);
             }
             return;
           }
@@ -51,7 +51,6 @@ struct OldOpsReplacer {
               "Corresponding upgrader graph for ",
               upgrader_name,
               " must exist");
-          std::cout << "FOUND UPGRADER" << std::endl;
           Graph upgrader_graph;
           parseIR(upgrader_graph_entry->second, &upgrader_graph);
           // inline the upgrader function body
