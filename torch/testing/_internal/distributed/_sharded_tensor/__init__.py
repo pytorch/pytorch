@@ -43,6 +43,7 @@ class ShardedTensorTestBase(MultiProcessTestCase):
         )
 
     def init_comms(self, init_rpc=True, backend="nccl"):
+        torch.cuda.set_device(self.rank)
         if init_rpc:
             self.init_rpc()
         self.init_pg(backend=backend)
