@@ -7296,14 +7296,14 @@ def error_inputs_kthvalue(op_info, device, **kwargs):
                        error_type=RuntimeError, error_regex=k_out_of_range_err),)
 
 def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
-                          train=None, min_input_dim=None, **kwargs):
+                          train=None, valid_input_dim=None, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if min_input_dim:
-        # Create cases with dim ranging from min_input_dim to min_input_dim + 2 (inclusive)
-        cases = [(S,) * i for i in range(min_input_dim, min_input_dim + 3)]
+    if valid_input_dim:
+        # dropout2d : Valid dimensions are (3, 4)
+        cases = ((S,) * i for i in valid_input_dim)
     else:
-        cases = [(S, S), (S,), ()]
+        cases = ((S, S), (S,), ())
     p_vals = [0.0, 0.5, 1.0]
     # This is to handle special case for feature_alpha_dropout which has different
     # supported dtypes depending on `train` parameter
@@ -14074,7 +14074,8 @@ op_db: List[OpInfo] = [
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_out=False,
-        sample_inputs_func=partial(sample_inputs_dropout, min_input_dim=2),
+        # Supported dims for dropout2d are 3-D (unbatched) and 4-D (batched)
+        sample_inputs_func=partial(sample_inputs_dropout, valid_input_dim=(3, 4)),
         inplace_variant=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs, inplace=True)),
     # In training mode, feature_alpha_dropout currently doesn't support inputs of complex dtype
