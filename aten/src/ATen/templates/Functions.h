@@ -2,21 +2,30 @@
 
 // ${generated_comment}
 
-#include <c10/core/Scalar.h>
-#include <ATen/Tensor.h>
-#include <c10/core/Storage.h>
-#include <ATen/core/Generator.h>
-#include <c10/util/Deprecated.h>
-#include <ATen/DeviceGuard.h>
-#include <c10/core/TensorOptions.h>
-#include <ATen/core/Reduction.h>
-#include <c10/util/Optional.h>
-#include <ATen/TensorUtils.h>
+#ifdef TORCH_ASSERT_NO_OPERATORS
+#error This change adds a dependency on native_functions.yaml,            \
+  meaning the file will need to be re-compiled every time an operator     \
+  is changed or added. Consider if your change would be better placed in  \
+  another file, or if a more specific header might achieve the same goal. \
+  See NOTE: [Tensor vs. TensorBase]
+#endif
+
 #include <ATen/Context.h>
+#include <ATen/DeviceGuard.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/TracerMode.h>
-#include <ATen/Operators.h>
+#include <ATen/core/Generator.h>
+#include <ATen/core/Reduction.h>
+#include <ATen/core/Tensor.h>
+#include <c10/core/Scalar.h>
+#include <c10/core/Storage.h>
+#include <c10/core/TensorOptions.h>
+#include <c10/util/Deprecated.h>
+#include <c10/util/Optional.h>
 
 ${static_dispatch_extra_headers}
+
+${Functions_includes}
 
 namespace at {
 
@@ -43,7 +52,7 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TENSOR)
 AT_FORALL_COMPLEX_TYPES(TENSOR)
 #undef TENSOR
 
-${function_definitions}
+${Functions_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
 // These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
