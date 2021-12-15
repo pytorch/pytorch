@@ -22,6 +22,7 @@ constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at { namespace native {
 
+DEFINE_DISPATCH(slow_conv3d_backward_stub);
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
@@ -1638,7 +1639,9 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     case ConvBackend::Slow3d:
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-        at::slow_conv3d_backward(grad_output, input, weight, kernel_size, params.stride, params.padding, output_mask);
+        slow_conv3d_backward_stub(
+            input.device().type(), grad_output, input, weight, kernel_size,
+            params.stride, params.padding, output_mask);
       break;
     // Handle backends that don't natively support groups > 1.
     case ConvBackend::NnpackSpatial:

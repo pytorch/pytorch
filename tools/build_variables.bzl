@@ -1022,6 +1022,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/BlasKernel.cpp",
     "aten/src/ATen/native/cpu/CatKernel.cpp",
     "aten/src/ATen/native/cpu/ComplexKernel.cpp",
+    "aten/src/ATen/native/cpu/ConvolutionMM3d.cpp",
     "aten/src/ATen/native/cpu/CopyKernel.cpp",
     "aten/src/ATen/native/cpu/CrossKernel.cpp",
     "aten/src/ATen/native/cpu/DepthwiseConvKernel.cpp",
