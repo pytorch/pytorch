@@ -20,7 +20,14 @@ def multi_tensor_adagrad(params: List[Tensor],
     """
 
     if has_sparse_grad:
-        return single_tensor_adagrad(params, grads, state_sums, state_steps, lr, weight_decay, lr_decay, eps)
+        return single_tensor_adagrad(params,
+                                     grads,
+                                     state_sums,
+                                     state_steps,
+                                     lr=lr,
+                                     weight_decay=weight_decay,
+                                     lr_decay=lr_decay,
+                                     eps=eps)
 
     if weight_decay != 0:
         if has_sparse_grad:
