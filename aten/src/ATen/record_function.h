@@ -94,7 +94,7 @@ struct ObserverContext {
 };
 
 typedef c10::SmallVector<uint64_t, kSoftLimitCallbacks> CallbackHandles;
-typedef std::vector<std::unique_ptr<ObserverContext>> ObserverContextList;
+typedef c10::SmallVector<std::unique_ptr<ObserverContext>, kSoftLimitCallbacks> ObserverContextList;
 typedef uint64_t RecordFunctionHandle;
 
 struct TORCH_API RecordFunction {
