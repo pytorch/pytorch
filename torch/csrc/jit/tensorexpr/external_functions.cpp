@@ -177,36 +177,37 @@ std::vector<at::Tensor> constructTensors(
 }
 
 #ifndef _WIN32
-at::Tensor quantized_add(
+at::Tensor quantized_add_out(
     const at::Tensor& x1,
     const at::Tensor& x2,
-    double scale,
-    int64_t zero) {
+    at::Tensor out) {
   const auto qadd_op =
       c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::add", "")
-          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
-  return qadd_op.call(x1, x2, scale, zero);
+          .findSchemaOrThrow("quantized::add", "out")
+          .typed<at::Tensor(at::Tensor, at::Tensor, at::Tensor)>();
+  return qadd_op.call(x1, x2, out);
 }
 
-at::Tensor quantized_mul(
+at::Tensor quantized_mul_out(
     const at::Tensor& x1,
     const at::Tensor& x2,
-    double scale,
-    int64_t zero) {
-  const auto op =
-      c10::Dispatcher::singleton()
-          .findSchemaOrThrow("quantized::mul", "")
-          .typed<at::Tensor(at::Tensor, at::Tensor, double, int64_t)>();
-  return op.call(x1, x2, scale, zero);
+    at::Tensor out) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::mul", "out")
+                      .typed<at::Tensor(at::Tensor, at::Tensor, at::Tensor)>();
+  return op.call(x1, x2, out);
 }
 
-at::Tensor quantized_mul_scalar(const at::Tensor& x, double scalar) {
-  const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::mul", "Scalar")
-                      .typed<at::Tensor(at::Tensor, c10::Scalar const&)>();
+at::Tensor quantized_mul_scalar_out(
+    const at::Tensor& x,
+    double scalar,
+    at::Tensor out) {
+  const auto op =
+      c10::Dispatcher::singleton()
+          .findSchemaOrThrow("quantized::mul", "Scalar_out")
+          .typed<at::Tensor(at::Tensor, c10::Scalar const&, at::Tensor)>();
   auto s = c10::Scalar(scalar);
-  return op.call(x, s);
+  return op.call(x, s, out);
 }
 
 at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
@@ -216,24 +217,16 @@ at::Tensor quantized_sigmoid(const at::Tensor& x, double scale, int64_t zero) {
   return op.call(x, scale, zero);
 }
 
-at::Tensor quantized_cat(
+at::Tensor quantized_cat_out(
     const c10::List<at::Tensor>& qxs,
     int64_t dim,
-    c10::optional<double> scale,
-    c10::optional<int64_t> zero) {
+    at::Tensor& out) {
   const auto op = c10::Dispatcher::singleton()
-                      .findSchemaOrThrow("quantized::cat", "")
+                      .findSchemaOrThrow("quantized::cat_out", "")
                       .typed<at::Tensor(
-                          c10::List<at::Tensor> const&,
-                          int64_t,
-                          c10::optional<double>,
-                          c10::optional<int64_t>)>();
+                          c10::List<at::Tensor> const&, int64_t, at::Tensor)>();
   return op.redispatch(
-      c10::DispatchKeySet({c10::DispatchKey::QuantizedCPU}),
-      qxs,
-      dim,
-      scale,
-      zero);
+      c10::DispatchKeySet({c10::DispatchKey::QuantizedCPU}), qxs, dim, out);
 }
 
 at::Tensor quantized_relu(const at::Tensor& qx) {
@@ -464,6 +457,8 @@ void nnc_aten_quantized_add(
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
+  const double out_qscale = ((double*)extra_args)[6];
+  const int64_t out_qzero = extra_args[7];
   auto tensors = constructTensors(
       bufs_num,
       buf_data,
@@ -471,14 +466,10 @@ void nnc_aten_quantized_add(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      {{1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
+      {{0u, {out_qscale, out_qzero, toQIntType(a_qdtype)}},
+       {1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
-
-  const double out_qscale = ((double*)extra_args)[6];
-  const int64_t out_qzero = extra_args[7];
-  // NOLINTNEXTLINE
-  auto r = quantized_add(tensors[1], tensors[2], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  quantized_add_out(tensors[1], tensors[2], tensors[0]);
 }
 
 void nnc_aten_quantized_mul(
@@ -496,6 +487,8 @@ void nnc_aten_quantized_mul(
   const double b_qscale = ((double*)extra_args)[3];
   const int64_t b_qzero = extra_args[4];
   const c10::ScalarType b_qdtype = static_cast<c10::ScalarType>(extra_args[5]);
+  const double out_qscale = ((double*)extra_args)[6];
+  const int64_t out_qzero = extra_args[7];
   auto tensors = constructTensors(
       bufs_num,
       buf_data,
@@ -503,13 +496,10 @@ void nnc_aten_quantized_mul(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      {{1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
+      {{0u, {out_qscale, out_qzero, toQIntType(a_qdtype)}},
+       {1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
-  const double out_qscale = ((double*)extra_args)[6];
-  const int64_t out_qzero = extra_args[7];
-  // NOLINTNEXTLINE
-  auto r = quantized_mul(tensors[1], tensors[2], out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  quantized_mul_out(tensors[1], tensors[2], tensors[0]);
 }
 
 void nnc_aten_quantized_mul_scalar(
@@ -531,11 +521,10 @@ void nnc_aten_quantized_mul_scalar(
       buf_dims,
       buf_strides,
       buf_dtypes,
-      {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
+      {{0u, {x_qscale, x_qzero, toQIntType(x_qdtype)}},
+       {1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
   const double scalar = ((double*)extra_args)[3];
-  // NOLINTNEXTLINE
-  auto r = quantized_mul_scalar(tensors[1], scalar);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  quantized_mul_scalar_out(tensors[1], scalar, tensors[0]);
 }
 
 void nnc_aten_quantized_relu(
@@ -558,7 +547,6 @@ void nnc_aten_quantized_relu(
       buf_strides,
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
-  // NOLINTNEXTLINE
   auto r = at::relu(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
@@ -575,6 +563,8 @@ void nnc_aten_quantized_sigmoid(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
+  const double out_qscale = ((double*)extra_args)[3];
+  const int64_t out_qzero = extra_args[4];
   auto tensors = constructTensors(
       bufs_num,
       buf_data,
@@ -605,6 +595,12 @@ void nnc_aten_quantized_cat(
     int64_t* extra_args) {
   std::vector<std::pair<size_t, QIData>> qdata;
   const auto in_bufs_num = bufs_num - 1;
+  const double out_qscale = ((double*)extra_args)[3 * in_bufs_num + 1];
+  const int64_t out_qzero = extra_args[3 * in_bufs_num + 2];
+  qdata.emplace_back(
+      0u,
+      std::make_tuple(
+          out_qscale, out_qzero, static_cast<c10::ScalarType>(extra_args[2])));
   for (const size_t i : c10::irange(in_bufs_num)) {
     const double qscale = ((double*)extra_args)[3 * i + 0];
     const int64_t qzero = extra_args[3 * i + 1];
@@ -615,12 +611,9 @@ void nnc_aten_quantized_cat(
   auto tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
   const int64_t dim = extra_args[3 * in_bufs_num + 0];
-  const double out_qscale = ((double*)extra_args)[3 * in_bufs_num + 1];
-  const int64_t out_qzero = extra_args[3 * in_bufs_num + 2];
   auto qxs = c10::List<at::Tensor>(
       std::vector<at::Tensor>(tensors.begin() + 1, tensors.end()));
-  auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);
-  memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
+  quantized_cat_out(qxs, dim, tensors[0]);
 }
 #endif // _WIN32
 
