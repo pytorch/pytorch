@@ -186,11 +186,11 @@ std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
     const torch::jit::Module& m,
     bool is_frozen,
     const StaticModuleOptions& opts) {
-  VLOG(1) << "StaticModuleOptions: cleanup_activations "
-          << opts.cleanup_activations << ", enable_out_variant "
-          << opts.enable_out_variant << ", optimize_memory "
-          << opts.optimize_memory << ", manage_output_tensors "
-          << opts.manage_output_tensors;
+  LOG(INFO) << "StaticModuleOptions: cleanup_activations "
+            << opts.cleanup_activations << ", enable_out_variant "
+            << opts.enable_out_variant << ", optimize_memory "
+            << opts.optimize_memory << ", manage_output_tensors "
+            << opts.manage_output_tensors;
 
   Module module = m.copy();
   if (!is_frozen) {
@@ -528,9 +528,9 @@ StaticModule::StaticModule(
   int node_idx = 0;
   FastMap<Node*, bool> node_has_out_variant;
 
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + num_inputs();
-  const auto values_index_offset = constants_index_offset + constants().size();
+  const auto inputs_index_offset = inputs_offset();
+  const auto constants_index_offset = constants_offset();
+  const auto values_index_offset = intermediate_values_offset();
 
   // Map node_idx to index offset in values_. Can't reserve space
   // because we don't know how many non-constant nodes there are yet.
@@ -604,6 +604,15 @@ StaticModule::StaticModule(
     }
     node_idx++;
   }
+
+  num_intermediate_values_ = std::accumulate(
+      nodes_.begin(),
+      nodes_.end(),
+      0,
+      [](uint32_t sum, const ProcessedNode& pnode) {
+        return sum + pnode.num_outputs();
+      });
+
   for (auto& pnode : nodes_) {
     if (pnode.num_outputs() == 1 &&
         isOptimizableContainerType(pnode.node(), node_has_out_variant)) {
@@ -732,17 +741,8 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
-  const auto total_num_node_outputs = std::accumulate(
-      nodes_.begin(),
-      nodes_.end(),
-      0,
-      [](uint32_t sum, const ProcessedNode& pnode) {
-        return sum + pnode.num_outputs();
-      });
-  values_.resize(
-      sm.num_inputs() + sm.constants().size() + total_num_node_outputs);
-  const auto inputs_index_offset = 0;
-  const auto constants_index_offset = inputs_index_offset + sm.num_inputs();
+  values_.resize(sm.total_num_values());
+  const auto constants_index_offset = sm.constants_offset();
   const auto constants_begin_it = values_.begin() + constants_index_offset;
   const auto constants_end_it = constants_begin_it + sm.constants().size();
   std::copy(sm.constants().begin(), sm.constants().end(), constants_begin_it);
@@ -1003,19 +1003,16 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
         auto& output = n.Output(i);
         if (output.isTensor()) {
           overlap_detected_with_fast_check |=
-              fast_check_overlap_with(n, output);
+              fast_check_and_correct_overlap_with(n, output);
         } else if (output.isTensorList()) {
           auto tensor_list = output.toListRef();
           for (auto& ival : tensor_list) {
             overlap_detected_with_fast_check |=
-                // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-                fast_check_overlap_with(n, const_cast<c10::IValue&>(ival));
+                fast_check_and_correct_overlap_with(
+                    n,
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+                    const_cast<c10::IValue&>(ival));
           }
-        } else {
-          TORCH_CHECK(
-              false,
-              "verify_and_correct_memory_overlap cannot handle IValue type ",
-              output.tagKind());
         }
       }
       if (n.outputs_memory_overlap_detected() &&
@@ -1027,7 +1024,7 @@ void StaticRuntime::verify_and_correct_memory_overlap(ProcessedNode& n) {
   }
 }
 
-bool StaticRuntime::fast_check_overlap_with(
+bool StaticRuntime::fast_check_and_correct_overlap_with(
     ProcessedNode& n,
     c10::IValue& tensor_ival) {
   auto& tensor = tensor_ival.toTensor();
@@ -1840,7 +1837,7 @@ bool ProcessedNode::verify_inputs_dont_overlap_outputs(bool force_check) const {
   return true;
 }
 
-bool ProcessedNode::check_overlap_with(
+bool ProcessedNode::check_and_correct_overlap_with(
     const at::Tensor& input,
     c10::IValue& output_ival) {
   auto& tensor = output_ival.toTensor();
@@ -1863,18 +1860,13 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
     for (const auto j : c10::irange(num_outputs_)) {
       auto& output = Output(j);
       if (output.isTensor()) {
-        check_overlap_with(in_t, output);
+        check_and_correct_overlap_with(in_t, output);
       } else if (output.isTensorList()) {
         auto tensors = output.toListRef();
         for (const auto& ival : tensors) {
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-          check_overlap_with(in_t, const_cast<c10::IValue&>(ival));
+          check_and_correct_overlap_with(in_t, const_cast<c10::IValue&>(ival));
         }
-      } else {
-        TORCH_CHECK(
-            false,
-            "verify_and_correct_memory_overlap cannot handle IValue type ",
-            output.tagKind());
       }
     }
   }

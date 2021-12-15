@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/frontend/resolver.h>
 #include <torch/csrc/jit/mobile/backport.h>
 #include <torch/csrc/jit/mobile/backport_manager.h>
-#include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
@@ -17,7 +16,6 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/runtime_compatibility.h>
 #include <torch/csrc/jit/serialization/export.h>
-#include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -27,11 +25,6 @@
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
-
-mobile::Module parse_mobile_module(void* data, size_t) {
-  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(flatbuffer_module);
-}
 
 TEST(LiteInterpreterTest, UpsampleNearest2d) {
   Module m("m");
@@ -54,12 +47,6 @@ TEST(LiteInterpreterTest, UpsampleNearest2d) {
   auto resd = res.toTensor();
   auto refd = ref.toTensor();
   ASSERT_TRUE(resd.equal(refd));
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  auto res2 = bc2.forward(inputs);
-  auto resd2 = res2.toTensor();
-  ASSERT_TRUE(resd2.equal(refd));
 }
 
 TEST(LiteInterpreterTest, CheckAttrAccess) {
@@ -79,11 +66,6 @@ TEST(LiteInterpreterTest, CheckAttrAccess) {
   mobile_optimized = bc.attr("mobile_optimized", false).toBool();
 
   AT_ASSERT(!mobile_optimized);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  auto mobile_optimized2 = bc2.attr("mobile_optimized", false).toBool();
-  AT_ASSERT(!mobile_optimized2);
 }
 
 TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
@@ -128,16 +110,6 @@ TEST(LiteInterpreterTest, MethodInvocation) { // NOLINT (use =delete in gtest)
     auto resd = res.toTensor().item<float>();
     auto refd = ref.toTensor().item<float>();
     AT_ASSERT(resd == refd);
-
-    auto buff = save_mobile_module_to_bytes(bc);
-    mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-    const auto& test_func2 = bc2.get_method("test_func");
-    IValue res2;
-    for (int i = 0; i < 3; ++i) {
-      res2 = test_func2({minput});
-    }
-    auto resd2 = res2.toTensor().item<float>();
-    AT_ASSERT(resd2 == refd);
   }
 }
 
@@ -172,16 +144,6 @@ TEST(LiteInterpreterTest, Conv) {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 3; ++i) {
-    res = bc2.get_method("forward")(inputs);
-  }
-  output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
-      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
 TEST(LiteInterpreterTest, Inline) {
@@ -202,12 +164,6 @@ TEST(LiteInterpreterTest, Inline) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("foo3")(inputs);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  std::vector<torch::jit::IValue> inputs2({torch::ones({})});
-  output = bc2.get_method("foo3")(inputs2);
-  AT_ASSERT(output.toTensor().item<float>() == 7.0);
 }
 
 TEST(LiteInterpreterTest, Tuple) {
@@ -226,11 +182,6 @@ TEST(LiteInterpreterTest, Tuple) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  output = bc2.get_method("forward")(inputs);
-  AT_ASSERT(output.toTuple()->elements()[1].toInt() == 2);
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -248,11 +199,6 @@ TEST(LiteInterpreterTest, Dict) {
   mobile::Module bc = _load_for_mobile(ss);
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
-  AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  output = bc2.get_method("forward")(inputs);
   AT_ASSERT(output.toGenericDict().at("result").toTensor().item().toInt() == 2);
 }
 
@@ -300,16 +246,6 @@ TEST(LiteInterpreterTest, Prim) {
   auto resi = res.toInt();
   auto refi = ref.toInt();
   AT_ASSERT(resi == refi);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto bcinputs = inputs;
-    res = bc2.get_method("forward")(bcinputs);
-  }
-  auto resi2 = res.toInt();
-  AT_ASSERT(resi2 == refi);
 }
 
 TEST(LiteInterpreterTest, PrimScalar) {
@@ -337,16 +273,6 @@ TEST(LiteInterpreterTest, PrimScalar) {
   auto resi = res.toInt();
   auto refi = ref.toInt();
   AT_ASSERT(resi == refi);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto bcinputs = inputs;
-    res = bc2.get_method("forward")(bcinputs);
-  }
-  auto resi2 = res.toInt();
-  AT_ASSERT(resi2 == refi);
 }
 
 TEST(LiteInterpreterTest, LoadOrigJit) {
@@ -378,11 +304,6 @@ TEST(LiteInterpreterTest, WrongMethodName) {
   inputs.emplace_back(minput);
   ASSERT_THROWS_WITH_MESSAGE(
       bc.get_method("forward")(inputs), "is not defined");
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  ASSERT_THROWS_WITH_MESSAGE(
-      bc2.get_method("forward")(inputs), "is not defined");
 }
 
 TEST(LiteInterpreterTest, SetState) {
@@ -390,7 +311,7 @@ TEST(LiteInterpreterTest, SetState) {
   m.register_parameter("foo", torch::ones({}), false);
   m.define(R"(
     def __getstate__(self):
-      return self.foo
+      return self.foo + self.foo
     def __setstate__(self, a):
       self.foo = a
     def forward(self, x):
@@ -420,17 +341,6 @@ TEST(LiteInterpreterTest, SetState) {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 3; ++i) {
-    // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-    auto bcinputs = inputs;
-    res = bc2.get_method("forward")(bcinputs);
-  }
-
-  auto resd2 = res.toTensor().item<float>();
-  AT_ASSERT(resd2 == refd);
 }
 
 class TorchBindLiteInterpreterTestStruct
@@ -525,12 +435,6 @@ TEST(LiteInterpreterTest, BuiltinClass) {
   const auto& str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
   AT_ASSERT(str == expected);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  res = bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
-  const auto& str2 = res.toStringRef();
-  AT_ASSERT(str2 == expected);
 }
 
 TEST(LiteInterpreterTest, BuiltinFunction) {
@@ -551,13 +455,6 @@ TEST(LiteInterpreterTest, BuiltinFunction) {
   // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
   auto str = res.toStringRef();
   std::string expected = "Hello! Your tensor has 12 elements!";
-  AT_ASSERT(str == expected);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  res = bc2.get_method("forward")(std::vector<IValue>{torch::zeros({3, 4})});
-  // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
-  str = res.toStringRef();
   AT_ASSERT(str == expected);
 }
 
@@ -879,17 +776,6 @@ TEST(LiteInterpreterTest, Eval) {
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  bc2.eval();
-  for (int i = 0; i < 3; ++i) {
-    res = bc2.get_method("forward")(inputs);
-  }
-  output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(
-      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
 TEST(LiteInterpreterTest, FindWrongMethodName) {
@@ -904,10 +790,6 @@ TEST(LiteInterpreterTest, FindWrongMethodName) {
   m._save_for_mobile(ss);
   mobile::Module bc = _load_for_mobile(ss);
   ASSERT_TRUE(bc.find_method("forward") == c10::nullopt);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  ASSERT_TRUE(bc2.find_method("forward") == c10::nullopt);
 }
 
 TEST(LiteInterpreterTest, FindAndRunMethod) {
@@ -938,19 +820,6 @@ TEST(LiteInterpreterTest, FindAndRunMethod) {
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
   AT_ASSERT(resd == refd);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-
-  for (int i = 0; i < 3; ++i) {
-    auto bcinputs = inputs;
-    auto method = bc2.find_method("add_it");
-    AT_ASSERT(method != c10::nullopt);
-    res = (*method)(std::move(bcinputs));
-  }
-
-  resd = res.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
 }
 
 TEST(LiteInterpreterTest, RunMethodVariadic) {
@@ -973,12 +842,6 @@ TEST(LiteInterpreterTest, RunMethodVariadic) {
 
   auto resd = res.toTensor().item<float>();
   auto refd = ref.toTensor().item<float>();
-  AT_ASSERT(resd == refd);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  res = bc.run_method("add_three", inputx, inputy);
-  resd = res.toTensor().item<float>();
   AT_ASSERT(resd == refd);
 }
 
@@ -1009,11 +872,6 @@ TEST(LiteInterpreterTest, DuplicateSetState) {
   const auto methods = bc.get_methods();
   const size_t expected_n = 3;
   ASSERT_EQ(methods.size(), expected_n);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  const auto methods2 = bc.get_methods();
-  ASSERT_EQ(methods2.size(), expected_n);
 }
 
 TEST(LiteInterpreterTest, ExtraFiles) {
@@ -1082,12 +940,6 @@ TEST(LiteInterpreterTest, OpNameExportFetchRootOperators) {
   };
   EXPECT_EQ(operator_names, expected_operator_names)
       << "Expected the root operator lists to be the same";
-
-  auto buff = save_mobile_module_to_bytes(ptl_model);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  operator_names = torch::jit::mobile::_export_operator_list(bc2);
-  EXPECT_EQ(operator_names, expected_operator_names)
-      << "Expected the root operator lists to be the same";
 }
 
 TEST(LiteInterpreterTest, DefaultArgsConv) {
@@ -1105,7 +957,7 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
       return torch.conv2d(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], 1)
   )");
 
-  inputs.emplace_back(torch::ones({1, 1, 28, 28}));
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
 
   auto outputref = m.forward(inputs).toTensor();
 
@@ -1117,15 +969,6 @@ TEST(LiteInterpreterTest, DefaultArgsConv) {
     res = bc.get_method("forward")(inputs);
   }
   auto output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 1; ++i) {
-    res = bc2.get_method("forward")(inputs);
-  }
-  output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(output.equal(outputref));
 }
@@ -1173,8 +1016,8 @@ TEST(RunTimeTest, ParseBytecode) {
   std::vector<IValue> types{"List[int]", "List[int]"};
   // 2. Parse the function
   std::string function_name("test_function");
-  auto function =
-      std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
   c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
       function_name,
@@ -1234,8 +1077,8 @@ TEST(RunTimeTest, ParseOperator) {
   int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
   // 2. Parse the function
   std::string function_name("test_function");
-  auto function =
-      std::make_unique<mobile::Function>(c10::QualifiedName(function_name));
+  auto function = std::unique_ptr<mobile::Function>(
+      new mobile::Function(c10::QualifiedName(function_name)));
   c10::ivalue::TupleElements debug_handles_m_tuple;
   parseInstructions(
       function_name,
@@ -1277,15 +1120,6 @@ void testLiteModuleCompareResultTensors(
   auto output = res.toTensor();
   AT_ASSERT(outputref.dim() == output.dim());
   AT_ASSERT(output.equal(outputref));
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  for (int i = 0; i < 3; ++i) {
-    res = bc2.get_method(method_name)(inputs);
-  }
-  output = res.toTensor();
-  AT_ASSERT(outputref.dim() == output.dim());
-  AT_ASSERT(output.equal(outputref));
 }
 
 void testDefaultArgsPinv(int num_args) {
@@ -1312,7 +1146,7 @@ void testDefaultArgsPinv(int num_args) {
   auto input = torch::range(1, N * N, 1);
   input[0] = 1; // a more stable matrix
   input = input.view({N, N});
-  inputs.emplace_back(input);
+  inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
 } // namespace
@@ -1412,7 +1246,7 @@ TEST(LiteInterpreterTest, DefaultArgsTensorinvSpecifyDefault) {
   std::vector<torch::jit::IValue> inputs;
   const int N = 4;
   auto input = torch::rand({N, N, N, N});
-  inputs.emplace_back(input);
+  inputs.push_back(input);
   testLiteModuleCompareResultTensors(m, inputs);
 }
 
@@ -1473,19 +1307,6 @@ TEST(LiteInterpreterTest, DefaultArgsWithOutArg) {
 
   auto ops = _get_model_ops_and_info(ss);
   auto op = ops.find("aten::add.out");
-  TORCH_CHECK(
-      op != ops.end() && op->second.num_schema_args.has_value() &&
-      op->second.num_schema_args.value() == 3);
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  auto input_x2 = 2 * torch::ones({});
-  auto input_h2 = torch::ones({});
-  m.run_method("forward", input_x2, input_h2);
-  bc2.run_method("forward", input_x2, input_h2);
-  AT_ASSERT(input_x2.equal(4 * torch::ones({})));
-  ops = _get_model_ops_and_info(ss);
-  op = ops.find("aten::add.out");
   TORCH_CHECK(
       op != ops.end() && op->second.num_schema_args.has_value() &&
       op->second.num_schema_args.value() == 3);
@@ -1696,13 +1517,6 @@ TEST(LiteInterpreterTest, OperatorSize1) {
   ASSERT_EQ(
       func.get_code()->operator_input_sizes_.size(),
       func.get_code()->operators_.size());
-
-  auto buff = save_mobile_module_to_bytes(bc);
-  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  const auto& func2 = bc.get_method("forward").function();
-  ASSERT_EQ(
-      func2.get_code()->operator_input_sizes_.size(),
-      func2.get_code()->operators_.size());
 }
 
 TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
@@ -1738,13 +1552,6 @@ TEST(LiteInterpreterTest, OperatorTest2) { // NOLINT (use =delete in gtest)
     ASSERT_EQ(
         func.get_code()->operator_input_sizes_.size(),
         func.get_code()->operators_.size());
-
-    auto buff = save_mobile_module_to_bytes(bc);
-    mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-    const auto& func2 = bc.get_method("test_func").function();
-    ASSERT_EQ(
-        func2.get_code()->operator_input_sizes_.size(),
-        func2.get_code()->operators_.size());
   }
 }
 
