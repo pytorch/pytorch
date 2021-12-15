@@ -81,7 +81,6 @@ class TestFSDPCheckpoint(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
     )
-    @skip_if_lt_x_gpu(2)
     def test_checkpoint_fsdp_wrapping(self, cpu_offload):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
         ckpt_sequential_wrapped_fsdp = checkpoint_wrapper(
@@ -120,6 +119,7 @@ class TestFSDPCheckpoint(FSDPTest):
 
             self._verify_parity(losses, outputs, models)
 
+    @skip_if_lt_x_gpu(2)
     @parametrize(
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
