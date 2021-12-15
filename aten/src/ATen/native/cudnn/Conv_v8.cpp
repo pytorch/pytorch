@@ -21,6 +21,7 @@
 
 #include <c10/util/env.h>
 #include <c10/cuda/CUDAException.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <mutex>
 #include <unordered_map>
@@ -28,37 +29,6 @@
 namespace at { namespace native {
 
 namespace {
-
-int v8_flag = -1;
-int debug = -1;
-auto heuristic_mode = CUDNN_HEUR_MODE_INSTANT;
-int printcount = 0;
-
-bool use_v8() {
-  if (v8_flag < 0) {
-    auto val = c10::utils::check_env("CUDNN_V8_API_ENABLED");
-    auto debug_val = c10::utils::check_env("CUDNN_V8_API_DEBUG");
-    auto heuristic_val = c10::utils::check_env("USE_HEURISTIC_MODE_B");
-    if (val == true) {
-      v8_flag = 1;
-    } else {
-      v8_flag = 0;
-    }
-    if (debug_val == true) {
-      debug = 1;
-    } else {
-      debug = 0;
-    }
-    if (heuristic_val == true) {
-      heuristic_mode = CUDNN_HEUR_MODE_B;
-    }
-  }
-  if (debug == 1 && printcount < 10) {
-    TORCH_WARN("CUDNN_V8_DEBUG ON, V8_FLAG: ", v8_flag, " HEURISTIC_MODE B: ", heuristic_mode == CUDNN_HEUR_MODE_B);
-    printcount++;
-  }
-  return v8_flag == 1;
-}
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr size_t operator "" _TiB(unsigned long long n) {
@@ -465,6 +435,7 @@ auto get_plans_from_find_fused(const cudnnHandle_t handle,
 // We only get configs from this stage to avoid building unnecessary plans that are never executed
 auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendDescriptorType_t desc, const Tensor& x, const Tensor& y, const Tensor& w, const CacheKey& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph(handle, desc, x, y, w, key, padding, stride, dilation);
+  auto heuristic_mode = at::native::cudnnv8_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(desc, x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
@@ -474,6 +445,7 @@ auto get_configs_from_heuristics(const cudnnHandle_t handle, const cudnnBackendD
 
 auto get_configs_from_heuristics_fused(const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b, const float alpha, const CacheKeyFused& key, const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const bool deterministic, const bool allow_tf32) {
   auto opGraph = build_opgraph_fused(handle, x, y, w, z, b, alpha, key, padding, stride, dilation);
+  auto heuristic_mode = at::native::cudnnv8_b() ? CUDNN_HEUR_MODE_B : CUDNN_HEUR_MODE_INSTANT;
   auto sources = get_generator_sources(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR, x, deterministic, allow_tf32, heuristic_mode);
 
   cudnn_frontend::EngineConfigGenerator generator(sources.size(), sources.data());
@@ -620,7 +592,7 @@ void raw_cudnn_convolution_forward_out(
     const bool benchmark, const bool deterministic, const bool allow_tf32)
 {
   if (output.numel() == 0) { return; }
-  if (use_v8()) {
+  if (at::native::cudnnv8_enabled()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_FORWARD_DESCRIPTOR,
       input, output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -639,7 +611,7 @@ void raw_cudnn_convolution_backward_input_out(
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
   if (grad_input.numel() == 0) { return; }
-  if (use_v8()) {
+  if (at::native::cudnnv8_enabled()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_DATA_DESCRIPTOR,
       grad_input, grad_output, weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -658,7 +630,7 @@ void raw_cudnn_convolution_backward_weight_out(
     const IntArrayRef padding, const IntArrayRef stride, const IntArrayRef dilation, const int64_t groups,
     const bool benchmark, const bool deterministic, const bool allow_tf32) {
   if (grad_weight.numel() == 0) { return; }
-  if (use_v8()) {
+  if (at::native::cudnnv8_enabled()) {
     run_single_conv(CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR,
       input, grad_output, grad_weight, padding, stride, dilation, groups,
       benchmark, deterministic, allow_tf32);
@@ -685,7 +657,7 @@ void raw_cudnn_convolution_add_relu_out(
     bool deterministic,
     bool allow_tf32) {
   if (output.numel() == 0) { return; }
-  if (use_v8()) {
+  if (at::native::cudnnv8_enabled()) {
     auto bias_ = bias.view({1, bias.numel(), 1, 1});
     run_fused_conv(input, output, weight, z, bias_,
       alpha, stride, padding, dilation,
