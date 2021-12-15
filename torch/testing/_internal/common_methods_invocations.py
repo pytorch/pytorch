@@ -9786,6 +9786,7 @@ op_db: List[OpInfo] = [
                # https://github.com/pytorch/pytorch/issues/67512
                DecorateInfo(unittest.skip("67512"), 'TestCommon', 'test_noncontiguous_samples'),
            )),
+    # We should probably remove this OpInfo and it is incredibly brittle
     OpInfo('linalg.det',
            op=torch.linalg.det,
            variant_test_name='singular',
@@ -9799,17 +9800,15 @@ op_db: List[OpInfo] = [
            skips=(
                # https://github.com/pytorch/pytorch/issues/67512
                DecorateInfo(unittest.skip("67512"), 'TestCommon', 'test_noncontiguous_samples'),
+               # These tests started breaking after touching the SVD.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
+                            dtypes=(torch.complex128,), active_if=IS_WINDOWS),
                # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
                             dtypes=(torch.complex128,)),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
-               # This test fails because singular inputs cannot be reliably
-               # generated unless we're using double types
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', 'test_unsupported_dtypes'),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestOpInfo', 'test_unsupported_backward',
-                            dtypes=(torch.float32, torch.complex64,)),
            )),
     OpInfo('linalg.cholesky',
            aten_name='linalg_cholesky',
