@@ -219,7 +219,7 @@ class SingletonOrSharedTypePtr {
    private:
     void destroy() {
       if (isSharedAndNonNull()) {
-        shared_.~shared_ptr<T>();
+        shared_.~shared_ptr();
       }
     }
   } repr_;
