@@ -70,7 +70,10 @@ TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
             return (%3, %5))IR";
   auto g = std::make_shared<Graph>();
   test_only_populate_upgraders(test_upgraders);
-  UpgraderEntry test_entry{3, "_test_serialization_subcmul_0_2", "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
+  UpgraderEntry test_entry{
+      3,
+      "_test_serialization_subcmul_0_2",
+      "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
@@ -131,18 +134,17 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
             return (%2))IR";
   auto g = std::make_shared<Graph>();
   test_only_populate_upgraders(test_upgraders);
-  UpgraderEntry test_entry{3, "_test_serialization_subcmul_0_2", "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
+  UpgraderEntry test_entry{
+      3,
+      "_test_serialization_subcmul_0_2",
+      "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
   test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
   ApplyOldOpsUpgraders(g);
-  testing::FileCheck()
-      .check_count("aten::mul", 1, false)
-      ->run(*g);
+  testing::FileCheck().check_count("aten::mul", 1, false)->run(*g);
 
-  testing::FileCheck()
-      .check_count("aten::sub", 1, false)
-      ->run(*g);
+  testing::FileCheck().check_count("aten::sub", 1, false)->run(*g);
 
   EXPECT_TRUE(g->get_op_version().has_value());
   EXPECT_EQ(g->get_op_version().value(), 3);
