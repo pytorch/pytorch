@@ -882,8 +882,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
-        tensor_idx = 0
-        input2tensoridx = {}
+        tensor_indices = set()
         for i, inp in enumerate(inputs):
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
@@ -893,30 +892,29 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 # If inp is a differentiable view, the dual might not be the tangent given to
                 # make_dual, so read it explicitly from the dual tensor
                 fw_grads.append(fwAD.unpack_dual(inp)[1])
-                input2tensoridx[i] = tensor_idx
-                tensor_idx += 1
+                tensor_indices.add(i)
             dual_inputs.append(inp)
 
         for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
             fw_grad.copy_(u.view_as(fw_grad))
 
-        for input_idx, inp in enumerate(inputs):
-            if input_idx not in input2tensoridx:
+        for idx, inp in enumerate(inputs):
+            if idx not in tensor_indices:
                 continue
-            dual_inp_obj = dual_inputs[input_idx]
+            dual_inp_obj = dual_inputs[idx]
 
             # case 1 (Materialized Zero Tensor Tangent)
-            dual_inputs[input_idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
+            dual_inputs[idx] = fwAD.make_dual(inp, torch.zeros_like(inp))
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs1 = filter(_is_float_or_complex_tensor, raw_outputs)
 
             # case 2 (Efficient Zero Tensor Tangent since we don't make a dual object and pass a regular tensor)
-            dual_inputs[input_idx] = inp
+            dual_inputs[idx] = inp
             raw_outputs = _as_tuple(func(*dual_inputs))
             dual_outputs2 = filter(_is_float_or_complex_tensor, raw_outputs)
 
             # reset
-            dual_inputs[input_idx] = dual_inp_obj
+            dual_inputs[idx] = dual_inp_obj
 
             for index_o, (d_o1, d_o2) in enumerate(zip(dual_outputs1, dual_outputs2)):
                 val1, res1 = fwAD.unpack_dual(d_o1)
