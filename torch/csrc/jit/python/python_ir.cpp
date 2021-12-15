@@ -868,39 +868,39 @@ void initPythonIRBindings(PyObject* module_) {
             return self->annotation_str();
           });
 
-  py::class_<AnyType, Type, std::shared_ptr<AnyType>>(m, "AnyType")
+  py::class_<AnyType, Type, AnyTypePtr>(m, "AnyType")
       .def_static("get", &AnyType::get);
-  py::class_<NumberType, Type, std::shared_ptr<NumberType>>(m, "NumberType")
+  py::class_<NumberType, Type, NumberTypePtr>(m, "NumberType")
       .def_static("get", &NumberType::get);
-  py::class_<IntType, Type, std::shared_ptr<IntType>>(m, "IntType")
+  py::class_<IntType, Type, IntTypePtr>(m, "IntType")
       .def_static("get", &IntType::get);
-  py::class_<FloatType, Type, std::shared_ptr<FloatType>>(m, "FloatType")
+  py::class_<FloatType, Type, FloatTypePtr>(m, "FloatType")
       .def_static("get", &FloatType::get);
-  py::class_<ComplexType, Type, std::shared_ptr<ComplexType>>(m, "ComplexType")
+  py::class_<ComplexType, Type, ComplexTypePtr>(m, "ComplexType")
       .def_static("get", &ComplexType::get);
-  py::class_<TensorType, Type, std::shared_ptr<TensorType>>(m, "TensorType")
+  py::class_<TensorType, Type, TensorTypePtr>(m, "TensorType")
       .def_static("get", &TensorType::get)
       .def_static("getInferred", &TensorType::getInferred)
       .def_static("create_from_tensor", [](const at::Tensor& t) {
         return TensorType::create(t);
       });
-  py::class_<BoolType, Type, std::shared_ptr<BoolType>>(m, "BoolType")
+  py::class_<BoolType, Type, BoolTypePtr>(m, "BoolType")
       .def_static("get", &BoolType::get);
-  py::class_<StringType, Type, std::shared_ptr<StringType>>(m, "StringType")
+  py::class_<StringType, Type, StringTypePtr>(m, "StringType")
       .def_static("get", &StringType::get);
-  py::class_<DeviceObjType, Type, std::shared_ptr<DeviceObjType>>(
+  py::class_<DeviceObjType, Type, DeviceObjTypePtr>(
       m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
-  py::class_<StreamObjType, Type, std::shared_ptr<StreamObjType>>(
+  py::class_<StreamObjType, Type, StreamObjTypePtr>(
       m, "StreamObjType")
       .def_static("get", &StreamObjType::get);
-  py::class_<PyObjectType, Type, std::shared_ptr<PyObjectType>>(
+  py::class_<PyObjectType, Type, PyObjectTypePtr>(
       m, "PyObjectType")
       .def_static("get", &PyObjectType::get);
-  py::class_<NoneType, Type, std::shared_ptr<NoneType>>(m, "NoneType")
+  py::class_<NoneType, Type, NoneTypePtr>(m, "NoneType")
       .def_static("get", &NoneType::get);
 
-  py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
+  py::class_<TupleType, Type, TupleTypePtr>(m, "TupleType")
       .def(py::init([](std::vector<TypePtr> a) {
         return TupleType::create(std::move(a));
       }))
@@ -911,13 +911,13 @@ void initPythonIRBindings(PyObject* module_) {
         }
         return types;
       });
-  py::class_<UnionType, Type, std::shared_ptr<UnionType>>(m, "UnionType")
+  py::class_<UnionType, Type, UnionTypePtr>(m, "UnionType")
       .def(py::init(
           [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
       .def("containedTypes", [](UnionType& self) {
         return self.containedTypes().vec();
       });
-  py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
+  py::class_<ListType, Type, ListTypePtr>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)
       .def_static("ofTensors", &ListType::ofTensors)
@@ -925,27 +925,27 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("ofComplexDoubles", &ListType::ofComplexDoubles)
       .def_static("ofBools", &ListType::ofBools)
       .def("getElementType", &ListType::getElementType);
-  py::class_<DictType, Type, std::shared_ptr<DictType>>(m, "DictType")
+  py::class_<DictType, Type, DictTypePtr>(m, "DictType")
       .def(py::init([](TypePtr key, TypePtr value) {
         return DictType::create(std::move(key), std::move(value));
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
-  py::class_<OptionalType, Type, std::shared_ptr<OptionalType>>(
+  py::class_<OptionalType, Type, OptionalTypePtr>(
       m, "OptionalType")
       .def(py::init(
           [](TypePtr a) { return OptionalType::create(std::move(a)); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
       .def("getElementType", &OptionalType::getElementType);
-  py::class_<RRefType, Type, std::shared_ptr<RRefType>>(m, "RRefType")
+  py::class_<RRefType, Type, RRefTypePtr>(m, "RRefType")
       .def(py::init([](TypePtr a) { return RRefType::create(std::move(a)); }))
       .def("getElementType", &RRefType::getElementType);
 
-  py::class_<FutureType, Type, std::shared_ptr<FutureType>>(m, "FutureType")
+  py::class_<FutureType, Type, FutureTypePtr>(m, "FutureType")
       .def(py::init([](TypePtr a) { return FutureType::create(std::move(a)); }))
       .def("getElementType", &FutureType::getElementType);
 
-  py::class_<ClassType, Type, std::shared_ptr<ClassType>>(m, "ClassType")
+  py::class_<ClassType, Type, ClassTypePtr>(m, "ClassType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_class(c10::QualifiedName(qualified_name));
       }))
@@ -953,7 +953,7 @@ void initPythonIRBindings(PyObject* module_) {
       .def("qualified_name", [](ClassType& self) {
         return self.name()->qualifiedName();
       });
-  py::class_<EnumType, Type, std::shared_ptr<EnumType>>(m, "EnumType")
+  py::class_<EnumType, Type, EnumTypePtr>(m, "EnumType")
       .def(py::init([](const std::string& qualified_name,
                        TypePtr value_type,
                        const std::vector<py::object>& enum_names_values) {
@@ -970,7 +970,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::move(names_values),
             get_python_cu());
       }));
-  py::class_<InterfaceType, Type, std::shared_ptr<InterfaceType>>(
+  py::class_<InterfaceType, Type, InterfaceTypePtr>(
       m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_interface(
