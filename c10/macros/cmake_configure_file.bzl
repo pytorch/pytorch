@@ -21,7 +21,7 @@ def cmake_configure_file(name, src, out, definitions):
         elif type(value) == "string":
             scheme, target = value.split(":", 1)
             if scheme != "config_setting":
-                fail("String config value types must be of form "
+                fail("String config value types must be of form " +
                      "config_setting://label/of/config_setting, but found " +
                      value)
             substitutions += select({
