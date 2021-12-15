@@ -271,13 +271,11 @@ class ShardedTensor(object):
         # will revise this part with CPU support and use dist.gather()
         # once NCCL support for gather() is ready
         # https://github.com/pytorch/pytorch/issues/66187
-        device = torch.device(f"cuda:{rank % world_size}")
-        with torch.cuda.device(device):
-            dist.all_gather_object(
-                obj=local_shards,
-                object_list=gathered_shards,
-                group=self._process_group,
-            )
+        dist.all_gather_object(
+            obj=local_shards,
+            object_list=gathered_shards,
+            group=self._process_group,
+        )
 
         if rank == dst:
             dims = len(full_size)
@@ -330,22 +328,11 @@ class ShardedTensor(object):
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
-            if isinstance(process_group, dist.ProcessGroupNCCL):
-                # with GPU/NCCL, we need to set a device for all_gather_object
-                # to use as we need to know which device we should put the
-                # serialized tensor on before the NCCL collective.
-                with torch.cuda.device(current_rank):
-                    dist.all_gather_object(
-                        gathered_metadatas,
-                        local_sharded_tensor_metadata,
-                        group=process_group
-                    )
-            else:
-                dist.all_gather_object(
-                    gathered_metadatas,
-                    local_sharded_tensor_metadata,
-                    group=process_group
-                )
+            dist.all_gather_object(
+                gathered_metadatas,
+                local_sharded_tensor_metadata,
+                group=process_group
+            )
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
