@@ -9,7 +9,6 @@ requirements:
    torch/csrc/jit/operator_upgraders/version_map.h
 """
 import torch
-import yaml
 from typing import List, no_type_check, Optional, Union
 
 # TODO (tugsuu) This context manager

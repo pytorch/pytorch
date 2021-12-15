@@ -1,7 +1,11 @@
 # Owner(s): ["oncall: mobile"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
-from tools.codegen.operator_versions.gen_mobile_upgraders import sort_upgrader, write_cpp
+
+from tools.codegen.operator_versions.gen_mobile_upgraders import (
+    sort_upgrader,
+    write_cpp,
+)
 from pathlib import Path
 import tempfile
 import os
