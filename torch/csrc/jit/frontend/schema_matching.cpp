@@ -647,8 +647,8 @@ Value* emitBuiltinCall(
     auto op_name = op->schema().operator_name().name +
         ((op_overload_name != "") ? "." + op_overload_name : "");
     if (graph_version.has_value()) {
-      auto version_entry = operatorVersionMap.find(op_name);
-      if (version_entry != operatorVersionMap.end()) {
+      auto version_entry = get_operator_version_map().find(op_name);
+      if (version_entry != get_operator_version_map().end()) {
         auto old_schema_entry =
             findUpgrader(version_entry->second, graph_version.value());
         if (old_schema_entry.has_value()) {
