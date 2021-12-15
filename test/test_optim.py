@@ -509,8 +509,8 @@ class TestOptim(TestCase):
             # ((optim.Adamax), dict(weight_decay=1)),
             ((optim.Adadelta), dict(weight_decay=0)),
             ((optim.Adadelta), dict(weight_decay=1)),
-            # ((optim.Adagrad), dict(weight_decay=0)),
-            # ((optim.Adagrad), dict(weight_decay=1)),
+            ((optim.Adagrad), dict(weight_decay=0)),
+            ((optim.Adagrad), dict(weight_decay=1)),
         ]
 
         kIterations = 11
