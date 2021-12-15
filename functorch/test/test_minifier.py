@@ -44,7 +44,6 @@ class TestMinifier(TestCase):
             return torch.isnan(fx_g(*inps)[0]).any()
 
         min_f, inps = minimizer(failing_f, inps, pass_checker)
-        import pdb; pdb.set_trace()
         assert len(min_f.graph.nodes) == 3
         assert len(inps) == 1 
 
