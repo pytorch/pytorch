@@ -600,7 +600,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     }
   });
 
-  if (ucc_lib_ != nullptr) {
+  if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef void *fn(void *);
     auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib_->sym("_Z28createProcessGroupUCCForNCCLPv"));
