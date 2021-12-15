@@ -29,8 +29,6 @@ from torch.ao.quantization import (
     NoopObserver,
 )
 from torch.ao.quantization.qconfig import qconfig_equals
-from torch.testing._internal.common_utils import TestCase
-
 from torch.testing._internal.common_quantization import (
     DeFusedEmbeddingBagLinear,
     QuantizationTestCase,
