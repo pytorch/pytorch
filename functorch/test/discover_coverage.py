@@ -137,19 +137,26 @@ def get_op(dotted_name):
         mod = getattr(mod, name)
     return mod
 
-# Maps function -> OpInfo
+# Maps function -> [OpInfo]
 def get_ops_covered_by_opinfos():
     ops = {}
+
+    def safe_append(dct, key, val):
+        if key in dct:
+            dct[key].append(val)
+        else:
+            dct[key] = [val]
+
     for opinfo in op_db:
         func_op = get_op(opinfo.name)
         if func_op:
-            ops[func_op] = opinfo
+            safe_append(ops, func_op, opinfo)
         if opinfo.method_variant:
-            ops[opinfo.method_variant] = opinfo
+            safe_append(ops, opinfo.method_variant, opinfo)
         if opinfo.inplace_variant:
-            ops[opinfo.inplace_variant] = opinfo
+            safe_append(ops, opinfo.inplace_variant, opinfo)
         for alias in opinfo.aliases:
-            ops[alias.op] = opinfo
+            safe_append(ops, alias.op, opinfo)
     return ops
 
 def get_top_ops(torch_threshold, nn_fn_threshold):
@@ -255,35 +262,30 @@ def get_statuses(for_subset=None, invert=False):
     op_to_opinfo = get_ops_covered_by_opinfos()
     result = {}
     x = get_covered_ops(overridable_outplace_we_care_about)
-    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
-        opinfo = op_to_opinfo[op]
-        if invert == False:
-            success = copy.deepcopy(tests)
-            for decorator in opinfo.decorators:
-                if not hasattr(decorator, 'test_name'):
-                    continue
-                if decorator.test_name in tests and decorator.test_name in success:
-                    success.remove(decorator.test_name)
-            # NB: disregard aliases, they're too much trouble
-            for func in [opinfo.op]:
-                if opinfo.name not in result.keys():
-                    result[name] = success
-                else:
-                    result[name] = result[name].intersection(success)
-        if invert == True:
-            failures = set({})
-            for decorator in opinfo.decorators:
-                if not hasattr(decorator, 'test_name'):
-                    continue
-                if decorator.test_name in tests:
-                    failures.add(decorator.test_name)
 
-            # NB: disregard aliases, they're too much trouble
-            for func in [opinfo.op]:
-                if opinfo.name not in result.keys():
-                    result[name] = failures
-                else:
-                    result[name] = result[name].union(failures)
+    def get_covered_tests(op):
+        opinfos = op_to_opinfo[op]
+        result = copy.deepcopy(tests)
+        for opinfo in opinfos:
+            for decorator in opinfo.decorators:
+                if not hasattr(decorator, 'test_name'):
+                    continue
+                if decorator.test_name in tests and decorator.test_name in result:
+                    result.remove(decorator.test_name)
+        return result
+
+    def get_all_aliases(op):
+        opinfos = op_to_opinfo[op]
+        result = []
+        for opinfo in opinfos:
+            result.append(opinfo.name)
+            result.extend(opinfo.aliases)
+        return set(result)
+
+    for name, op in get_covered_ops(overridable_outplace_we_care_about).items():
+        successful_tests = get_covered_tests(op)
+        failed_tests = tests - successful_tests
+        result[name] = failed_tests if invert else successful_tests
     return result
 
 def transpose_statuses(for_subset=None, invert=False):
