@@ -40,4 +40,4 @@ def apply_input_props_using_example(graph: Graph, example_input: List[Any]):
         if isinstance(example_i, torch.Tensor):
             dtype = example_i.dtype
             shape = example_i.shape
-            graph_i.setType(graph_i.type().with_dtype(dtype).with_sizes(shape))  # type: ignore
+            graph_i.setType(graph_i.type().with_dtype(dtype).with_sizes(shape))  # type: ignore[arg-type]
