@@ -956,8 +956,13 @@ def gen_aggregated_headers(
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         static_dispatch_idx: Optional[BackendIndex],
+        selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
         cpu_fm: FileManager,
+        cuda_fm: FileManager,
+        functions_keys: Set[DispatchKey],
+        dispatch_keys: Sequence[DispatchKey],
+        rocm: bool,
 ) -> None:
     # Buck doesn't support dynamic output files, so we aggregate all operator
     # headers into a single file
@@ -1000,14 +1005,49 @@ def gen_aggregated_headers(
             grouped_native_functions)),
     })
 
+    for dispatch_key in dispatch_keys:
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        if dispatch_key in functions_keys:
+            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+                # See Note [Avoiding Include Cycles In Static Dispatch]
+                inl_headers = ''
+            else:
+                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
+            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+                'dispatch_key': str(dispatch_key),
+                'inline_headers_for_nonstatic_build': inl_headers,
+            })
+            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+                'DispatchKeyFunctions_inl_includes': [],
+                'dispatch_namespace': dispatch_key.lower(),
+                'dispatch_namespaced_declarations': list(concatMap(
+                    dest.RegisterDispatchKey(
+                        backend_indices[dispatch_key],
+                        Target.NAMESPACED_DECLARATION,
+                        selector,
+                        rocm=rocm,
+                        cpp_namespace='at::native',
+                        class_method_name=None),
+                    grouped_native_functions
+                )),
+            })
+
+        del fm
+
 def gen_per_operator_headers(
         *,
         native_functions: Sequence[NativeFunction],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
         static_dispatch_idx: Optional[BackendIndex],
+        selector: SelectiveBuilder,
         backend_indices: Dict[DispatchKey, BackendIndex],
         cpu_fm: FileManager,
+        cuda_fm: FileManager,
         ops_fm: FileManager,
+        functions_keys: Set[DispatchKey],
+        dispatch_keys: Sequence[DispatchKey],
+        rocm: bool,
 ) -> None:
     # For CMake builds, split operator declarations into separate headers in
     # the ATen/ops folder to split up header dependencies
@@ -1079,6 +1119,58 @@ def gen_per_operator_headers(
             f'{category}_declarations': [],
         })
 
+    for dispatch_key in dispatch_keys:
+        if dispatch_key not in functions_keys:
+            continue
+
+        dispatch_namespace = dispatch_key.lower()
+        dispatch_names = []
+
+        for name, functions in functions_by_root_name.items():
+            grouped_functions = grouped_functions_by_root_name.get(name, [])
+            declarations = list(concatMap(
+                dest.RegisterDispatchKey(
+                    backend_indices[dispatch_key],
+                    Target.NAMESPACED_DECLARATION,
+                    selector,
+                    rocm=rocm,
+                    cpp_namespace='at::native',
+                    class_method_name=None),
+                grouped_functions
+            ))
+
+            if len(declarations) == 0:
+                continue
+
+            dispatch_names.append(name)
+            ops_fm.write_with_template(
+                f'{name}_{dispatch_namespace}_dispatch.h',
+                'DispatchKeyFunction.h', lambda: {
+                    'dispatch_namespace': dispatch_namespace,
+                    'dispatch_namespaced_declarations': declarations,
+                })
+
+        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
+        if dispatch_key in static_dispatch_keys(static_dispatch_idx):
+            # See Note [Avoiding Include Cycles In Static Dispatch]
+            inl_headers = ''
+        else:
+            inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
+
+        fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
+            'dispatch_key': str(dispatch_key),
+            'inline_headers_for_nonstatic_build': inl_headers,
+        })
+        fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
+            'dispatch_namespace': dispatch_namespace,
+            'DispatchKeyFunctions_inl_includes': [
+                f'#include <ATen/ops/{name}_{dispatch_namespace}_dispatch.h>'
+                for name in sorted(dispatch_names)
+            ],
+            'dispatch_namespaced_declarations': [],
+        })
+        del fm
+
     cpu_fm.write('MethodOperators.h', lambda: {
         'MethodOperators_includes': sorted(
             f'#include <ATen/ops/{name}_ops.h>'
@@ -1104,51 +1196,32 @@ def gen_headers(
         rocm: bool,
         per_operator_headers: bool,
 ) -> None:
-    for dispatch_key in dispatch_keys:
-        fm = cuda_fm if is_cuda_dispatch_key(dispatch_key) else cpu_fm
-        if dispatch_key in functions_keys:
-            if dispatch_key in static_dispatch_keys(static_dispatch_idx):
-                # See Note [Avoiding Include Cycles In Static Dispatch]
-                inl_headers = ''
-            else:
-                inl_headers = f'#include <ATen/{dispatch_key}Functions_inl.h>'
-
-            fm.write_with_template(f'{dispatch_key}Functions.h', 'DispatchKeyFunctions.h', lambda: {
-                'dispatch_key': str(dispatch_key),
-                'inline_headers_for_nonstatic_build': inl_headers,
-            })
-            fm.write_with_template(f'{dispatch_key}Functions_inl.h', 'DispatchKeyFunctions_inl.h', lambda: {
-                'dispatch_namespace': dispatch_key.lower(),
-                'dispatch_namespaced_declarations': list(concatMap(
-                    dest.RegisterDispatchKey(
-                        backend_indices[dispatch_key],
-                        Target.NAMESPACED_DECLARATION,
-                        selector,
-                        rocm=rocm,
-                        cpp_namespace='at::native',
-                        class_method_name=None),
-                    grouped_native_functions
-                )),
-            })
-
-        del fm
-
     if per_operator_headers:
         gen_per_operator_headers(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
             static_dispatch_idx=static_dispatch_idx,
+            selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
+            cuda_fm=cuda_fm,
             ops_fm=ops_fm,
+            dispatch_keys=dispatch_keys,
+            functions_keys=functions_keys,
+            rocm=rocm,
         )
     else:
         gen_aggregated_headers(
             native_functions=native_functions,
             grouped_native_functions=grouped_native_functions,
             static_dispatch_idx=static_dispatch_idx,
+            selector=selector,
             backend_indices=backend_indices,
             cpu_fm=cpu_fm,
+            cuda_fm=cuda_fm,
+            dispatch_keys=dispatch_keys,
+            functions_keys=functions_keys,
+            rocm=rocm,
         )
 
 
