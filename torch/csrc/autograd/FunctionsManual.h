@@ -380,6 +380,24 @@ Tensor _lu_with_info_jvp(
   const Tensor& pivs
 );
 
+
+Tensor convolution_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, Tensor& bias_t,
+  IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+  bool transposed, IntArrayRef output_padding, int64_t groups
+);
+
+Tensor _convolution_jvp(
+  const Tensor& input_p, const Tensor& input_t,
+  const Tensor& weight_p, const Tensor& weight_t,
+  const Tensor& bias_p, Tensor& bias_t,
+  IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+  bool transposed, IntArrayRef output_padding, int64_t groups,
+  bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
+);
+
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);

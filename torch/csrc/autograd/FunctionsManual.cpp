@@ -717,6 +717,77 @@ std::tuple<at::Tensor, at::Tensor> clamp_backward_min_max(
   return ret;
 }
 
+Tensor convolution_jvp(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, Tensor& bias_t,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups) {
+  auto zeros_like_bias = bias_t.defined()
+    ? c10::optional<at::Tensor>(at::_efficientzerotensor(bias_p.sizes(), bias_p.options())) : c10::nullopt;
+
+  auto result =
+      at::convolution(input_t, weight_p, zeros_like_bias, stride, padding, dilation, transposed, output_padding, groups)
+    + at::convolution(input_p, weight_t, zeros_like_bias, stride, padding, dilation, transposed, output_padding, groups);
+
+  // NB: We do things out-of-place in case bias_t is batched
+  if (bias_t.defined()) {
+    int64_t dim = weight_p.dim() - 2;
+    TORCH_CHECK(
+        dim == 1 || dim == 2 || dim == 3,
+        "_convolution_jvp expected dim of weigh to be 3, 4, or 4, but got: ",
+        weight_p.dim());
+
+    if (bias_t.dim() == 1) {
+      bias_t = bias_t.unsqueeze(0);
+      for (const auto _ : c10::irange(dim)) {
+        bias_t = bias_t.unsqueeze(-1);
+      }
+    }
+    return result + bias_t;
+  } else {
+    return result;
+  }
+}
+
+Tensor _convolution_jvp(
+    const Tensor& input_p, const Tensor& input_t,
+    const Tensor& weight_p, const Tensor& weight_t,
+    const Tensor& bias_p, Tensor& bias_t,
+    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
+    bool transposed, IntArrayRef output_padding, int64_t groups,
+    bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
+  auto zeros_like_bias = bias_t.defined()
+    ? c10::optional<at::Tensor>(at::_efficientzerotensor(bias_p.sizes(), bias_p.options())) : c10::nullopt;
+
+  auto result =
+      at::_convolution(
+        input_t, weight_p, zeros_like_bias, stride, padding, dilation, transposed, output_padding,
+        groups, benchmark, deterministic, cudnn_enabled, allow_tf32)
+    + at::_convolution(
+        input_p, weight_t, zeros_like_bias, stride, padding, dilation, transposed, output_padding,
+        groups, benchmark, deterministic, cudnn_enabled, allow_tf32);
+
+  // NB: We do things out-of-place in case bias_t is batched
+  if (bias_t.defined()) {
+    int64_t dim = weight_p.dim() - 2;
+    TORCH_CHECK(
+        dim == 1 || dim == 2 || dim == 3,
+        "_convolution_jvp expected dim of weigh to be 3, 4, or 4, but got: ",
+        weight_p.dim());
+
+    if (bias_t.dim() == 1) {
+      bias_t = bias_t.unsqueeze(0);
+      for (const auto _ : c10::irange(dim)) {
+        bias_t = bias_t.unsqueeze(-1);
+      }
+    }
+    return result + bias_t;
+  } else {
+    return result;
+  }
+}
+
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor

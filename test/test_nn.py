@@ -18545,8 +18545,8 @@ class TestNNDeviceType(NNTestCase):
         for sd in seeds:
             torch.manual_seed(sd)
             x = torch.randn(1, 12, 12, device=device, requires_grad=True)
-            gradcheck(func, [x])
-            gradgradcheck(func, [x])
+            gradcheck(func, [x], check_forward_ad=True)
+            gradgradcheck(func, [x], check_fwd_over_rev=True)
             if device == 'cpu':
                 test_dtype(func, x, torch.bfloat16)
 
