@@ -11,6 +11,7 @@ from torch.ao.quantization.qconfig import (
     default_qconfig,
     default_debug_qconfig,
     default_per_channel_qconfig,
+    QConfigDynamic,
     default_dynamic_qconfig,
     float16_dynamic_qconfig,
     float16_static_qconfig,
