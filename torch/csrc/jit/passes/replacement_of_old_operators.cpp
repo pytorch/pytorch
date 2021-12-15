@@ -30,8 +30,9 @@ struct OldOpsReplacer {
       if (auto schema = node->maybeSchema()) {
         auto schema_name = getFullSchemaName(*schema);
         // this implies there was a version bump because of this operator
-        auto version_entry = kOperatorVersionMap.find(schema_name);
-        if (version_entry != kOperatorVersionMap.end()) {
+        auto version_entry = operatorVersionMap.find(schema_name);
+        std::cout << (operatorVersionMap.find("aten::_test_serialization_subcmul") != operatorVersionMap.end()) << std::endl;
+        if (version_entry != operatorVersionMap.end()) {
           const auto& entry = version_entry->second;
           updated_version = std::max(updated_version, entry[entry.size() - 1].bumped_at_version);
           auto upgrader_entry =
@@ -50,6 +51,7 @@ struct OldOpsReplacer {
               "Corresponding upgrader graph for ",
               upgrader_name,
               " must exist");
+          std::cout << "FOUND UPGRADER" << std::endl;
           Graph upgrader_graph;
           parseIR(upgrader_graph_entry->second, &upgrader_graph);
           // inline the upgrader function body

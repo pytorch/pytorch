@@ -652,8 +652,8 @@ Value* emitBuiltinCall(
     bool found_upgrader = false;
     auto op_name = getFullSchemaName(op->schema());
     if (graph_version.has_value()) {
-      auto version_entry = kOperatorVersionMap.find(op_name);
-      if (version_entry != kOperatorVersionMap.end()) {
+      auto version_entry = operatorVersionMap.find(op_name);
+      if (version_entry != operatorVersionMap.end()) {
         auto old_schema_entry =
             findUpgrader(version_entry->second, graph_version.value());
         if (old_schema_entry.has_value()) {

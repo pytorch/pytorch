@@ -26,7 +26,6 @@ inline c10::optional<UpgraderEntry> findUpgrader(
   if (pos != upgraders_for_schema.end()) {
     return *pos;
   }
-
   return c10::nullopt;
 }
 
@@ -42,8 +41,8 @@ inline bool isOpEntryCurrent(
 }
 
 inline bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
-  auto it = kOperatorVersionMap.find(name);
-  if (it != kOperatorVersionMap.end()) {
+  auto it = operatorVersionMap.find(name);
+  if (it != operatorVersionMap.end()) {
     return isOpEntryCurrent(it->second, current_version);
   }
   return true;

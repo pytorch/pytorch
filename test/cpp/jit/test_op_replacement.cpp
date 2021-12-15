@@ -2,6 +2,7 @@
 
 #include <test/cpp/jit/test_utils.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 #include <memory>
 
@@ -34,53 +35,7 @@ std::unordered_map<std::string, std::string> test_upgraders(
                                 block1():
                                     %37 : Tensor = aten::div(%self.1, %other.1, %32)
                                     -> (%37)
-                            return (%35))IR"},
-     {"div_Scalar_0_3", R"IR(graph(%self.1 : Tensor,
-                                %other.1 : Scalar):
-                            %41 : str = prim::Constant[value=\"trunc\"]()
-                            %6 : bool = prim::Constant[value=1]()
-                            %4 : bool = aten::is_floating_point(%self.1)
-                            %9 : bool = prim::If(%4)
-                                block0():
-                                    -> (%6)
-                                block1():
-                                    %8 : bool = prim::isinstance[types=[float]](%other.1)
-                                    -> (%8)
-                            %44 : Tensor = prim::If(%9) # torch/jit/operator_upgraders.py:21:4
-                                block0():
-                                    %45 : Tensor = aten::div(%self.1, %other.1) # torch/jit/operator_upgraders.py:22:15
-                                    -> (%45)
-                                block1():
-                                    %other.9 : Union[complex, int] = prim::unchecked_cast(%other.1)
-                                    %46 : Tensor = aten::div(%self.1, %other.9, %41) # torch/jit/operator_upgraders.py:23:11
-                                    -> (%46)
-                            return (%44))IR"},
-     {"div_out_0_3", R"IR(graph(%self.1 : Tensor,
-                            %other.1 : Tensor,
-                            %out.1 : Tensor):
-                        %41 : str = prim::Constant[value="trunc"]() # torch/jit/operator_upgraders.py:33:44
-                        %7 : bool = prim::Constant[value=1]() # torch/jit/operator_upgraders.py:31:8
-                        %5 : bool = aten::is_floating_point(%self.1) # torch/jit/operator_upgraders.py:31:8
-                        %12 : bool = prim::If(%5) # torch/jit/operator_upgraders.py:31:8
-                            block0():
-                                -> (%7)
-                            block1():
-                            %10 : bool = aten::is_floating_point(%other.1) # torch/jit/operator_upgraders.py:31:36
-                                -> (%10)
-                        %18 : bool = prim::If(%12) # torch/jit/operator_upgraders.py:31:8
-                            block0():
-                                -> (%7)
-                            block1():
-                                %16 : bool = aten::is_floating_point(%out.1) # torch/jit/operator_upgraders.py:31:65
-                                -> (%16)
-                        %44 : Tensor = prim::If(%18) # torch/jit/operator_upgraders.py:31:4
-                            block0():
-                                %45 : Tensor = aten::div(%self.1, %other.1, %out.1) # torch/jit/operator_upgraders.py:32:15
-                                -> (%45)
-                            block1():
-                                %46 : Tensor = aten::div(%self.1, %other.1, %41, %out.1) # torch/jit/operator_upgraders.py:33:11
-                                -> (%46)
-                        return (%44))IR"}});
+                            return (%35))IR"}});
 
 TEST(OpReplacementTest, ReplaceDivInSimpleFunction) {
   const auto graph_string = R"IR(
@@ -115,17 +70,20 @@ TEST(OpReplacementTest, ReplaceTwoOpsInSimpleFunction) {
             return (%3, %5))IR";
   auto g = std::make_shared<Graph>();
   test_only_populate_upgraders(test_upgraders);
+  UpgraderEntry test_entry{3, "_test_serialization_subcmul_0_2", "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
+  test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
   ApplyOldOpsUpgraders(g);
   testing::FileCheck()
       .check("prim::If")
-      ->check_count("aten::div(%2, %1)", 1, /*exactly=*/true)
-      ->check_count("aten::div(%2, %1, %4)", 1, /*exactly=*/true)
+      ->check_count("aten::div", 2, /*exactly=*/true)
       ->run(*g);
 
   EXPECT_TRUE(g->get_op_version().has_value());
   EXPECT_EQ(g->get_op_version().value(), 4);
+  test_only_remove_entry("aten::_test_serialization_subcmul");
+  test_only_remove_upgraders(test_upgraders);
 }
 
 TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
@@ -161,6 +119,7 @@ TEST(OpReplacementTest, ReplaceDivInNestedFunction) {
 
   EXPECT_TRUE(g->get_op_version().has_value());
   EXPECT_EQ(g->get_op_version().value(), 4);
+  test_only_remove_upgraders(test_upgraders);
 }
 
 TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
@@ -172,6 +131,8 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
             return (%2))IR";
   auto g = std::make_shared<Graph>();
   test_only_populate_upgraders(test_upgraders);
+  UpgraderEntry test_entry{3, "_test_serialization_subcmul_0_2", "aten::_test_serialization_subcmul(Tensor self, Tensor other, Scalar alpha=2) -> Tensor"};
+  test_only_add_entry("aten::_test_serialization_subcmul", test_entry);
   torch::jit::parseIR(graph_string, g.get());
   g->set_op_version(2);
   ApplyOldOpsUpgraders(g);
@@ -185,6 +146,8 @@ TEST(OpReplacementTest, ReplaceTestSubcmulInSimpleFunction) {
 
   EXPECT_TRUE(g->get_op_version().has_value());
   EXPECT_EQ(g->get_op_version().value(), 3);
+  test_only_remove_upgraders(test_upgraders);
+  test_only_remove_entry("aten::_test_serialization_subcmul");
 }
 
 } // namespace jit
