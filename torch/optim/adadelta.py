@@ -43,12 +43,13 @@ class Adadelta(Optimizer):
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        foreach (bool, optional): whether foreach implementation of optimizer is used (default: False)
 
     .. _ADADELTA\: An Adaptive Learning Rate Method:
         https://arxiv.org/abs/1212.5701
     """
 
-    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0):
+    def __init__(self, params, lr=1.0, rho=0.9, eps=1e-6, weight_decay=0, foreach=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= rho <= 1.0:
@@ -58,7 +59,7 @@ class Adadelta(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, rho=rho, eps=eps, weight_decay=weight_decay, foreach=foreach)
         super(Adadelta, self).__init__(params, defaults)
 
     @torch.no_grad()
@@ -79,7 +80,11 @@ class Adadelta(Optimizer):
             grads = []
             square_avgs = []
             acc_deltas = []
-            lr, rho, eps, weight_decay = group['lr'], group['rho'], group['eps'], group['weight_decay']
+            lr, rho, eps, weight_decay, foreach = (group['lr'],
+                                                   group['rho'],
+                                                   group['eps'],
+                                                   group['weight_decay'],
+                                                   group['foreach'])
 
             for p in group['params']:
                 if p.grad is None:
@@ -109,6 +114,7 @@ class Adadelta(Optimizer):
                        lr=lr,
                        rho=rho,
                        eps=eps,
-                       weight_decay=weight_decay)
+                       weight_decay=weight_decay,
+                       foreach=foreach)
 
         return loss

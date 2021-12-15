@@ -3,6 +3,8 @@ import math
 import torch
 from torch import Tensor
 from typing import List, Optional
+from . import _single_tensor_functional as single
+from . import _multi_tensor_functional as multi
 
 # TODO: use foreach API in optim._functional to do all the computation
 
@@ -200,28 +202,32 @@ def adadelta(params: List[Tensor],
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float):
+             weight_decay: float,
+             foreach: Optional[bool] = False):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    for (param, grad, square_avg, acc_delta) in zip(params, grads, square_avgs, acc_deltas):
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
+    if foreach:
+        multi.multi_tensor_adadelta(params,
+                                    grads,
+                                    square_avgs,
+                                    acc_deltas,
+                                    lr=lr,
+                                    weight_decay=weight_decay,
+                                    rho=rho,
+                                    eps=eps)
+    else:
+        single.single_tensor_adadelta(params,
+                                      grads,
+                                      square_avgs,
+                                      acc_deltas,
+                                      lr=lr,
+                                      weight_decay=weight_decay,
+                                      rho=rho,
+                                      eps=eps)
 
-        if torch.is_complex(param):
-            square_avg = torch.view_as_real(square_avg)
-            acc_delta = torch.view_as_real(acc_delta)
-            grad = torch.view_as_real(grad)
-
-        square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
-        std = square_avg.add(eps).sqrt_()
-        delta = acc_delta.add(eps).sqrt_().div_(std).mul_(grad)
-        acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
-        if torch.is_complex(param):
-            delta = torch.view_as_complex(delta)
-        param.add_(delta, alpha=-lr)
 
 def rmsprop(params: List[Tensor],
             grads: List[Tensor],
