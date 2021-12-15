@@ -242,6 +242,10 @@ class Wishart(ExponentialFamily):
     @property
     def _natural_params(self):
         return (
-            (self.df - self.event_shape[-1] - 1) / 2,
-            - torch.cholesky_inverse(self._unbroadcasted_scale_tril).div(2)
+            0.5 * self.df,
+            - 0.5 * torch.cholesky_inverse(self._unbroadcasted_scale_tril)
         )
+
+    def _log_normalizer(self, x, y):
+        p = y.shape[-1]
+        return x * (- torch.linalg.slogdet(-2 * y) + _log_2 * p) + _mvdigamma(x, p=p)
