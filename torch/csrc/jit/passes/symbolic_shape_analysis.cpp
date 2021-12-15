@@ -757,6 +757,18 @@ struct SymbolicShapeGraphAnalyzer {
     }
   }
 
+  void registerStitchedComputeOutput(
+      std::shared_ptr<Graph> stitched_shape_compute_graph,
+      Value* output,
+      int64_t symbolic_shape) {
+    stitched_shape_compute_graph->registerOutput(output);
+    output_index_to_symbolic_shape_
+        [stitched_shape_compute_graph->outputs().size() - 1] = symbolic_shape;
+    symbolic_shape_value_to_graph_output_[symbolic_shape] =
+        stitched_shape_compute_graph->outputs().at(
+            stitched_shape_compute_graph->outputs().size() - 1);
+  }
+
   void joinPartialEvaluatedShapeGraphToLargeShapeGraph(
       Node* curr,
       std::shared_ptr<Graph> partial_eval_graph,
@@ -811,7 +823,31 @@ struct SymbolicShapeGraphAnalyzer {
             shape_graph_input;
         partial_eval_inputs.push_back(shape_graph_input);
       }
+      // make sure all symbolic dimensions in the graph we are creating are
+      // computed in the partial eval graph
+      if (auto tt = node_input->type()->cast<TensorType>()) {
+        if (!tt->symbolic_sizes().rank()) {
+          continue;
+        }
+        auto rank = *tt->symbolic_sizes().rank();
+        for (size_t j = 0; j < rank; ++j) {
+          auto shape = tt->symbolic_sizes()[j];
+          if (shape.is_static() ||
+              symbolic_shape_value_to_graph_output_.count(shape.value())) {
+            continue;
+          }
+          auto input = enclosing_graph_value_to_shape_graph_input_[node_input];
+          WithInsertPoint guard(stitched_shape_compute_graph->block());
+          auto index = stitched_shape_compute_graph->insertConstant(
+              static_cast<int64_t>(j));
+          auto li_index = stitched_shape_compute_graph->insert(
+              aten::__getitem__, {input, index});
+          registerStitchedComputeOutput(
+              stitched_shape_compute_graph, li_index, shape.value());
+        }
+      }
     }
+
     WithInsertPoint guard(stitched_shape_compute_graph->block());
     std::unordered_map<Value*, Value*> value_map;
     insertGraph(
@@ -842,14 +878,10 @@ struct SymbolicShapeGraphAnalyzer {
         if (symbolic_shape_value_to_graph_output_.count(symbolic_shape)) {
           continue;
         }
-        stitched_shape_compute_graph->registerOutput(
-            new_list_output->node()->input(i));
-        output_index_to_symbolic_shape_
-            [stitched_shape_compute_graph->outputs().size() - 1] =
-                symbolic_shape;
-        symbolic_shape_value_to_graph_output_[symbolic_shape] =
-            stitched_shape_compute_graph->outputs().at(
-                stitched_shape_compute_graph->outputs().size() - 1);
+        registerStitchedComputeOutput(
+            stitched_shape_compute_graph,
+            new_list_output->node()->input(i),
+            symbolic_shape);
       }
     }
   }

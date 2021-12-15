@@ -442,15 +442,10 @@ def dropout_mapper(node: torch.fx.Node, mod: nn.Module):
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
 @register_acc_op_mapping(
     op_and_target=("call_function", nn.functional.hardtanh),
-    arg_replacement_tuples=[
-        ("input", "input"),
-        ("min_val", "left"),
-        ("max_val", "right"),
-    ],
 )
 @register_acc_op
-def hardtanh(*, input, left=-1.0, right=1.0):
-    return nn.functional.hardtanh(input, min_val=left, max_val=right)
+def hardtanh(*, input, min_val=-1.0, max_val=1.0):
+    return nn.functional.hardtanh(**locals())
 
 
 @register_acc_op_properties(AccOpProperty.pointwise, AccOpProperty.unary)
@@ -622,11 +617,58 @@ def mul(*, input, other):
     return input * other
 
 
-@register_acc_op_properties(AccOpProperty.pointwise)
-@register_acc_op_mapping(op_and_target=("call_function", operator.truediv))
+# Torch.floor_divide is announced to be deprecated, consider using torch.div() with 'trunc' or 'floor'
+# mode instead.
+# This implementation matches torch.floor_div's behavior, which for negative number the divide result
+# is round toward zero, rather than -Inf.
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.floor_divide),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("other", "other"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", operator.floordiv),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("other", "other"),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", torch.div),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("other", "other"),
+        ("rounding_mode", "rounding_mode", this_arg_is_optional),
+    ],
+)
+@register_custom_acc_mapper_fn(
+    op_and_target=("call_function", operator.truediv),
+    arg_replacement_tuples=[
+        ("input", "input"),
+        ("other", "other"),
+    ],
+)
+def div_mapper(node: torch.fx.Node, mod: torch.fx.GraphModule) -> torch.fx.Node:
+    with node.graph.inserting_before(node):
+        div_kwargs = dict(node.kwargs)
+        if "rounding_mode" not in div_kwargs and node.op == "call_function":
+            div_kwargs["rounding_mode"] = None
+            if node.target is torch.floor_divide:
+                div_kwargs["rounding_mode"] = "trunc"
+            elif node.target is operator.floordiv:
+                div_kwargs["rounding_mode"] = "floor"
+            elif node.target is operator.truediv:
+                div_kwargs["rounding_mode"] = None
+        div_node = node.graph.call_function(div, kwargs=div_kwargs)
+        div_node.meta = node.meta.copy()
+        return div_node
+
+
 @register_acc_op
-def div(*, input, other):
-    return input / other
+def div(input, other, *, rounding_mode=None):
+    return torch.div(input, other, rounding_mode=rounding_mode)
 
 
 @register_acc_op_properties(AccOpProperty.pointwise)

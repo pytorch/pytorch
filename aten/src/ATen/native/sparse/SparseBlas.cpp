@@ -1,6 +1,18 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Tensor.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/addmv_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/scalar_tensor_native.h>
+#endif
 
 #include <c10/util/MaybeOwned.h>
 
@@ -50,6 +62,31 @@ Tensor& addmv_out_sparse_csr(
 
   sparse::impl::cpu::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
   return result;
+}
+
+/*
+  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
+  op(A) X = B.
+
+  Args:
+  * `B` - dense Tensor of size m × nrhs.
+  * `A` - sparse Tensor of size m × m.
+  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `transpose` - if true then op(A) = A^T.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `X` - dense Tensor of size m × nrhs.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+*/
+std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
+    const Tensor& B,
+    const Tensor& A,
+    bool upper,
+    bool transpose,
+    bool unitriangular,
+    Tensor& X,
+    Tensor& clone_A) {
+  sparse::impl::cpu::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+  return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 
 } // namespace native

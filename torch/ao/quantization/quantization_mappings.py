@@ -16,6 +16,7 @@ import torch.nn.qat.dynamic as nnqatd
 
 from typing import Optional, Union, Dict, Set, Callable, Any
 
+import torch.ao.nn as ao_nn
 from torch.ao.quantization.stubs import QuantStub, DeQuantStub
 from torch.ao.quantization.fake_quantize import (
     default_affine_fixed_qparams_fake_quant,
@@ -78,7 +79,6 @@ DEFAULT_STATIC_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nnqat.Linear: nnq.Linear,
     nnqat.Conv2d: nnq.Conv2d,
     nnqat.Conv3d: nnq.Conv3d,
-    nnqat.EmbeddingBag: nnq.EmbeddingBag,
 }
 
 # Default map for swapping float module to qat modules
@@ -86,7 +86,6 @@ DEFAULT_QAT_MODULE_MAPPINGS : Dict[Callable, Any] = {
     nn.Conv2d: nnqat.Conv2d,
     nn.Conv3d: nnqat.Conv3d,
     nn.Linear: nnqat.Linear,
-    nn.EmbeddingBag: nnqat.EmbeddingBag,
     nn.modules.linear.NonDynamicallyQuantizableLinear: nnqat.Linear,
     # Intrinsic modules:
     nni.ConvBn1d: nniqat.ConvBn1d,
@@ -143,6 +142,16 @@ DEFAULT_MODULE_TO_ACT_POST_PROCESS : Dict[Callable, Callable] = {
     nn.Tanh: default_symmetric_fixed_qparams_fake_quant,
 }
 
+# Default map for swapping float module to static sparse quantized ones
+DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    nn.Linear: ao_nn.sparse.quantized.Linear
+}
+
+# Default map for swapping float module to dynamic sparse quantized ones
+DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS : Dict[Callable, Any] = {
+    nn.Linear: ao_nn.sparse.quantized.dynamic.Linear
+}
+
 def no_observer_set() -> Set[Any]:
     r"""These modules cannot have observers inserted by default."""
     no_observers = set([
@@ -155,6 +164,19 @@ def get_default_static_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training static quantization
     '''
     return copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+
+def get_embedding_static_quant_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping, including mapping for embedding QAT
+    '''
+    mapping = copy.deepcopy(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS)
+    mapping[nnqat.EmbeddingBag] = nnq.EmbeddingBag
+    mapping[nnqat.Embedding] = nnq.Embedding
+    return mapping
+
+def get_default_static_sparse_quant_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping for post training static sparse quantization
+    '''
+    return copy.deepcopy(DEFAULT_STATIC_SPARSE_QUANT_MODULE_MAPPINGS)
 
 def get_static_quant_module_class(
         float_module_class: Callable,
@@ -194,10 +216,25 @@ def get_default_qat_module_mappings() -> Dict[Callable, Any]:
     '''
     return copy.deepcopy(DEFAULT_QAT_MODULE_MAPPINGS)
 
+def get_embedding_qat_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping for quantization aware training
+        This is includes default values in addition to
+        enabling qat for embeddings.
+    '''
+    mapping = copy.deepcopy(DEFAULT_QAT_MODULE_MAPPINGS)
+    mapping[nn.EmbeddingBag] = nnqat.EmbeddingBag
+    mapping[nn.Embedding] = nnqat.Embedding
+    return mapping
+
 def get_default_dynamic_quant_module_mappings() -> Dict[Callable, Any]:
     ''' Get module mapping for post training dynamic quantization
     '''
     return DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS
+
+def get_default_dynamic_sparse_quant_module_mappings() -> Dict[Callable, Any]:
+    ''' Get module mapping for post training dynamic sparse quantization
+    '''
+    return DEFAULT_DYNAMIC_SPARSE_QUANT_MODULE_MAPPINGS
 
 def get_default_qconfig_propagation_list() -> Set[Callable]:
     ''' Get the default list of module types that we'll attach qconfig

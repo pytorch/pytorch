@@ -20,6 +20,7 @@ struct Code {
   std::vector<Instruction> instructions_;
   std::vector<DebugHandle> debug_handles_;
   std::vector<c10::OperatorName> op_names_;
+  std::vector<int> operator_input_sizes_;
   std::vector<std::function<void(Stack&)>> operators_;
   std::vector<c10::IValue> constants_;
   std::vector<c10::TypePtr> types_;

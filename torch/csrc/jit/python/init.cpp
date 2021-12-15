@@ -378,7 +378,13 @@ void initJITBindings(PyObject* module) {
       .def("_jit_pass_fuse_frozen_conv_add_relu", &FuseFrozenConvAddRelu)
       .def("_jit_pass_transpose_frozen_linear", &FrozenLinearTranspose)
       .def("_jit_pass_optimize_frozen_graph", &OptimizeFrozenGraph)
-      .def("_jit_pass_optimize_for_inference", &optimize_for_inference)
+      .def(
+          "_jit_pass_optimize_for_inference",
+          [](Module& module, std::vector<std::string> other_methods) {
+            optimize_for_inference(module, other_methods);
+          },
+          py::arg("module"),
+          py::arg("other_methods") = std::vector<std::string>())
       .def("_jit_pass_fuse_linear", &FuseLinear)
       .def(
           "_jit_pass_fuse_add_relu",
@@ -610,9 +616,15 @@ void initJITBindings(PyObject* module) {
           })
       .def(
           "_jit_pass_create_autodiff_subgraphs",
-          [](const std::shared_ptr<Graph>& graph) {
-            CreateAutodiffSubgraphs(graph);
-          })
+          [](const std::shared_ptr<Graph>& graph, py::object threshold) {
+            if (threshold.is(py::none())) {
+              CreateAutodiffSubgraphs(graph);
+            } else {
+              CreateAutodiffSubgraphs(graph, py::cast<int>(threshold));
+            }
+          },
+          py::arg("graph"),
+          py::arg("threshold") = py::none())
 #if defined(BUILDING_TESTS) && !defined(USE_ROCM)
       .def(
           "_jit_run_cpp_tests",
@@ -1252,7 +1264,7 @@ void initJITBindings(PyObject* module) {
   m.def("get_schema", [](const std::string& op_name, const std::string& overload_name) {
     auto symbol = Symbol::fromQualString(op_name);
     auto operations = getAllOperatorsFor(symbol);
-    for (auto op: operations) {
+    for (const auto& op: operations) {
       if (op->schema().overload_name() == overload_name) {
         return op->schema();
       }
