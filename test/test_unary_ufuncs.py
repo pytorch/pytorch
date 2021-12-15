@@ -13,7 +13,7 @@ import unittest
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict,
-    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS, gradcheck)
+    suppress_warnings, TEST_SCIPY, slowTest, skipIfNoSciPy, IS_WINDOWS, gradcheck, TEST_WITH_ROCM)
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs, _NOTHING)
 from torch.testing._internal.common_device_type import (
@@ -501,7 +501,10 @@ class TestUnaryUfuncs(TestCase):
         else:
             res = op(input, out=output, **kwargs)
             self.assertTrue(res is output)
-            self.assertEqual(output, expected.to(output.dtype))
+            if all([TEST_WITH_ROCM, op.name == "sinc", expected.dtype == torch.complex64, output.dtype == torch.complex128]):
+                self.assertEqual(output, expected.to(output.dtype), atol=1e-6, rtol=1e-6)
+            else:
+                self.assertEqual(output, expected.to(output.dtype))
 
     @ops(unary_ufuncs, dtypes=OpDTypes.supported)
     def test_out_arg_all_dtypes(self, device, dtype, op):
