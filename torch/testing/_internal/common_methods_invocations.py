@@ -40,7 +40,7 @@ from torch.testing._internal.common_utils import \
      freeze_rng_state)
 import torch.testing._internal.opinfo_helper as opinfo_helper
 
-from setuptools import distutils
+from distutils.version import LooseVersion
 
 has_scipy_fft = False
 if TEST_SCIPY:
@@ -2493,6 +2493,73 @@ def sample_inputs_full_like(self, device, dtype, requires_grad, **kwargs):
                         requires_grad=requires_grad)
         samples.append(SampleInput(t, args=(fill_value,), kwargs=kwargs))
 
+    return tuple(samples)
+
+def sample_inputs_multinomial(self, device, dtype, requires_grad, **kwargs):
+    cases = [
+        ([3], 3, dict()),
+        ([10], 3, dict()),
+        ([3, 10], 3, dict()),
+        ([3], 3, dict(replacement=False)),
+        ([3], 3, dict(replacement=True)),
+        ([3, 4], 4, dict(replacement=True)),
+        ([3, 4], 4, dict(replacement=False)),
+    ]
+
+    samples = []
+    for shape, num_samples, kwargs in cases:
+        t = make_tensor(shape, device, dtype,
+                        low=0, high=None,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t, args=(num_samples,), kwargs=kwargs))
+    return tuple(samples)
+
+def sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs):
+    def get_value_or_make_tensor(value_or_shape):
+        if isinstance(value_or_shape, list):
+            return make_tensor(value_or_shape, device, dtype,
+                               low=0, high=None,
+                               requires_grad=requires_grad)
+        return value_or_shape
+
+    samples = []
+    for value_or_mean_shape, value_or_std_shape, kwargs in cases:
+        mean = get_value_or_make_tensor(value_or_mean_shape)
+        std = get_value_or_make_tensor(value_or_std_shape)
+        samples.append(SampleInput(mean, args=(std,), kwargs=kwargs))
+    return tuple(samples)
+
+def sample_inputs_normal_tensor_first(self, device, dtype, requires_grad, **kwargs):
+    # value_or_size, value_or_size, kwargs
+    cases = [
+        ([], [], {}),
+        ([3], [3], {}),
+        ([3, 4, 2], [3, 4, 2], {}),
+        ([2, 3], 1.1, {}),
+    ]
+
+    return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
+
+def sample_inputs_normal_tensor_second(self, device, dtype, requires_grad, **kwargs):
+    cases = [
+        ([3, 4], 0.3, {}),
+    ]
+    return sample_inputs_normal_common(self, device, dtype, requires_grad, cases, **kwargs)
+
+def sample_inputs_bernoulli(self, device, dtype, requires_grad, **kwargs):
+    shapes = [
+        [3],
+        [],
+        [0, 3],
+        [2, 3, 4],
+    ]
+
+    samples = []
+    for shape in shapes:
+        t = make_tensor(shape, device, dtype,
+                        low=0, high=1,
+                        requires_grad=requires_grad)
+        samples.append(SampleInput(t))
     return tuple(samples)
 
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad):
@@ -10277,8 +10344,6 @@ op_db: List[OpInfo] = [
                    safe_casts_outputs=True,
                    supports_autograd=False,
                    skips=(
-                       # Pre-existing condition; Needs to be fixed
-                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                        # The function variant always returns BoolTensor
                        # while the inplace variant preserves the input dtype.
                        # >>> t = torch.randn(3)
@@ -10668,8 +10733,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_and does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10680,8 +10743,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_or does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -10692,8 +10753,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     always_returns_bool=True,
                     skips=(
-                        # Pre-existing condition; Needs to be fixed
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_composite_compliance'),
                         # FIXME: logical_xor does not accept scalar inputs
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_broadcast_python_scalar'),
                     )),
@@ -12012,8 +12071,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Passes for complex, but for float - Need: _s_where
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                            dtypes=[torch.float64]),
-               DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view', device_type='cuda'),),),
+                            dtypes=[torch.float64]),),),
     OpInfo('qr',
            op=torch.qr,
            dtypes=floating_and_complex_types(),
@@ -13209,6 +13267,8 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('index_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           # An `out=` variant exists but is not exposed to the Python API
+           # see: https://github.com/pytorch/pytorch/pull/65993#discussion_r737760723
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -13654,6 +13714,76 @@ op_db: List[OpInfo] = [
                # Can't find schemas for this operator for some reason
                DecorateInfo(unittest.skip("Skipped!"), 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
            ),
+           supports_autograd=False),
+    OpInfo('multinomial',
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.multinomial, inp, *args, **kwargs),
+           method_variant=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.Tensor.multinomial, inp, *args, **kwargs),
+           dtypes=floating_types(),
+           dtypesIfCUDA=floating_types_and(torch.half),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_multinomial,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning')),
+           supports_autograd=False),
+    OpInfo('normal',
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.normal, inp, *args, **kwargs),
+           # The inplace variant (Tensor.normal_) is different from torch.normal
+           inplace_variant=None,
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_normal_tensor_first,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),),
+           supports_autograd=False),
+    OpInfo('normal',
+           # This has its own variant b/c OpInfos assume the first arg is a Tensor but it is not here
+           variant_test_name='number_mean',
+           op=lambda std, mean, *args, **kwargs:
+               wrapper_set_seed(torch.normal, mean, std, *args, **kwargs),
+           # The inplace variant (Tensor.normal_) is different from torch.normal
+           inplace_variant=None,
+           dtypes=floating_types_and(torch.bfloat16, torch.half),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_normal_tensor_second,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Seems like a bug:
+               # The size of tensor a (0) must match the size of tensor b (4) at non-singleton dimension 1
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),),
+           supports_autograd=False),
+    OpInfo('bernoulli',
+           op=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.bernoulli, inp, *args, **kwargs),
+           # The inplace variant (Tensor.bernoulli_) is different from torch.bernoulli
+           inplace_variant=None,
+           method_variant=lambda inp, *args, **kwargs:
+               wrapper_set_seed(torch.Tensor.bernoulli, inp, *args, **kwargs),
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
+           supports_out=True,
+           sample_inputs_func=sample_inputs_bernoulli,
+           skips=(
+               # AssertionError: JIT Test does not execute any logic
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # Expected RuntimeError when doing an unsafe cast from a result of
+               # dtype torch.float32 into an out= with dtype torch.lon
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+               # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning')),
            supports_autograd=False),
     OpInfo('scatter_add',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -14269,11 +14399,11 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Reference: https://github.com/pytorch/pytorch/pull/49155#issuecomment-742664611
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
-                                    active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_hard',
-                                    active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
-                                    active_if=TEST_SCIPY and distutils.version.LooseVersion(scipy.__version__) < "1.4.0"),
+                                    active_if=TEST_SCIPY and LooseVersion(scipy.__version__) < "1.4.0"),
                    )),
     UnaryUfuncInfo('lgamma',
                    ref=reference_lgamma if TEST_SCIPY else _NOTHING,
