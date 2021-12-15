@@ -323,6 +323,15 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
+      - name: Generate netrc (only for docs-push)
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
+        run: |
+          # set credentials for https pushing
+          echo "machine github.com" > "${RUNNER_TEMP}/.netrc"
+          echo "login pytorchbot" >> "${RUNNER_TEMP}/.netrc"
+          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
       - name: Build ${{ matrix.docs_type }} docs
         run: |
           set -ex
@@ -347,6 +356,7 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
+            -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/workspace/.netrc \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
@@ -356,15 +366,6 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Generate netrc (only for docs-push)
-        if: ${{ github.event_name == 'schedule' }}
-        env:
-          GITHUB_PYTORCHBOT_TOKEN: ${{ secrets.GITHUB_PYTORCHBOT_TOKEN }}
-        run: |
-          # set credentials for https pushing
-          echo "machine github.com" > ~/.netrc
-          echo "login pytorchbot" >> ~/.netrc
-          echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> ~/.netrc
       - uses: seemethere/upload-artifact-s3@v3
         name: Upload Python Docs Preview
         if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'python' }}

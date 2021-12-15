@@ -35,6 +35,14 @@ class TestComplex(JitTestCase):
         input = {2 + 3j : 2 - 3j, -4.3 - 2j: 3j}
         self.checkScript(fn, (input, -4.3 - 2j))
 
+    def test_complex_in_torch_number(self):
+        # tests if mypy torch.Number recognizes
+        # complex as its' valid subtype
+        def foo(inp: complex):
+            inp_tensor = torch.full([5, 5], 1j)
+            return torch.divide(inp_tensor, inp)
+        self.checkScript(foo, (5 + 2j,))
+
     def test_pickle(self):
         class ComplexModule(torch.jit.ScriptModule):
             def __init__(self):
