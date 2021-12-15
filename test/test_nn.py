@@ -13521,11 +13521,12 @@ class TestNNDeviceType(NNTestCase):
             self._test_dropout(nn.Dropout, device, input)
 
     def _test_dropoutNd_no_batch(self, dropout, input):
+        input_clone = input.clone()
         with freeze_rng_state():
             res_no_batch = dropout(input)
 
         with freeze_rng_state():
-            res_batched = dropout(input.unsqueeze(0)).squeeze(0)
+            res_batched = dropout(input_clone.unsqueeze(0)).squeeze(0)
 
         self.assertEqual(res_no_batch, res_batched)
 
@@ -13549,8 +13550,8 @@ class TestNNDeviceType(NNTestCase):
 
         # no batch dims
         input = torch.rand(50, 2, 2, device=device)
-        dropout2d = nn.Dropout2d(p=0.5)
-        self._test_dropoutNd_no_batch(dropout2d, input)
+        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
 
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout3d(self, device):
@@ -13572,8 +13573,8 @@ class TestNNDeviceType(NNTestCase):
 
         # no batch dims
         input = torch.rand(50, 2, 2, 2, device=device)
-        dropout3d = nn.Dropout3d(p=0.5)
-        self._test_dropoutNd_no_batch(dropout3d, input)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5, inplace=True), input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)

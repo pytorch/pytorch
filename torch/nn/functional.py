@@ -1306,11 +1306,17 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     inp_dim = input.dim()
     msg = f"dropout2d: Input should be 3-D (unbatched) or 4-D (batched) but received {inp_dim}-D tensor"
     assert inp_dim in (3, 4), msg
+
     is_batched = inp_dim == 4
     if not is_batched:
-        input = input.unsqueeze(0)
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
-    return result if is_batched else result.squeeze(0)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+
+    return result
 
 
 def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: bool = False) -> Tensor:
@@ -1335,11 +1341,16 @@ def dropout3d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
     inp_dim = input.dim()
     msg = f"dropout3d: Input should be 4-D (unbatched) or 5-D (batched) but received {inp_dim}-D tensor"
     assert inp_dim in (4, 5), msg
+
     is_batched = inp_dim == 5
     if not is_batched:
-        input = input.unsqueeze(0)
+        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
-    return result if is_batched else result.squeeze(0)
+
+    if not is_batched:
+        result = result.squeeze_(0) if inplace else result.squeeze(0)
+    return result
 
 
 def feature_alpha_dropout(input: Tensor, p: float = 0.5, training: bool = False, inplace: bool = False) -> Tensor:
