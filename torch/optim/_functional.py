@@ -13,12 +13,12 @@ def adagrad(params: List[Tensor],
             state_sums: List[Tensor],
             state_steps: List[int],
             has_sparse_grad: bool = False,
+            foreach: bool = False,
             *,
             lr: float,
             weight_decay: float,
             lr_decay: float,
-            eps: float,
-            foreach: bool = False):
+            eps: float):
     r"""Functional API that performs Adagrad algorithm computation.
 
     See :class:`~torch.optim.Adagrad` for details.
@@ -179,12 +179,12 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
+             foreach: bool = False,
              *,
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float,
-             foreach: Optional[bool] = False):
+             weight_decay: float):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.

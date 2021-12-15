@@ -111,10 +111,10 @@ class Adadelta(Optimizer):
                        grads,
                        square_avgs,
                        acc_deltas,
+                       foreach=foreach,
                        lr=lr,
                        rho=rho,
                        eps=eps,
-                       weight_decay=weight_decay,
-                       foreach=foreach)
+                       weight_decay=weight_decay)
 
         return loss
