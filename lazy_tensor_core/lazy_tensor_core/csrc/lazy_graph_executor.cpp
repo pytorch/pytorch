@@ -671,6 +671,16 @@ std::vector<torch::lazy::Value> LazyGraphExecutor::CollectRoots(
   return roots;
 }
 
+std::vector<LazyTensor> LazyGraphExecutor::FetchLazyTensors(
+    std::vector<LazyTensor>* tensors, const SyncTensorsConfig& config,
+    c10::ArrayRef<size_t> indices) {
+  std::vector<LazyTensor> lazy_tensors;
+  for (auto index : indices) {
+    lazy_tensors.push_back((*tensors)[index]);
+  }
+  return lazy_tensors;
+}
+
 std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
     std::vector<LazyTensor>* tensors, const SyncTensorsConfig& config,
     c10::ArrayRef<size_t> indices) {
@@ -693,7 +703,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::FetchTensorData(
       handle = compiler::getBackend()
                    ->CreateDataPlaceholder(tensor_device,
                                            std::move(tensor.shape()));
-      tensor.SetDataHandle(handle, config.sync_ltc_data);
+      tensor.SetDataHandle(handle, true/*config.sync_ltc_data*/);
     }
     tensors_data.emplace_back(std::move(handle));
   }
@@ -704,8 +714,12 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     const std::vector<LazyTensor>& tensors, c10::ArrayRef<size_t> indices) {
   std::vector<torch::lazy::Node*> roots;
   roots.reserve(indices.size());
+  static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
   for (auto index : indices) {
     torch::lazy::Value ir_value = tensors.at(index).CurrentIrValue();
+    if (VERBOSE_DATA) {
+      std::cerr << "RunPostOrder for LazyTensor " << tensors.at(index).GetUniqueId() << std::endl;
+    }
     roots.push_back(ir_value.node.get());
   }
   PostOrderData po_data;
@@ -717,6 +731,13 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
     if (device_data != nullptr) {
       torch::lazy::BackendData::Handle handle =
           device_data->data()->GetHandle();
+      
+      if (VERBOSE_DATA) {
+        std::cerr << "looking up " << reinterpret_cast<void*>(handle) << std::endl;
+        if (GetDestroyedBackendDatas().count(handle) != 0) {
+          std::cerr << "IR node holds reference to a destroyed tensor: " << reinterpret_cast<void*>(handle) << std::endl;
+        }
+      }
       auto it = data_handles.find(handle);
       if (it != data_handles.end()) {
         po_data.parameter_sequence.push_back(it->second);
@@ -741,7 +762,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
   LTC_VALUE_METRIC("TensorsGraphSize", po_data->post_order.size());
   VLOG(5) << "TensorsGraphSize=" << po_data->post_order.size();
 
-  return ScheduleSyncTensorsGraph(
+  return ScheduleSyncTensorsGraph2(
       tensors, coll, std::move(po_data->parameters_data), std::move(cached_computation));
 }
 
@@ -867,6 +888,13 @@ std::shared_ptr<LazyGraphExecutor::Async>
 LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
                                             c10::ArrayRef<std::string> devices,
                                             const SyncTensorsConfig& config) {
+  
+  auto const static VERBOSE_SYNC = std::getenv("LTC_VERBOSE_SYNC");
+  if (VERBOSE_SYNC) {
+    auto ids = c10::fmap(*tensors, [](const LazyTensor& lt){return lt.GetUniqueId();});
+    std::cerr << "triggering sync on [" << c10::Join(", ", ids) << " ]" << std::endl;
+    
+  }
   SyncTensorCollection coll = CollectSyncTensors(*tensors, config);
   if (coll.indices.empty()) {
     return nullptr;
@@ -893,13 +921,14 @@ LazyGraphExecutor::SyncTensorsGraphInternal(std::vector<LazyTensor>* tensors,
       std::move(compile_result.computation));
   GetComputationCache()->Add(coll.hash, cached_computation);
 
-  return ScheduleSyncTensorsGraph(
+  return ScheduleSyncTensorsGraph2(
       tensors, &coll, std::move(compile_result.parameters_data), std::move(cached_computation));
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
 LazyGraphExecutor::ScheduleSyncTensorsGraph(
     SyncTensorCollection* coll,
+    const std::vector<LazyTensor>& lazy_tensors,
     std::vector<torch::lazy::BackendDataPtr> parameters_data,
     std::vector<torch::lazy::BackendDataPtr> tensors_data,
     ComputationCache::TypePtr cached_computation) {
@@ -907,7 +936,7 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
       coll, std::move(parameters_data), std::move(tensors_data),
       std::move(cached_computation));
 
-  auto syncfn = [async, hash = coll->hash]() {
+  auto syncfn = [async, hash = coll->hash, lazy_tensors]() {
     try {
       VLOG(3) << "Executing IR graph hash " << torch::lazy::HashToString(hash)
               << " on device " << async->device << " ...";
@@ -924,6 +953,10 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
         } else {
           async->tensors_data[i] = std::move(results[i]);
         }
+      }
+
+      for (auto lt : lazy_tensors) {
+        lt.AssignIrValue(torch::lazy::Value());
       }
     } catch (...) {
       // There are two paths of discovery of an exception happening on an
@@ -949,12 +982,13 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
 }
 
 std::shared_ptr<LazyGraphExecutor::Async>
-LazyGraphExecutor::ScheduleSyncTensorsGraph(
+LazyGraphExecutor::ScheduleSyncTensorsGraph2(
     std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
     std::vector<torch::lazy::BackendDataPtr> parameters_data,
     ComputationCache::TypePtr cached_computation) {
   auto tensors_data = FetchTensorData(tensors, coll->config, coll->indices);
-  return ScheduleSyncTensorsGraph(coll, std::move(parameters_data),
+  auto lazy_tensors = FetchLazyTensors(tensors, coll->config, coll->indices);
+  return ScheduleSyncTensorsGraph(coll, lazy_tensors, std::move(parameters_data),
                                   std::move(tensors_data),
                                   std::move(cached_computation));
 }

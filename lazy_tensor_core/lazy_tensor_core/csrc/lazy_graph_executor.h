@@ -169,6 +169,11 @@ class LazyGraphExecutor {
       std::vector<LazyTensor>* tensors, const SyncTensorsConfig& config,
       c10::ArrayRef<size_t> indices);
 
+
+  std::vector<LazyTensor> FetchLazyTensors(
+      std::vector<LazyTensor>* tensors, const SyncTensorsConfig& config,
+      c10::ArrayRef<size_t> indices);
+
   PostOrderData RunPostOrder(const std::vector<LazyTensor>& tensors,
                              c10::ArrayRef<size_t> indices);
   std::shared_ptr<Async> TryRunCachedSync(std::vector<LazyTensor>* tensors,
@@ -198,11 +203,12 @@ class LazyGraphExecutor {
   // present within the coll structure.
   std::shared_ptr<Async> ScheduleSyncTensorsGraph(
       SyncTensorCollection* coll,
+      const std::vector<LazyTensor>& lazy_tensors,
       std::vector<torch::lazy::BackendDataPtr> parameters_data,
       std::vector<torch::lazy::BackendDataPtr> tensors_data,
       ComputationCache::TypePtr cached_computation);
 
-  std::shared_ptr<Async> ScheduleSyncTensorsGraph(
+  std::shared_ptr<Async> ScheduleSyncTensorsGraph2(
       std::vector<LazyTensor>* tensors, SyncTensorCollection* coll,
       std::vector<torch::lazy::BackendDataPtr> parameters_data,
       ComputationCache::TypePtr cached_computation);

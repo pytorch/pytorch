@@ -426,7 +426,7 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
             static const auto VERBOSE_AUTOGRAD = std::getenv("VERBOSE_AUTOGRAD");
             if (VERBOSE_AUTOGRAD) {
               const auto stats = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
-              size_t bytes = stats.allocated_bytes[static_cast<size_t>(c10::cuda::CUDACachingAllocator::StatType::AGGREGATE)].allocated;
+              size_t bytes = stats.allocated_bytes[static_cast<size_t>(c10::cuda::CUDACachingAllocator::StatType::AGGREGATE)].current;
               size_t ONE_MB = 1024 * 1024;
               std::cerr << "executing " << task.fn_.get()->name() << "bytes " 
                 << bytes << " mb " << (bytes * 1.0 / ONE_MB) <<std::endl;

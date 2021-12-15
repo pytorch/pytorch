@@ -3,6 +3,9 @@
 #include <sstream>
 
 #include "lazy_tensor_core/csrc/ops/ltc_ops.h"
+// 
+#include "lazy_tensor_core/csrc/lazy_graph_executor.h"
+#include "lazy_tensor_core/csrc/ts_backend/LazyLazyIr.h"
 
 namespace torch_lazy_tensors {
 namespace ir {
@@ -23,6 +26,7 @@ std::string DeviceData::ToString() const {
 const DeviceData* DeviceData::Cast(const torch::lazy::Node* node) {
   return torch::lazy::NodeCast<DeviceData>(node, ltc_device_data);
 }
+
 
 }  // namespace ops
 }  // namespace ir
