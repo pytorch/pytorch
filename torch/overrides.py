@@ -234,6 +234,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._make_subclass,
         Tensor.stride,
         Tensor.unflatten,
+        Tensor.to_sparse_coo,
         Tensor.to_sparse_csr,
         Tensor._reduce_ex_internal,
         Tensor._fix_weakref,
@@ -242,6 +243,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._conj,
         Tensor._conj_physical,
         Tensor._neg_view,
+        Tensor._is_zerotensor,
     }
 
 
@@ -663,6 +665,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.narrow_copy: lambda input, dim, start, length: -1,
         torch.nan_to_num: lambda input, nan=0.0, posinf=None, neginf=None, out=None: -1,
         torch.native_batch_norm: lambda input, weight, bias, running_mean, running_var, training, momentum, eps: -1,
+        torch.native_dropout : lambda input, p, train: -1,
         torch.native_layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
         torch.native_group_norm: lambda input, weight, bias, N, C, HxW, group, eps: -1,
         torch.native_norm: lambda input, p=2: -1,
@@ -735,7 +738,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.instance_norm: (lambda input, running_mean=None, running_var=None, weight=None, bias=None,
                                             use_input_stats=True, momentum=0.1, eps=1e-05: -1),
         torch.nn.functional.interpolate: (lambda input, size=None, scale_factor=None, mode='nearest', align_corners=None,
-                                          recompute_scale_factor=None: -1),
+                                          recompute_scale_factor=None, antialias=False: -1),
         torch.nn.functional.kl_div: lambda input, target, size_average=None, reduce=None, reduction='mean', log_target=False: -1,
         torch.nn.functional.l1_loss: lambda input, target, size_average=None, reduce=None, reduction='mean': -1,
         torch.nn.functional.layer_norm: lambda input, normalized_shape, weight=None, bias=None, eps=1e-05: -1,
@@ -890,6 +893,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.saddmm: lambda input, mat1, mat2, beta=1, alpha=1, out=None: -1,
         torch.scatter: lambda input, dim, index, src: -1,
         torch.scatter_add: lambda input, dim, index, src: -1,
+        torch._scatter_reduce: lambda input, dim, index, reduce, output_size=None, out=None: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
         torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
@@ -981,6 +985,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.trapz: lambda y, x=None, dim=-1: -1,
         torch.trapezoid: lambda y, x=None, dim=-1: -1,
         torch.triangular_solve: lambda input, A, upper=True, transpose=False, unitriangular=False: -1,
+        torch.linalg.solve_triangular: lambda input, B, upper, left=True, unitriangular=False: -1,
         torch.tril: lambda input, diagonal=0, out=None: -1,
         torch.triplet_margin_loss: (lambda anchor, positive, negative, margin=1.0, p=2, eps=1e-06, swap=False,
 

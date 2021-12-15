@@ -22,6 +22,8 @@ GENERATED_CPP = [
     "autograd/generated/python_nn_functions.cpp",
     "autograd/generated/python_fft_functions.cpp",
     "autograd/generated/python_linalg_functions.cpp",
+    "autograd/generated/python_return_types.cpp",
+    "autograd/generated/python_sparse_functions.cpp",
     "autograd/generated/python_special_functions.cpp",
     "autograd/generated/python_torch_functions_0.cpp",
     "autograd/generated/python_torch_functions_1.cpp",
@@ -31,6 +33,7 @@ GENERATED_CPP = [
 
 # NVFuser runtime library
 libtorch_nvfuser_runtime_sources = [
+    "torch/csrc/jit/codegen/cuda/runtime/bf16_support.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_reduction.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_atomic.cu",
     "torch/csrc/jit/codegen/cuda/runtime/block_sync_default.cu",
@@ -41,6 +44,7 @@ libtorch_nvfuser_runtime_sources = [
     "torch/csrc/jit/codegen/cuda/runtime/random_numbers.cu",
     "torch/csrc/jit/codegen/cuda/runtime/tensor.cu",
     "torch/csrc/jit/codegen/cuda/runtime/welford.cu",
+    "torch/csrc/jit/codegen/cuda/runtime/warp.cu",
     "aten/src/ATen/cuda/detail/PhiloxCudaStateRaw.cuh",
     "aten/src/ATen/cuda/detail/UnpackRaw.cuh",
 ]
@@ -67,7 +71,7 @@ def libtorch_generated_sources(gencode_pattern):
 # copied from https://github.com/pytorch/pytorch/blob/f99a693cd9ff7a9b5fdc71357dac66b8192786d3/aten/src/ATen/core/CMakeLists.txt
 jit_core_headers = [
     "torch/csrc/utils/memory.h",
-    "torch/csrc/WindowsTorchApiMacro.h",
+    "torch/csrc/Export.h",
     "torch/csrc/jit/frontend/source_range.h",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.h",
     "torch/csrc/jit/serialization/source_range_serialization.h",
@@ -114,6 +118,7 @@ core_sources_common = [
     "torch/csrc/jit/runtime/vararg_functions.cpp",
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
+    "torch/csrc/jit/operator_upgraders/upgraders.cpp",
 ]
 
 torch_unpickler_common = [
@@ -127,6 +132,7 @@ libtorch_sources_common = sorted(core_sources_common + torch_unpickler_common)
 libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
+    "torch/csrc/monitor/counters.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -268,6 +274,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/passes/utils/memory_dag.cpp",
     "torch/csrc/jit/passes/utils/subgraph_utils.cpp",
     "torch/csrc/jit/passes/utils/optimization_utils.cpp",
+    "torch/csrc/jit/passes/utils/op_registry.cpp",
     "torch/csrc/jit/passes/xnnpack_rewrite.cpp",
     "torch/csrc/jit/passes/vulkan_rewrite.cpp",
     "torch/csrc/jit/passes/metal_rewrite.cpp",
@@ -291,6 +298,7 @@ core_sources_full_mobile_no_backend_interface = [
     "torch/csrc/jit/runtime/script_profile.cpp",
     "torch/csrc/jit/runtime/symbolic_script.cpp",
     "torch/csrc/jit/runtime/symbolic_shape_registry.cpp",
+    "torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp",
     "torch/csrc/jit/runtime/jit_trace.cpp",
     "torch/csrc/jit/serialization/callstack_debug_info_serialization.cpp",
     "torch/csrc/jit/serialization/import.cpp",
@@ -361,14 +369,30 @@ core_sources_full = core_sources_full_mobile + [
 
 lazy_tensor_core_sources = [
     "torch/csrc/lazy/backend/backend_device.cpp",
+    "torch/csrc/lazy/backend/backend_interface.cpp",
     "torch/csrc/lazy/backend/lowering_context.cpp",
     "torch/csrc/lazy/core/config.cpp",
     "torch/csrc/lazy/core/hash.cpp",
+    "torch/csrc/lazy/core/helpers.cpp",
     "torch/csrc/lazy/core/ir.cpp",
+    "torch/csrc/lazy/core/ir_dump_util.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/lazy_view.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/core/tensor_util.cpp",
+    "torch/csrc/lazy/core/view_ops/as_strided.cpp",
+    "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
+    "torch/csrc/lazy/core/view_ops/diagonal.cpp",
+    "torch/csrc/lazy/core/view_ops/diagonal_view_update.cpp",
+    "torch/csrc/lazy/core/view_ops/narrow.cpp",
+    "torch/csrc/lazy/core/view_ops/narrow_view_update.cpp",
+    "torch/csrc/lazy/core/view_ops/permute.cpp",
+    "torch/csrc/lazy/core/view_ops/resize.cpp",
+    "torch/csrc/lazy/core/view_ops/select.cpp",
+    "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
+    "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
@@ -384,24 +408,24 @@ libtorch_core_sources = sorted(
 
 # These files are the only ones that are supported on Windows.
 libtorch_distributed_base_sources = [
-    "torch/csrc/distributed/c10d/frontend.cpp",
-    "torch/csrc/distributed/c10d/comm.cpp",
-    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
-    "torch/csrc/distributed/c10d/logger.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupGloo.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupMPI.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupWrapper.cpp",
-    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
-    "torch/csrc/distributed/c10d/reducer.cpp",
-    "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/Store.cpp",
     "torch/csrc/distributed/c10d/TCPStore.cpp",
     "torch/csrc/distributed/c10d/Utils.cpp",
+    "torch/csrc/distributed/c10d/comm.cpp",
+    "torch/csrc/distributed/c10d/default_comm_hooks.cpp",
+    "torch/csrc/distributed/c10d/exception.cpp",
+    "torch/csrc/distributed/c10d/logger.cpp",
+    "torch/csrc/distributed/c10d/reducer.cpp",
+    "torch/csrc/distributed/c10d/sequence_num.cpp",
+    "torch/csrc/distributed/c10d/socket.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -488,6 +512,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
@@ -539,6 +564,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
     "torch/csrc/jit/mobile/train/sequential.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_bytecode.cpp",
@@ -566,6 +592,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/executor.cpp",
     "torch/csrc/jit/codegen/cuda/executor_kernel_arg.cpp",
     "torch/csrc/jit/codegen/cuda/executor_launch_params.cpp",
+    "torch/csrc/jit/codegen/cuda/evaluator_common.cpp",
     "torch/csrc/jit/codegen/cuda/executor_utils.cpp",
     "torch/csrc/jit/codegen/cuda/fusion.cpp",
     "torch/csrc/jit/codegen/cuda/graph_fuser.cpp",
@@ -586,6 +613,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/kernel_ir_builder.cpp",
     "torch/csrc/jit/codegen/cuda/kernel_ir_printer.cpp",
     "torch/csrc/jit/codegen/cuda/lower_alias_memory.cpp",
+    "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower_allocation.cpp",
     "torch/csrc/jit/codegen/cuda/lower_expr_sort.cpp",
     "torch/csrc/jit/codegen/cuda/lower_index.cpp",
@@ -608,6 +636,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/parallel_dimension_map.cpp",
     "torch/csrc/jit/codegen/cuda/parallel_type_bitmap.cpp",
     "torch/csrc/jit/codegen/cuda/parser.cpp",
+    "torch/csrc/jit/codegen/cuda/partial_split_map.cpp",
     "torch/csrc/jit/codegen/cuda/partition.cpp",
     "torch/csrc/jit/codegen/cuda/predicate_compute.cpp",
     "torch/csrc/jit/codegen/cuda/register_interface.cpp",
@@ -615,9 +644,11 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/scheduler/pointwise.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/normalization.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/reduction.cpp",
+    "torch/csrc/jit/codegen/cuda/scheduler/reduction_utils.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/registry.cpp",
     "torch/csrc/jit/codegen/cuda/scheduler/utils.cpp",
-    "torch/csrc/jit/codegen/cuda/shape_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/type_inference.cpp",
+    "torch/csrc/jit/codegen/cuda/type_promotion.cpp",
     "torch/csrc/jit/codegen/cuda/fusion_segmenter.cpp",
     "torch/csrc/jit/codegen/cuda/tensor_view.cpp",
     "torch/csrc/jit/codegen/cuda/transform_iter.cpp",
@@ -625,6 +656,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/transform_rfactor.cpp",
     "torch/csrc/jit/codegen/cuda/type.cpp",
     "torch/csrc/jit/codegen/cuda/utils.cpp",
+    "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
 ]
@@ -636,7 +668,6 @@ libtorch_cuda_distributed_base_sources = [
 
 # These files are only supported on Linux (and others) but not on Windows.
 libtorch_cuda_distributed_extra_sources = [
-    "torch/csrc/distributed/c10d/frontend_cuda.cpp",
     "torch/csrc/distributed/c10d/NCCLUtils.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
@@ -798,7 +829,6 @@ libtorch_python_core_sources = [
     "torch/csrc/jit/python/python_sugared_value.cpp",
     "torch/csrc/jit/python/python_tree_views.cpp",
     "torch/csrc/jit/runtime/static/init.cpp",
-    "torch/csrc/fx/fx_init.cpp",
     "torch/csrc/jit/tensorexpr/tensorexpr_init.cpp",
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
@@ -828,6 +858,7 @@ libtorch_python_core_sources = [
 libtorch_python_distributed_core_sources = [
     "torch/csrc/distributed/c10d/init.cpp",
     "torch/csrc/distributed/c10d/python_comm_hook.cpp",
+    "torch/csrc/distributed/c10d/quantization/quantization.cpp",
 ]
 
 libtorch_python_distributed_sources = libtorch_python_distributed_core_sources + [
@@ -853,6 +884,8 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "autograd/generated/python_nn_functions.cpp",
         "autograd/generated/python_fft_functions.cpp",
         "autograd/generated/python_linalg_functions.cpp",
+        "autograd/generated/python_return_types.cpp",
+        "autograd/generated/python_sparse_functions.cpp",
         "autograd/generated/python_special_functions.cpp",
         "autograd/generated/python_torch_functions_0.cpp",
         "autograd/generated/python_torch_functions_1.cpp",
@@ -895,6 +928,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/TensorNames.cpp",
     "aten/src/ATen/TensorUtils.cpp",
     "aten/src/ATen/ThreadLocalState.cpp",
+    "aten/src/ATen/FuncTorchTLS.cpp",
     "aten/src/ATen/Utils.cpp",
     "aten/src/ATen/Version.cpp",
     "aten/src/ATen/VmapMode.cpp",
@@ -1216,10 +1250,8 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseTensor.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensor.cpp",
     "aten/src/ATen/native/sparse/SparseTensorMath.cpp",
+    "aten/src/ATen/native/sparse/SparseUnaryOps.cpp",
     "aten/src/ATen/native/sparse/SparseCsrTensorMath.cpp",
-    "aten/src/TH/THGeneral.cpp",
-    "aten/src/TH/THStorageFunctions.cpp",
-    "aten/src/TH/THTensor.cpp",
     "aten/src/ATen/native/utils/Factory.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
