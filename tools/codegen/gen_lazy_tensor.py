@@ -154,7 +154,7 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
     # Generate Dispatcher registrations which hook up the nativefunctions
     for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
         gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                     dispatch_key, selector)
+                                     backend_key, dispatch_key, selector)
 
     # Generate native function impls that build IR nodes
     fm.write_with_template(f'{backend_key}NativeFunctions.cpp', 'DispatchKeyNativeFunctions.cpp', lambda: {

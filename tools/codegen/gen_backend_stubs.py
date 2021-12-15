@@ -237,11 +237,12 @@ def gen_dispatcher_registrations(
         cpp_namespace: str,
         backend_indices: Dict[DispatchKey, BackendIndex],
         grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
+        backend_dispatch_key: DispatchKey,
         dispatch_key: DispatchKey,
         selector: 'SelectiveBuilder') -> None:
     fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
         'extra_cuda_headers': '',
-        'external_backend_headers': f'#include "{output_dir}/{dispatch_key}NativeFunctions.h"',
+        'external_backend_headers': f'#include "{output_dir}/{backend_dispatch_key}NativeFunctions.h"',
         'namespaced_headers': '',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
@@ -253,7 +254,7 @@ def gen_dispatcher_registrations(
                 selector,
                 rocm=False,
                 cpp_namespace=cpp_namespace,
-                class_method_name=f'{dispatch_key}NativeFunctions'),
+                class_method_name=f'{backend_dispatch_key}NativeFunctions'),
             grouped_native_functions
         )),
         'dispatch_anonymous_definitions': list(concatMap(
@@ -263,7 +264,7 @@ def gen_dispatcher_registrations(
                 selector,
                 rocm=False,
                 cpp_namespace=cpp_namespace,
-                class_method_name=f'{dispatch_key}NativeFunctions'),
+                class_method_name=f'{backend_dispatch_key}NativeFunctions'),
             grouped_native_functions
         )),
         'dispatch_registrations': list(concatMap(
@@ -317,6 +318,6 @@ def run(source_yaml: str, output_dir: str, dry_run: bool, impl_path: Optional[st
 
         for dispatch_key in [backend_key] if autograd_key is None else [backend_key, autograd_key]:
             gen_dispatcher_registrations(fm, output_dir, cpp_namespace, backend_indices, grouped_native_functions,
-                                         dispatch_key, selector)
+                                         backend_key, dispatch_key, selector)
 if __name__ == '__main__':
     main()
