@@ -59,6 +59,7 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
     cur_size = len(failing_graph.nodes)
 
     def graph_fails(graph, inps):
+
         mod = fx.GraphModule(fail_f, graph)
         mod.graph.lint()
         return module_fails(mod, inps)
@@ -191,3 +192,25 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
     print(failing_fx.code)
     print([i.shape for i in inps])
     return failing_fx, inps
+
+import subprocess
+def check_nvfuser_subprocess(f, inps):
+    f.to_folder("temp")
+    with open("_temp.py", 'w') as fil:
+        fil.write(f'''
+    import torch
+    from temp import FxModule
+    f = FxModule().cuda()
+    inps = {[(i.shape, i.dtype) for i in inps]}
+    inps = [torch.randn(shape, dtype=dtype, device='cuda') for shape, dtype in inps]
+    with torch.jit.fuser("fuser2"):
+    nf = torch.jit.script(f)
+    for _ in range(5):
+        nf(*inps)
+    ''')
+    try:
+        subprocess.check_call("PYTORCH_NVFUSER_DISABLE_FALLBACK=1 python _temp.py", shell=True)
+    except Exception as e:
+        print(e)
+        return True
+    return False
