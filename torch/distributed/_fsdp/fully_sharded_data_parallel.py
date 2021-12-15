@@ -708,16 +708,17 @@ class FullyShardedDataParallel(nn.Module):
         # Switch to local shard after backward.
         self._use_param_local_shard([param])
 
-        # Wait for all work in the current stream to finish, then start the
-        # reductions in post_backward stream.
-        self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
-
         # Prefetch previous layer's full params in backward pass
         if (
             self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
         ):
             self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+
+        # Wait for all work in the current stream to finish, then start the
+        # reductions in post_backward stream.
+        self._streams["post_backward"].wait_stream(torch.cuda.current_stream())
 
         with torch.cuda.stream(self._streams["post_backward"]):
             orig_grad_data = param.grad.data
