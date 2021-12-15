@@ -193,7 +193,7 @@ class C10_API DispatchKeySet final {
   // Only functionality bits are allowed to be removed from a keyset.
   // This is generally not an operation you should be doing
   // (it's used to implement operator<<)
-  C10_NODISCARD DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet removeFunctionalityKey(DispatchKey t) const {
     // For now, we're only allowing removal of "functionality bits" from the keyset,
     // which is specifically needed by the fallthrough key calculation logic.
     // Why is removing backend bits problematic? Consider this example:
@@ -209,8 +209,12 @@ class C10_API DispatchKeySet final {
     // backend bits: CPU, CUDA
     //
     // Instead, removeFunctionalityKey(DispatchKey.AutogradCPU) will only remove the "Autograd" bit from the bitset.
-    TORCH_INTERNAL_ASSERT(t > DispatchKey::EndOfBackendKeys);
-    TORCH_INTERNAL_ASSERT(!isAliasDispatchKey(t));
+    if (t <= DispatchKey::EndOfBackendKeys) {
+      throw std::invalid_argument("invalid key");
+    }
+    if (isAliasDispatchKey(t)) {
+      throw std::invalid_argument("invalid key");
+    }
     auto functionality_k = isPerBackendFunctionalityKey(t) ? t : toFunctionalityKey(t);
     return DispatchKeySet(repr_ & ~DispatchKeySet(functionality_k).repr_);
   }
@@ -388,51 +392,29 @@ class C10_API DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
-constexpr DispatchKeySet autograd_dispatch_keyset;
-constexpr DispatchKeySet autocast_dispatch_keyset;
-constexpr DispatchKeySet default_included_set;
-constexpr DispatchKeySet default_excluded_set;
-constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView;
-constexpr DispatchKeySet autogradother_backends;
-constexpr DispatchKeySet after_autograd_keyset;
-constexpr DispatchKeySet after_ADInplaceOrView_keyset;
-constexpr DispatchKeySet after_func_keyset;
-constexpr DispatchKeySet backend_dispatch_keyset;
-constexpr DispatchKeySet math_dispatch_keyset;
-
 // autograd_dispatch_keyset should include all runtime autograd keys.
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with CompositeImplicitAutograd
-constexpr DispatchKeySet _autograd_dispatch_keyset() {
-    static DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
+constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutogradFunctionality,
         DispatchKey::AutogradOther,
     }) | DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
-    return autograd_dispatch_keyset;
-}
 
-constexpr DispatchKeySet _autocast_dispatch_keyset() {
-    static DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
+constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
     });
-    return autocast_dispatch_keyset;
-}
 
 // See Note [TLS Initialization]
-constexpr DispatchKeySet _default_included_set() {
-    static DispatchKeySet default_included_set = DispatchKeySet({
+constexpr DispatchKeySet default_included_set = DispatchKeySet({
         DispatchKey::BackendSelect,
         DispatchKey::ADInplaceOrView,
     });
-    return default_included_set;
-}
 
-constexpr DispatchKeySet _default_excluded_set = DispatchKeySet({
+constexpr DispatchKeySet default_excluded_set = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
     });
-}
 
 constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
         autograd_dispatch_keyset | DispatchKeySet(DispatchKey::ADInplaceOrView);
@@ -456,21 +438,17 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
         DispatchKey::CustomRNGKeyId,
         DispatchKey::MkldnnCPU,
         DispatchKey::Meta});
-    return autogradother_backends;
-}
 
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
 // Autograd key
 constexpr DispatchKeySet after_autograd_keyset =
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
-}
 
 // The set of dispatch keys that come after ADInplaceOrView
 constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
         DispatchKeySet::FULL_AFTER,
         c10::DispatchKey::ADInplaceOrView);
-}
 
 // The set of dispatch keys that come after Functionalize
 constexpr DispatchKeySet after_func_keyset =
