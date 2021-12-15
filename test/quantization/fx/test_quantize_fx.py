@@ -2012,6 +2012,25 @@ class TestQuantizeFx(QuantizationTestCase):
         # quantize, should run with no errors
         quantized = convert_fx(prepared_copy)
 
+    def test_quantized_model_type(self):
+        """ Test state_dict and deepcopy works properly in the quantized model
+        """
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(5, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        m = M().eval()
+        m = prepare_fx(m, {"": default_qconfig})
+        m = convert_fx(m)
+        m_copy = copy.deepcopy(m)
+        state_dict = m.state_dict()
+        print(m)
+        print(state_dict)
+
     def test_dequantize(self):
         r""" Test to make sure dequantize node are placed before
         non-quantizable node
