@@ -348,13 +348,6 @@ filegroup(
 )
 
 filegroup(
-    name = "th_srcs",
-    srcs = [
-        "aten/src/TH/THGeneral.cpp",
-    ],
-)
-
-filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
@@ -510,14 +503,6 @@ header_template_rule(
     },
 )
 
-header_template_rule(
-    name = "aten_src_TH_THGeneral",
-    src = "aten/src/TH/THGeneral.h.in",
-    out = "aten/src/TH/THGeneral.h",
-    substitutions = {
-    },
-)
-
 cc_library(
     name = "aten_headers",
     hdrs = [
@@ -541,7 +526,6 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
-        ":aten_src_TH_THGeneral",
     ],
 )
 
@@ -561,20 +545,6 @@ intern_build_aten_ops(
     deps = [
         ":aten_headers",
         "@sleef",
-        "@fbgemm",
-    ],
-)
-
-cc_library(
-    name = "th",
-    srcs = [
-        ":th_srcs",
-    ],
-    copts = ATEN_COPTS + [
-        "-mavx",
-    ],
-    deps = [
-        ":aten_headers",
         "@fbgemm",
     ],
 )
@@ -606,7 +576,6 @@ cc_library(
         ":ATen_CPU",
         ":aten_headers",
         ":caffe2_for_aten_headers",
-        ":th",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
