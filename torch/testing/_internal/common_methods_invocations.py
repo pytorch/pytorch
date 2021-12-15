@@ -12946,7 +12946,7 @@ op_db: List[OpInfo] = [
                # please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out', dtypes=(torch.float32,)),),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out_warning'),),
            sample_inputs_func=sample_inputs_column_stack,),
     OpInfo('pinverse',
            op=torch.pinverse,
