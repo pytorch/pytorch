@@ -320,6 +320,9 @@ Tensor index_add(const Tensor& self, Dimname dim, const Tensor& index, const Ten
 Tensor& index_add_(Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar &alpha) {
   reportNYIDimnameOverload("index_add");
 }
+Tensor& index_add_out(const Tensor& self, Dimname dim, const Tensor& index, const Tensor& source, const Scalar& alpha, Tensor& result) {
+  reportNYIDimnameOverload("index_add");
+}
 Tensor index_fill(const Tensor& self, Dimname dim, const Tensor& index, const Scalar& source) {
   return at::index_fill(self, dimname_to_position(self, dim), index, source);
 }
