@@ -13,7 +13,6 @@ using DynamicTypeBits = std::uint32_t;
 
 constexpr DynamicTypeBits kDynamicCovariantTypeBit = DYNAMIC_TYPE_BIT(31);
 constexpr DynamicTypeBits kDynamicAnyTypeBit = DYNAMIC_TYPE_BIT(30);
-constexpr DynamicTypeBits kDynamicSingletonTypeBit = DYNAMIC_TYPE_BIT(29);
 
 constexpr DynamicTypeBits kDynamicNoneTypeBit = DYNAMIC_TYPE_BIT(1);
 constexpr DynamicTypeBits kDynamicIntTypeBit = DYNAMIC_TYPE_BIT(3);
@@ -41,6 +40,9 @@ constexpr DynamicTypeBits kDynamicTupleTypeBit = DYNAMIC_TYPE_BIT(8);
   _(AnyList, (kDynamicListTypeBit | kDynamicAnyTypeBit))                     \
   _(AnyTuple,                                                                \
     (kDynamicTupleTypeBit | kDynamicCovariantTypeBit | kDynamicAnyTypeBit))  \
+  _(DeviceObj, DYNAMIC_TYPE_BIT(12))                                         \
+  _(StreamObj, DYNAMIC_TYPE_BIT(13))                                         \
+  _(Capsule, DYNAMIC_TYPE_BIT(14))                                           \
   _(Any, 0xffffffff)
 
 class DynamicType;
@@ -117,7 +119,6 @@ class DynamicType : public Type {
 #define DYNAMIC_TYPE_ITEM(NAME, VAL) NAME = VAL,
     FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_ITEM)
 #undef DYNAMIC_TYPE_ITEM
-        Singleton = kDynamicSingletonTypeBit,
   };
 
   bool operator==(const Type& rhs) const override;
@@ -151,7 +152,6 @@ class DynamicType : public Type {
   union {
     Arguments arguments_;
     ClassTypePtr class_;
-    TypeKind typeKind_;
   };
 };
 

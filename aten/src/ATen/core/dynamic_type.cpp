@@ -25,8 +25,6 @@ std::string DynamicType::str() const {
   if (tag_ == Tag::Class) {
     auto name = class_->name();
     ret += "[" + (name ? name->qualifiedName() : "Unknown Class") + "]";
-  } else if (tag_ == Tag::Singleton) {
-    ret += "[kind:" + std::to_string(static_cast<int>(typeKind_)) + "]";
   } else if (arguments_.elems.size() > 0) {
     ret += "[";
     for (const auto& arg : arguments_.elems) {
@@ -59,10 +57,6 @@ DynamicType::Arguments::Arguments(
 }
 
 DynamicType::~DynamicType() {
-  if (tag_ == Tag::Singleton) {
-    return;
-  }
-
   if (tag_ == Tag::Class) {
     class_.~ClassTypePtr();
     return;
@@ -104,12 +98,6 @@ DynamicType::DynamicType(const Type& other) : Type(DynamicType::Kind) {
     FORALL_DYNAMIC_TYPES(CASE_TYPE)
 #undef CASE_TYPE
     default:
-      if (kind == DeviceObjType::Kind || kind == StreamObjType::Kind ||
-          kind == CapsuleType::Kind) {
-        tag_ = Tag::Singleton;
-        typeKind_ = kind;
-        return;
-      }
       TORCH_INTERNAL_ASSERT(false, "Unsupported dynamic type: ", other.str());
   }
 
@@ -139,8 +127,6 @@ bool DynamicType::equals(const DynamicType& other) const {
   switch (tag_) {
     case Tag::Class:
       return *class_ == *other.class_;
-    case Tag::Singleton:
-      return typeKind_ == other.typeKind_;
     default:
       return compareArguments(
           other, [](const LabeledDynamicType& a, const LabeledDynamicType& b) {
