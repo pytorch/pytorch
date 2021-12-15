@@ -2035,6 +2035,16 @@ void enumerateTupleType(
   }
 }
 
+/**
+ * Enumerate all possible JIT types appearing in mobile runtime, and test
+ * whether subtyping relation is preserved after one of the JIT types is
+ * converted to DynamicType.
+ *
+ * We firstly enumerate all "base" types in a vector, and implement
+ * expandTypes() to enumerate container types one "level" up for a given set
+ * of types. We call expandTypes() twice to test types nested less or equal
+ * to two levels. e.g. List[Optional[Tensor]], Optional[Dict[Int, Bool]], etc.
+ */
 TEST(LiteInterpreterTest, DynamicType) {
   auto cu = std::make_shared<CompilationUnit>();
   std::vector<TypePtr> keyTypes = {
