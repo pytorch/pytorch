@@ -682,25 +682,23 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
-    auto index = indexVec(value());
+    auto index = value().intValue();
     ScalarType v_sdtype = v->dtype().scalar_type();
     switch (v_sdtype) {
 #define TYPE_CASE(Type, Name)                        \
   case ScalarType::Name: {                           \
     Type* ptr##Name = static_cast<Type*>(ptr);       \
-    std::vector<Type> val(index.size());             \
-    for (const auto i : c10::irange(index.size())) { \
-      val[i] = ptr##Name[index[i]];                  \
+    Type val;                                        \
+      val = ptr##Name[index];                        \
       GRAPH_DEBUG(                                   \
           "LOAD: ptr=",                              \
           ptr##Name,                                 \
           ", buf=",                                  \
           v->buf()->name_hint(),                     \
           ", idx=",                                  \
-          index[i],                                  \
+          index,                                     \
           ", val=",                                  \
-          (int)underlyingValue(val[i]));             \
-    }                                                \
+          (int)underlyingValue(val));                \
     value_ = InterpValue(val);                       \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
@@ -725,30 +723,25 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     ExprPtr flat_idx =
         flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
     flat_idx->accept(this);
-    auto index = indexVec(value());
+    auto index = value().intValue();
     ScalarType v_sdtype = v->value()->dtype().scalar_type();
 
     switch (v_sdtype) {
 #define TYPE_CASE(Type, Name)                                   \
   case ScalarType::Name: {                                      \
     v->value()->accept(this);                                   \
-    std::vector<Type> value = this->value().as_vec<Type>();     \
-    if (index.size() != value.size()) {                         \
-      throw malformed_input("value size mismatch in Store", v); \
-    }                                                           \
+    Type value = this->value().as<Type>();                      \
     Type* ptr##Name = static_cast<Type*>(ptr);                  \
-    for (const auto i : c10::irange(index.size())) {            \
       GRAPH_DEBUG(                                              \
           "STORE: ptr=",                                        \
           ptr##Name,                                            \
           ", buf=",                                             \
           v->buf()->name_hint(),                                \
           ", idx=",                                             \
-          index[i],                                             \
+          index,                                                \
           ", val=",                                             \
-          (int)underlyingValue(value[i]));                      \
-      ptr##Name[index[i]] = value[i];                           \
-    }                                                           \
+          (int)underlyingValue(value));                         \
+      ptr##Name[index] = value;                                 \
   } break;
       AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, TYPE_CASE);
       // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
