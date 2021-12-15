@@ -51,6 +51,10 @@ SKIP_TRAIN_ONLY = {
     "hf_BigBird",
     "pyhpc_equation_of_state",
     "pyhpc_isoneutral_mixing",
+    "densenet121",
+    "resnet50_quantized_qat",
+    "Background_Matting",
+    "hf_Bart",
 }
 
 current_name = ""
