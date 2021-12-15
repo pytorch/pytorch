@@ -279,3 +279,19 @@ template <>
 double pow<double>(double a, double b) {
   return ::pow(a, b);
 }
+
+float pow(float a, int b) {
+  return pow(a, (float)b);
+}
+
+double pow(double a, int b) {
+  return pow(a, (double)b);
+}
+
+float pow(float a, int64_t b) {
+  return pow(a, (float)b);
+}
+
+double pow(double a, int64_t b) {
+  return pow(a, (double)b);
+}

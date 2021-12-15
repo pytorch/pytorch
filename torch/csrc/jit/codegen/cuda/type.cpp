@@ -281,7 +281,6 @@ bool needFloatSuffix(BinaryOpType t) {
     case BinaryOpType::Atan2:
     case BinaryOpType::Div:
     case BinaryOpType::Fmod:
-    case BinaryOpType::Pow:
       return true;
     default:
       return false;

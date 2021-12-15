@@ -697,24 +697,19 @@ NvrtcFunction nvrtcCompile(
       "--std=c++14", compute.c_str(), "-default-device"};
 #endif
 
-  const char* disable_fastmath = getenv("PYTORCH_NVFUSER_DISABLE_FASTMATH");
-  if (!disable_fastmath || (atoi(disable_fastmath) == 0)) {
-    args.push_back("--use_fast_math");
-  } else {
-    TORCH_WARN_ONCE(
-        "fast math disabled in nvfuser, try set `PYTORCH_NVFUSER_DISABLE_FASTMATH=0`");
-  }
-
   const char* disable_fma = getenv("PYTORCH_NVFUSER_DISABLE_FMA");
-  // int disable_fma_flag = disable_fma ? atoi(disable_fma) : 0;
-  if (disable_fma && atoi(disable_fma)) {
 #ifdef __HIP_PLATFORM_HCC__
+  if (disable_fma && atoi(disable_fma)) {
     TORCH_WARN_ONCE(
         "PYTORCH_CUDA_FUSER_DISABLE_FMA is not supported on ROCm, ignoring");
-#else
-    args.push_back("--fmad=false");
-#endif
   }
+#else
+  if (disable_fma && atoi(disable_fma)) {
+    args.push_back("--fmad=false");
+  } else {
+    args.push_back("--fmad=true");
+  }
+#endif
 
 #ifndef NDEBUG
   // Add line info to generated kernels

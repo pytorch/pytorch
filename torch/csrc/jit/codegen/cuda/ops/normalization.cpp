@@ -23,7 +23,7 @@ TensorView* softmax(TensorView* x, int dim) {
   auto exp_val = exp(x_max_sub);
   auto sum_exp = sum(exp_val, {kReductionAxis});
   auto bcast_sum = broadcast(sum_exp, broadcast_mask);
-  auto y = div(exp_val, bcast_sum);
+  auto y = mul(exp_val, reciprocal(bcast_sum));
 
   return y;
 }
@@ -102,7 +102,7 @@ ForwardNormResult layer_norm(
   auto x_sub_mean = sub(x, mean_bcast);
 
   auto var_sum_bcast = broadcast(welford_out.var_sum, inner_broadcast_mask);
-  auto var = div(var_sum_bcast, num_features);
+  auto var = mul(var_sum_bcast, reciprocal(num_features));
   auto var_eps = add(var, eps);
   auto invstd = rsqrt(var_eps);
 
@@ -273,7 +273,8 @@ ForwardNormResult batch_norm(
       auto new_mean_hat = add(mean_hat, current_mean_hat);
 
       auto num_feature_decrement = sub(num_features, new Int(1));
-      auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
+      auto unbiased_var =
+          mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
@@ -320,7 +321,7 @@ ForwardNormResult batch_norm(
     auto mean_bcast = broadcast(mean, broadcast_mask);
     auto x_sub_mean = sub(x, mean_bcast);
 
-    auto var = div(welford_out.var_sum, num_features);
+    auto var = mul(welford_out.var_sum, reciprocal(num_features));
     auto var_eps = add(var, eps);
     invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, broadcast_mask);
@@ -531,12 +532,13 @@ ForwardNormResult instance_norm(
       // NS: static_cast to workaround VC++ error, see
       // https://godbolt.org/z/6Prd77xYs
       auto new_mean_sum = sum(new_mean_hat, {static_cast<int>(kBatchDim)});
-      auto new_mean_channels_only = div(new_mean_sum, B);
+      auto new_mean_channels_only = mul(new_mean_sum, reciprocal(B));
       fusion->addOutput(new_mean_channels_only);
       fusion->aliasOutputToInput(new_mean_channels_only, running_mean);
 
       auto num_feature_decrement = sub(N, new Int(1));
-      auto unbiased_var = div(welford_out.var_sum, num_feature_decrement);
+      auto unbiased_var =
+          mul(welford_out.var_sum, reciprocal(num_feature_decrement));
       auto current_var_hat = mul(unbiased_var, momentum);
       auto var_hat = mul(running_var, rev_momentum);
       auto new_var_hat = add(var_hat, current_var_hat);
@@ -544,7 +546,7 @@ ForwardNormResult instance_norm(
       // NS: static_cast to workaround VC++ error, see
       // https://godbolt.org/z/6Prd77xYs
       auto new_var_sum = sum(new_var_hat, {static_cast<int>(kBatchDim)});
-      auto new_var_channels_only = div(new_var_sum, B);
+      auto new_var_channels_only = mul(new_var_sum, reciprocal(B));
       fusion->addOutput(new_var_channels_only);
       fusion->aliasOutputToInput(new_var_channels_only, running_var);
     }
@@ -553,7 +555,7 @@ ForwardNormResult instance_norm(
     auto mean_bcast = broadcast(mean, x_broadcast_mask);
     auto x_sub_mean = sub(x, mean_bcast);
 
-    auto var = div(welford_out.var_sum, N);
+    auto var = mul(welford_out.var_sum, reciprocal(N));
     auto var_eps = add(var, eps);
     invstd = rsqrt(var_eps);
     auto invstd_bcast = broadcast(invstd, x_broadcast_mask);
