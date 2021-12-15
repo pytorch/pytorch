@@ -22,6 +22,8 @@
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <c10/util/SmallBuffer.h>
+
 
 #include <ciso646>
 #include <algorithm>
@@ -1009,6 +1011,17 @@ Tensor var_backward(Tensor grad, const Tensor& self, c10::optional<IntArrayRef> 
   const int64_t dof = _safe_size(self.sizes(), dim) - correction;
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
   return (2.0 / dof) * grad * (self - self.mean(dim, /*keepdim=*/true));
+}
+
+Tensor var_jvp(const Tensor& self_t, const Tensor& self_p, const Tensor& result, c10::optional<IntArrayRef> dim_opt,
+    c10::optional<int64_t> correction_opt, bool keepdim) {
+  auto correction = correction_opt.value_or(1);
+  if (self_p.dim() == 0 || !dim_opt.has_value()) {
+    return var_backward(self_t.conj(), self_p, correction).sum().expand_as(result).conj();
+  }
+  auto dim = dim_opt.value();
+  const int64_t dof = _safe_size(self_p.sizes(), dim) - correction;
+  return ((2.0 / dof) * self_t.conj() * (self_p - self_p.mean(dim, /*keepdim=*/true))).sum(dim, keepdim).conj();
 }
 
 Tensor std_backward(
