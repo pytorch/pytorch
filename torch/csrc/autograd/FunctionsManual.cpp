@@ -735,7 +735,7 @@ Tensor convolution_jvp(
     int64_t dim = weight_p.dim() - 2;
     TORCH_CHECK(
         dim == 1 || dim == 2 || dim == 3,
-        "_convolution_jvp expected dim of weigh to be 3, 4, or 4, but got: ",
+        "convolution_jvp expected dim of weigh to be 3, 4, or 4, but got: ",
         weight_p.dim());
 
     if (bias_t.dim() == 1) {
