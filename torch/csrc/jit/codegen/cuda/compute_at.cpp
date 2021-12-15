@@ -59,14 +59,8 @@ bool validateDomain(TensorView* tv, TensorDomain* new_td) {
 unsigned int getReplayablePosPasC(
     TensorView* producer,
     TensorView* consumer,
-    const ComputeAtRootDomainMap& root_map_,
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
     ComputeAtMode mode) {
-  // Grab dimensions in producer and consumer that are mappable to eachother
-  // based on the computeAtRootDomainMap. This will tell us which dimensions
-  // can be inlined based on avoiding trying to inline reduction structures.
-  auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain());
-
   // Check if any consumer dimensions are marked as vectorize as producer can
   // not be inlined to vectorized dimensions in consumer.
   auto c_dom = consumer->domain()->domain();
@@ -124,9 +118,14 @@ unsigned int getReplayablePosPasC(
     if (std::any_of(
             consumer_root_dim_ids.begin(),
             consumer_root_dim_ids.end(),
-            [&mappable_roots, &c2p_root_map](IterDomain* root_id) {
-              return mappable_roots.find(root_id) == mappable_roots.end() &&
-                  c2p_root_map.find(root_id) != c2p_root_map.end();
+            [&unmappable_producer_dims, &c2p_root_map](IterDomain* c_root_id) {
+              auto p_root_id_it = c2p_root_map.find(c_root_id);
+              if (p_root_id_it == c2p_root_map.end()) {
+                return false;
+              }
+              auto p_id = p_root_id_it->second;
+              return unmappable_producer_dims.find(p_id) !=
+                  unmappable_producer_dims.end();
             })) {
       continue;
     }
@@ -146,14 +145,8 @@ unsigned int getReplayablePosPasC(
 unsigned int getReplayablePosCasP(
     TensorView* consumer,
     TensorView* producer,
-    const ComputeAtRootDomainMap& root_map_,
+    const std::unordered_set<IterDomain*>& unmappable_producer_dims,
     ComputeAtMode mode) {
-  // Grab dimensions in producer and consumer that are mappable to eachother
-  // based on the computeAtRootDomainMap. This will tell us which dimensions
-  // can be inlined based on avoiding trying to inline reduction structures.
-  auto mappable_roots =
-      root_map_.getMappableDims(producer->domain(), consumer->domain());
-
   auto p_dom = producer->domain()->domain();
   auto first_reduction =
       std::find_if(p_dom.begin(), p_dom.end(), [](IterDomain* id) {
@@ -208,10 +201,11 @@ unsigned int getReplayablePosCasP(
     if (std::any_of(
             producer->getMaybeRFactorDomain().begin(),
             producer->getMaybeRFactorDomain().end(),
-            [&mappable_roots, &all_vals](IterDomain* root_id) {
-              return std::find(all_vals.begin(), all_vals.end(), root_id) !=
+            [&unmappable_producer_dims, &all_vals](IterDomain* p_root_id) {
+              return std::find(all_vals.begin(), all_vals.end(), p_root_id) !=
                   all_vals.end() &&
-                  mappable_roots.find(root_id) == mappable_roots.end();
+                  unmappable_producer_dims.find(p_root_id) !=
+                  unmappable_producer_dims.end();
             })) {
       continue;
     }
@@ -446,7 +440,8 @@ unsigned int ComputeAt::backwardComputeAt_impl(
   FUSER_PERF_SCOPE("backwardComputeAt_impl");
 
   auto max_consumer_compute_at_pos =
-      getReplayablePosPasC(producer, consumer, root_map_, mode_);
+      getReplayablePosPasC(producer, consumer, unmappable_dims_, mode_);
+
   if (mode_ == ComputeAtMode::BestEffort) {
     consumer_compute_at_pos =
         std::min(consumer_compute_at_pos, max_consumer_compute_at_pos);
@@ -517,7 +512,7 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   FUSER_PERF_SCOPE("forwardComputeAt_impl");
 
   auto max_producer_compute_at_pos =
-      getReplayablePosCasP(consumer, producer, root_map_, mode_);
+      getReplayablePosCasP(consumer, producer, unmappable_dims_, mode_);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     producer_compute_at_pos =
@@ -865,6 +860,25 @@ void ComputeAt::runPass() {
   }
 }
 
+void ComputeAt::buildUnmappableDims() {
+  auto all_tvs = ir_utils::allTvs(producer_->fusion());
+  for (auto tv : all_tvs) {
+    auto consumers = ir_utils::consumerTvsOf(tv);
+    for (auto consumer : consumers) {
+      // Grab dimensions in producer and consumer that are mappable to eachother
+      // based on the computeAtRootDomainMap. This will tell us which dimensions
+      // can be inlined based on avoiding trying to inline reduction structures.
+      auto mappable_roots =
+          root_map_.getMappableDims(tv->domain(), consumer->domain());
+      for (auto tv_root_id : tv->getMaybeRFactorDomain()) {
+        if (mappable_roots.find(tv_root_id) == mappable_roots.end()) {
+          unmappable_dims_.emplace(tv_root_id);
+        }
+      }
+    }
+  }
+}
+
 ComputeAt::ComputeAt(
     TensorView* _producer,
     TensorView* _consumer,
@@ -903,6 +917,8 @@ ComputeAt::ComputeAt(
   setCommonConsumer();
 
   root_map_.build();
+
+  buildUnmappableDims();
 }
 
 } // namespace cuda

@@ -110,7 +110,7 @@ class TORCH_CUDA_CU_API PairwiseRootDomainMap : public RootDomainMap {
   const TensorView* consumer_tv_ = nullptr;
 };
 
-std::string toString(const PairwiseRootDomainMap& root_map);
+TORCH_CUDA_CU_API std::string toString(const PairwiseRootDomainMap& root_map);
 
 //! Represents an iteration domain of a TensorDomain. Only used for
 //! root domain mapping.
@@ -347,6 +347,12 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   //! Set a pair of producer-consumer domain keys as mappable
   void setMapped(const DomainKey& producer, const DomainKey& consumer);
 
+  //! Records two domains are invalid to map
+  void setInvalid(const DomainKey& key1, const DomainKey& key2);
+
+  //! Check if no pair of domains is invalid to map
+  bool isInvalid(const std::vector<DomainKey>& domains) const;
+
   //! Track a pair of producer-consumer domains as potentially mappable. Inserts
   //! entries into pending_map_, but does not add anything into the root_map_
   //! (added when handle is called on a TensorView). Maybe mapped will, however,
@@ -415,10 +421,13 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
 
  private:
   ComputeAtRootDomainMap& root_map_;
-  //! Keep track of what we want to try and map. Set in attemptToProveId.
+  //! Keep track of what we want to try and map
   DomainKeyMap<DomainKeySet> pending_map_;
   std::unordered_set<Expr*> visited_;
+  //! Helper class to find invalid mappings due to reductions
   UnmappableReductionDomains incompatible_domains_;
+  //! Running vector of domain pairs that are invalid to map
+  std::vector<std::pair<DomainKey, DomainKey>> invalid_mappings_;
 
   //! Disable UnmappableReductions check, should
   //!  always be false for compute_at use cases
