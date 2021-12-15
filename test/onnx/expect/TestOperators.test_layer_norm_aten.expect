@@ -25,7 +25,7 @@ graph {
       type: INTS
     }
     attribute {
-      name: "operator"
+      name: "operator_name"
       s: "layer_norm"
       type: STRING
     }

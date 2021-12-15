@@ -584,7 +584,7 @@ Caffe2Ops Caffe2Backend::CreateWhereOp(
   converted.CopyFrom(onnx_node->node);
   converted.set_op_type("ATen");
   onnx::AttributeProto* attr = converted.add_attribute();
-  attr->set_name("operator");
+  attr->set_name("operator_name");
   attr->set_s("where");
   OnnxNode new_node(converted);
   return CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
@@ -602,7 +602,7 @@ Caffe2Ops Caffe2Backend::CreateNonZeroOp(
   converted.set_output(0, nonzero_output);
   converted.set_op_type("ATen");
   onnx::AttributeProto* attr = converted.add_attribute();
-  attr->set_name("operator");
+  attr->set_name("operator_name");
   attr->set_s("nonzero");
   OnnxNode new_node(converted);
   auto ret = CommonOnnxNodeToCaffe2Ops(&new_node, ctx);
@@ -626,7 +626,7 @@ Caffe2Ops Caffe2Backend::CreateMultinomialOp(
 
   auto* c2_multinomial = ret.ops.Add();
   caffe2::Argument c2_arg_op;
-  c2_arg_op.set_name("operator");
+  c2_arg_op.set_name("operator_name");
   c2_arg_op.set_s("multinomial");
   // ONNX Multinomial only supports replacement=True.
   caffe2::Argument c2_arg_rep;

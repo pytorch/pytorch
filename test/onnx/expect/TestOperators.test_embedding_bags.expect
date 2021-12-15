@@ -22,7 +22,7 @@ graph {
       type: INT
     }
     attribute {
-      name: "operator"
+      name: "operator_name"
       s: "embedding_bag"
       type: STRING
     }

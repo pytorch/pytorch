@@ -9,7 +9,7 @@ graph {
     name: "ATen_0"
     op_type: "ATen"
     attribute {
-      name: "operator"
+      name: "operator_name"
       s: "add"
       type: STRING
     }
