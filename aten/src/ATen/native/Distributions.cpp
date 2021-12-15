@@ -202,8 +202,8 @@ Tensor& cauchy_(Tensor& self, double median, double sigma, c10::optional<Generat
 
 template<typename RNG>
 struct ExponentialStub {
-  void operator()(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
-    exponential_stub(iter.device_type(), iter, lambda, gen);
+  void operator()(Tensor& self, double lambda, c10::optional<Generator> gen) {
+    exponential_stub(self.device().type(), self, lambda, gen);
   }
 };
 

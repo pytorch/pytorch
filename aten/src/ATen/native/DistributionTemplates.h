@@ -332,8 +332,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
   TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
-  auto iter = TensorIterator::borrowing_nullary_op(self);
-  exponential_kernel<RNG>()(iter, lambda, gen);
+  exponential_kernel<RNG>()(self, lambda, gen);
   return self;
 }
 

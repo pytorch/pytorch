@@ -76,7 +76,7 @@ DECLARE_DISPATCH(unary_fn, lgamma_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const Tensor&, c10::optional<Generator>), bernoulli_tensor_stub);
 DECLARE_DISPATCH(void(*)(Tensor&, const double, c10::optional<Generator>), bernoulli_scalar_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), cauchy_stub);
-DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), exponential_stub);
+DECLARE_DISPATCH(void(*)(Tensor&, const double, c10::optional<Generator>), exponential_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, c10::optional<Generator>), geometric_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), log_normal_stub);
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const double, const double, c10::optional<Generator>), uniform_stub);

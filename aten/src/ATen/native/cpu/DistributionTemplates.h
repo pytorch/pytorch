@@ -300,7 +300,8 @@ void exponential_kernel(TensorIteratorBase& iter, double lambda, RNG generator) 
 
 template<typename RNG>
 struct ExponentialKernel {
-  void operator()(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
+  void operator()(Tensor& self, double lambda, c10::optional<Generator> gen) {
+    auto iter = TensorIterator::borrowing_nullary_op(self);
     exponential_kernel(iter, lambda, check_generator<RNG>(gen));
   }
 };
