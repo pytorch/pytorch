@@ -4127,7 +4127,9 @@ Example::
 add_docstr(torch.ger,
            r"""
 ger(input, vec2, *, out=None) -> Tensor
+
 Alias of :func:`torch.outer`.
+
 .. warning::
     This function is deprecated and will be removed in a future PyTorch release.
     Use :func:`torch.outer` instead.
