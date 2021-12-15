@@ -628,7 +628,7 @@ class TORCH_API ProcessGroupNCCL : public ProcessGroup {
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
   static std::shared_ptr<at::DynamicLibrary> uccLib_;
-  c10::intrusive_ptr<ProcessGroup> ucc_pg_;
+  c10::intrusive_ptr<ProcessGroup> uccPG_;
 #endif
 };
 

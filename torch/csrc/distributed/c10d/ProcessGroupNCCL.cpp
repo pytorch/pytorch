@@ -615,7 +615,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       .size = size
     };
     auto raw_ucc_pg = static_cast<ProcessGroup *>(createProcessGroupUCCForNCCL(&args));
-    ucc_pg_ = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
+    uccPG_ = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
     LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
   }
 #endif
@@ -2235,7 +2235,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
 std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
 
 bool ProcessGroupNCCL::isUCCAvailable() const {
-  return (ucc_pg_ != nullptr);
+  return (uccPG_ != nullptr);
 }
 #endif
 
