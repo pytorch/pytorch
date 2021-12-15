@@ -198,12 +198,12 @@ def adadelta(params: List[Tensor],
              grads: List[Tensor],
              square_avgs: List[Tensor],
              acc_deltas: List[Tensor],
+             foreach: bool = False,
              *,
              lr: float,
              rho: float,
              eps: float,
-             weight_decay: float,
-             foreach: Optional[bool] = False):
+             weight_decay: float):
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
