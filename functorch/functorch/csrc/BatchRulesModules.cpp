@@ -15,10 +15,14 @@ namespace at { namespace functorch {
 // Does not support batch_group_count (needed for convolution backwards)
 std::tuple<Tensor,optional<int64_t>>
 convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tensor& rhs, optional<int64_t> rhs_bdim, const optional<Tensor>& bias, optional<int64_t> bias_bdim, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, bool transposed, IntArrayRef output_padding, int64_t groups) {
-  std::vector<int64_t> lhs_spec(stride.size() + 2);
+  DimVector lhs_spec(stride.size() + 2);
   std::iota(lhs_spec.begin(), lhs_spec.end(), 0);
-  std::vector<int64_t> rhs_spec = lhs_spec;
-  std::vector<int64_t> out_spec = lhs_spec;
+  DimVector rhs_spec = lhs_spec;
+  DimVector out_spec = lhs_spec;
+  if (transposed) {
+    rhs_spec[0] = 1;
+    rhs_spec[1] = 0;
+  }
 
   // If we have a batched bias or weight, we need to perform the computation separately.
   optional<Tensor> unbatched_bias;
@@ -45,7 +49,8 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
       out = reshape_dim_outof(out_spec[1], rhs.sizes()[*rhs_bdim], out);
       result = std::make_tuple(out, out_spec[1]);
     } else {
-      auto new_w = reshape_dim_outof(rhs_spec[0] + (*rhs_bdim <= rhs_spec[0]), groups, rhs);
+      auto dim_with_groups = transposed ? 1 : 0;
+      auto new_w = reshape_dim_outof(rhs_spec[dim_with_groups] + (*rhs_bdim <= rhs_spec[0]), groups, rhs);
       new_w = reshape_dim_into(*rhs_bdim + (rhs_spec[0] < rhs_bdim), rhs_spec[0] + 1, new_w);
       new_w = reshape_dim_into(rhs_spec[0], rhs_spec[0], new_w);
       auto out = at::convolution(lhs, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
@@ -57,7 +62,8 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
   } else if (lhs_bdim && rhs_bdim) {
     auto new_x = reshape_dim_into(*lhs_bdim, lhs_spec[1], lhs);
     groups *= lhs.sizes()[*lhs_bdim];
-    auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[0], rhs);
+    auto dim_with_groups = transposed ? 1 : 0;
+    auto new_w = reshape_dim_into(*rhs_bdim, rhs_spec[dim_with_groups], rhs);
     auto out = at::convolution(new_x, new_w, unbatched_bias, stride, padding, dilation, transposed, output_padding, groups);
     out = reshape_dim_outof(out_spec[1], lhs.sizes()[*lhs_bdim], out);
     result = std::make_tuple(out, out_spec[1]);
