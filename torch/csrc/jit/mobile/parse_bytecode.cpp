@@ -69,7 +69,7 @@ class OpCodeCache {
 } // namespace
 
 void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
-  std::shared_ptr<Code> code = function->get_code();
+  const Code& code = function->get_code();
   auto& operator_version_map = getOperatorVersionMapForMobile();
   for (size_t i = 0; i < function->get_code().instructions_.size(); i++) {
     Instruction& inst = function->get_code().instructions_[i];
