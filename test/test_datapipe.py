@@ -40,7 +40,7 @@ import torch
 import torch.utils.data.backward_compatibility
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
-import torch.utils.data.sharding
+import torch.utils.data.graph_settings
 from torch.testing._internal.common_utils import TestCase, run_tests, suppress_warnings
 from torch.utils.data import (
     DataLoader,
@@ -1394,7 +1394,7 @@ class TestFunctionalIterDataPipe(TestCase):
             # Test Deterministic
             for num_workers in (0, 1):
                 random.seed(123)
-                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn)
+                dl = DataLoader(shuffle_dp, num_workers=num_workers, worker_init_fn=_worker_init_fn, shuffle=True)
                 dl_res = list(dl)
                 self.assertEqual(res, dl_res)
 
@@ -1947,7 +1947,7 @@ class TestSharding(TestCase):
     @skipIfNoDill
     def test_simple_sharding(self):
         sharded_dp = self._get_pipeline().sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp, 3, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, 1)
         items = list(sharded_dp)
         self.assertEqual([1, 20, 40, 70], items)
 
@@ -1955,7 +1955,7 @@ class TestSharding(TestCase):
         items = []
         for i in range(3):
             sharded_dp = self._get_pipeline().sharding_filter()
-            torch.utils.data.sharding.apply_sharding(sharded_dp, 3, i)
+            torch.utils.data.graph_settings.apply_sharding(sharded_dp, 3, i)
             items += list(sharded_dp)
 
         self.assertEqual(sorted(all_items), sorted(items))
@@ -1963,11 +1963,11 @@ class TestSharding(TestCase):
     def test_sharding_length(self):
         numbers_dp = dp.iter.IterableWrapper(range(13))
         sharded_dp0 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp0, 3, 0)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp0, 3, 0)
         sharded_dp1 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp1, 3, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp1, 3, 1)
         sharded_dp2 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp2, 3, 2)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp2, 3, 2)
         self.assertEqual(13, len(numbers_dp))
         self.assertEqual(5, len(sharded_dp0))
         self.assertEqual(4, len(sharded_dp1))
@@ -1975,9 +1975,9 @@ class TestSharding(TestCase):
 
         numbers_dp = dp.iter.IterableWrapper(range(1))
         sharded_dp0 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp0, 2, 0)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp0, 2, 0)
         sharded_dp1 = numbers_dp.sharding_filter()
-        torch.utils.data.sharding.apply_sharding(sharded_dp1, 2, 1)
+        torch.utils.data.graph_settings.apply_sharding(sharded_dp1, 2, 1)
         self.assertEqual(1, len(sharded_dp0))
         self.assertEqual(0, len(sharded_dp1))
 
