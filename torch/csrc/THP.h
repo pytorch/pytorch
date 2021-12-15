@@ -2,8 +2,6 @@
 #define THP_H
 
 #include <torch/csrc/python_headers.h>
-#include <TH/TH.h>
-
 #include <torch/csrc/Export.h>
 
 // Back-compatibility macros, Thanks to http://cx-oracle.sourceforge.net/
