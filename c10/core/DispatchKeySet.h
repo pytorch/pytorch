@@ -388,6 +388,7 @@ class C10_API DispatchKeySet final {
 C10_API std::string toString(DispatchKeySet);
 C10_API std::ostream& operator<<(std::ostream&, DispatchKeySet);
 
+<<<<<<< HEAD
 constexpr DispatchKeySet autograd_dispatch_keyset;
 constexpr DispatchKeySet autocast_dispatch_keyset;
 constexpr DispatchKeySet default_included_set;
@@ -404,6 +405,12 @@ constexpr DispatchKeySet math_dispatch_keyset;
 // Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet _autograd_dispatch_keyset() {
+=======
+// autograd_dispatch_keyset should include all runtime autograd keys.
+// Alias key DispatchKey::Autograd maps to autograd_dispatch_keyset.
+// NB: keys in this set also get associated with CompositeImplicitAutograd
+static DispatchKeySet get_autograd_dispatch_keyset() {
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
     static DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutogradFunctionality,
         DispatchKey::AutogradOther,
@@ -411,7 +418,11 @@ constexpr DispatchKeySet _autograd_dispatch_keyset() {
     return autograd_dispatch_keyset;
 }
 
+<<<<<<< HEAD
 constexpr DispatchKeySet _autocast_dispatch_keyset() {
+=======
+static DispatchKeySet get_autocast_dispatch_keyset() {
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
     static DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
@@ -420,7 +431,11 @@ constexpr DispatchKeySet _autocast_dispatch_keyset() {
 }
 
 // See Note [TLS Initialization]
+<<<<<<< HEAD
 constexpr DispatchKeySet _default_included_set() {
+=======
+static DispatchKeySet get_default_included_set() {
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
     static DispatchKeySet default_included_set = DispatchKeySet({
         DispatchKey::BackendSelect,
         DispatchKey::ADInplaceOrView,
@@ -428,6 +443,7 @@ constexpr DispatchKeySet _default_included_set() {
     return default_included_set;
 }
 
+<<<<<<< HEAD
 constexpr DispatchKeySet _default_excluded_set = DispatchKeySet({
         DispatchKey::AutocastCPU,
         DispatchKey::AutocastCUDA,
@@ -440,6 +456,26 @@ constexpr DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
 // backend dispatch keys that map to DispatchKey::AutogradOther
 // NB: keys in this set also get associated with CompositeImplicitAutograd
 constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
+=======
+static DispatchKeySet get_default_excluded_set() {
+    static DispatchKeySet default_excluded_set = DispatchKeySet({
+        DispatchKey::AutocastCPU,
+        DispatchKey::AutocastCUDA,
+    });
+    return default_excluded_set;
+}
+
+static DispatchKeySet get_autograd_dispatch_keyset_with_ADInplaceOrView() {
+    static DispatchKeySet autograd_dispatch_keyset_with_ADInplaceOrView =
+        get_autograd_dispatch_keyset() | DispatchKeySet(DispatchKey::ADInplaceOrView);
+    return autograd_dispatch_keyset_with_ADInplaceOrView;
+}
+
+// backend dispatch keys that map to DispatchKey::AutogradOther
+// NB: keys in this set also get associated with CompositeImplicitAutograd
+static DispatchKeySet get_autogradother_backends() {
+    static DispatchKeySet autogradother_backends = DispatchKeySet(
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
         // TODO: delete commented code before landing.
         // HIP and VE now have their own backend bits, which means that
         // they can now have their own Autograd keys.
@@ -462,6 +498,7 @@ constexpr DispatchKeySet autogradother_backends = DispatchKeySet(
 // The set of dispatch keys that come after autograd
 // n.b. this relies on the fact that AutogradOther is currently the lowest
 // Autograd key
+<<<<<<< HEAD
 constexpr DispatchKeySet after_autograd_keyset =
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
 }
@@ -474,6 +511,25 @@ constexpr DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
 
 // The set of dispatch keys that come after Functionalize
 constexpr DispatchKeySet after_func_keyset =
+=======
+static DispatchKeySet get_after_autograd_keyset() {
+    static DispatchKeySet after_autograd_keyset =
+        DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::AutogradOther);
+    return after_autograd_keyset;
+}
+
+// The set of dispatch keys that come after ADInplaceOrView
+static DispatchKeySet get_after_ADInplaceOrView_keyset() {
+    static DispatchKeySet after_ADInplaceOrView_keyset = DispatchKeySet(
+        DispatchKeySet::FULL_AFTER,
+        c10::DispatchKey::ADInplaceOrView);
+    return after_ADInplaceOrView_keyset;
+}
+
+// The set of dispatch keys that come after Functionalize
+static DispatchKeySet get_after_func_keyset() {
+    static DispatchKeySet after_func_keyset =
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
         DispatchKeySet(DispatchKeySet::FULL_AFTER, c10::DispatchKey::Functionalize)
             .removeFunctionalityKey(
                 // NOTE: we also need to remove ADInplaceOrView from the keyset when
@@ -488,25 +544,48 @@ constexpr DispatchKeySet after_func_keyset =
                 // get us that, But at::redispatch is more performant. We can get
                 // away with it by explicitly removing the key here.
                 c10::DispatchKey::ADInplaceOrView);
+<<<<<<< HEAD
+=======
+    return after_func_keyset;
+}
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
 
 // backend_dispatch_keyset should include all runtime backend keys.
 // Alias key DispatchKey::CompositeExplicitAutograd maps to
 // backend_dispatch_keyset NestedTensor has been explicitly removed due to
 // incompatibility with some kernels, such as structured kernels, that use the
 // DefaultBackend key.
+<<<<<<< HEAD
 constexpr DispatchKeySet backend_dispatch_keyset = autogradother_backends |
+=======
+static DispatchKeySet get_backend_dispatch_keyset() {
+    static DispatchKeySet backend_dispatch_keyset = get_autogradother_backends() |
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
         DispatchKeySet(DispatchKeySet::RAW, full_backend_mask) |
         DispatchKeySet({
             DispatchKey::Dense,
             DispatchKey::Sparse,
             DispatchKey::Quantized,
         });
+<<<<<<< HEAD
+=======
+    return backend_dispatch_keyset;
+}
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
 
 // math_dispatch_keyset contains all keys in backend_dispatch_keyset and
 // autograd_dispatch_keyset Alias key DispatchKey::CompositeImplicitAutograd
 // maps to math_dispatch_keyset.
+<<<<<<< HEAD
 constexpr DispatchKeySet math_dispatch_keyset =
         backend_dispatch_keyset | autograd_dispatch_keyset;
+=======
+static DispatchKeySet get_math_dispatch_keyset() {
+    static DispatchKeySet math_dispatch_keyset =
+        get_backend_dispatch_keyset() | get_autograd_dispatch_keyset();
+    return math_dispatch_keyset;
+}
+>>>>>>> dfcd9ff727 (make DispatchKeySets static singletons)
 
 
 constexpr DispatchKeySet backend_bitset_mask = DispatchKeySet(

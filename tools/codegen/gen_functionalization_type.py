@@ -129,7 +129,7 @@ def emit_view_functionalization_body(
     assert_view_op_properties(f.func)
     view_tensor_name = dispatcher_sig.arguments()[0].name
 
-    keyset = 'dispatchKeySet & c10::after_func_keyset'
+    keyset = 'dispatchKeySet & c10::get_after_func_keyset()'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
     unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig)
@@ -203,7 +203,7 @@ def emit_inplace_functionalization_body(
 
     dispatcher_sig = DispatcherSignature.from_schema(f.func)
 
-    keyset = 'dispatchKeySet & c10::after_func_keyset'
+    keyset = 'dispatchKeySet & c10::get_after_func_keyset()'
     return_type = dispatcher_sig.returns_type().remove_const_ref().cpp_type()
 
     unwrap_tensor_args_str, unwrapped_args_ctx = unwrap_tensor_args(dispatcher_sig)

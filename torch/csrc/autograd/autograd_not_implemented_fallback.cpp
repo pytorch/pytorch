@@ -134,11 +134,11 @@ void autogradNotImplementedFallbackImpl(const c10::OperatorHandle& op, c10::Disp
   #endif
   if (aliased_input_idx != -1 || any_is_inplace_output) {
     at::AutoDispatchBelowAutograd guard;
-    op.redispatchBoxed(dispatch_keys & c10::after_autograd_keyset, stack);
+    op.redispatchBoxed(dispatch_keys & c10::get_after_autograd_keyset(), stack);
   } else {
     // If neither in-place nor view
     at::AutoDispatchBelowADInplaceOrView guard;
-    op.redispatchBoxed(dispatch_keys & c10::after_ADInplaceOrView_keyset, stack);
+    op.redispatchBoxed(dispatch_keys & c10::get_after_ADInplaceOrView_keyset(), stack);
   }
   #ifndef NDEBUG
   _foreach_tensor([&](size_t idx_tensor, size_t _, const at::Tensor& t) {
@@ -267,7 +267,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(const c10::OperatorHandle& 
 
   {
     at::AutoDispatchBelowADInplaceOrView guard;
-    op.redispatchBoxed(dispatch_keys & c10::after_ADInplaceOrView_keyset, stack);
+    op.redispatchBoxed(dispatch_keys & c10::get_after_ADInplaceOrView_keyset(), stack);
   }
 
   for (const auto i : c10::irange(num_returns)) {

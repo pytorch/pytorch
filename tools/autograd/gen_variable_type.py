@@ -722,7 +722,7 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # Ops also always have a function variant of the redispatch API.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
-        dispatch_key_set = 'ks & c10::after_autograd_keyset'
+        dispatch_key_set = 'ks & c10::get_after_autograd_keyset()'
         call = CALL_REDISPATCH.substitute(
             api_name=cpp.name(
                 f.func,

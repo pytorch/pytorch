@@ -97,7 +97,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor & self, int64_t level) {
 
   auto result = ([&]() {
     at::AutoDispatchBelowAutograd guard;
-    return at::redispatch::_fw_primal(ks & c10::after_autograd_keyset, self_, level);
+    return at::redispatch::_fw_primal(ks & c10::get_after_autograd_keyset(), self_, level);
   })();
 
   if (grad_fn) {
@@ -132,7 +132,7 @@ Tensor _make_dual(c10::DispatchKeySet ks, const Tensor& primal, const Tensor& ta
 
   auto result = ([&]() {
     at::AutoDispatchBelowAutograd guard;
-    return at::redispatch::_make_dual(ks & c10::after_autograd_keyset, primal_, tangent_, level);
+    return at::redispatch::_make_dual(ks & c10::get_after_autograd_keyset(), primal_, tangent_, level);
   })();
 
   if (grad_fn) {
@@ -161,7 +161,7 @@ Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool n
   }
   {
     at::AutoDispatchBelowAutograd mode;
-    at::redispatch::copy_(ks & c10::after_autograd_keyset, self_, src_, non_blocking);
+    at::redispatch::copy_(ks & c10::get_after_autograd_keyset(), self_, src_, non_blocking);
   }
   rebase_history(self , std::move(grad_fn));
 
@@ -200,7 +200,7 @@ const Tensor& resize_(
   }
   {
     at::AutoDispatchBelowAutograd mode;
-    at::redispatch::resize_(ks & c10::after_autograd_keyset, self_, size, optional_memory_format);
+    at::redispatch::resize_(ks & c10::get_after_autograd_keyset(), self_, size, optional_memory_format);
   }
 
   if (self._fw_grad(/* level */ 0).defined()) {
@@ -222,7 +222,7 @@ const Tensor& resize_as_(
   }
   {
     at::AutoDispatchBelowAutograd mode;
-    at::redispatch::resize_as_(ks & c10::after_autograd_keyset, self_, the_template_, optional_memory_format);
+    at::redispatch::resize_as_(ks & c10::get_after_autograd_keyset(), self_, the_template_, optional_memory_format);
   }
 
   // Handle fw grad
@@ -237,7 +237,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor & self) {
   RECORD_FUNCTION("detach", std::vector<c10::IValue>({self}));
   auto result = ([&]() {
     at::AutoDispatchBelowAutograd guard;
-    return at::redispatch::detach(ks & c10::after_autograd_keyset, self_);
+    return at::redispatch::detach(ks & c10::get_after_autograd_keyset(), self_);
   })();
   namedinference::propagate_names(result, self);
 
@@ -307,7 +307,7 @@ namespace ADInplaceOrView {
   Tensor & copy_(c10::DispatchKeySet ks, Tensor & self, const Tensor & src, bool non_blocking) {
     {
       at::AutoDispatchBelowADInplaceOrView guard;
-      at::redispatch::copy_(ks & c10::after_ADInplaceOrView_keyset, self, src, non_blocking);
+      at::redispatch::copy_(ks & c10::get_after_ADInplaceOrView_keyset(), self, src, non_blocking);
     }
     torch::autograd::increment_version(self);
     return self;

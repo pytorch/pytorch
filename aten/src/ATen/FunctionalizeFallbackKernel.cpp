@@ -28,7 +28,7 @@ namespace {
     }
     {
       at::AutoDispatchSkipFunctionalize guard;
-      op.redispatchBoxed(dispatchKeySet & c10::after_func_keyset, stack);
+      op.redispatchBoxed(dispatchKeySet & c10::get_after_func_keyset(), stack);
     }
     const auto num_returns = schema.returns().size();
     const auto returns_begin = stack->size() - num_returns;

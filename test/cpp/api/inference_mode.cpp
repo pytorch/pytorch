@@ -28,8 +28,8 @@ namespace {
   void assert_TLS_states(bool inference_mode) {
     ASSERT_EQ(InferenceMode::is_enabled(), inference_mode);
     ASSERT_FALSE(c10::impl::tls_is_dispatch_key_excluded(c10::DispatchKey::ADInplaceOrView));
-    ASSERT_FALSE(c10::impl::tls_is_dispatch_keyset_included(c10::autograd_dispatch_keyset));
-    ASSERT_EQ(c10::impl::tls_is_dispatch_keyset_excluded(c10::autograd_dispatch_keyset), inference_mode);
+    ASSERT_FALSE(c10::impl::tls_is_dispatch_keyset_included(c10::get_autograd_dispatch_keyset()));
+    ASSERT_EQ(c10::impl::tls_is_dispatch_keyset_excluded(c10::get_autograd_dispatch_keyset()), inference_mode);
     ASSERT_EQ(c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::ADInplaceOrView), !inference_mode);
     ASSERT_EQ(GradMode::is_enabled(), !inference_mode);
   }

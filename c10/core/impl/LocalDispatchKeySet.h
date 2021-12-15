@@ -37,18 +37,18 @@ struct C10_API PODLocalDispatchKeySet {
   // See Note [TLS Initialization]
   DispatchKeySet included() const {
     return DispatchKeySet(DispatchKeySet::RAW, included_) ^
-        c10::default_included_set;
+        c10::get_default_included_set();
   }
   DispatchKeySet excluded() const {
     return DispatchKeySet(DispatchKeySet::RAW, excluded_) ^
-        c10::default_excluded_set;
+        c10::get_default_excluded_set();
   }
 
   void set_included(DispatchKeySet x) {
-    included_ = (x ^ c10::default_included_set).raw_repr();
+    included_ = (x ^ c10::get_default_included_set()).raw_repr();
   }
   void set_excluded(DispatchKeySet x) {
-    excluded_ = (x ^ c10::default_excluded_set).raw_repr();
+    excluded_ = (x ^ c10::get_default_excluded_set()).raw_repr();
   }
 };
 static_assert(

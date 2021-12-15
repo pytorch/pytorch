@@ -267,7 +267,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   if (dispatch_key == DispatchKey::Undefined || isIncludedInAlias(dispatch_key, DispatchKey::CompositeImplicitAutograd)) {
     if (auto math_registration = getKernelForDispatchKey(DispatchKey::CompositeImplicitAutograd)) {
       if (dispatch_key == DispatchKey::AutogradOther
-          && hasKernelForAnyDispatchKey(c10::autogradother_backends)) {
+          && hasKernelForAnyDispatchKey(c10::get_autogradother_backends())) {
         return {ambiguousAutogradOtherKernel(), "ambiguous autogradother"};
       } else if (!has_backend_kernel) {
         return {*math_registration, "math kernel"};
@@ -319,6 +319,7 @@ void OperatorEntry::updateDispatchTable_(const c10::Dispatcher& dispatcher, Disp
     updateDispatchTableEntry_(dispatcher, dispatch_key);
     return;
   }
+  auto ks = c10::getRuntimeDispatchKeySet(dispatch_key);
   for (auto k : c10::getRuntimeDispatchKeySet(dispatch_key)) {
     updateDispatchTableEntry_(dispatcher, k);
   }

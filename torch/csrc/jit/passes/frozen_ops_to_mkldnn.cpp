@@ -237,7 +237,7 @@ Operation createUnaryOp(
     bool inplace = false) {
   return [aten_op, inplace](Stack& stack) {
     auto a = pop(stack).toTensor();
-    c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+    c10::impl::ExcludeDispatchKeyGuard edkg(c10::get_autograd_dispatch_keyset());
     // we cast `a` to an `ideep::tensor`, so we can get at its descriptor
     // which we then use to set up `out` tensor w/ the same props as a
     auto a_it = at::native::itensor_from_mkldnn(a);
@@ -276,7 +276,7 @@ Operation createUnaryOp(
 }
 
 void MKLDNNLayerNormOp(Stack& stack, bool inplace) {
-  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::get_autograd_dispatch_keyset());
 
   // enable_cudnn not used
   pop(stack);
@@ -355,7 +355,7 @@ Operation BroadOp(const Node* node) {
         // these broadcasts and it could be up to ~100x slower.
         // We use a very simple heuristic to convert an arg in nchw
         // to the blocked format of the other argument.
-        c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+        c10::impl::ExcludeDispatchKeyGuard edkg(c10::get_autograd_dispatch_keyset());
         auto a_it = at::native::itensor_from_mkldnn(exp_a);
         auto b_it = at::native::itensor_from_mkldnn(exp_b);
 
@@ -566,7 +566,7 @@ jit::RegisterOperators reg_fut_ops({
         "prim::MKLDNNScalarMul(Tensor self, Scalar other) -> Tensor",
         [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
-              c10::autograd_dispatch_keyset);
+              c10::get_autograd_dispatch_keyset());
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
           auto out = at::native::empty_mkldnn(
@@ -584,7 +584,7 @@ jit::RegisterOperators reg_fut_ops({
         "prim::MKLDNNScalarMul_(Tensor(a!) self, Scalar other) -> Tensor(a!)",
         [](jit::Stack& stack) {
           c10::impl::ExcludeDispatchKeyGuard edkg(
-              c10::autograd_dispatch_keyset);
+              c10::get_autograd_dispatch_keyset());
           float other = pop(stack).toScalar().toFloat();
           Tensor self = pop(stack).toTensor();
           mkldnn_tensor_scalar_mul(self, self, other);
