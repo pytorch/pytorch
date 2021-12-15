@@ -459,6 +459,10 @@ test_bazel() {
 
   get_bazel
 
+  # Test //c10/... without Google flags and logging libraries.
+  tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+              --no//c10:use_gflags --no//c10:use_glog //c10/...
+
   # Test //c10/... in the default mode.
   tools/bazel test --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA //c10/...
 
