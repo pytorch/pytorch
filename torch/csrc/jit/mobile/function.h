@@ -48,6 +48,7 @@ class TORCH_API Function : public torch::jit::Function {
 
   int64_t get_debug_handle(size_t pc) const;
   const Code& get_code() const;
+  Code& get_code();
 
   torch::jit::Function& setSchema(c10::FunctionSchema schema) override;
   bool hasSchema() const;
