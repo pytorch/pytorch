@@ -27,10 +27,6 @@ class ShardedTensorTestBase(MultiProcessTestCase):
             init_method=f"file://{self.file_name}",
         )
 
-        # set device for nccl pg for collectives
-        if backend == "nccl":
-            torch.cuda.set_device(self.rank)
-
     def init_rpc(self):
         rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
         rpc_backend_options.init_method = f"file://{self.file_name}"
