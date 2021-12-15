@@ -4758,7 +4758,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
   }
 
   // Just call the general backward and ignore the bias gradient part.
-  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::native::convolution_backward(
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
       grad_output, self, weight, c10::nullopt, stride, padding, dilation, transposed,
       output_padding, groups, {output_mask[0], output_mask[1], false});
   std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
