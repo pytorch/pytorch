@@ -227,6 +227,14 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE(conv_transpose1d);
   OP_DECOMPOSE2(conv_transpose2d, input);
   OP_DECOMPOSE2(conv_transpose3d, input);
+  OP_DECOMPOSE(conv1d);
+  OP_DECOMPOSE(conv2d);
+  OP_DECOMPOSE(conv3d);
+  OP_DECOMPOSE2(conv1d, padding);
+  OP_DECOMPOSE2(conv2d, padding);
+  OP_DECOMPOSE2(conv3d, padding);
+  OP_DECOMPOSE(_convolution_mode);
+  OP_DECOMPOSE(type_as);
   DECOMPOSE_FUNCTIONAL(diag_embed);
   DECOMPOSE_FUNCTIONAL(block_diag);
 }
