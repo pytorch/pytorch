@@ -258,6 +258,14 @@ class ShardedTensor(object):
             out (:class `torch.Tensor`, optional): The output full tensor.
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
+
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``
+
         """
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size

@@ -337,6 +337,15 @@ def init_from_local_shards(
         >>> )
         >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
         >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
+
+    .. note:: `init_from_local_shards` uses collectives to do cross rank
+        validation during initialization. For NCCL-based processed groups,
+        objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
+
     """
     return ShardedTensor._init_from_local_shards(
         local_shards,
@@ -397,6 +406,13 @@ def shard_parameter(
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
 
+    .. note:: shard_parameter uses collective to do shards scattering and validation.
+        For NCCL-based processed groups, objects must be moved to the GPU device before
+        communication takes place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``
+
     .. warning::
         Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
         currently supported as the ``sharding_spec``.
@@ -421,8 +437,7 @@ def shard_parameter(
 
     # Validate src_rank and sharding_spec are same across all ranks.
     gathered_list = [None] * world_size
-    with torch.cuda.device(tensor.device):
-        dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
+    dist.all_gather_object(gathered_list, (src_rank, sharding_spec), group=pg)
 
     for idx, entry in enumerate(gathered_list):
         if src_rank != entry[0]:  # type: ignore[index]
