@@ -6,6 +6,9 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, lazy_property
 
 
+_log_2_pi = math.log(2 * math.pi)
+
+
 def _batch_mv(bmat, bvec):
     r"""
     Performs a batched matrix-vector product, with compatible but different batch shapes.
@@ -207,11 +210,11 @@ class MultivariateNormal(ExponentialFamily):
         diff = value - self.loc
         M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
         half_log_det = self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-        return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
+        return -0.5 * (self._event_shape[0] * _log_2_pi + M) - half_log_det
 
     def entropy(self):
         half_log_det = self._unbroadcasted_scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
-        H = 0.5 * self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + half_log_det
+        H = 0.5 * self._event_shape[0] * (1.0 + _log_2_pi) + half_log_det
         if len(self._batch_shape) == 0:
             return H
         else:
@@ -220,3 +223,11 @@ class MultivariateNormal(ExponentialFamily):
     @property
     def _natural_params(self):
         return (self.loc, -0.5 * self.precision_matrix)
+
+    def _log_normalizer(self, x, y):
+        scale_tril = _precision_to_scale_tril(y)
+        return (
+            0.25 * _batch_mahalanobis(scale_tril, x)
+            - 0.5 * scale_tril.diagonal(dim1=-2, dim2=-1).log().sum(-1)
+            + 0.5 * x.shape[-1] * _log_2_pi
+        )
