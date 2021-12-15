@@ -238,7 +238,7 @@ bool UnrollPass::canOmitElseClause(kir::ForLoop* fl) {
     // unswitch predicate is sufficient.
     // When the loop stop is the same as the extent of its IterDomain,
     // the per-thread visit count is guaranteed to be one at most (see
-    // CudaKernelGenerator::visit(kir::ForLoop*) as well. Also, when a
+    // CudaKernelGenerator::handle(kir::ForLoop*) as well. Also, when a
     // loop is vectorized (not misaligned), the count must be one at
     // most. Even if not parallelized nor vectoirzed, it is also
     // sufficient if the loop stop is in fact one.

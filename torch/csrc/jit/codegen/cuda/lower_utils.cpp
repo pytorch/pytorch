@@ -421,14 +421,15 @@ std::pair<kir::ForLoop*, int64_t> getAllocPoint(
 
 namespace {
 
-class ReplaceExprInput : public kir::MutableIrVisitor {
+class ReplaceExprInput : public kir::OptOutDispatch {
  public:
+  using kir::OptOutDispatch::handle;
   static kir::Expr* replace(
       kir::Expr* expr,
       const std::unordered_map<kir::Val*, kir::Val*>& replacement_map) {
     ReplaceExprInput replacer(expr, replacement_map);
     TORCH_INTERNAL_ASSERT(expr != nullptr);
-    expr->accept(&replacer);
+    replacer.handle(expr);
     TORCH_INTERNAL_ASSERT(replacer.replaced_expr_ != nullptr);
     auto ret_expr = replacer.replaced_expr_;
 
@@ -486,7 +487,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
   }
 
   // IR visitor interface
-  void visit(kir::ForLoop* for_loop) final {
+  void handle(kir::ForLoop* for_loop) final {
     auto new_for_loop = ir_builder_.create<kir::ForLoop>(for_loop);
 
     auto replaced_loop_body =
@@ -498,7 +499,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     replaced_expr_ = new_for_loop;
   }
 
-  void visit(kir::IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     auto new_ite = ir_builder_.create<kir::IfThenElse>(ite->predicate());
     auto replaced_then_body =
         replace(ite->thenBody().exprs(), replacement_map_);
@@ -515,7 +516,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     replaced_expr_ = new_ite;
   }
 
-  void visit(kir::UnaryOp* node) final {
+  void handle(kir::UnaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::UnaryOp>(
@@ -524,7 +525,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
           replaced_inputs.value().at(node->in()));
     }
   }
-  void visit(kir::BinaryOp* node) final {
+  void handle(kir::BinaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::BinaryOp>(
@@ -535,7 +536,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     }
   }
 
-  void visit(kir::TernaryOp* node) final {
+  void handle(kir::TernaryOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::TernaryOp>(
@@ -547,7 +548,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     }
   }
 
-  void visit(kir::ReductionOp* node) final {
+  void handle(kir::ReductionOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::ReductionOp>(
@@ -558,7 +559,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     }
   }
 
-  void visit(kir::BroadcastOp* node) final {
+  void handle(kir::BroadcastOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::BroadcastOp>(
@@ -566,7 +567,7 @@ class ReplaceExprInput : public kir::MutableIrVisitor {
     }
   }
 
-  void visit(kir::WelfordOp* node) final {
+  void handle(kir::WelfordOp* node) final {
     auto replaced_inputs = getMaybeInputReplacementMap(node);
     if (replaced_inputs.has_value()) {
       replaced_expr_ = ir_builder_.create<kir::WelfordOp>(

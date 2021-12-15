@@ -44,7 +44,7 @@ void IndexLowering::pushBack(kir::Expr* expr) {
   }
 }
 
-void IndexLowering::visit(const kir::IfThenElse* ite) {
+void IndexLowering::handle(const kir::IfThenElse* ite) {
   const auto prev_scope_expr = active_scope_expr_;
   const auto prev_scope = active_scope_;
 
@@ -56,20 +56,20 @@ void IndexLowering::visit(const kir::IfThenElse* ite) {
   active_scope_ = &new_ite->thenBody();
 
   for (auto expr : ite->thenBody().exprs()) {
-    expr->accept(this);
+    kir::OptOutConstDispatch::handle(expr);
   }
 
   active_scope_ = &new_ite->elseBody();
 
   for (auto expr : ite->elseBody().exprs()) {
-    expr->accept(this);
+    kir::OptOutConstDispatch::handle(expr);
   }
 
   active_scope_ = prev_scope;
   active_scope_expr_ = prev_scope_expr;
 }
 
-void IndexLowering::visit(const kir::ForLoop* for_loop) {
+void IndexLowering::handle(const kir::ForLoop* for_loop) {
   const auto prev_scope_expr = active_scope_expr_;
   const auto prev_scope = active_scope_;
 
@@ -80,27 +80,27 @@ void IndexLowering::visit(const kir::ForLoop* for_loop) {
   active_scope_ = &new_for_loop->body();
 
   for (auto expr : for_loop->body().exprs()) {
-    expr->accept(this);
+    kir::OptOutConstDispatch::handle(expr);
   }
 
   active_scope_ = prev_scope;
   active_scope_expr_ = prev_scope_expr;
 }
 
-void IndexLowering::visit(const kir::UnaryOp* uop) {
+void IndexLowering::handle(const kir::UnaryOp* uop) {
   const auto in = lowerSrcIndex(uop->in(), uop->out());
   const auto out = lowerDstIndex(uop->out());
   pushBack(ir_builder_.create<kir::UnaryOp>(uop->operation(), out, in));
 }
 
-void IndexLowering::visit(const kir::BinaryOp* bop) {
+void IndexLowering::handle(const kir::BinaryOp* bop) {
   const auto lhs = lowerSrcIndex(bop->lhs(), bop->out());
   const auto rhs = lowerSrcIndex(bop->rhs(), bop->out());
   const auto out = lowerDstIndex(bop->out());
   pushBack(ir_builder_.create<kir::BinaryOp>(bop->operation(), out, lhs, rhs));
 }
 
-void IndexLowering::visit(const kir::TernaryOp* top) {
+void IndexLowering::handle(const kir::TernaryOp* top) {
   const auto in1 = lowerSrcIndex(top->in1(), top->out());
   const auto in2 = lowerSrcIndex(top->in2(), top->out());
   const auto in3 = lowerSrcIndex(top->in3(), top->out());
@@ -183,7 +183,7 @@ kir::Allocate* allocGlobalBufferForGridComm(
 
 } // namespace
 
-void IndexLowering::visit(const kir::ReductionOp* rop) {
+void IndexLowering::handle(const kir::ReductionOp* rop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(rop));
 
   const auto out_tv = rop->out()->as<kir::TensorView>();
@@ -282,7 +282,7 @@ void IndexLowering::visit(const kir::ReductionOp* rop) {
   }
 }
 
-void IndexLowering::visit(const kir::WelfordOp* wop) {
+void IndexLowering::handle(const kir::WelfordOp* wop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(wop));
 
   const auto out_tv = wop->outAvg()->as<kir::TensorView>();
@@ -400,7 +400,7 @@ void IndexLowering::visit(const kir::WelfordOp* wop) {
   }
 }
 
-void IndexLowering::visit(const kir::BroadcastOp* bop) {
+void IndexLowering::handle(const kir::BroadcastOp* bop) {
   TORCH_INTERNAL_ASSERT(ir_utils::isTVOp(bop));
 
   const auto out_tv = bop->out()->as<kir::TensorView>();
@@ -453,19 +453,19 @@ void IndexLowering::visit(const kir::BroadcastOp* bop) {
   pushBack(grid_broadcast);
 }
 
-void IndexLowering::visit(const kir::Allocate* allocate) {
+void IndexLowering::handle(const kir::Allocate* allocate) {
   // TODO(kir): remove the need for const_cast
   pushBack(const_cast<kir::Allocate*>(allocate)); // NOLINT
 }
 
-void IndexLowering::visit(const kir::Sync* sync) {
+void IndexLowering::handle(const kir::Sync* sync) {
   // TODO(kir): remove the need for const_cast
   pushBack(const_cast<kir::Sync*>(sync)); // NOLINT
 }
 
 void IndexLowering::generate(const std::vector<kir::Expr*>& exprs) {
   for (auto expr : exprs) {
-    expr->accept(this);
+    kir::OptOutConstDispatch::handle(expr);
   }
 }
 

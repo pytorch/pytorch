@@ -60,7 +60,7 @@ c10::optional<Int::ScalarType> ExpressionEvaluator::evaluate(const Val* value) {
       return pre_eval_it->second;
     }
 
-    value->accept(this);
+    OptOutConstDispatch::handle(value);
 
     const auto post_eval_it = known_values_.find(value);
     return post_eval_it != known_values_.end()
@@ -83,19 +83,14 @@ void ExpressionEvaluator::print() const {
   std::cout << "--------------------\n\n";
 }
 
-void ExpressionEvaluator::unhandled(const void*) {
-  TORCH_INTERNAL_ASSERT(
-      false, "Kernel IR expression evaluation reached an unsupported node");
-}
-
-void ExpressionEvaluator::visit(const Int* value) {
+void ExpressionEvaluator::handle(const Int* value) {
   TORCH_INTERNAL_ASSERT(!value->isConst());
   if (auto def = value->definition()) {
-    def->accept(this);
+    OptOutConstDispatch::handle(def);
   }
 }
 
-void ExpressionEvaluator::visit(const NamedScalar* named_scalar) {
+void ExpressionEvaluator::handle(const NamedScalar* named_scalar) {
   const auto& name = named_scalar->name();
   for (auto pt : kParallelTypeThreads) {
     auto pt_val_it = known_parallel_dimensions_.find(pt);
@@ -109,7 +104,7 @@ void ExpressionEvaluator::visit(const NamedScalar* named_scalar) {
   }
 }
 
-void ExpressionEvaluator::visit(const UnaryOp* unary_op) {
+void ExpressionEvaluator::handle(const UnaryOp* unary_op) {
   const auto in = evaluate(unary_op->in());
   if (in.has_value()) {
     switch (unary_op->operation()) {
@@ -125,7 +120,7 @@ void ExpressionEvaluator::visit(const UnaryOp* unary_op) {
   }
 }
 
-void ExpressionEvaluator::visit(const BinaryOp* binary_op) {
+void ExpressionEvaluator::handle(const BinaryOp* binary_op) {
   const auto lhs = evaluate(binary_op->lhs());
   const auto rhs = evaluate(binary_op->rhs());
   if (lhs.has_value() && rhs.has_value()) {

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 
 namespace torch {
@@ -12,7 +13,7 @@ namespace cuda {
 
 namespace {
 
-class MagicZeroInserter : public kir::MutableIrVisitor {
+class MagicZeroInserter : public kir::OptOutDispatch {
  public:
   static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
     MagicZeroInserter inserter(exprs);
@@ -30,28 +31,20 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
     loop_nests_.insert(
         loop_nests_.begin(), ir_builder.create<kir::InitMagicZero>());
     for (auto expr : exprs) {
-      handle(expr);
+      kir::OptOutDispatch::handle(expr);
     }
     insertAll();
-  }
-
-  void handle(kir::Expr* expr) {
-    if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    }
   }
 
   void handle(kir::IfThenElse* ite) {
     scope_nest_.push_back(&ite->thenBody());
     for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
+      kir::OptOutDispatch::handle(expr);
     }
     scope_nest_.pop_back();
     scope_nest_.push_back(&ite->elseBody());
     for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
+      kir::OptOutDispatch::handle(expr);
     }
     scope_nest_.pop_back();
   }
@@ -66,7 +59,7 @@ class MagicZeroInserter : public kir::MutableIrVisitor {
     } else {
       scope_nest_.push_back(&fl->body());
       for (auto expr : fl->body().exprs()) {
-        handle(expr);
+        kir::OptOutDispatch::handle(expr);
       }
       scope_nest_.pop_back();
     }

@@ -89,7 +89,7 @@ std::string IrPrinter::gen(const kir::Node* node, bool top_level) {
   // Generate the node itself
   std::stringstream node_str;
   std::swap(node_str, ir_str_);
-  node->accept(this);
+  OptOutConstDispatch::handle(node);
   std::swap(node_str, ir_str_);
 
   if (!implicit_definition_) {
@@ -157,7 +157,7 @@ void IrPrinter::handleBlock(const kir::Scope& scope) {
   std::swap(uses_, outer_uses);
 }
 
-void IrPrinter::visit(const kir::Bool* node) {
+void IrPrinter::handle(const kir::Bool* node) {
   if (node->isConst()) {
     ir_str_ << boolLiteral(*node->value());
   } else {
@@ -165,7 +165,7 @@ void IrPrinter::visit(const kir::Bool* node) {
   }
 }
 
-void IrPrinter::visit(const kir::Double* node) {
+void IrPrinter::handle(const kir::Double* node) {
   if (node->isConst()) {
     const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
     ir_str_ << "double(" << std::setprecision(digits) << *node->value() << ")";
@@ -174,7 +174,7 @@ void IrPrinter::visit(const kir::Double* node) {
   }
 }
 
-void IrPrinter::visit(const kir::Int* node) {
+void IrPrinter::handle(const kir::Int* node) {
   if (node->isConst()) {
     ir_str_ << *node->value();
   } else {
@@ -182,11 +182,11 @@ void IrPrinter::visit(const kir::Int* node) {
   }
 }
 
-void IrPrinter::visit(const kir::NamedScalar* node) {
+void IrPrinter::handle(const kir::NamedScalar* node) {
   ir_str_ << node->name();
 }
 
-void IrPrinter::visit(const kir::Predicate* node) {
+void IrPrinter::handle(const kir::Predicate* node) {
   switch (node->predicate_type()) {
     case PredicateType::Inline: {
       ir_str_ << "Inline";
@@ -221,7 +221,7 @@ void IrPrinter::visit(const kir::Predicate* node) {
   }
 }
 
-void IrPrinter::visit(const kir::TensorIndex* node) {
+void IrPrinter::handle(const kir::TensorIndex* node) {
   ir_str_ << gen(node->view()) << "[";
   for (auto index : node->indices()) {
     ir_str_ << use(index);
@@ -232,7 +232,7 @@ void IrPrinter::visit(const kir::TensorIndex* node) {
   ir_str_ << "]";
 }
 
-void IrPrinter::visit(const kir::IterDomain* node) {
+void IrPrinter::handle(const kir::IterDomain* node) {
   ir_str_ << varName(node, "id") << "[";
   if (node->isRFactorProduct()) {
     ir_str_ << "rfactor.";
@@ -241,17 +241,17 @@ void IrPrinter::visit(const kir::IterDomain* node) {
           << use(node->start()) << " .. " << use(node->extent()) << ")]";
 }
 
-void IrPrinter::visit(const kir::TensorDomain*) {
+void IrPrinter::handle(const kir::TensorDomain*) {
   // TODO(kir): print Tensor shapes?
   ir_str_ << "kir::TensorDomain";
 }
 
-void IrPrinter::visit(const kir::TensorView* node) {
+void IrPrinter::handle(const kir::TensorView* node) {
   // TODO(kir): print memory type too?
   ir_str_ << varName(node, "T");
 }
 
-void IrPrinter::visit(const kir::UnaryOp* node) {
+void IrPrinter::handle(const kir::UnaryOp* node) {
   indent() << gen(node->out()) << " = ";
 
   auto op_type = node->operation();
@@ -287,7 +287,7 @@ void IrPrinter::visit(const kir::UnaryOp* node) {
   ir_str_ << "\n";
 }
 
-void IrPrinter::visit(const kir::BinaryOp* node) {
+void IrPrinter::handle(const kir::BinaryOp* node) {
   indent() << gen(node->out()) << " = ";
 
   const auto op_type = node->operation();
@@ -314,20 +314,20 @@ void IrPrinter::visit(const kir::BinaryOp* node) {
   ir_str_ << "\n";
 }
 
-void IrPrinter::visit(const kir::TernaryOp* node) {
+void IrPrinter::handle(const kir::TernaryOp* node) {
   indent() << gen(node->out()) << " = " << node->operation() << "("
            << use(node->in1()) << ", " << use(node->in2()) << ", "
            << use(node->in3()) << ")\n";
 }
 
-void IrPrinter::visit(const kir::ReductionOp* node) {
+void IrPrinter::handle(const kir::ReductionOp* node) {
   indent() << gen(node->out()) << " = "
            << "REDUCTION(op='" << node->operation() << "'"
            << ", in=" << use(node->in()) << ", init=" << use(node->init())
            << ", pred=" << use(node->predicate()) << ")\n";
 }
 
-void IrPrinter::visit(const kir::WelfordOp* node) {
+void IrPrinter::handle(const kir::WelfordOp* node) {
   indent() << gen(node->outVar()) << "," << gen(node->outAvg()) << ","
            << gen(node->outN()) << " = "
            << "Welford( inAvg=" << use(node->inAvg());
@@ -343,7 +343,7 @@ void IrPrinter::visit(const kir::WelfordOp* node) {
   indent() << ", pred=" << use(node->predicate()) << ")\n";
 }
 
-void IrPrinter::visit(const kir::GridReduction* node) {
+void IrPrinter::handle(const kir::GridReduction* node) {
   const auto* reduction_op = node->reduction_op();
   indent() << gen(reduction_op->out()) << " = "
            << "GRID_REDUCTION(op='" << reduction_op->operation() << "'"
@@ -358,7 +358,7 @@ void IrPrinter::visit(const kir::GridReduction* node) {
   indent() << kTab << kTab << ".grid_pred=" << use(node->predicate()) << "\n";
 }
 
-void IrPrinter::visit(const kir::GridWelford* node) {
+void IrPrinter::handle(const kir::GridWelford* node) {
   const auto* welford_op = node->welford_op();
   indent() << gen(welford_op->outVar()) << "," << gen(welford_op->outAvg())
            << "," << gen(welford_op->outN()) << " = "
@@ -383,17 +383,17 @@ void IrPrinter::visit(const kir::GridWelford* node) {
   indent() << kTab << kTab << ".grid_pred=" << use(node->predicate()) << "\n";
 }
 
-void IrPrinter::visit(const kir::BroadcastOp* node) {
+void IrPrinter::handle(const kir::BroadcastOp* node) {
   indent() << gen(node->out()) << " = BROADCAST(" << use(node->in()) << ")\n";
 }
 
-void IrPrinter::visit(const kir::ForLoop* node) {
+void IrPrinter::handle(const kir::ForLoop* node) {
   indent() << "FOR " << gen(node->index()) << " in " << gen(node->iter_domain())
            << ":\n";
   handleBlock(node->body());
 }
 
-void IrPrinter::visit(const kir::IfThenElse* node) {
+void IrPrinter::handle(const kir::IfThenElse* node) {
   indent() << "IF " << use(node->predicate()) << ":\n";
   handleBlock(node->thenBody());
   if (node->hasElse()) {
@@ -402,7 +402,7 @@ void IrPrinter::visit(const kir::IfThenElse* node) {
   }
 }
 
-void IrPrinter::visit(const kir::Allocate* node) {
+void IrPrinter::handle(const kir::Allocate* node) {
   indent() << gen(node->buffer()) << " = ALLOCATE("
            << "mem_type=" << node->memoryType() << ", "
            << "size=" << use(node->size()) << ", "
@@ -413,16 +413,16 @@ void IrPrinter::visit(const kir::Allocate* node) {
   }
 }
 
-void IrPrinter::visit(const kir::Sync* node) {
+void IrPrinter::handle(const kir::Sync* node) {
   indent() << "SYNC(war_hazard=" << boolLiteral(node->isWarHazardSync())
            << ")\n";
 }
 
-void IrPrinter::visit(const kir::InitMagicZero* node) {
+void IrPrinter::handle(const kir::InitMagicZero* node) {
   indent() << "NVFUSER_DEFINE_MAGIC_ZERO\n";
 }
 
-void IrPrinter::visit(const kir::UpdateMagicZero* node) {
+void IrPrinter::handle(const kir::UpdateMagicZero* node) {
   indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
 }
 

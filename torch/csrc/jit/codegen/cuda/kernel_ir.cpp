@@ -15,15 +15,32 @@ namespace fuser {
 namespace cuda {
 namespace kir {
 
+Val* Node::asVal() {
+  TORCH_INTERNAL_ASSERT(isVal(), "Cannot cast to Val as this is not a Val.");
+  return this->as<Val>();
+}
+
+Expr* Node::asExpr() {
+  TORCH_INTERNAL_ASSERT(isExpr(), "Cannot cast to Expr as this is not a Expr.");
+  return this->as<Expr>();
+}
+
 void Node::print() const {
   std::cout << "\n";
   IrPrinter(std::cout).printNode(this);
   std::cout << "\n";
 }
 
-Val::Val(Passkey passkey, DataType dtype) : Node(passkey), dtype_(dtype) {
+Val::Val(Passkey passkey, ValType _vtype, DataType _dtype)
+    : Node(passkey), vtype_(_vtype), dtype_(_dtype) {
   // NOLINTNEXTLINE: https://bugs.llvm.org/show_bug.cgi?id=48534
   id_ = passkey.kernel->newValueId(passkey);
+}
+
+c10::optional<DataType> Val::getDataType() const {
+  TORCH_INTERNAL_ASSERT(
+      dtype_ != DataType::Null, "Value does not have a data type.");
+  return dtype_;
 }
 
 namespace {
@@ -31,46 +48,44 @@ namespace {
 // Traverse definition of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
 // val is also a constant value.
-class ConstCheck : IrVisitor {
+class ConstCheck : OptOutConstDispatch {
  private:
   bool is_const_ = true;
 
-  using IrVisitor::visit;
-
-  void visit(const Bool* b) override {
+  void handle(const Bool* b) final {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void visit(const Double* d) override {
+  void handle(const Double* d) final {
     is_const_ = is_const_ && d->isConst();
   }
 
-  void visit(const Int* i) override {
+  void handle(const Int* i) final {
     is_const_ = is_const_ && i->isConst();
   }
 
-  void visit(const NamedScalar* ns) override {
+  void handle(const NamedScalar* ns) final {
     is_const_ = is_const_ && false;
   }
 
-  void visit(const Expr* expr) {
+  void handle(const Expr* expr) final {
     for (auto inp : expr->inputs()) {
-      visit(inp);
+      handle(inp);
     }
   }
 
-  void visit(const Val* val) {
+  void handle(const Val* val) final {
     if (val->definition() != nullptr) {
-      visit(val->definition());
+      handle(val->definition());
     } else {
-      val->accept(this);
+      OptOutConstDispatch::handle(val);
     }
   }
 
  public:
   static bool isConst(const Val* val) {
     ConstCheck cc;
-    cc.visit(val);
+    cc.handle(val);
     return cc.is_const_;
   }
 };
@@ -138,7 +153,7 @@ c10::optional<ParallelType> NamedScalar::getParallelIndex() const {
 }
 
 IterDomain::IterDomain(Passkey passkey, Val* start, Val* extent)
-    : Val(passkey, DataType::Int),
+    : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       stop_(extent),
       extent_(extent) {}
@@ -146,7 +161,7 @@ IterDomain::IterDomain(Passkey passkey, Val* start, Val* extent)
 IterDomain::IterDomain(
     Passkey passkey,
     const fuser::cuda::IterDomain* iter_domain)
-    : Val(passkey, iter_domain->getDataType().value()),
+    : Val(passkey, ValType::IterDomain, iter_domain->getDataType().value()),
       start_(GpuLower::current()->lowerValue(iter_domain->start())),
       stop_(GpuLower::current()->lowerValue(iter_domain->stop())),
       extent_(GpuLower::current()->lowerValue(iter_domain->extent())),
@@ -169,7 +184,8 @@ Val* IterDomain::extent() const {
 }
 
 TensorDomain::TensorDomain(Passkey passkey, std::vector<IterDomain*> domain)
-    : Val(passkey, DataType::Null), root_domain_(std::move(domain)) {
+    : Val(passkey, ValType::TensorDomain, DataType::Null),
+      root_domain_(std::move(domain)) {
   domain_ = root_domain_;
   resetDomains();
 }
@@ -177,7 +193,8 @@ TensorDomain::TensorDomain(Passkey passkey, std::vector<IterDomain*> domain)
 TensorDomain::TensorDomain(
     Passkey passkey,
     const fuser::cuda::TensorDomain* tensor_domain)
-    : Val(passkey, DataType::Null), contiguity_(tensor_domain->contiguity()) {
+    : Val(passkey, ValType::TensorDomain, DataType::Null),
+      contiguity_(tensor_domain->contiguity()) {
   // preserve the fusion node's name
   setName(tensor_domain->name());
 
@@ -270,7 +287,8 @@ std::vector<IterDomain*> TensorDomain::noBroadcasts(
 }
 
 TensorView::TensorView(Passkey passkey, const fuser::cuda::TensorView* tv)
-    : Val(passkey, tv->getDataType().value()), fuser_tv_(tv) {
+    : Val(passkey, ValType::TensorView, tv->getDataType().value()),
+      fuser_tv_(tv) {
   setName(tv->name());
   domain_ = GpuLower::current()->lowerValue(tv->domain())->as<TensorDomain>();
   memory_type_ = tv->getMemoryType();
@@ -281,10 +299,15 @@ TensorView::TensorView(
     DataType dtype,
     TensorDomain* domain,
     MemoryType memory_type)
-    : Val(passkey, dtype), domain_(domain), memory_type_(memory_type) {}
+    : Val(passkey, ValType::TensorView, dtype),
+      domain_(domain),
+      memory_type_(memory_type) {}
 
 UnaryOp::UnaryOp(Passkey passkey, UnaryOpType operation, Val* out, Val* in)
-    : Expr(passkey), operation_(operation), out_(out), in_(in) {
+    : Expr(passkey, ExprType::UnaryOp),
+      operation_(operation),
+      out_(out),
+      in_(in) {
   addOutput(out);
   addInput(in);
 }
@@ -295,7 +318,11 @@ BinaryOp::BinaryOp(
     Val* out,
     Val* lhs,
     Val* rhs)
-    : Expr(passkey), operation_(operation), out_(out), lhs_(lhs), rhs_(rhs) {
+    : Expr(passkey, ExprType::BinaryOp),
+      operation_(operation),
+      out_(out),
+      lhs_(lhs),
+      rhs_(rhs) {
   addOutput(out);
   addInput(lhs);
   addInput(rhs);
@@ -308,7 +335,7 @@ TernaryOp::TernaryOp(
     Val* in1,
     Val* in2,
     Val* in3)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::TernaryOp),
       operation_(operation),
       out_(out),
       in1_(in1),
@@ -326,7 +353,11 @@ ReductionOp::ReductionOp(
     Val* init,
     Val* out,
     Val* in)
-    : Expr(passkey), operation_(operation), init_(init), out_(out), in_(in) {
+    : Expr(passkey, ExprType::ReductionOp),
+      operation_(operation),
+      init_(init),
+      out_(out),
+      in_(in) {
   addOutput(out);
   addInput(in);
 }
@@ -342,7 +373,7 @@ WelfordOp::WelfordOp(
     Val* in_var,
     Val* in_avg,
     Val* in_N)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::WelfordOp),
       out_var_(out_var),
       out_avg_(out_avg),
       out_N_(out_N),
@@ -364,7 +395,7 @@ WelfordOp::WelfordOp(
 }
 
 BroadcastOp::BroadcastOp(Passkey passkey, Val* out, Val* in)
-    : Expr(passkey), out_(out), in_(in) {
+    : Expr(passkey, ExprType::BroadcastOp), out_(out), in_(in) {
   TORCH_CHECK(in->isA<TensorIndex>() || in->isA<TensorView>());
   TORCH_CHECK(out->isA<TensorIndex>() || out->isA<TensorView>());
   addOutput(out);
@@ -375,7 +406,7 @@ TensorIndex::TensorIndex(
     Passkey passkey,
     const fuser::cuda::TensorView* view,
     std::vector<Val*> indices)
-    : Val(passkey, view->getDataType().value()),
+    : Val(passkey, ValType::TensorIndex, view->getDataType().value()),
       view_(GpuLower::current()->lowerValue(view)->as<TensorView>()),
       indices_(indices) {
   TORCH_INTERNAL_ASSERT(
@@ -397,11 +428,13 @@ TensorIndex::TensorIndex(
 }
 
 Sync::Sync(Passkey passkey, bool war_sync)
-    : Expr(passkey), war_sync_(war_sync) {}
+    : Expr(passkey, ExprType::Sync), war_sync_(war_sync) {}
 
-InitMagicZero::InitMagicZero(Passkey passkey) : Expr(passkey) {}
+InitMagicZero::InitMagicZero(Passkey passkey)
+    : Expr(passkey, ExprType::InitMagicZero) {}
 
-UpdateMagicZero::UpdateMagicZero(Passkey passkey) : Expr(passkey) {}
+UpdateMagicZero::UpdateMagicZero(Passkey passkey)
+    : Expr(passkey, ExprType::UpdateMagicZero) {}
 
 void Scope::insert(std::vector<Expr*>::const_iterator pos, Expr* expr) {
   exprs_.insert(pos, expr);
@@ -479,7 +512,7 @@ ForLoop::ForLoop(
     bool vectorize,
     Val* vectorize_shift,
     bool unroll_required)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::ForLoop),
       iter_domain_{iter_domain},
       index_(index),
       start_(start),
@@ -606,7 +639,7 @@ Val* ForLoop::step() const {
 }
 
 IfThenElse::IfThenElse(Passkey passkey, Predicate* cond)
-    : Expr(passkey), then_body_(this), else_body_(this) {
+    : Expr(passkey, ExprType::IfThenElse), then_body_(this), else_body_(this) {
   setPredicate(cond);
   addInput(cond);
 }
@@ -626,7 +659,7 @@ Allocate::Allocate(
     MemoryType memory_type,
     std::vector<Val*> shape,
     bool zero_init)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::Allocate),
       buffer_(buffer),
       memory_type_(memory_type),
       shape_(std::move(shape)),
@@ -679,7 +712,7 @@ GridReduction::GridReduction(
     ReductionOp* reduction_op,
     Allocate* reduction_buffer,
     Allocate* sync_buffer)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::GridReduction),
       reduction_op_(reduction_op),
       reduction_buffer_(reduction_buffer),
       sync_buffer_(sync_buffer) {}
@@ -691,7 +724,7 @@ GridWelford::GridWelford(
     Allocate* avg_buffer,
     Allocate* n_buffer,
     Allocate* sync_buffer)
-    : Expr(passkey),
+    : Expr(passkey, ExprType::GridWelford),
       welford_op_(welford_op),
       var_buffer_(var_buffer),
       avg_buffer_(avg_buffer),

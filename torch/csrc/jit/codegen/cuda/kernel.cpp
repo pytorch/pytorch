@@ -17,11 +17,11 @@ namespace {
 
 //! Scan all primary expressions in the Kernel IR and build
 //! lists of specialized nodes and other interesting information
-class KernelIrScanner : private kir::IrVisitor {
+class KernelIrScanner : private OptOutConstDispatch {
  public:
   explicit KernelIrScanner(const Kernel* kernel) {
     for (const auto& ir_node : kernel->irNodes()) {
-      ir_node->accept(this);
+      OptOutConstDispatch::handle(ir_node.get());
     }
     const auto gpu_lower = GpuLower::current();
     for (auto split : gpu_lower->nonDivisibleSplitInfo().splitsToValidate()) {
@@ -36,7 +36,7 @@ class KernelIrScanner : private kir::IrVisitor {
   }
 
  private:
-  void visit(const kir::Sync* sync) final {
+  void handle(const kir::Sync* sync) final {
     // TODO: Move to a dedicated validation pass
     // which is not on the common execution/compilation path
     if (sync->isWarHazardSync()) {
@@ -44,7 +44,7 @@ class KernelIrScanner : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::Allocate* allocate) final {
+  void handle(const kir::Allocate* allocate) final {
     switch (allocate->memoryType()) {
       case MemoryType::Global:
         summary_.global_allocations.push_back(allocate);
@@ -65,14 +65,14 @@ class KernelIrScanner : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::UnaryOp* unary_op) final {
+  void handle(const kir::UnaryOp* unary_op) final {
     if (unary_op->operation() == UnaryOpType::RandLike) {
       // This kernel is using random numbers
       summary_.is_stochastic = true;
     }
   }
 
-  void visit(const kir::TensorIndex* tensor_index) final {
+  void handle(const kir::TensorIndex* tensor_index) final {
     const auto tv = tensor_index->view();
     const auto domain = tv->domain();
 
@@ -106,7 +106,7 @@ class KernelIrScanner : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::GridWelford* grid_welford) final {
+  void handle(const kir::GridWelford* grid_welford) final {
     const auto dom = grid_welford->welford_op()
                          ->out()
                          ->as<kir::TensorIndex>()
@@ -115,7 +115,7 @@ class KernelIrScanner : private kir::IrVisitor {
     updateGridReductionInLoop(dom);
   }
 
-  void visit(const kir::GridReduction* grid_reduction) final {
+  void handle(const kir::GridReduction* grid_reduction) final {
     const auto dom = grid_reduction->reduction_op()
                          ->out()
                          ->as<kir::TensorIndex>()
@@ -124,7 +124,7 @@ class KernelIrScanner : private kir::IrVisitor {
     updateGridReductionInLoop(dom);
   }
 
-  void visit(const kir::GridBroadcast*) final {
+  void handle(const kir::GridBroadcast*) final {
     summary_.has_cooperative_grid_reduction = true;
   }
 
@@ -169,7 +169,7 @@ class KernelIrScanner : private kir::IrVisitor {
 //! MemoryType::Global for tensors parallelized with blockIdx), it is
 //! assumed that allocation is properly extended for the iteration
 //! count.
-class ValidateAllocation : private kir::IrVisitor {
+class ValidateAllocation : private OptOutConstDispatch {
  public:
   static void validate(const Kernel* kernel) {
     ValidateAllocation validate_allocation(kernel);
@@ -179,13 +179,13 @@ class ValidateAllocation : private kir::IrVisitor {
   explicit ValidateAllocation(const Kernel* kernel) {
     live_allocations_.emplace_back(std::vector<const Allocate*>());
     for (const auto& ir_node : kernel->topLevelExprs()) {
-      ir_node->accept(this);
+      OptOutConstDispatch::handle(ir_node);
     }
     live_allocations_.pop_back();
     TORCH_INTERNAL_ASSERT(live_allocations_.empty());
   }
 
-  void visit(const kir::Allocate* allocate) final {
+  void handle(const kir::Allocate* allocate) final {
     TORCH_INTERNAL_ASSERT(!live_allocations_.empty());
     live_allocations_.back().push_back(allocate);
   }
@@ -223,7 +223,7 @@ class ValidateAllocation : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::ForLoop* for_loop) final {
+  void handle(const kir::ForLoop* for_loop) final {
     if (for_loop->stop() != for_loop->iter_domain()->extent() &&
         isParallelTypeThread(for_loop->iter_domain()->parallelType())) {
       validate(for_loop);
@@ -231,17 +231,17 @@ class ValidateAllocation : private kir::IrVisitor {
 
     live_allocations_.emplace_back(std::vector<const Allocate*>());
     for (const auto& expr : for_loop->body().exprs()) {
-      expr->accept(this);
+      OptOutConstDispatch::handle(expr);
     }
     live_allocations_.pop_back();
   }
 
-  void visit(const kir::IfThenElse* ite) final {
+  void handle(const kir::IfThenElse* ite) final {
     for (const auto& expr : ite->thenBody().exprs()) {
-      expr->accept(this);
+      OptOutConstDispatch::handle(expr);
     }
     for (const auto& expr : ite->elseBody().exprs()) {
-      expr->accept(this);
+      OptOutConstDispatch::handle(expr);
     }
   }
 

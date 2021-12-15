@@ -5,6 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 
 #include <vector>
@@ -14,7 +15,7 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-class TORCH_CUDA_CU_API IndexLowering : private kir::IrVisitor {
+class TORCH_CUDA_CU_API IndexLowering : private kir::OptOutConstDispatch {
  public:
   static std::vector<kir::Expr*> getIndexedExprs(
       std::vector<kir::Expr*> incoming_exprs) {
@@ -29,16 +30,16 @@ class TORCH_CUDA_CU_API IndexLowering : private kir::IrVisitor {
 
   void pushBack(kir::Expr*);
 
-  void visit(const kir::ForLoop*) final;
-  void visit(const kir::IfThenElse*) final;
-  void visit(const kir::UnaryOp*) final;
-  void visit(const kir::BinaryOp*) final;
-  void visit(const kir::TernaryOp*) final;
-  void visit(const kir::ReductionOp*) final;
-  void visit(const kir::WelfordOp*) final;
-  void visit(const kir::BroadcastOp*) final;
-  void visit(const kir::Allocate*) final;
-  void visit(const kir::Sync*) final;
+  void handle(const kir::ForLoop*) final;
+  void handle(const kir::IfThenElse*) final;
+  void handle(const kir::UnaryOp*) final;
+  void handle(const kir::BinaryOp*) final;
+  void handle(const kir::TernaryOp*) final;
+  void handle(const kir::ReductionOp*) final;
+  void handle(const kir::WelfordOp*) final;
+  void handle(const kir::BroadcastOp*) final;
+  void handle(const kir::Allocate*) final;
+  void handle(const kir::Sync*) final;
 
   void generate(const std::vector<kir::Expr*>& exprs);
 

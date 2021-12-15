@@ -82,6 +82,9 @@ class ViewOp;
 // By default, all IR nodes are handled in this dispatch, and will call an empty
 // function on all nodes.
 class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
+ protected:
+  virtual void unhandled(const Statement*) {}
+
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(const Statement*);
@@ -89,30 +92,33 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Val*);
 
   // Vals
-  virtual void handle(const IterDomain*) {}
-  virtual void handle(const TensorDomain*) {}
-  virtual void handle(const TensorView*) {}
-  virtual void handle(const Bool*) {}
-  virtual void handle(const Double*) {}
-  virtual void handle(const Int*) {}
-  virtual void handle(const NamedScalar*) {}
+  virtual void handle(const IterDomain* stmt);
+  virtual void handle(const TensorDomain* stmt);
+  virtual void handle(const TensorView* stmt);
+  virtual void handle(const Bool* stmt);
+  virtual void handle(const Double* stmt);
+  virtual void handle(const Int* stmt);
+  virtual void handle(const NamedScalar* stmt);
 
   // Exprs
-  virtual void handle(const Split*) {}
-  virtual void handle(const Merge*) {}
-  virtual void handle(const UnaryOp*) {}
-  virtual void handle(const BinaryOp*) {}
-  virtual void handle(const TernaryOp*) {}
-  virtual void handle(const ReductionOp*) {}
-  virtual void handle(const WelfordOp*) {}
-  virtual void handle(const BroadcastOp*) {}
-  virtual void handle(const TransposeOp*) {}
-  virtual void handle(const ShiftOp*) {}
-  virtual void handle(const GatherOp*) {}
-  virtual void handle(const ViewOp*) {}
+  virtual void handle(const Split* stmt);
+  virtual void handle(const Merge* stmt);
+  virtual void handle(const UnaryOp* stmt);
+  virtual void handle(const BinaryOp* stmt);
+  virtual void handle(const TernaryOp* stmt);
+  virtual void handle(const ReductionOp* stmt);
+  virtual void handle(const WelfordOp* stmt);
+  virtual void handle(const BroadcastOp* stmt);
+  virtual void handle(const TransposeOp* stmt);
+  virtual void handle(const ShiftOp* stmt);
+  virtual void handle(const GatherOp* stmt);
+  virtual void handle(const ViewOp* stmt);
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
+ protected:
+  virtual void unhandled(Statement*) {}
+
  public:
   // Hierarchal dispatch functions for handle
   virtual void handle(Statement*);
@@ -120,165 +126,43 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
   virtual void handle(Val*);
 
   // Vals
-  virtual void handle(IterDomain*) {}
-  virtual void handle(TensorDomain*) {}
-  virtual void handle(TensorView*) {}
-  virtual void handle(Bool*) {}
-  virtual void handle(Double*) {}
-  virtual void handle(Int*) {}
-  virtual void handle(NamedScalar*) {}
+  virtual void handle(IterDomain* stmt);
+  virtual void handle(TensorDomain* stmt);
+  virtual void handle(TensorView* stmt);
+  virtual void handle(Bool* stmt);
+  virtual void handle(Double* stmt);
+  virtual void handle(Int* stmt);
+  virtual void handle(NamedScalar* stmt);
 
   // Exprs
-  virtual void handle(Split*) {}
-  virtual void handle(Merge*) {}
-  virtual void handle(UnaryOp*) {}
-  virtual void handle(BinaryOp*) {}
-  virtual void handle(TernaryOp*) {}
-  virtual void handle(ReductionOp*) {}
-  virtual void handle(WelfordOp*) {}
-  virtual void handle(BroadcastOp*) {}
-  virtual void handle(TransposeOp*) {}
-  virtual void handle(ShiftOp*) {}
-  virtual void handle(GatherOp*) {}
-  virtual void handle(ViewOp*) {}
+  virtual void handle(Split* stmt);
+  virtual void handle(Merge* stmt);
+  virtual void handle(UnaryOp* stmt);
+  virtual void handle(BinaryOp* stmt);
+  virtual void handle(TernaryOp* stmt);
+  virtual void handle(ReductionOp* stmt);
+  virtual void handle(WelfordOp* stmt);
+  virtual void handle(BroadcastOp* stmt);
+  virtual void handle(TransposeOp* stmt);
+  virtual void handle(ShiftOp* stmt);
+  virtual void handle(GatherOp* stmt);
+  virtual void handle(ViewOp* stmt);
 };
 
-class TORCH_CUDA_CU_API OptInConstDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
  public:
-  // Hierarchal dispatch functions for handle
-  virtual void handle(const Statement*);
-  virtual void handle(const Expr*);
-  virtual void handle(const Val*);
+  using OptOutConstDispatch::handle;
 
-  // Vals
-  virtual void handle(const IterDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IterDomain.");
-  }
-  virtual void handle(const TensorDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorDomain.");
-  }
-  virtual void handle(const TensorView*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
-  }
-  virtual void handle(const Bool*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
-  }
-  virtual void handle(const Double*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Double.");
-  }
-  virtual void handle(const Int*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
-  }
-  virtual void handle(const NamedScalar*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
-  }
-
-  // Exprs
-  virtual void handle(const Split*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Split.");
-  }
-  virtual void handle(const Merge*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Merge.");
-  }
-  virtual void handle(const UnaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for UnaryOp.");
-  }
-  virtual void handle(const BinaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
-  }
-  virtual void handle(const WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for WelfordOp.");
-  }
-  virtual void handle(const TernaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
-  }
-  virtual void handle(const ReductionOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
-  }
-  virtual void handle(const BroadcastOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
-  }
-  virtual void handle(const TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
-  }
-  virtual void handle(const ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
-  }
-  virtual void handle(const GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
-  }
-  virtual void handle(const ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ViewOp.");
-  }
+ protected:
+  virtual void unhandled(const Statement* stmt) final;
 };
 
-class TORCH_CUDA_CU_API OptInDispatch : public PolymorphicBase {
+class TORCH_CUDA_CU_API OptInDispatch : public OptOutDispatch {
  public:
-  // Hierarchal dispatch functions for handle
-  virtual void handle(Statement* s);
-  virtual void handle(Expr* e);
-  virtual void handle(Val* v);
+  using OptOutDispatch::handle;
 
-  // Vals
-  virtual void handle(IterDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for IterDomain.");
-  }
-  virtual void handle(TensorDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorDomain.");
-  }
-  virtual void handle(TensorView*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TensorView.");
-  }
-  virtual void handle(Bool*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Bool.");
-  }
-  virtual void handle(Double*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Double.");
-  }
-  virtual void handle(Int*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Int.");
-  }
-  virtual void handle(NamedScalar*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for NamedScalar.");
-  }
-
-  // Exprs
-  virtual void handle(Split*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Split.");
-  }
-  virtual void handle(Merge*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for Merge.");
-  }
-  virtual void handle(UnaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for UnaryOp.");
-  }
-  virtual void handle(BinaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BinaryOp.");
-  }
-  virtual void handle(TernaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TernaryOp.");
-  }
-  virtual void handle(ReductionOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ReductionOp.");
-  }
-  virtual void handle(WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for WelfordOp.");
-  }
-  virtual void handle(BroadcastOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for BroadcastOp.");
-  }
-  virtual void handle(TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for TransposeOp.");
-  }
-  virtual void handle(ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ShiftOp.");
-  }
-  virtual void handle(GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for GatherOp.");
-  }
-  virtual void handle(ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Handle not overriden for ViewOp.");
-  }
+ protected:
+  virtual void unhandled(Statement* stmt) final;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -332,84 +216,6 @@ class TORCH_CUDA_CU_API OptOutMutator : public PolymorphicBase {
   virtual Statement* mutate(ShiftOp*);
   virtual Statement* mutate(GatherOp*);
   virtual Statement* mutate(ViewOp*);
-};
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-class TORCH_CUDA_CU_API OptInMutator : public PolymorphicBase {
- public:
-  std::unordered_map<Val*, Val*> mutations;
-
- public:
-  void registerMutation(Val* val, Val* mutation) {
-    TORCH_INTERNAL_ASSERT(
-        mutations.find(val) == mutations.end(),
-        " The same value is incorrectly being mutated twice.",
-        " One mutation per mutation pass is allowed.");
-    mutations[val] = mutation;
-  }
-
-  // Hierarchal dispatch functions for mutate
-  virtual Statement* mutate(Statement*);
-  virtual Statement* mutate(Expr*);
-  virtual Statement* mutate(Val*);
-
-  // Vals
-  virtual Statement* mutate(IterDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for IterDomain.");
-  }
-  virtual Statement* mutate(TensorDomain*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorDomain.");
-  }
-  virtual Statement* mutate(TensorView*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TensorView.");
-  }
-  virtual Statement* mutate(Bool*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Bool.");
-  }
-  virtual Statement* mutate(Int*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Int.");
-  }
-  virtual Statement* mutate(NamedScalar*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for NamedScalar.");
-  }
-
-  // Exprs
-  virtual Statement* mutate(Split*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Split.");
-  }
-  virtual Statement* mutate(Merge*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for Merge.");
-  }
-  virtual Statement* mutate(UnaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for UnaryOp.");
-  }
-  virtual Statement* mutate(BinaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BinaryOp.");
-  }
-  virtual Statement* mutate(TernaryOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TernaryOp.");
-  }
-  virtual Statement* mutate(ReductionOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ReductionOp.");
-  }
-  virtual Statement* mutate(WelfordOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for WelfordOp.");
-  }
-  virtual Statement* mutate(BroadcastOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for BroadcastOp.");
-  }
-  virtual Statement* mutate(TransposeOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for TransposeOp.");
-  }
-  virtual Statement* mutate(ShiftOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ShiftOp.");
-  }
-  virtual Statement* mutate(GatherOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for GatherOp.");
-  }
-  virtual Statement* mutate(ViewOp*) {
-    TORCH_INTERNAL_ASSERT(false, "Mutate not overriden for ViewOp.");
-  }
 };
 
 } // namespace cuda

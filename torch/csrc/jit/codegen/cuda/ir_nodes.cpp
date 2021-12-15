@@ -38,19 +38,19 @@ class ScalarCheck : OptInConstDispatch {
   }
 
  private:
-  void handle(const Bool* b) override {
+  void handle(const Bool* b) final {
     same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
-  void handle(const Double* d) override {
+  void handle(const Double* d) final {
     same_ = v1_->as<Double>()->sameAs(v2_->as<Double>());
   }
 
-  void handle(const Int* i) override {
+  void handle(const Int* i) final {
     same_ = v1_->as<Int>()->sameAs(v2_->as<Int>());
   }
 
-  void handle(const NamedScalar* ns) override {
+  void handle(const NamedScalar* ns) final {
     same_ = v1_->as<NamedScalar>()->sameAs(v2_->as<NamedScalar>());
   }
 

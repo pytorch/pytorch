@@ -17,7 +17,7 @@ namespace cuda {
 
 namespace {
 
-class AllocationInserter : public kir::MutableIrVisitor {
+class AllocationInserter : public kir::OptOutDispatch {
  private:
   struct AllocationInformation {
     // The for loop that the initialization of this allocation must be
@@ -462,9 +462,9 @@ class AllocationInserter : public kir::MutableIrVisitor {
         info.buffer, info.buffer->memoryType(), alloc_dims);
   }
 
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) override {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      expr->accept(this);
+      OptOutDispatch::handle(expr);
       return;
     }
 
@@ -551,7 +551,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
         std::move(lower_alloc_info_ptr);
   }
 
-  void visit(kir::ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for_loops.push_back(fl);
     // Modifying in place, make a copy of the vector
     const std::vector<kir::Expr*> exprs = fl->body().exprs();
@@ -561,7 +561,7 @@ class AllocationInserter : public kir::MutableIrVisitor {
     for_loops.pop_back();
   }
 
-  void visit(kir::IfThenElse*) final {
+  void handle(kir::IfThenElse*) final {
     TORCH_INTERNAL_ASSERT(
         false,
         "Pass does not support conditional statements, ",

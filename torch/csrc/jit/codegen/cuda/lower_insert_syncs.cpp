@@ -297,23 +297,23 @@ class LocalSyncInserter {
   SmemAllocMap alloc_map_;
 };
 
-class ExprFlattener : private kir::IrVisitor {
+class ExprFlattener : private kir::OptOutDispatch {
  private:
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      expr->accept(this);
+      kir::OptOutDispatch::handle(expr);
     } else {
       exprs_.push_back(expr);
     }
   }
 
-  void visit(const kir::ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for (auto expr : fl->body().exprs()) {
       handle(expr);
     }
   }
 
-  void visit(const kir::IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->thenBody().exprs()) {
       handle(expr);
     }
@@ -337,7 +337,7 @@ class ExprFlattener : private kir::IrVisitor {
   }
 };
 
-class ValidatePlacementAfterWrites : private kir::IrVisitor {
+class ValidatePlacementAfterWrites : private kir::OptOutDispatch {
  public:
   //! Validate no expr in writes found under loop
   static void validate(
@@ -351,9 +351,9 @@ class ValidatePlacementAfterWrites : private kir::IrVisitor {
   ValidatePlacementAfterWrites(const std::unordered_set<kir::Expr*>& writes)
       : writes_(writes) {}
 
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      expr->accept(this);
+      kir::OptOutDispatch::handle(expr);
     } else {
       TORCH_INTERNAL_ASSERT(
           writes_.find(expr) == writes_.end(),
@@ -362,13 +362,13 @@ class ValidatePlacementAfterWrites : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for (auto expr : fl->body().exprs()) {
       handle(expr);
     }
   }
 
-  void visit(const kir::IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     for (auto expr : ite->thenBody().exprs()) {
       handle(expr);
     }
@@ -381,7 +381,7 @@ class ValidatePlacementAfterWrites : private kir::IrVisitor {
   const std::unordered_set<kir::Expr*>& writes_;
 };
 
-class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
+class ReadAfterWriteSyncs : public kir::OptOutDispatch {
  private:
   //! Traverse up the loop stack from loops_it and if a halo loop is
   //! found, place a given sync expr before the outer-most halo loop.
@@ -432,9 +432,9 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
     return true;
   }
 
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) final {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      expr->accept(this);
+      kir::OptOutDispatch::handle(expr);
       return;
     }
 
@@ -514,7 +514,7 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
     }
   }
 
-  void visit(kir::ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     for_loops_.push_back(fl);
     // Modifying in place, make a copy of the vector
     const std::vector<kir::Expr*> exprs = fl->body().exprs();
@@ -524,7 +524,7 @@ class ReadAfterWriteSyncs : public kir::MutableIrVisitor {
     for_loops_.pop_back();
   }
 
-  void visit(kir::IfThenElse*) final {
+  void handle(kir::IfThenElse*) final {
     TORCH_INTERNAL_ASSERT(
         false,
         "Pass does not support conditional statements, ",

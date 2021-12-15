@@ -22,18 +22,20 @@ namespace {
 //! Get string representation of Allocate size for symbolic comparison
 //!
 //!  TODO: Some expr simplifications could also be helpful
-class SymbolicSizePrinter : private kir::IrVisitor {
+class SymbolicSizePrinter : private kir::OptOutConstDispatch {
  public:
   static std::string printSize(const kir::Allocate* allocate) {
     SymbolicSizePrinter printer;
-    allocate->size()->accept(&printer);
+    printer.handle(allocate->size());
     return printer.os_.str();
   }
 
  private:
-  void visit(const kir::Int* node) final {
+  using kir::OptOutConstDispatch::handle;
+
+  void handle(const kir::Int* node) final {
     if (auto def = node->definition()) {
-      def->accept(this);
+      kir::OptOutConstDispatch::handle(def);
     } else if (node->isConst()) {
       os_ << *node->value();
     } else {
@@ -41,21 +43,21 @@ class SymbolicSizePrinter : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::NamedScalar* named_scalar) final {
+  void handle(const kir::NamedScalar* named_scalar) final {
     os_ << "@" << named_scalar->name();
   }
 
-  void visit(const kir::UnaryOp* unary_op) final {
+  void handle(const kir::UnaryOp* unary_op) final {
     os_ << unary_op->operation() << "(";
-    unary_op->in()->accept(this);
+    kir::OptOutConstDispatch::handle(unary_op);
     os_ << ")";
   }
 
-  void visit(const kir::BinaryOp* binary_op) final {
+  void handle(const kir::BinaryOp* binary_op) final {
     os_ << binary_op->operation() << "(";
-    binary_op->lhs()->accept(this);
+    kir::OptOutConstDispatch::handle(binary_op->lhs());
     os_ << ",";
-    binary_op->rhs()->accept(this);
+    kir::OptOutConstDispatch::handle(binary_op->rhs());
     os_ << ")";
   }
 

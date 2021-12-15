@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -19,7 +20,7 @@ namespace codegen {
 
 namespace {
 
-class CudaKernelGenerator : private kir::IrVisitor {
+class CudaKernelGenerator : private kir::OptOutConstDispatch {
   static constexpr const char* kTab = "  ";
 
  public:
@@ -177,7 +178,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void genBody() {
     for (auto expr : kernel_->topLevelExprs()) {
-      expr->accept(this);
+      kir::OptOutConstDispatch::handle(expr);
     }
   }
 
@@ -211,7 +212,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (replacement != replacement_map_.end()) {
       node = replacement->second;
     }
-    node->accept(this);
+    kir::OptOutConstDispatch::handle(node);
     std::swap(tmp_code, code_);
     return tmp_code.str();
   }
@@ -243,12 +244,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return result;
   }
 
-  void visit(const kir::Predicate* node) final {
+  void handle(const kir::Predicate* node) final {
     TORCH_INTERNAL_ASSERT(node->hasValue());
     code_ << gen(node->value());
   }
 
-  void visit(const kir::Bool* node) final {
+  void handle(const kir::Bool* node) final {
     const auto def = node->definition();
     if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
@@ -259,7 +260,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::Double* node) final {
+  void handle(const kir::Double* node) final {
     const auto def = node->definition();
     if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
@@ -271,7 +272,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::Int* node) final {
+  void handle(const kir::Int* node) final {
     const auto def = node->definition();
     if (print_inline_ && def != nullptr) {
       code_ << "(" << gen(def) << ")";
@@ -282,7 +283,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::NamedScalar* node) final {
+  void handle(const kir::NamedScalar* node) final {
     // dim3 components are unsigned int. Cast to signed integer to
     // support negative indexing
     if (node->getParallelIndex().has_value() ||
@@ -293,7 +294,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::TensorIndex* node) final {
+  void handle(const kir::TensorIndex* node) final {
     code_ << varName(node->view()) << "[";
 
     bool first = true;
@@ -314,19 +315,19 @@ class CudaKernelGenerator : private kir::IrVisitor {
     code_ << "]";
   }
 
-  void visit(const kir::IterDomain* node) final {
+  void handle(const kir::IterDomain* node) final {
     TORCH_INTERNAL_ASSERT(!"Unreachable");
   }
 
-  void visit(const kir::TensorDomain* node) final {
+  void handle(const kir::TensorDomain* node) final {
     TORCH_INTERNAL_ASSERT(!"Unreachable");
   }
 
-  void visit(const kir::TensorView* tv) final {
+  void handle(const kir::TensorView* tv) final {
     TORCH_INTERNAL_ASSERT(!"Unreachable");
   }
 
-  void visit(const kir::UnaryOp* node) final {
+  void handle(const kir::UnaryOp* node) final {
     bool is_vector_op = false;
     size_t vector_word_size = 1;
 
@@ -579,7 +580,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return true;
   }
 
-  void visit(const kir::BinaryOp* node) final {
+  void handle(const kir::BinaryOp* node) final {
     // Try replacing pow with mul
     if (genPowerWithMul(node)) {
       return;
@@ -642,7 +643,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::TernaryOp* node) final {
+  void handle(const kir::TernaryOp* node) final {
     if (!print_inline_) {
       indent() << gen(node->out());
       if (!node->out()->isScalar()) {
@@ -678,7 +679,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return lambda.str();
   }
 
-  void visit(const kir::BroadcastOp* node) final {
+  void handle(const kir::BroadcastOp* node) final {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
     const auto tensor_index = node->out()->as<kir::TensorIndex>();
 
@@ -743,7 +744,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << "));\n";
   }
 
-  void visit(const kir::ReductionOp* node) final {
+  void handle(const kir::ReductionOp* node) final {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
 
     const auto out = node->out()->as<kir::TensorIndex>();
@@ -817,7 +818,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::WelfordOp* node) final {
+  void handle(const kir::WelfordOp* node) final {
     TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
 
     const auto out = node->out()->as<kir::TensorIndex>();
@@ -954,7 +955,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return flags.str();
   }
 
-  void visit(const kir::GridReduction* node) final {
+  void handle(const kir::GridReduction* node) final {
     const auto rop = node->reduction_op();
     TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
 
@@ -1010,7 +1011,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
              << genInline(node->reduction_op()->init()) << "));\n";
   }
 
-  void visit(const kir::GridBroadcast* node) final {
+  void handle(const kir::GridBroadcast* node) final {
     const auto bop = node->broadcast_op();
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorIndex>());
 
@@ -1053,7 +1054,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     indent() << kTab << genInline(node->predicate()) << ");\n";
   }
 
-  void visit(const kir::GridWelford* node) final {
+  void handle(const kir::GridWelford* node) final {
     const auto wop = node->welford_op();
     TORCH_INTERNAL_ASSERT(wop->outAvg()->isA<kir::TensorIndex>());
 
@@ -1128,11 +1129,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void handleScope(const kir::Scope& scope) {
     for (auto expr : scope.exprs()) {
-      expr->accept(this);
+      kir::OptOutConstDispatch::handle(expr);
     }
   }
 
-  void visit(const kir::ForLoop* node) final {
+  void handle(const kir::ForLoop* node) final {
     // TODO(kir): handle this during lowering
     if (node->iter_domain()->isBroadcast()) {
       handleScope(node->body());
@@ -1210,7 +1211,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     endBlock();
   }
 
-  void visit(const kir::IfThenElse* node) final {
+  void handle(const kir::IfThenElse* node) final {
     auto conditional = node->predicate()->value();
     if (conditional->isConst()) {
       // If the conditional is a constant, then the IfThenElse is not required
@@ -1239,7 +1240,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   // TODO(kir): fold initialization into Allocate
-  void visit(const kir::Allocate* node) final {
+  void handle(const kir::Allocate* node) final {
     const auto buffer_dtype = node->buffer()->dtype();
 
     if (!node->buffer()->isA<kir::TensorView>()) {
@@ -1292,7 +1293,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::Sync* node) final {
+  void handle(const kir::Sync* node) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
@@ -1301,11 +1302,11 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::InitMagicZero* node) final {
+  void handle(const kir::InitMagicZero* node) final {
     indent() << "NVFUSER_DEFINE_MAGIC_ZERO\n";
   }
 
-  void visit(const kir::UpdateMagicZero* node) final {
+  void handle(const kir::UpdateMagicZero* node) final {
     indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
   }
 

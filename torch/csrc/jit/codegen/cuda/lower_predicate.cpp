@@ -225,8 +225,6 @@ class PredicateAnalyzer : public OptOutDispatch {
     return needs_predicate_;
   }
 
-  using OptOutDispatch::handle;
-
   void handle(IterDomain* consumer_id) override {
     // The traversal should have ended if needs_predicate_ was true
     TORCH_INTERNAL_ASSERT(!needs_predicate_);
@@ -250,7 +248,7 @@ class PredicateAnalyzer : public OptOutDispatch {
       return;
     }
 
-    handle(consumer_id->definition());
+    OptOutDispatch::handle(consumer_id->definition());
   }
 
   // If it splits the input axis evenly, proceeds to check the input

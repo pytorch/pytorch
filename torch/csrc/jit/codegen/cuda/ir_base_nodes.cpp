@@ -92,33 +92,33 @@ namespace {
 // Traverse definition of all values involved in constructing the provided val.
 // Check if all values involved are constant values, meaning the provided
 // val is also a constant value.
-class ConstCheck : OptOutConstDispatch {
+class ConstCheck : private OptOutConstDispatch {
  private:
   bool is_const_ = true;
 
-  void handle(const Bool* b) override {
+  void handle(const Bool* b) final {
     is_const_ = is_const_ && b->isConst();
   }
 
-  void handle(const Double* d) override {
+  void handle(const Double* d) final {
     is_const_ = is_const_ && d->isConst();
   }
 
-  void handle(const Int* i) override {
+  void handle(const Int* i) final {
     is_const_ = is_const_ && i->isConst();
   }
 
-  void handle(const NamedScalar* ns) override {
+  void handle(const NamedScalar* ns) final {
     is_const_ = is_const_ && false;
   }
 
-  void handle(const Expr* expr) override {
+  void handle(const Expr* expr) final {
     for (auto inp : expr->inputs()) {
       handle(inp);
     }
   }
 
-  void handle(const Val* val) override {
+  void handle(const Val* val) final {
     if (val->definition() != nullptr) {
       handle(val->definition());
     } else {
@@ -186,7 +186,7 @@ bool Val::isConsumerOf(const Val* other) const {
 
 // We don't register with the active fusion in Expr as this needs to be done
 // after inputs and outputs are registered with the Expr
-Expr::Expr(ExprType type) : type_{type} {
+Expr::Expr(ExprType etype) : etype_{etype} {
   Fusion* fusion = FusionGuard::getCurFusion();
   if (fusion == nullptr)
     TORCH_CHECK(false, "No active fusion group found when creating an Expr.");
@@ -195,7 +195,7 @@ Expr::Expr(ExprType type) : type_{type} {
 
 Expr::Expr(const Expr* src, IrCloner* ir_cloner)
     : Statement(src, ir_cloner),
-      type_(src->type_),
+      etype_(src->etype_),
       inputs_(ir_cloner->clone(src->inputs_)),
       outputs_(ir_cloner->clone(src->outputs_)) {
   // If we're "cloning" into the same fusion, register with the fusion

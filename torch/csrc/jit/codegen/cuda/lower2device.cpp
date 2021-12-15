@@ -172,7 +172,7 @@ std::unordered_map<Val*, Val*> getSimplificationMap(Fusion* fusion) {
   return extent_to_min_input_id_extent;
 }
 
-class KIRCleaner : public kir::MutableIrVisitor {
+class KIRCleaner : public kir::OptOutDispatch {
  public:
   //! Remove nop IR nodes
   static std::vector<kir::Expr*> cleanUp(
@@ -190,16 +190,16 @@ class KIRCleaner : public kir::MutableIrVisitor {
   }
 
  private:
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      expr->accept(this);
+      kir::OptOutDispatch::handle(expr);
     } else {
       // Any non-scoping expr is not considered nop
       is_nop_ = false;
     }
   }
 
-  void visit(kir::ForLoop* fl) final {
+  void handle(kir::ForLoop* fl) final {
     auto exprs = fl->body().exprs();
     fl->body().clear();
     for (auto expr : exprs) {
@@ -213,7 +213,7 @@ class KIRCleaner : public kir::MutableIrVisitor {
     is_nop_ = fl->body().empty();
   }
 
-  void visit(kir::IfThenElse* ite) final {
+  void handle(kir::IfThenElse* ite) final {
     const auto conditional = ite->predicate()->value();
 
     // Visit the then block
@@ -572,17 +572,7 @@ class GpuLower::KernelIrMapper : private OptInConstDispatch {
   }
 
  private:
-  void handle(const Statement* node) final {
-    OptInConstDispatch::handle(node);
-  }
-
-  void handle(const Val* node) final {
-    OptInConstDispatch::handle(node);
-  }
-
-  void handle(const Expr* node) final {
-    OptInConstDispatch::handle(node);
-  }
+  using OptInConstDispatch::handle;
 
   void handle(const TensorDomain* node) final {
     const auto lowered_node = ir_builder_.create<kir::TensorDomain>(node);

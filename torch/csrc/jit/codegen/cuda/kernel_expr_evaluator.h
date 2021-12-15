@@ -4,6 +4,7 @@
 #include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/codegen/cuda/evaluator_common.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 
 #include <c10/util/Optional.h>
 
@@ -34,7 +35,7 @@ namespace kir {
 //!   }
 //! ```
 //!
-class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
+class TORCH_CUDA_CU_API ExpressionEvaluator : private OptInConstDispatch {
  public:
   //! Set a concrete value for a symbolic value
   void bind(const Val* value, Int::ScalarType concrete_value);
@@ -56,11 +57,10 @@ class TORCH_CUDA_CU_API ExpressionEvaluator : private IrVisitor {
   }
 
  private:
-  void unhandled(const void*) final;
-  void visit(const Int* value) final;
-  void visit(const NamedScalar* named_scalar) final;
-  void visit(const UnaryOp* unary_op) final;
-  void visit(const BinaryOp* binary_op) final;
+  void handle(const Int* value) final;
+  void handle(const NamedScalar* named_scalar) final;
+  void handle(const UnaryOp* unary_op) final;
+  void handle(const BinaryOp* binary_op) final;
 
  private:
   std::unordered_map<const Val*, Int::ScalarType> known_values_;

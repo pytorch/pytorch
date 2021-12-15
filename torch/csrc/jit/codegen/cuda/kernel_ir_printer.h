@@ -4,6 +4,7 @@
 
 #include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 
 #include <iostream>
 #include <sstream>
@@ -23,7 +24,7 @@ namespace kir {
 //!
 //! implicit_definition_ = true will recurisvely print the definition of all
 //! inputs to an expression if they haven't been printed.
-class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
+class TORCH_CUDA_CU_API IrPrinter : private kir::OptOutConstDispatch {
   static constexpr char const* kTab = "  ";
 
  public:
@@ -55,32 +56,32 @@ class TORCH_CUDA_CU_API IrPrinter : private kir::IrVisitor {
   void endBlock();
   void handleBlock(const kir::Scope& scope);
 
-  void visit(const kir::Bool*) final;
-  void visit(const kir::Double*) final;
-  void visit(const kir::Int*) final;
-  void visit(const kir::NamedScalar*) final;
-  void visit(const kir::Predicate*) final;
+  void handle(const kir::Bool*) final;
+  void handle(const kir::Double*) final;
+  void handle(const kir::Int*) final;
+  void handle(const kir::NamedScalar*) final;
+  void handle(const kir::Predicate*) final;
 
-  void visit(const kir::TensorIndex*) final;
-  void visit(const kir::IterDomain*) final;
-  void visit(const kir::TensorDomain*) final;
-  void visit(const kir::TensorView*) final;
+  void handle(const kir::TensorIndex*) final;
+  void handle(const kir::IterDomain*) final;
+  void handle(const kir::TensorDomain*) final;
+  void handle(const kir::TensorView*) final;
 
-  void visit(const kir::UnaryOp*) final;
-  void visit(const kir::BinaryOp*) final;
-  void visit(const kir::TernaryOp*) final;
-  void visit(const kir::ReductionOp*) final;
-  void visit(const kir::WelfordOp*) final;
-  void visit(const kir::BroadcastOp*) final;
+  void handle(const kir::UnaryOp*) final;
+  void handle(const kir::BinaryOp*) final;
+  void handle(const kir::TernaryOp*) final;
+  void handle(const kir::ReductionOp*) final;
+  void handle(const kir::WelfordOp*) final;
+  void handle(const kir::BroadcastOp*) final;
 
-  void visit(const kir::GridReduction*) final;
-  void visit(const kir::GridWelford*) final;
-  void visit(const kir::ForLoop*) final;
-  void visit(const kir::IfThenElse*) final;
-  void visit(const kir::Allocate*) final;
-  void visit(const kir::Sync*) final;
-  void visit(const kir::InitMagicZero*) final;
-  void visit(const kir::UpdateMagicZero*) final;
+  void handle(const kir::GridReduction*) final;
+  void handle(const kir::GridWelford*) final;
+  void handle(const kir::ForLoop*) final;
+  void handle(const kir::IfThenElse*) final;
+  void handle(const kir::Allocate*) final;
+  void handle(const kir::Sync*) final;
+  void handle(const kir::InitMagicZero*) final;
+  void handle(const kir::UpdateMagicZero*) final;
 
  private:
   std::ostream& os_;

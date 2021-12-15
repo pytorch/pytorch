@@ -52,30 +52,32 @@ class TORCH_CUDA_CU_API IrPrinter : public OptInConstDispatch {
     handle(&f);
   }
 
-  void handle(const Statement* s) override;
-  void handle(const Val* v) override;
-  void handle(const Expr* e) override;
+  void handle(const Statement* s) final;
+  void handle(const Val* v) final;
+  void handle(const Expr* e) final;
 
-  void handle(const TensorDomain*) override;
-  void handle(const TensorView*) override;
-  void handle(const IterDomain*) override;
+  void handle(const TensorDomain*) final;
+  void handle(const TensorView*) final;
+  void handle(const IterDomain*) final;
 
-  void handle(const Bool*) override;
-  void handle(const Double*) override;
-  void handle(const Int*) override;
-  void handle(const NamedScalar*) override;
+  void handle(const Bool*) final;
+  void handle(const Double*) final;
+  void handle(const Int*) final;
+  void handle(const NamedScalar*) final;
 
-  void handle(const UnaryOp*) override;
-  void handle(const BinaryOp*) override;
-  void handle(const TernaryOp*) override;
-  void handle(const ReductionOp*) override;
-  void handle(const WelfordOp*) override;
-  void handle(const BroadcastOp*) override;
-  void handle(const TransposeOp*) override;
-  void handle(const ShiftOp*) override;
-  void handle(const GatherOp*) override;
-  void handle(const ViewOp*) override;
+  void handle(const UnaryOp*) final;
+  void handle(const BinaryOp*) final;
+  void handle(const TernaryOp*) final;
+  void handle(const ReductionOp*) final;
+  void handle(const WelfordOp*) final;
+  void handle(const BroadcastOp*) final;
+  void handle(const TransposeOp*) final;
+  void handle(const ShiftOp*) final;
+  void handle(const GatherOp*) final;
+  void handle(const ViewOp*) final;
 
+  // IR math printer overrides these to prevent them from printing, keep
+  // override
   void handle(const Split*) override;
   void handle(const Merge*) override;
 

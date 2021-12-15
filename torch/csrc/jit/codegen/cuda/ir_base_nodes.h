@@ -60,7 +60,6 @@ TORCH_CUDA_CU_API void swap(Fusion& a, Fusion& b) noexcept;
 //! is also important for the design to have a dispatch system for a Statment.
 //! Basically beinng able to succienctly traverse down the inhereitance stack of
 //! a Statment at runtime. This is currently implemented in dispatch.h
-//!
 class TORCH_CUDA_CU_API Statement : public NonCopyable, public PolymorphicBase {
   friend void swap(Fusion&, Fusion&) noexcept;
 
@@ -181,16 +180,29 @@ class TORCH_CUDA_CU_API Val : public Statement {
 
   Val(const Val* src, IrCloner* ir_cloner);
 
-  // TODO: why is this optional?
-  //
+  // Dispatch functions, definitions in dispatch.cpp
+  template <typename T>
+  static void dispatch(T handler, Val*);
+
+  template <typename T>
+  static void constDispatch(T handler, const Val* const);
+
+  template <typename T>
+  static Statement* mutatorDispatch(T mutator, Val*);
+
   c10::optional<ValType> getValType() const override {
     return vtype_;
   }
 
+  ValType vtype() const {
+    return vtype_;
+  }
+
+  DataType dtype() const {
+    return dtype_;
+  }
+
   // Throws if no DataType is found. Vals must have a DataType
-  //
-  // TODO: why is this optional?
-  //
   c10::optional<DataType> getDataType() const override;
 
   bool isScalar() const {
@@ -253,16 +265,6 @@ class TORCH_CUDA_CU_API Val : public Statement {
   int evaluatorIndex() const {
     return evaluator_index_;
   }
-
-  // Dispatch functions, definitions in dispatch.cpp
-  template <typename T>
-  static void dispatch(T handler, Val*);
-
-  template <typename T>
-  static void constDispatch(T handler, const Val* const);
-
-  template <typename T>
-  static Statement* mutatorDispatch(T mutator, Val*);
 
  protected:
   friend Fusion;
@@ -346,11 +348,11 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   Expr(const Expr* src, IrCloner* ir_cloner);
 
   c10::optional<ExprType> getExprType() const override {
-    return type_;
+    return etype_;
   }
 
-  ExprType type() const {
-    return type_;
+  ExprType etype() const {
+    return etype_;
   }
 
   bool sameAs(const Statement* other) const override;
@@ -394,7 +396,7 @@ class TORCH_CUDA_CU_API Expr : public Statement {
   }
 
  private:
-  ExprType type_ = ExprType::Invalid;
+  ExprType etype_ = ExprType::Invalid;
   std::vector<Val*> inputs_;
   std::vector<Val*> outputs_;
 };

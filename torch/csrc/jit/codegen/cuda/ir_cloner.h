@@ -105,7 +105,7 @@ class RecomputeTv : private IrCloner {
  private:
   RecomputeTv(Fusion* fusion, std::vector<Expr*> exprs);
 
-  void handle(const TensorDomain*) override;
+  void handle(const TensorDomain*) final;
 };
 
 } // namespace cuda
