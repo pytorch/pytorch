@@ -603,7 +603,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   if (uccLib_ != nullptr) {
     LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
     typedef void *fn(void *);
-    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(ucc_lib_->sym("_Z28createProcessGroupUCCForNCCLPv"));
+    auto createProcessGroupUCCForNCCL = reinterpret_cast<fn*>(uccLib_->sym("_Z28createProcessGroupUCCForNCCLPv"));
     struct args_t {
       const c10::intrusive_ptr<Store>& store;
       int rank = -1;
