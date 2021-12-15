@@ -617,28 +617,31 @@ examine our traced module:
     # The generated `forward` function is:
     """
     def forward(self, x, y):
-        add_1 = x + y;  x = y = None
-        return add_1
+        add = x + y;  x = y = None
+        return add
     """
 
     # Print the internal Graph.
     print(traced.graph)
     # This print-out returns:
     """
-    graph(x, y):
-        %add_1 : [#users=1] = call_function[target=<built-in function add>](args = (%x, %y), kwargs = {})
-        return add_1
+    graph():
+        %x : [#users=1] = placeholder[target=x]
+        %y : [#users=1] = placeholder[target=y]
+        %add : [#users=1] = call_function[target=operator.add](args = (%x, %y), kwargs = {})
+        return add
     """
 
     # Print a tabular representation of the internal Graph.
     traced.graph.print_tabular()
     # This gives us:
     """
-    opcode         name    target                   args      kwargs
-    -------------  ------  -----------------------  --------  --------
-    placeholder    x       x                        ()        {}
-    placeholder    y       y                        ()        {}
-    call_function  add_1   <built-in function add>  (x, y)    {}
+    opcode         name    target                   args    kwargs
+    -------------  ------  -----------------------  ------  --------
+    placeholder    x       x                        ()      {}
+    placeholder    y       y                        ()      {}
+    call_function  add     <built-in function add>  (x, y)  {}
+    output         output  output                   (add,)  {}
     """
 
 Using the utility functions above, we can compare our traced Module
@@ -1002,6 +1005,69 @@ Miscellanea
       supported.
    -  Annotations on local names within a function are not currently
       supported.
+
+
+-  Gotcha around ``training`` flag and submodules
+
+   -  When using functionals like ``torch.nn.functional.dropout``, it will be common for the training argument to be passed in as ``self.training``. During FX tracing, this will likely be baked in as a constant value.
+
+    ::
+
+        import torch
+        import torch.fx
+
+        class DropoutRepro(torch.nn.Module):
+          def forward(self, x):
+            return torch.nn.functional.dropout(x, training=self.training)
+
+
+        traced = torch.fx.symbolic_trace(DropoutRepro())
+        print(traced.code)
+        """
+        def forward(self, x):
+          dropout = torch.nn.functional.dropout(x, p = 0.5, training = True, inplace = False);  x = None
+          return dropout
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+        """
+        AssertionError: Tensor-likes are not close!
+
+        Mismatched elements: 15 / 15 (100.0%)
+        Greatest absolute difference: 1.6207983493804932 at index (0, 2) (up to 1e-05 allowed)
+        Greatest relative difference: 1.0 at index (0, 0) (up to 0.0001 allowed)
+        """
+
+   - However, when the standard ``nn.Dropout()`` submodule is used, the training flag is encapsulated and--because of the preservation of the ``nn.Module`` object model--can be changed.
+
+    ::
+
+        class DropoutRepro2(torch.nn.Module):
+          def __init__(self):
+            super().__init__()
+            self.drop = torch.nn.Dropout()
+
+          def forward(self, x):
+            return self.drop(x)
+
+        traced = torch.fx.symbolic_trace(DropoutRepro2())
+        print(traced.code)
+        """
+        def forward(self, x):
+          drop = self.drop(x);  x = None
+          return drop
+        """
+
+        traced.eval()
+
+        x = torch.randn(5, 3)
+        torch.testing.assert_allclose(traced(x), x)
+
+  - Because of this difference, consider marking modules that interact with the ``training`` flag dynamically as leaf modules.
+
 
 API Reference
 -------------

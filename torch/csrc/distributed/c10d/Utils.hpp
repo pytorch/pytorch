@@ -482,7 +482,6 @@ size_t computeLengthsAndOffsets(
 }
 
 using RankType = uint32_t;
-using PortType = uint16_t;
 using SizeType = uint64_t;
 
 // `errno` is only meaningful when it fails. E.g., a  successful `fork()` sets
@@ -536,31 +535,7 @@ using SizeType = uint64_t;
 // Since SOCKET_ERROR = -1 in MSVC, so also leverage SYSCHECK_ERR_RETURN_NEG1
 #define SYSCHECK_ERR_RETURN_NEG1(expr) SYSCHECK(expr, __output != -1)
 
-// Helper resource guard class
-class ResourceGuard {
- public:
-  ResourceGuard(std::function<void()> destructor)
-      : destructor_(std::move(destructor)), released_(false) {}
-
-  ~ResourceGuard() {
-    if (!released_) {
-      destructor_();
-    }
-  }
-
-  void release() {
-    released_ = true;
-  }
-
- private:
-  std::function<void()> destructor_;
-  bool released_;
-};
-
 namespace tcputil {
-
-constexpr std::chrono::milliseconds kNoTimeout = std::chrono::milliseconds(-1);
-const std::string kConnectTimeoutMsg = "connect() timed out.";
 
 // Send and receive
 template <typename T>
@@ -676,21 +651,6 @@ inline std::string recvString(int socket) {
   recvBytes<char>(socket, value.data(), value.size());
   return std::string(value.data(), value.size());
 }
-
-// Other helpers
-std::string sockaddrToString(struct sockaddr* addr);
-
-std::pair<int, PortType> listen(PortType port);
-
-int connect(
-    const std::string& address,
-    PortType port,
-    bool wait = true,
-    const std::chrono::milliseconds& timeout = kNoTimeout);
-
-std::tuple<int, std::string> accept(
-    int listenSocket,
-    const std::chrono::milliseconds& timeout = kNoTimeout);
 
 } // namespace tcputil
 } // namespace c10d

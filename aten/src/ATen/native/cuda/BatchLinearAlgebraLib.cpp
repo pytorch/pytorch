@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/irange.h>
 
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -638,13 +639,16 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
   std::stringstream ss;
   const int too_long = 5;
 
+  ss << "batches ";
   if (batches.size() <= too_long) {
-    ss << "batches ";
-    for (int i = 0; i < batches.size() - 1; i++) ss << batches[i] << ", ";
+    for (const auto i : c10::irange(batches.size() - 1)) {
+      ss << batches[i] << ", ";
+    }
     ss << batches.back();
   } else {
-    ss << "batches ";
-    for (int i = 0; i < too_long; i++) ss << batches[i] << ", ";
+    for (const auto i : c10::irange(too_long)) {
+      ss << batches[i] << ", ";
+    }
     ss << "and other " << batches.size() - too_long << " batches";
   }
 

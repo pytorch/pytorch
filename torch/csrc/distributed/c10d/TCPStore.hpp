@@ -110,6 +110,7 @@ class TORCH_API TCPStore : public Store {
 
   const std::string initKey_ = "init/";
   const std::string keyPrefix_ = "/";
+  std::mutex activeOpLock_;
 };
 
 } // namespace c10d

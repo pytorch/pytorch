@@ -19,6 +19,7 @@ from pt import (  # noqa: F401
     qunary_test,
     qembedding_pack_test,
     qembeddingbag_test,
+    qatembedding_ops_test,
 )
 
 

@@ -11,11 +11,9 @@ import sys
 from collections import namedtuple
 
 import cimodel.data.binary_build_definitions as binary_build_definitions
-import cimodel.data.pytorch_build_definitions as pytorch_build_definitions
 import cimodel.data.simple.android_definitions
 import cimodel.data.simple.binary_smoketest
 import cimodel.data.simple.docker_definitions
-import cimodel.data.simple.macos_definitions
 import cimodel.data.simple.mobile_definitions
 import cimodel.data.simple.nightly_android
 import cimodel.data.simple.nightly_ios
@@ -139,8 +137,6 @@ def generate_required_docker_images(items):
 
 def gen_build_workflows_tree():
     build_workflows_functions = [
-        pytorch_build_definitions.get_workflow_jobs,
-        cimodel.data.simple.macos_definitions.get_workflow_jobs,
         cimodel.data.simple.android_definitions.get_workflow_jobs,
         cimodel.data.simple.mobile_definitions.get_workflow_jobs,
         cimodel.data.simple.binary_smoketest.get_workflow_jobs,

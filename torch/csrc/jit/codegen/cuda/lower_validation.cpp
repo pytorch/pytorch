@@ -5,10 +5,13 @@
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
+
+#include <limits>
 
 namespace torch {
 namespace jit {
@@ -68,7 +71,7 @@ class ValidateParallelType : public IterVisitor {
     auto out_n = wop->outN()->as<TensorView>();
     TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
     TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
-    for (size_t i = 0; i < out_avg->nDims(); i++) {
+    for (const auto i : c10::irange(out_avg->nDims())) {
       // TODO: can be cleaner.
       convertIterDomain(out_avg->axis(i), out_var->axis(i));
       convertIterDomain(out_avg->axis(i), out_n->axis(i));
@@ -162,7 +165,7 @@ void checkContiguity(
     TensorView* tv) {
   TORCH_INTERNAL_ASSERT(tv->getMemoryType() == MemoryType::Global);
 
-  for (size_t idx = 0; idx < tv->getRootDomain().size(); ++idx) {
+  for (const auto idx : c10::irange(tv->getRootDomain().size())) {
     auto root = tv->getRootDomain()[idx];
     if (domains.find(root) != domains.end()) {
       TORCH_INTERNAL_ASSERT(
@@ -196,13 +199,13 @@ void checkContiguity(
           .mapConsumerToProducer(consumer->domain(), producer->domain());
 
   std::unordered_map<IterDomain*, bool> producer_domain_contiguity;
-  for (size_t idx = 0; idx < producer->getRootDomain().size(); ++idx) {
-    auto root = producer->getRootDomain()[idx];
+  for (const auto idx : c10::irange(producer->getMaybeRFactorDomain().size())) {
+    auto root = producer->getMaybeRFactorDomain()[idx];
     auto contiguity = producer->domain()->contiguity()[idx];
     producer_domain_contiguity.insert({root, contiguity});
   }
 
-  for (auto consumer_root : consumer->getRootDomain()) {
+  for (auto consumer_root : consumer->getMaybeRFactorDomain()) {
     if (domains.find(consumer_root) != domains.end()) {
       auto producer_root = root_c2p[consumer_root];
       TORCH_INTERNAL_ASSERT(
@@ -349,13 +352,11 @@ class VectorizeValidator : public OptInDispatch {
 
     TORCH_INTERNAL_ASSERT(validator.vectorized_id_ != nullptr);
 
-    // TODO: Contiguity is based on root domain not rfactor. Seems this
-    // generally doesn't cause problems, though contiguity should be on rfactor
-    // domain as that's the domain we index on.
+    // Contiguity is based on rfactor domain.
     IterDomain* last_root_dim = nullptr;
     int last_root_dim_pos = -1;
-    for (size_t i = tv->getRootDomain().size(); i > 0; i--) {
-      auto r_id = tv->getRootDomain()[i - 1];
+    for (size_t i = tv->getMaybeRFactorDomain().size(); i > 0; i--) {
+      auto r_id = tv->getMaybeRFactorDomain()[i - 1];
       if (r_id->isReduction() || r_id->isBroadcast()) {
         continue;
       }
@@ -399,7 +400,7 @@ void validateVectorize(Fusion* fusion) {
     bool has_vectorize_dim = false;
     bool has_misaligned_vectorize_dim = false;
 
-    for (size_t i = 0; i < tv->nDims(); i++) {
+    for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->axis(i);
       IterDomain* concrete_id =
           GpuLower::current()->caParallelMap().getConcreteMappedID(id);
@@ -451,23 +452,45 @@ void validateVectorize(Fusion* fusion) {
 
 namespace {
 
-//! Return true if axis is derived from a root axis that is an input
-//! to a CA leaf axis.
-bool derivedFromRootCAAxes(TensorView* tv, IterDomain* axis) {
-  std::vector<IterDomain*> ca_axes(
-      tv->domain()->domain().begin(),
-      tv->domain()->domain().begin() + tv->getComputeAtPosition());
+// Validate parallelization of a single tensor
+void validateParallelizationOfTensor(TensorView* tv) {
+  // Each ParallelType can be used only once.
+  ParallelTypeBitmap pt_map;
+  for (size_t i = 0; i < tv->nDims(); ++i) {
+    auto axis = tv->axis(i);
+    auto ptype = axis->getParallelType();
+    if (!isParallelTypeThread(ptype)) {
+      continue;
+    }
 
-  auto ca_root_vals = IterVisitor::getInputsTo(
-      std::vector<Val*>(ca_axes.begin(), ca_axes.end()));
+    TORCH_INTERNAL_ASSERT(
+        !pt_map.get(ptype),
+        "Multiple use of ",
+        ptype,
+        " in tensor t",
+        tv->name(),
+        ": ",
+        tv);
+    pt_map.set(ptype);
+  }
 
-  auto root_vals = IterVisitor::getInputsTo({axis});
+  // If this tensor is predicated by a paralel type, it should not be
+  // used to parallelize any domain of this tensor
 
-  return std::any_of(
-      root_vals.begin(), root_vals.end(), [&ca_root_vals](auto root) {
-        return std::find(ca_root_vals.begin(), ca_root_vals.end(), root) !=
-            ca_root_vals.end();
-      });
+  const auto thread_pred =
+      GpuLower::current()->threadPredMap().getPredicateInfo(tv);
+
+  auto predicated_parallel_types = pt_map & thread_pred.limited_types;
+
+  TORCH_INTERNAL_ASSERT(
+      predicated_parallel_types.none(),
+      "Invalid parallelization of tensor t",
+      tv->name(),
+      ". The tensor is parallelized with ",
+      predicated_parallel_types.toString(),
+      ", but it's invalid to use the types as the tensor is also predicated with them.",
+      ", thread prd: ",
+      thread_pred.limited_types.toString());
 }
 
 } // namespace
@@ -478,7 +501,6 @@ void validateParallelize(Fusion* fusion) {
 
   const auto& par_map = GpuLower::current()->caParallelMap();
   const auto& loop_map = GpuLower::current()->caLoopMap();
-  const auto& index_map = GpuLower::current()->caIndexMap();
   const auto& pred_map = GpuLower::current()->threadPredMap();
 
   auto exprs = ExprSort::getExprs(fusion);
@@ -487,6 +509,11 @@ void validateParallelize(Fusion* fusion) {
     if (!ir_utils::isTVOp(expr)) {
       continue;
     }
+    // Validate parallelization of each consumer by itself
+    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      validateParallelizationOfTensor(consumer);
+    }
+    // Validate parallelization between a producer and a consumer
     for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
       // Parallelization on input tensors have no effect.
       if (producer->isFusionInput()) {
@@ -494,8 +521,7 @@ void validateParallelize(Fusion* fusion) {
       }
       const auto parallel_bcast_doms =
           pred_map.getParallelBroadcastDomains(producer);
-      ParallelTypeBitmap pt_map;
-      for (size_t i = 0; i < producer->nDims(); ++i) {
+      for (const auto i : c10::irange(producer->nDims())) {
         // If a producer axis is threaded, either with threadIdx or
         // blockIdx, there must be a mapped consumer axis with the
         // same ParallelType. An exception is when the producer is
@@ -509,19 +535,10 @@ void validateParallelize(Fusion* fusion) {
         if (!isParallelTypeThread(producer_ptype)) {
           continue;
         }
-        // Each ParallelType can be used only once.
-        TORCH_INTERNAL_ASSERT(
-            !pt_map.get(producer_ptype),
-            "Multiple use of ",
-            producer_ptype,
-            " in tensor t",
-            producer->name(),
-            ": ",
-            producer);
-        pt_map.set(producer_ptype, true);
         // When the producer axis is a broadcast, it is not really
         // parallelized unless thread-predicated
-        if (producer_axis->isBroadcast() && parallel_bcast_doms.none()) {
+        if (producer_axis->isBroadcast() &&
+            !parallel_bcast_doms.get(producer_ptype)) {
           continue;
         }
         // No constraint on the consumer tensor when the producer
@@ -537,27 +554,17 @@ void validateParallelize(Fusion* fusion) {
           continue;
         }
         // There must be a consumer axis that uses the same indexing
-        // with the same parallel type as the producer axis. The index
-        // map is used to to find such an axis. In addition, even when
-        // no mapped axis is found in the index map, but when an
-        // mapped axis exists in the loop map, the producer and
-        // consumer axes may still use the same indexing. That only
-        // happens when the producer is derived from a root axis that
-        // is an input to any leaf CA axes. In such a case, the axis
-        // in the reference tensor that maps to
-        // the producer axis is created based on the consumer, so both
-        // the producer and consumer axes should have the same
-        // indexing. See issue #995 as well as the
-        // FusionValidateParallelize6 test for a concrete example.
+        // with the same parallel type as the producer axis. The loop
+        // map is used to to find such an axis. Broadcast forwarding
+        // does not cause any inconsistent parallelization as indexing
+        // takes care of the forwarding.
         for (auto consumer :
              ir_utils::filterByType<TensorView>(expr->outputs())) {
           auto it = std::find_if(
               consumer->domain()->domain().begin(),
               consumer->domain()->domain().end(),
               [&](IterDomain* consumer_axis) {
-                return index_map.areMapped(producer_axis, consumer_axis) ||
-                    (loop_map.areMapped(producer_axis, consumer_axis) &&
-                     derivedFromRootCAAxes(producer, producer_axis));
+                return loop_map.areMapped(producer_axis, consumer_axis);
               });
           TORCH_INTERNAL_ASSERT(
               it != consumer->domain()->domain().end(),
@@ -598,6 +605,220 @@ void validateParallelize(Fusion* fusion) {
               consumer_axis,
               " is ",
               stringifyThread(consumer_ptype),
+              ".");
+        }
+      }
+    }
+  }
+}
+
+namespace {
+
+// Backward propagation of partial ranges from outputs to
+// inputs. Necessary to determine required ranges to compute.
+//
+// Example:
+//  tv0: [0:N]
+//  tv1: shift(tv0, {1}) -> [1:N]
+//  tv2: shift(tv0, {-1}) -> [0:N-1]
+//  tv3: tv1 + tv2 -> [1:N-1]
+//
+// In this case, the valid range of tv3 starts at 1 and ends at
+// N-1. This means that not all of the values of tv1 and tv2 are
+// actually necessary. Specifically, tv1[0] and tv2[N-1] aren't used
+// for tv3. This function calculates the required minimum range of
+// each tensor that needs to be computed.
+std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets(
+    Fusion* fusion) {
+  auto exprs = ExprSort::getExprs(fusion);
+
+  std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
+
+  ExpressionEvaluator ee(fusion);
+
+  for (auto it = exprs.rbegin(); it != exprs.rend(); ++it) {
+    auto expr = *it;
+    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
+      for (auto consumer_root : consumer->getRootDomain()) {
+        auto consumer_start_offset = ee.evaluate(consumer_root->start());
+        auto consumer_stop_offset = ee.evaluate(consumer_root->stopOffset());
+        TORCH_INTERNAL_ASSERT(
+            consumer_start_offset.has_value(),
+            "Can't evaluate start value of ",
+            consumer_root->start());
+        TORCH_INTERNAL_ASSERT(
+            consumer_stop_offset.has_value(),
+            "Can't evaluate stop value of ",
+            consumer_root->stopOffset());
+        auto it = map.find(consumer_root);
+        if (it == map.end() || consumer->isFusionOutput()) {
+          // No range set for this root domain, which means this
+          // consumer_tensor is an output tensor or the consumer_root
+          // domain is a reduction domain. In either case, the
+          // required range is simply defined by the start and stop
+          // offsets of the root domain.
+          // Also, when consumer is an output, even if it's not
+          // terminating, the range to compute must not be affected by
+          // how it's used by its consumers because an output tensor
+          // is visible to outside of the fusion.
+          map.insert(
+              {consumer_root,
+               {consumer_start_offset.value(), consumer_stop_offset.value()}});
+        } else {
+          // When the range of this root domain is already set, it
+          // must be set by its consumers. Make sure the required
+          // range by the consumers is covered by the defined range of
+          // this root domain.
+          auto& consumer_range = it->second;
+          TORCH_INTERNAL_ASSERT(
+              consumer_start_offset.value() <= consumer_range.first);
+          TORCH_INTERNAL_ASSERT(
+              consumer_stop_offset.value() <= consumer_range.second);
+        }
+      }
+
+      // Propagate the range information from consumers to the
+      // produces. Note that the effect on the range by shift and
+      // gather is not considered here but taken care by halo regions.
+      for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
+        auto c2p =
+            PairwiseRootDomainMap(producer, consumer)
+                .mapConsumerToProducer(consumer->domain(), producer->domain());
+        for (auto consumer_root : consumer->getRootDomain()) {
+          auto producer_it = c2p.find(consumer_root);
+          if (producer_it == c2p.end()) {
+            continue;
+          }
+          auto producer_root = producer_it->second;
+          auto& consumer_range = map.at(consumer_root);
+          const std::pair<int64_t, int64_t> init_range{
+              std::numeric_limits<int64_t>::max(),
+              std::numeric_limits<int64_t>::max()};
+          auto& producer_range =
+              map.insert({producer_root, init_range}).first->second;
+          producer_range.first =
+              std::min(producer_range.first, consumer_range.first);
+          producer_range.second =
+              std::min(producer_range.second, consumer_range.second);
+        }
+      }
+    }
+  }
+
+  return map;
+}
+
+// Make sure that a partial split with split_offset does not violate
+// the required range defined by domain_offset. Suppose checking the
+// start side of a root domain. Only positions at split_offset or
+// larger are going to be computed, and all positions starting at
+// domain_offset must be computed, thus split_offset must be smaller
+// or equal to domain_offset. The same condition must hold for the end
+// side of the domain.
+//
+// In order to validate this condition, the split offset is assumed to
+// be a statically known constant value. This is not a hard
+// requirement, but otherwise a runtime check would be needed.
+void validateSplit(
+    Val* split_offset,
+    int64_t domain_offset,
+    const std::string& err_msg_prefix) {
+  ExpressionEvaluator ee(split_offset->fusion());
+
+  TORCH_INTERNAL_ASSERT(split_offset->isA<Int>());
+  auto split_offset_value = ee.evaluate(split_offset);
+  TORCH_INTERNAL_ASSERT(
+      split_offset_value.has_value(),
+      err_msg_prefix,
+      ": Unknown offset of split: ",
+      split_offset);
+
+  TORCH_INTERNAL_ASSERT(
+      split_offset_value.value() <= domain_offset,
+      err_msg_prefix,
+      ": Split offset is larger than the domain offset.",
+      " Split offset: ",
+      split_offset_value.value(),
+      ". Domain offset: ",
+      domain_offset);
+}
+
+} // namespace
+
+void validatePartialSplit(Fusion* fusion) {
+  FUSER_PERF_SCOPE("GpuLower::Lower::validatePartialSplit");
+  FusionGuard fg(fusion);
+
+  // If a root domain is partially split, only the sub range defined
+  // by the start and stop offsets of the partial split is
+  // computed. That sub range must cover the required range of the
+  // domain. So, the first thing to do is to determine the required
+  // minimum range of each root domain. Then, check if any partial
+  // split could result in a smaller range than the required range.
+
+  // Compute the required range of each root domain
+  auto range_info = getLiveRangeOffsets(fusion);
+
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    auto exprs = ir_utils::historyOf(tv);
+    for (auto split : ir_utils::filterByType<Split>(exprs)) {
+      // When the start and stop offsets are not zero, make sure the
+      // range defined by the split includes the required range to
+      // compute. If both of the split offsets are zero, this
+      // condition is obviously true. Also, this validation only needs
+      // to be done with root domains. Since the start and stop
+      // offsets of non-root domains must be just zero, they are
+      // skipped at this point.
+      if (split->startOffset()->isZeroInt() &&
+          split->stopOffset()->isZeroInt()) {
+        continue;
+      }
+      auto root_domain = split->in();
+      std::stringstream err_msg_prefix;
+      err_msg_prefix << "Error with " << root_domain << " in T" << tv->name();
+      TORCH_INTERNAL_ASSERT(range_info.find(root_domain) != range_info.end());
+      const auto& valid_range = range_info.at(root_domain);
+      // Check the start offset. If it's zero, no validation regarding
+      // the required range can occur.
+      if (!split->startOffset()->isZeroInt()) {
+        validateSplit(
+            split->startOffset(), valid_range.first, err_msg_prefix.str());
+      }
+      // Same for the stop offset.
+      if (!split->stopOffset()->isZeroInt()) {
+        validateSplit(
+            split->stopOffset(), valid_range.second, err_msg_prefix.str());
+      }
+    }
+  }
+}
+
+void validateThreadPredicates(Fusion* fusion) {
+  for (auto tv : ir_utils::allTvs(fusion)) {
+    if (tv->definition() == nullptr) {
+      continue;
+    }
+    const auto src_info =
+        GpuLower::current()->threadPredMap().getPredicateInfo(tv).source_map;
+    const TensorView* known_src_tensor = nullptr;
+    for (const auto& kv : src_info) {
+      ParallelType pt = kv.first;
+      if (!isParallelTypeBlockDim(pt)) {
+        continue;
+      }
+      for (auto src_tv : kv.second) {
+        if (known_src_tensor == nullptr) {
+          known_src_tensor = src_tv;
+        } else {
+          TORCH_INTERNAL_ASSERT(
+              known_src_tensor == src_tv,
+              "Tensor t",
+              tv->name(),
+              " is invalid as it is predicated by ",
+              "t",
+              known_src_tensor->name(),
+              " and t",
+              src_tv->name(),
               ".");
         }
       }

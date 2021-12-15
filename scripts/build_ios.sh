@@ -176,6 +176,9 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
+# enable ARC
+CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-fobjc-arc")
+
 # Now, actually build the iOS target.
 BUILD_ROOT=${BUILD_ROOT:-"$CAFFE2_ROOT/build_ios"}
 INSTALL_PREFIX=${BUILD_ROOT}/install

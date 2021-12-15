@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 
-from torch.distributed._fsdp.fully_sharded_data_parallel import CPUOffload
+from torch.distributed._fsdp import CPUOffload
 
 
 if not dist.is_available():

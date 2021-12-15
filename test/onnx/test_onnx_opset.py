@@ -11,15 +11,15 @@ import onnx
 import io
 
 from torch.onnx.symbolic_helper import _export_onnx_opset_version
-from torch.onnx import ir_version, producer_name, producer_version
+from torch.onnx import producer_name, producer_version
 
 
 def check_onnx_opset_operator(model, ops, opset_version=_export_onnx_opset_version):
     # check_onnx_components
-    assert model.ir_version == ir_version and \
-        model.producer_name == producer_name and \
-        model.producer_version == producer_version and \
-        model.opset_import[0].version == opset_version
+    assert (
+        model.producer_name == producer_name and
+        model.producer_version == producer_version and
+        model.opset_import[0].version == opset_version)
 
     # check the schema with the onnx checker
     onnx.checker.check_model(model)

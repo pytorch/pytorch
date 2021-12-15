@@ -24,7 +24,7 @@ ForwardDropoutResult dropout(TensorView* x, Val* prob, Val* scale) {
           scale->getDataType().value() == DataType::Double,
       "Scale is not a valid Double.");
 
-  auto rand_vals = unaryOp(UnaryOpType::RandLike, x);
+  auto rand_vals = randlike(x);
   auto mask = lt(rand_vals, prob);
   auto apply_mask = mul(x, mask);
   auto y = mul(apply_mask, scale);
@@ -53,8 +53,7 @@ Val* softplus(Val* x, Val* beta, Val* threshold) {
       threshold != nullptr, "Threshold is not a valid Double.");
 
   auto op_beta = mul(x, beta);
-  auto maybe_result = div(
-      unaryOp(UnaryOpType::Log1p, unaryOp(UnaryOpType::Exp, op_beta)), beta);
+  auto maybe_result = div(log1p(exp(op_beta)), beta);
   auto y = where(gt(op_beta, threshold), x, maybe_result);
   return y;
 }
@@ -72,13 +71,13 @@ LstmResult lstm(
   TORCH_INTERNAL_ASSERT(cell_x != nullptr, "Cell-gate input is invalid");
   TORCH_INTERNAL_ASSERT(out_x != nullptr, "Out-gate input is invalid");
 
-  const auto in_gate = unaryOp(UnaryOpType::Sigmoid, in_x);
-  const auto forget_gate = unaryOp(UnaryOpType::Sigmoid, forget_x);
-  const auto cell_gate = unaryOp(UnaryOpType::Tanh, cell_x);
-  const auto out_gate = unaryOp(UnaryOpType::Sigmoid, out_x);
+  const auto in_gate = sigmoid(in_x);
+  const auto forget_gate = sigmoid(forget_x);
+  const auto cell_gate = tanh(cell_x);
+  const auto out_gate = sigmoid(out_x);
 
   const auto cell = add(mul(forget_gate, prev_cell), mul(in_gate, cell_gate));
-  const auto hidden = mul(out_gate, unaryOp(UnaryOpType::Tanh, cell));
+  const auto hidden = mul(out_gate, tanh(cell));
 
   return {cell, hidden};
 }
@@ -94,7 +93,7 @@ Val* fast_gelu(Val* x) {
   auto inner_1 = mul(new Double(kKappa), x_cube);
   auto inner_2 = add(x, inner_1);
   auto inner_3 = mul(new Double(kBeta), inner_2);
-  auto tanh_inner = unaryOp(UnaryOpType::Tanh, inner_3);
+  auto tanh_inner = tanh(inner_3);
 
   auto out = mul(x, add(new Double(1.), tanh_inner));
   auto y = mul(new Double(0.5), out);
@@ -114,7 +113,7 @@ Val* fast_gelu_backward(Val* dy, Val* x) {
   auto inner_1 = mul(new Double(kKappa), x_cube);
   auto inner_2 = add(x, inner_1);
   auto inner_3 = mul(new Double(kBeta), inner_2);
-  auto tanh_inner = unaryOp(UnaryOpType::Tanh, inner_3);
+  auto tanh_inner = tanh(inner_3);
 
   auto left = mul(new Double(0.5), x);
   auto right = add(new Double(1.), tanh_inner);
@@ -140,13 +139,13 @@ Val* gelu_backward(Val* dy, Val* x) {
   const double kHalf = 0.5;
 
   auto cdf_1 = mul(x, new Double(M_SQRT1_2));
-  auto cdf_2 = unaryOp(UnaryOpType::Erf, cdf_1);
+  auto cdf_2 = erf(cdf_1);
   auto cdf_3 = add(cdf_2, new Double(1.));
   auto cdf_4 = mul(cdf_3, new Double(kHalf));
 
   auto pdf_1 = mul(x, x);
   auto pdf_2 = mul(pdf_1, new Double(-kHalf));
-  auto pdf_3 = unaryOp(UnaryOpType::Exp, pdf_2);
+  auto pdf_3 = exp(pdf_2);
 
   auto out = addcmul(cdf_4, x, pdf_3, new Double(kAlpha));
   auto dx = mul(out, dy);
