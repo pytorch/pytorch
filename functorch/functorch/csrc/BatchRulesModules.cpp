@@ -87,10 +87,20 @@ convolution_batch_rule(const Tensor& lhs, optional<int64_t> lhs_bdim, const Tens
     return result;
   }
 }
-Tensor convNd_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
-  std::vector<int64_t> t(self.dim() - 2, 0);
-  IntArrayRef out_padding(t);
-  return at::convolution(self, weight, bias, stride, padding, dilation, false, out_padding, groups);
+
+Tensor _convolution_decomp(
+    const Tensor& input_r, const Tensor& weight_r, const c10::optional<Tensor>& bias_r_opt,
+    IntArrayRef stride_, IntArrayRef padding_, IntArrayRef dilation_,
+    bool transposed_, IntArrayRef output_padding_, int64_t groups_,
+    bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
+  // Ignore everything. If the user called this in the normal way,
+  // then they should be fine.
+  (void*) benchmark;
+  (void*) deterministic;
+  (void*) cudnn_enabled;
+  (void*) allow_tf32;
+  return at::convolution(
+      input_r, weight_r, bias_r_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
 }
 
 // Tensor convNd_transpose_decomp(const Tensor &self, const Tensor &weight, const optional<Tensor>& bias, IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
@@ -517,13 +527,10 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batch_rule);
-  // m.impl("conv_transpose2d", convNd_transpose_decomp);
+  m.impl("_convolution", _convolution_decomp);
   m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
   m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
   m.impl("cudnn_convolution", cudnn_convolution_plumbing);
-  m.impl("conv1d", convNd_decomp);
-  m.impl("conv2d", convNd_decomp);
-  m.impl("conv3d", convNd_decomp);
 
   EXISTING_BDIM(im2col);
   EXISTING_BDIM(im2col_backward);
