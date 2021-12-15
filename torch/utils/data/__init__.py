@@ -16,7 +16,7 @@ from torch.utils.data.dataset import (
     Dataset as MapDataPipe,
     DFIterDataPipe,
     IterableDataset,
-    IterableDataset as IterDataPipe,
+    IterDataPipe,
     Subset,
     TensorDataset,
     random_split,
@@ -25,6 +25,8 @@ from torch.utils.data.dataloader import (
     DataLoader,
     _DatasetKind,
     get_worker_info,
+    default_collate,
+    default_convert,
 )
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data._decorator import (
@@ -58,6 +60,8 @@ __all__ = ['BatchSampler',
            '_DatasetKind',
            'argument_validation',
            'communication',
+           'default_collate',
+           'default_convert',
            'functional_datapipe',
            'get_worker_info',
            'guaranteed_datapipes_determinism',
