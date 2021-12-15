@@ -174,8 +174,10 @@ def is_pattern_dtype_config_supported_by_backend(
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
     dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
 
-    input_node = matched_nodes[0]
-    output_node = matched_nodes[-1]
+    # TODO: this only checks one input and one output, need to generalize to multiple
+    # inputs/output
+    input_node = matched_nodes[-1]
+    output_node = matched_nodes[0]
     for dtype_config in dtype_configs:
         # check if arg dtype are supported
         supported = True
