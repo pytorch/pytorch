@@ -13588,6 +13588,18 @@ class TestNNDeviceType(NNTestCase):
 
         self.assertEqual(res_no_batch, res_batched)
 
+    def _test_dropoutNd_channel_zero(self, dropout, input):
+        # Verify the number of zeros in a channel is 0 or the number of elements in the channel
+        # for a non-zero input tensor
+        shape = input.shape
+        B = shape[0]
+        C = shape[1]
+        channel_numel = torch.tensor(shape[2:]).prod()
+        result = dropout(input)
+
+        for b, c in product(range(B), range(C)):
+            self.assertTrue(result[b, c].count_nonzero() in (0, channel_numel))
+
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout2d(self, device):
         b = random.randint(1, 5)
@@ -13611,6 +13623,11 @@ class TestNNDeviceType(NNTestCase):
         self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
         self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
 
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout2d(p=0.5, inplace=True), input)
+
     @expectedFailureXLA  # seems like freeze_rng_state is not honoured by XLA
     def test_Dropout3d(self, device):
         b = random.randint(1, 5)
@@ -13633,6 +13650,11 @@ class TestNNDeviceType(NNTestCase):
         input = torch.rand(50, 2, 2, 2, device=device)
         self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5), input)
         self._test_dropoutNd_no_batch(nn.Dropout3d(p=0.5, inplace=True), input)
+
+        # check that complete channels are dropped
+        input = torch.ones(10, 4, 2, 2, 2, device=device)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5), input)
+        self._test_dropoutNd_channel_zero(nn.Dropout3d(p=0.5, inplace=True), input)
 
     def test_InstanceNorm1d_general(self, device):
         b = random.randint(3, 5)
