@@ -94,15 +94,15 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      // std::cout << "RUNNING " << pc << " "
-      //           << code_->instructions_with_handles_[pc].instruction;
+      // std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
       // if (inst.op == OP) {
-      //   std::cout << ", " << code_->op_names_[inst.X].name;
-      //   if (!code_->op_names_[inst.X].overload_name.empty()) {
-      //     std::cout << "." << code_->op_names_[inst.X].overload_name;
+      //   std::cout << ", " << code.op_names_[inst.X].name;
+      //   if (!code.op_names_[inst.X].overload_name.empty()) {
+      //     std::cout << "." << code.op_names_[inst.X].overload_name;
       //   }
       // }
       // std::cout << std::endl;
+      // std::cout << "top " << stack.back().tagKind() << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in
       // Dispatcher

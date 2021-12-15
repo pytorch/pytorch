@@ -4,9 +4,11 @@ from itertools import product
 from inspect import signature, isgenerator
 from copy import deepcopy
 import tempfile
+from operator import methodcaller
 
 import torch
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests, onlyCUDA, toleranceOverride, tol)
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck, gradgradcheck)
@@ -19,11 +21,34 @@ class TestModule(TestCase):
     precision = 1e-5
     rel_tol = 1e-5
 
+    def _assert_module_parameters_and_buffer_are(self, module, device, dtype):
+        # Check device placement and dtype for created parameters and buffers.
+        # Only verify floating point dtypes since that's what the kwarg or methods
+        # such as `float()` applies to.
+        if not isinstance(device, torch.device):
+            device = torch.device(device)
+
+        def _check_module(items, name, device=device, dtype=dtype):
+            for item_name, item in items:
+                self.assertEqual(
+                    item.device, device,
+                    f'{name} {item_name} is on device {item.device} instead of the expected device {device}')
+                if item.dtype.is_floating_point:
+                    self.assertEqual(
+                        item.dtype, dtype,
+                        f'{name} {item_name} is of dtype {item.dtype} instead of the expected dtype {dtype}')
+        _check_module(module.named_parameters(), "Parameter")
+        _check_module(module.named_buffers(), "Buffer")
+
     @modules(module_db)
     def test_forward(self, device, dtype, module_info):
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=False)
+        dtype_to_method_caller = {
+            torch.float32: methodcaller("float"),
+            torch.float64: methodcaller("double"),
+        }
         for module_input in module_inputs:
             if module_input.forward_input is None:
                 continue
@@ -44,6 +69,12 @@ class TestModule(TestCase):
                 if reference_fn is not None:
                     ref_outputs = reference_fn(m, *args, **kwargs)
                     self.assertEqual(outputs, ref_outputs)
+
+                # === Use the method call and verify the parameters and buffers ===
+                if dtype in dtype_to_method_caller:
+                    dtype_to_method_caller[dtype](m)
+                    m(*args, **kwargs)
+                    self._assert_module_parameters_and_buffer_are(m, device, dtype)
 
     # Tests passing factory kwargs (e.g. device / dtype) during module instantiation.
     # They should be applied to any created parameters and buffers.
@@ -98,22 +129,63 @@ class TestModule(TestCase):
                 # Check device placement and dtype for created parameters and buffers.
                 # Only verify floating point dtypes since that's what the kwarg applies to.
                 m = module_cls(*args, **kwargs)
-                for name, param in m.named_parameters():
-                    self.assertEqual(
-                        str(param.device), device,
-                        f'Parameter {name} is on {param.device.type} instead of the expected device {device}')
-                    if param.dtype.is_floating_point:
-                        self.assertEqual(
-                            param.dtype, dtype,
-                            f'Parameter {name} is of dtype {param.dtype} instead of the expected dtype {dtype}')
-                for name, buffer in m.named_buffers():
-                    self.assertEqual(
-                        str(buffer.device), device,
-                        f'Buffer {name} is on {buffer.device.type} instead of the expected device {device}')
-                    if buffer.dtype.is_floating_point:
-                        self.assertEqual(
-                            buffer.dtype, dtype,
-                            f'Buffer {name} is of dtype {buffer.dtype} instead of the expected dtype {dtype}')
+                self._assert_module_parameters_and_buffer_are(m, device, dtype)
+
+    @onlyCUDA
+    @modules(module_db)
+    def test_multiple_device_transfer(self, device, dtype, module_info):
+        module_cls = module_info.module_cls
+        module_inputs_device = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                              requires_grad=False)
+        module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
+                                                           requires_grad=False)
+        for module_input_device, module_input_cpu in zip(module_inputs_device, module_inputs_cpu):
+            if module_input_device.forward_input is None:
+                continue
+
+            with freeze_rng_state():
+                # === Instantiate the module. ===
+                args, kwargs = module_input_device.constructor_input.args, module_input_device.constructor_input.kwargs
+                m = module_cls(*args, **kwargs)
+                m.to(device).to(dtype)
+
+                # === Do forward pass on GPU ===
+                input_device_args = module_input_device.forward_input.args
+                input_device_kwargs = module_input_device.forward_input.kwargs
+                m(*input_device_args, **input_device_kwargs)
+                self._assert_module_parameters_and_buffer_are(m, device, dtype)
+
+                # === Move to CPU ===
+                input_cpu_args = module_input_cpu.forward_input.args
+                input_cpu_kwargs = module_input_cpu.forward_input.kwargs
+                m.cpu()
+                m(*input_cpu_args, **input_cpu_kwargs)
+                self._assert_module_parameters_and_buffer_are(m, "cpu", dtype)
+
+                # === Move back to GPU and forward pass ===
+                m.cuda()
+                m(*input_device_args, **input_device_kwargs)
+                self._assert_module_parameters_and_buffer_are(m, device, dtype)
+
+                if torch.cuda.device_count() >= 2:
+                    # === test cross-GPU transfer works
+                    def _to_device1(objs):
+                        if isinstance(objs, (tuple, list)):
+                            return type(objs)(_to_device1(item) for item in objs)
+                        elif isinstance(objs, dict):
+                            return {name: _to_device1(item) for name, item in objs.items()}
+                        elif isinstance(objs, torch.Tensor):
+                            return objs.cuda(1)
+                        else:
+                            return objs
+                    input_device_1_args = _to_device1(input_device_args)
+                    input_device_1_kwargs = _to_device1(input_device_kwargs)
+
+                    m.cuda(1)
+                    with torch.cuda.device(1):
+                        m(*input_device_1_args, **input_device_1_kwargs)
+                    self._assert_module_parameters_and_buffer_are(m, torch.device("cuda:1"), dtype)
+
 
     @modules(module_db)
     def test_repr(self, device, dtype, module_info):
@@ -368,6 +440,72 @@ class TestModule(TestCase):
              allowed_dtypes=[torch.double])
     def test_gradgrad(self, device, dtype, module_info):
         self._test_gradients_helper(device, dtype, module_info, gradgradcheck)
+
+    @onlyCUDA
+    @toleranceOverride({torch.float32: tol(5e-2, 0),
+                        torch.float64: tol(4e-4, 0)})
+    @modules(module_db)
+    def test_cpu_gpu_parity(self, device, dtype, module_info):
+        # Test cpu and gpu results are the same
+        module_cls = module_info.module_cls
+        module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
+                                                           requires_grad=True)
+
+        def _to_device(obj):
+            if isinstance(obj, torch.Tensor):
+                res = obj.detach().to(device=device)
+                res.requires_grad = obj.requires_grad
+                return res
+            elif isinstance(obj, tuple):
+                return tuple(_to_device(o) for o in obj)
+            elif isinstance(obj, dict):
+                return {key: _to_device(o) for key, o in obj.items()}
+            else:
+                return deepcopy(obj)
+
+        for module_input in module_inputs_cpu:
+
+            # === Move input from cpu to device ===
+            cpu_forward_args = module_input.forward_input.args
+            cpu_forward_kwargs = module_input.forward_input.kwargs
+
+            gpu_forward_args, gpu_forward_kwargs = _to_device((cpu_forward_args, cpu_forward_kwargs))
+
+            self._retain_grad((cpu_forward_args, cpu_forward_kwargs, gpu_forward_args, gpu_forward_kwargs))
+
+            # === Construct module on cpu and gpu ===
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+
+            cpu_module = module_cls(*args, **kwargs).to(dtype).to("cpu")
+            gpu_module = module_cls(*args, **kwargs).to(dtype).to(device)
+
+            for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                gpu_p.data.copy_(cpu_p)
+
+            # === Compare forward output between cpu and gpu ===
+            cpu_output = cpu_module(*cpu_forward_args, **cpu_forward_kwargs)
+            gpu_output = gpu_module(*gpu_forward_args, **gpu_forward_kwargs)
+
+            self.assertEqual(cpu_output, gpu_output)
+
+            # === Run backwards on CPU and GPU and compare results ===
+            for _ in range(5):
+                cpu_grad_output = cpu_output.clone().normal_()
+                gpu_grad_output = cpu_grad_output.type_as(gpu_output)
+
+                cpu_output.backward(cpu_grad_output, retain_graph=True)
+                gpu_output.backward(gpu_grad_output, retain_graph=True)
+
+                cpu_grad_input = self._get_grads(cpu_forward_args)
+                gpu_grad_input = self._get_grads(gpu_forward_args)
+                self.assertEqual(cpu_grad_input, gpu_grad_input)
+
+                for cpu_p, gpu_p in zip(cpu_module.parameters(), gpu_module.parameters()):
+                    self.assertEqual(cpu_p.grad, gpu_p.grad)
+
+                cpu_grad_kwarg_input = self._get_grads(cpu_forward_kwargs)
+                gpu_grad_kwarg_input = self._get_grads(gpu_forward_kwargs)
+                self.assertEqual(cpu_grad_kwarg_input, gpu_grad_kwarg_input)
 
 
 instantiate_device_type_tests(TestModule, globals())

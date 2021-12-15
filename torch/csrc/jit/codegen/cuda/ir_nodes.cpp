@@ -259,7 +259,7 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
     c_mapped.insert(pair_entry.second);
   }
 
-  for (size_t i = 0; i < c_root.size(); ++i) {
+  for (const auto i : c10::irange(c_root.size())) {
     const auto c_id = c_root[i];
     if (c_mapped.find(c_id) != c_mapped.end()) {
       continue;
@@ -489,11 +489,12 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
-ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets)
+ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad)
     : Expr(ExprType::ShiftOp),
       out_(out),
       in_(in),
-      offsets_(std::move(offsets)) {
+      offsets_(std::move(offsets)),
+      pad_(pad) {
   // clang-tidy complains about out_ that it may be null.
   TORCH_INTERNAL_ASSERT(out_ != nullptr);
   TORCH_INTERNAL_ASSERT(in_ != nullptr);
@@ -521,7 +522,8 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
-      offsets_(src->offsets_) {}
+      offsets_(src->offsets_),
+      pad_(src->pad_) {}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -609,7 +611,7 @@ bool GatherOp::sameAs(const Statement* other) const {
   if (windowShape().size() != other_op->windowShape().size()) {
     return false;
   }
-  for (size_t i = 0; i < windowShape().size(); ++i) {
+  for (const auto i : c10::irange(windowShape().size())) {
     if (!windowShape()[i]->sameAs(other_op->windowShape()[i])) {
       return false;
     }
@@ -617,7 +619,7 @@ bool GatherOp::sameAs(const Statement* other) const {
   if (padWidth().size() != other_op->padWidth().size()) {
     return false;
   }
-  for (size_t i = 0; padWidth().size(); ++i) {
+  for (const auto i : c10::irange(padWidth().size())) {
     if (!padWidth()[i][0]->sameAs(other_op->padWidth()[i][0]) ||
         !padWidth()[i][1]->sameAs(other_op->padWidth()[i][1])) {
       return false;
@@ -641,9 +643,25 @@ IterDomain::IterDomain(
     ParallelType parallel_type,
     IterType iter_type,
     bool is_rfactor_domain)
+    : IterDomain(
+          start,
+          extent,
+          nullptr,
+          parallel_type,
+          iter_type,
+          is_rfactor_domain) {}
+
+IterDomain::IterDomain(
+    Val* start,
+    Val* extent,
+    Val* stop_offset,
+    ParallelType parallel_type,
+    IterType iter_type,
+    bool is_rfactor_domain)
     : Val(ValType::IterDomain, DataType::Int, false),
       start_(start),
       extent_(extent),
+      stop_offset_(stop_offset == nullptr ? new Int(0) : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
       is_rfactor_domain_(is_rfactor_domain) {
@@ -663,14 +681,6 @@ IterDomain::IterDomain(
       start,
       " .");
 
-  // Check that all for-loops iterate from zero to some positive integer
-  // lower_insert_syncs uses this assumption for correctness.
-  TORCH_INTERNAL_ASSERT(
-      start->isZeroInt(),
-      "Cannot create an iter domain with a start that is non-zero but received ",
-      start,
-      " .");
-
   name_ = fusion_->registerVal(this);
 }
 
@@ -678,9 +688,12 @@ IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
-      is_rfactor_domain_(src->is_rfactor_domain_) {}
+      is_rfactor_domain_(src->is_rfactor_domain_),
+      is_padded_dimension_(src->is_padded_dimension_),
+      padded_to_size_(src->padded_to_size_) {}
 
 bool IterDomain::sameAs(const Statement* other) const {
   if (other == this) {
@@ -697,6 +710,8 @@ bool IterDomain::sameAs(const Statement* other) const {
       getParallelType() == other_id->getParallelType();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
+  is_same =
+      is_same && ScalarCheck::sameAs(stopOffset(), other_id->stopOffset());
 
   return is_same;
 }
@@ -712,10 +727,12 @@ std::vector<IterDomain*> IterDomain::clone(
   return cloned_domains;
 }
 
+// Merging does not propagate the start and stop values of the input
+// domains to the merged output domain. The actual range of the
+// domains is enforced by predicates. Note that since only root
+// domains have valid start and stop, it's not possible to contiguous
+// predication.
 IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
-  TORCH_CHECK(
-      outer->start()->isZeroInt() && inner->start()->isZeroInt(),
-      "Merging IterDomains with starting values that aren't 0 is not supported at this time.");
   TORCH_CHECK(
       !outer->extent()->isZeroInt() && !inner->extent()->isZeroInt(),
       "Merging IterDomains with ending values that are 0 is not supported at this time.");
@@ -763,14 +780,15 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   return merged_id;
 }
 
+// Both outer and inner domains do not inherit start and stop
+// values as they can't be split. The access range is enforced by
+// predicates.
 std::pair<IterDomain*, IterDomain*> IterDomain::split(
     IterDomain* in,
     Val* factor,
-    bool inner_split) {
-  TORCH_CHECK(
-      in->start()->isZeroInt(),
-      "Splitting IterDomains with starting values that aren't 0 is not supported at this time.");
-
+    bool inner_split,
+    Val* start_offset,
+    Val* stop_offset) {
   TORCH_CHECK(
       !in->extent()->isZeroInt(),
       "Splitting IterDomains with ending values that are 0 is not supported at this time.");
@@ -792,7 +810,15 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   }
 
   // outer loop size
-  Val* remainder = ceilDiv(in->extent(), factor);
+  Val* remainder =
+      ceilDiv(Split::extent(in->extent(), start_offset, stop_offset), factor);
+
+  if ((start_offset != nullptr && !start_offset->isZeroInt()) ||
+      (stop_offset != nullptr && !stop_offset->isZeroInt())) {
+    TORCH_INTERNAL_ASSERT(
+        in->definition() == nullptr,
+        "Partial split is only allowed with root domains");
+  }
 
   // outer loop IterDomain
   IterDomain* ido = new IterDomain(
@@ -810,8 +836,18 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
       in->getIterType(),
       in->isRFactorProduct());
 
-  new Split(ido, idi, in, factor, inner_split);
+  new Split(ido, idi, in, factor, inner_split, start_offset, stop_offset);
   return {ido, idi};
+}
+
+std::pair<IterDomain*, IterDomain*> IterDomain::split(
+    IterDomain* in,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
+  auto start_offset = trim_out_of_bounds ? in->start() : nullptr;
+  auto stop_offset = trim_out_of_bounds ? in->stopOffset() : nullptr;
+  return IterDomain::split(in, factor, inner_split, start_offset, stop_offset);
 }
 
 // TODO: We should change parallelize interface to be on tensorview or at least
@@ -832,6 +868,22 @@ void IterDomain::parallelize(ParallelType t) {
   }
 }
 
+bool IterDomain::maybePartial() const {
+  return !start()->isZeroInt() || !stopOffset()->isZeroInt();
+}
+
+Val* IterDomain::stopOffset() const {
+  return stop_offset_;
+}
+
+Val* IterDomain::stop() const {
+  if (stopOffset()->isZeroInt()) {
+    return extent();
+  }
+
+  return sub(extent(), stopOffset());
+}
+
 TensorDomain::TensorDomain(
     std::vector<IterDomain*> root_domain,
     std::vector<bool> contiguity)
@@ -841,7 +893,7 @@ TensorDomain::TensorDomain(
           contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
                              : std::move(contiguity)) {
   TORCH_CHECK(
-      contiguity_.size() == root_domain_.size(),
+      contiguity_.size() == getMaybeRFactorDomain().size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
       contiguity_.size(),
       " but needed one of size ",
@@ -865,7 +917,7 @@ TensorDomain::TensorDomain(
           contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
                              : std::move(contiguity)) {
   TORCH_CHECK(
-      contiguity_.size() == root_domain_.size(),
+      contiguity_.size() == getMaybeRFactorDomain().size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
       contiguity_.size(),
       " but needed one of size ",
@@ -902,10 +954,10 @@ TensorDomain::TensorDomain(
       domain_(std::move(domain)),
       rfactor_domain_(std::move(rfactor_domain)),
       contiguity_(
-          contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
+          contiguity.empty() ? std::vector<bool>(rfactor_domain_.size(), false)
                              : std::move(contiguity)) {
   TORCH_CHECK(
-      contiguity_.size() == root_domain_.size(),
+      contiguity_.size() == getMaybeRFactorDomain().size(),
       "Invalid contiguity information provided, incorrect size. Recieved vector of size ",
       contiguity_.size(),
       " but needed one of size ",
@@ -982,19 +1034,19 @@ bool TensorDomain::sameAs(const Statement* const other) const {
     return false;
   }
 
-  for (size_t i = 0; i < nDims(); i++) {
+  for (const auto i : c10::irange(nDims())) {
     if (!(axis(i)->sameAs(other_td->axis(i)))) {
       return false;
     }
   }
 
-  for (size_t i = 0; i < getRootDomain().size(); i++) {
+  for (const auto i : c10::irange(getRootDomain().size())) {
     if (!(getRootDomain()[i]->sameAs(other_td->getRootDomain()[i]))) {
       return false;
     }
   }
 
-  for (size_t i = 0; i < getRFactorDomain().size(); i++) {
+  for (const auto i : c10::irange(getRFactorDomain().size())) {
     if (!(getRFactorDomain()[i]->sameAs(other_td->getRFactorDomain()[i]))) {
       return false;
     }
@@ -1014,6 +1066,15 @@ bool TensorDomain::sameAs(
       return false;
   }
   return true;
+}
+
+void TensorDomain::setContiguity(const std::vector<bool>& contig) {
+  TORCH_INTERNAL_ASSERT(
+      getMaybeRFactorDomain().size() == contig.size(),
+      "Invalid contiguity vector: ",
+      contig);
+
+  contiguity_ = contig;
 }
 
 bool TensorDomain::hasReduction() const {
@@ -1085,7 +1146,20 @@ size_t TensorDomain::posOf(IterDomain* id) const {
   TORCH_CHECK(false, "Provided id is not part of this domain.");
 }
 
-void TensorDomain::split(int axis_, Val* factor, bool inner_split) {
+size_t TensorDomain::rootPosOf(IterDomain* id) const {
+  TORCH_INTERNAL_ASSERT(
+      root_domain_.size() > 0, "Tried to find an axis in a 0-dim root domain");
+  auto it = std::find(root_domain_.begin(), root_domain_.end(), id);
+  TORCH_INTERNAL_ASSERT(
+      it != root_domain_.end(), "Provided id is not part of root domain.");
+  return std::distance(root_domain_.begin(), it);
+}
+
+void TensorDomain::split(
+    int axis_,
+    Val* factor,
+    bool inner_split,
+    bool trim_out_of_bounds) {
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to do split on a 0-dim domain");
   if (axis_ < 0)
     axis_ += nDims();
@@ -1095,7 +1169,17 @@ void TensorDomain::split(int axis_, Val* factor, bool inner_split) {
       "Tried to split on axis outside TensorDomain's range.");
 
   IterDomain* id = axis(axis_);
-  auto split_ids = IterDomain::split(id, factor, inner_split);
+
+  // partial split is only allowed with root domains
+  if (trim_out_of_bounds) {
+    TORCH_INTERNAL_ASSERT(
+        std::find(getRootDomain().begin(), getRootDomain().end(), id) !=
+            getRootDomain().end(),
+        "Partial split is only allowed with root domains");
+  }
+
+  auto split_ids =
+      IterDomain::split(id, factor, inner_split, trim_out_of_bounds);
   domain_.erase(domain_.begin() + axis_);
   domain_.insert(domain_.begin() + axis_, split_ids.second);
   domain_.insert(domain_.begin() + axis_, split_ids.first);
@@ -1272,128 +1356,22 @@ std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
       TransformRFactor::runReplay2(this, axes)};
 }
 
-namespace {
-
-//! Concretize broadcast axes, i.e. identifying a non-broadcast
-//! IterDomain that the broadcast IterDomain can map to.
-//!
-//! This traversal processes root domains only, concretization works by
-//! inspecting pointwise ops, e.g. : T2 [i0,i1] = T1[i0,B0] + T0[i0,i1]
-//! will concretize axis B0 to i1
-//!
-class ConcretizeDomain : private BackwardVisitor {
- public:
-  //! Traverses the graph backward from outputs
-  //! to identify all concretizing opportunities
-  //!
-  explicit ConcretizeDomain(Fusion* fusion) {
-    traverseFrom(fusion, fusion->outputs(), false);
-  }
-
-  //! API call to run the concretize pass and return the
-  //! axis that bcast_dom concretizes to
-  //!
-  static const IterDomain* getConcreteDomain(IterDomain* bcast_dom) {
-    ConcretizeDomain cd(bcast_dom->fusion());
-
-    // Remove this assertion once we support broadcast on output
-    TORCH_INTERNAL_ASSERT(cd.canConcretize(bcast_dom));
-    return cd.concretized(bcast_dom);
-  }
-
-  // Returns true if either id is not a broadcast or
-  // the traversal has found a concretized axis for id
-  bool canConcretize(IterDomain* id) const {
-    return !id->isBroadcast() || bcast_domain_map_.count(id);
-  }
-
-  // Returns the concretized id recorded from traversal
-  IterDomain* concretized(IterDomain* id) const {
-    TORCH_INTERNAL_ASSERT(canConcretize(id));
-    if (!id->isBroadcast()) {
-      return id;
-    }
-    return bcast_domain_map_.at(id);
-  }
-
- private:
-  // Utility to inspect a pointwise operator and
-  // record concretize opportunities
-  void concretizePwOp(Expr* e);
-
-  // Utility to record new concretize opportunity
-  void concretizeTo(IterDomain* id, IterDomain* To) {
-    TORCH_INTERNAL_ASSERT(id->isBroadcast() && !To->isBroadcast());
-    bcast_domain_map_[id] = concretized(To);
-  }
-
-  using BackwardVisitor::handle;
-
-  void handle(ReductionOp* rop) override {
-    concretizePwOp(rop);
-  }
-
-  void handle(UnaryOp* uop) override {
-    concretizePwOp(uop);
-  }
-
-  void handle(BinaryOp* bop) override {
-    concretizePwOp(bop);
-  }
-
-  void handle(TernaryOp* top) override {
-    concretizePwOp(top);
-  };
-
- private:
-  using MapType = std::unordered_map<IterDomain*, IterDomain*>;
-  MapType bcast_domain_map_;
-};
-
-void ConcretizeDomain::concretizePwOp(Expr* e) {
-  if (e->output(0)->getValType() != ValType::TensorView) {
-    return;
-  }
-
-  TORCH_INTERNAL_ASSERT(e->outputs().size() == 1);
-  TensorView* tv = e->output(0)->as<TensorView>();
-
-  std::vector<IterDomain*> io = tv->getRootDomain();
-
-  for (auto* i : ir_utils::filterByType<TensorView>(e->inputs())) {
-    std::vector<IterDomain*> ii =
-        TensorDomain::noReductions(i->getMaybeRFactorDomain());
-    TORCH_INTERNAL_ASSERT(ii.size() == io.size());
-
-    for (const auto it : c10::irange(ii.size())) {
-      if (!canConcretize(io[it]))
-        continue;
-
-      if (!canConcretize(ii[it]))
-        concretizeTo(ii[it], concretized(io[it]));
-    }
-  }
-}
-
-} // namespace
-
-// API call to return the concretized axis of a broadcast axis
-const IterDomain* IterDomain::concretizeDomain(IterDomain* bcast_dom) {
-  return ConcretizeDomain::getConcreteDomain(bcast_dom);
-}
-
 Split::Split(
     IterDomain* outer,
     IterDomain* inner,
     IterDomain* in,
     Val* factor,
-    bool inner_split)
+    bool inner_split,
+    Val* start_offset,
+    Val* stop_offset)
     : Expr(ExprType::Split),
       outer_{outer},
       inner_{inner},
       in_{in},
       factor_{factor},
-      inner_split_{inner_split} {
+      inner_split_{inner_split},
+      start_offset_{start_offset != nullptr ? start_offset : new Int(0)},
+      stop_offset_{stop_offset != nullptr ? stop_offset : new Int(0)} {
   TORCH_INTERNAL_ASSERT(
       factor_->isAnInt(),
       "Attempted to create a Split node with a non-integer factor.");
@@ -1411,7 +1389,23 @@ Split::Split(const Split* src, IrCloner* ir_cloner)
       inner_(ir_cloner->clone(src->inner_)),
       in_(ir_cloner->clone(src->in_)),
       factor_(ir_cloner->clone(src->factor_)),
-      inner_split_(src->inner_split_) {}
+      inner_split_(src->inner_split_),
+      start_offset_(ir_cloner->clone(src->start_offset_)),
+      stop_offset_(ir_cloner->clone(src->stop_offset_)) {}
+
+Val* Split::extent(Val* in_extent, Val* start_offset, Val* stop_offset) {
+  TORCH_INTERNAL_ASSERT(in_extent != nullptr);
+
+  if (start_offset != nullptr && !start_offset->isZeroInt()) {
+    in_extent = sub(in_extent, start_offset);
+  }
+
+  if (stop_offset != nullptr && !stop_offset->isZeroInt()) {
+    in_extent = sub(in_extent, stop_offset);
+  }
+
+  return in_extent;
+}
 
 bool Split::sameAs(const Statement* other) const {
   if (this == other) {
@@ -1422,7 +1416,9 @@ bool Split::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other) &&
       factor()->sameAs(other->as<Split>()->factor()) &&
-      innerSplit() == other->as<Split>()->innerSplit();
+      innerSplit() == other->as<Split>()->innerSplit() &&
+      startOffset()->sameAs(other->as<Split>()->startOffset()) &&
+      stopOffset()->sameAs(other->as<Split>()->stopOffset());
 }
 
 Merge::Merge(IterDomain* out, IterDomain* outer, IterDomain* inner)
@@ -1463,6 +1459,10 @@ bool NamedScalar::sameAs(const Statement* other) const {
 }
 
 NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
+  TORCH_INTERNAL_ASSERT(
+      isParallelTypeThread(p_type),
+      "Cannot get parallel dim of non thread type, received: ",
+      p_type);
   std::string parallel_dim = stringifyThreadSize(p_type);
   return new NamedScalar(parallel_dim, DataType::Int);
 }

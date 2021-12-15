@@ -10,6 +10,8 @@ namespace torch {
 namespace jit {
 using Stack = std::vector<c10::IValue>;
 enum OpCode : uint8_t;
+struct Instruction;
+struct OperatorString;
 
 namespace mobile {
 struct Code;
@@ -17,6 +19,10 @@ struct Code;
 class TORCH_API Function : public torch::jit::Function {
  public:
   explicit Function(c10::QualifiedName name);
+  Function(
+      c10::QualifiedName name,
+      std::shared_ptr<Code> code,
+      at::optional<c10::FunctionSchema> schema);
   void run(Stack& stack) override;
   at::IValue operator()(Stack& stack);
   void ensure_defined() override {}
@@ -24,6 +30,9 @@ class TORCH_API Function : public torch::jit::Function {
   const c10::QualifiedName& qualname() const override;
   bool call(Stack&, c10::function_ref<void(const mobile::Code&)>) override;
 
+  // NOTE: the APIs below is dangerous: if you call append_instruction with
+  // dbg_handle and then call it without; then the dbg_handle will become
+  // misaligned. Therefore only use ONE variant at time.
   void append_instruction(OpCode op, int X, int N, int64_t dbg_handle);
   void append_instruction(OpCode op, int X, int N);
   bool append_operator(
@@ -49,12 +58,23 @@ class TORCH_API Function : public torch::jit::Function {
   // is halted due to exception.
   // If no corresponding debug handle is found then -1 is returned.
   const std::vector<int64_t>& getExceptionDebugHandles() const;
+  static Function& registerFunc(
+      const std::string& qualified_name,
+      const std::vector<Instruction>& instructions,
+      const std::vector<c10::IValue>& constants,
+      const std::vector<c10::TypePtr>& types,
+      const size_t register_size);
 
  private:
   c10::QualifiedName name_;
   std::shared_ptr<Code> code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
 };
+
+c10::optional<std::function<void(Stack&)>> makeOperatorFunction(
+    c10::OperatorName opname,
+    c10::optional<int> num_specified_args,
+    int64_t model_version);
 
 } // namespace mobile
 } // namespace jit

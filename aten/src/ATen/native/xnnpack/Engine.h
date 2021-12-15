@@ -13,7 +13,7 @@ namespace xnnpack {
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -90,7 +90,8 @@ Tensor channel_shuffle(
 // Activations
 //
 bool use_hardswish(const Tensor& input);
-const Tensor& hardswish_out(const Tensor& input, const Tensor& result);
+Tensor hardswish(const Tensor& input);
+Tensor& hardswish_(Tensor& input);
 
 } // namespace xnnpack
 } // namespace native

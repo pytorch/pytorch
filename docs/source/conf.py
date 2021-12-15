@@ -262,6 +262,8 @@ coverage_missing_automodule = [
     "torch.nn.parallel",
     "torch.nn.qat",
     "torch.nn.qat.modules",
+    "torch.nn.qat.dynamic",
+    "torch.nn.qat.dynamic.modules",
     "torch.nn.quantizable",
     "torch.nn.quantizable.modules",
     "torch.nn.quantized",

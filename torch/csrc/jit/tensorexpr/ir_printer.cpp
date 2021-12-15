@@ -249,7 +249,8 @@ void IRPrinter::visit(VarPtr v) {
 
 void IRPrinter::visit(BufPtr v) {
   auto dtype = v->dtype();
-  os() << "Buf(dtype=" << dtypeToCppString(dtype);
+  os() << *v->base_handle();
+  os() << "(dtype=" << dtypeToCppString(dtype);
   if (v->qscale()) {
     os() << ", qscale=";
     v->qscale()->accept(this);
@@ -258,6 +259,25 @@ void IRPrinter::visit(BufPtr v) {
     os() << ", qzero=";
     v->qzero()->accept(this);
   }
+  os() << ", sizes=[";
+  size_t i = 0;
+  for (const ExprPtr& s : v->dims()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+  os() << ", strides=[";
+  i = 0;
+  for (const ExprPtr& s : v->strides()) {
+    if (i++) {
+      os() << ", ";
+    }
+    s->accept(this);
+  }
+  os() << "]";
+
   os() << ")";
 }
 

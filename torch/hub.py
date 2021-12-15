@@ -67,7 +67,7 @@ _hub_dir = None
 
 
 # Copied from tools/shared/module_loader to be included in torch package
-def import_module(name, path):
+def _import_module(name, path):
     import importlib.util
     from importlib.abc import Loader
     spec = importlib.util.spec_from_file_location(name, path)
@@ -75,6 +75,11 @@ def import_module(name, path):
     assert isinstance(spec.loader, Loader)
     spec.loader.exec_module(module)
     return module
+
+
+def import_module(name, path):
+    warnings.warn('The use of torch.hub.import_module is deprecated in v0.11 and will be removed in v0.12', DeprecationWarning)
+    return _import_module(name, path)
 
 
 def _remove_if_exists(path):
@@ -293,7 +298,7 @@ def list(github, force_reload=False, skip_validation=False):
     sys.path.insert(0, repo_dir)
 
     hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
-    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -327,7 +332,7 @@ def help(github, model, force_reload=False, skip_validation=False):
     sys.path.insert(0, repo_dir)
 
     hubconf_path = os.path.join(repo_dir, MODULE_HUBCONF)
-    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     sys.path.remove(repo_dir)
 
@@ -422,7 +427,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     sys.path.insert(0, hubconf_dir)
 
     hubconf_path = os.path.join(hubconf_dir, MODULE_HUBCONF)
-    hub_module = import_module(MODULE_HUBCONF, hubconf_path)
+    hub_module = _import_module(MODULE_HUBCONF, hubconf_path)
 
     entry = _load_entry_from_hubconf(hub_module, model)
     model = entry(*args, **kwargs)

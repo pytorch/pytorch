@@ -291,7 +291,7 @@ def full(sharding_spec: ShardingSpec,
 
 def init_from_local_shards(
         local_shards: List[Shard],
-        sharded_tensor_metadata: ShardedTensorMetadata,
+        *global_size,
         process_group=None,
         init_rrefs=False):
     """
@@ -301,11 +301,8 @@ def init_from_local_shards(
     Args:
         local_shards (List[:class `torch.distributed._sharded_tensor.Shard`]): A list
             of shards that represent the local shards on this rank.
-        sharded_tensor_metadata (:class:`torch.distributed._sharded_tensor.ShardedTensorMetadata`)
-            The ShardedTensorMetadata that created manually, represents the global metadata
-            of the ShardedTensor, must comply with `local_shards` defined in each rank.
-            Note that `sharded_tensor_metadata` must be valid and should also contain
-            local shards metadata.
+        global_size (int...):  a list, tuple, or `torch.Size` of integers defining the
+            shape of the overall sharded tensor.
 
     Keyword args:
         process_group (ProcessGroup, optional): The process group to work on. If None,
@@ -317,10 +314,33 @@ def init_from_local_shards(
 
     Returns:
         A :class:`ShardedTensor` object handle on this rank
+
+
+    Examples:
+      Suppose we want construct a sharded tensor on two ranks, global size = (10, 5),
+      each shard have a (5, 5) local tensor, we can do it like below:
+
+      on rank 0:
+        >>> local_shard_metadata = ShardMetadata(
+        >>>     shard_offsets=[0, 0]
+        >>>     shard_lengths=[5, 5]
+        >>>     placement="rank:0/cuda:0"
+        >>> )
+        >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
+        >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
+
+      on rank 1:
+        >>> local_shard_metadata = ShardMetadata(
+        >>>     shard_offsets=[5, 0]
+        >>>     shard_lengths=[5, 5]
+        >>>     placement="rank:1/cuda:1"
+        >>> )
+        >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
+        >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
     """
     return ShardedTensor._init_from_local_shards(
         local_shards,
-        sharded_tensor_metadata,
+        *global_size,
         process_group=process_group,
         init_rrefs=init_rrefs
     )
@@ -442,7 +462,7 @@ def shard_parameter(
 
         shard_metadata = ShardMetadata(
             shard_offsets=copy.deepcopy(current_offsets),
-            shard_lengths=shard_size,
+            shard_sizes=shard_size,
             placement=placement,
         )
         shards_metadata.append(shard_metadata)
@@ -455,12 +475,18 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # Reshape to get shard for this rank.
-    local_shard = tensor.narrow(
-        sharding_spec.dim,  # type: ignore[arg-type]
-        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-        local_metadata.shard_lengths[sharding_spec.dim],  # type: ignore[union-attr, index]
-    ).contiguous()
+    # We don't want autograd recording here for the narrow op and
+    # 'local_shard' should be a leaf variable in the autograd graph
+    with torch.no_grad():
+        # Reshape to get shard for this rank.
+        local_shard = tensor.narrow(
+            sharding_spec.dim,  # type: ignore[arg-type]
+            local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+            local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
+        ).contiguous()
+
+    # Sync requires_grad to local_shard.
+    local_shard.requires_grad = tensor.requires_grad
 
     # Create ShardedTensor based on local shards.
     local_shards = [
@@ -469,19 +495,8 @@ def shard_parameter(
             metadata=local_metadata,  # type: ignore[arg-type]
         )
     ]
-    sharded_tensor_metadata = ShardedTensorMetadata(
-        shards_metadata=shards_metadata,
-        size=tensor.size(),
-        tensor_properties=TensorProperties(
-            dtype=local_shard.dtype,
-            layout=local_shard.layout,
-            requires_grad=local_shard.requires_grad,
-            memory_format=torch.contiguous_format,
-            pin_memory=local_shard.is_pinned(),
-        )
-    )
 
-    st = ShardedTensor._init_from_local_shards(local_shards, sharded_tensor_metadata, process_group=pg)
+    st = ShardedTensor._init_from_local_shards(local_shards, tensor.size(), process_group=pg)
 
     # Manually set sharding_spec
     st._sharding_spec = sharding_spec

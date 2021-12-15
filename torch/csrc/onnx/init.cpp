@@ -1,8 +1,10 @@
+#include <onnx/onnx_pb.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
-#include <onnx/onnx_pb.h>
+#include <torch/version.h>
 
-namespace torch { namespace onnx {
+namespace torch {
+namespace onnx {
 void initONNXBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   auto onnx = m.def_submodule("_onnx");
@@ -25,18 +27,17 @@ void initONNXBindings(PyObject* module) {
       .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
-    .value("ONNX", OperatorExportTypes::ONNX)
-    .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
-    .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
-    .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
+      .value("ONNX", OperatorExportTypes::ONNX)
+      .value("ONNX_ATEN", OperatorExportTypes::ONNX_ATEN)
+      .value("ONNX_ATEN_FALLBACK", OperatorExportTypes::ONNX_ATEN_FALLBACK)
+      .value("ONNX_FALLTHROUGH", OperatorExportTypes::ONNX_FALLTHROUGH);
 
   py::enum_<TrainingMode>(onnx, "TrainingMode")
-    .value("EVAL", TrainingMode::EVAL)
-    .value("PRESERVE", TrainingMode::PRESERVE)
-    .value("TRAINING", TrainingMode::TRAINING);
+      .value("EVAL", TrainingMode::EVAL)
+      .value("PRESERVE", TrainingMode::PRESERVE)
+      .value("TRAINING", TrainingMode::TRAINING);
 
-  onnx.attr("IR_VERSION") = IR_VERSION;
-  onnx.attr("PRODUCER_VERSION") = py::str(PRODUCER_VERSION);
+  onnx.attr("PRODUCER_VERSION") = py::str(TORCH_VERSION);
 
 #ifdef PYTORCH_ONNX_CAFFE2_BUNDLE
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = true;
@@ -44,4 +45,5 @@ void initONNXBindings(PyObject* module) {
   onnx.attr("PYTORCH_ONNX_CAFFE2_BUNDLE") = false;
 #endif
 }
-}} // namespace torch::onnx
+} // namespace onnx
+} // namespace torch

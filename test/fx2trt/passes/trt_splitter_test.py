@@ -104,7 +104,7 @@ class TestSplit(unittest.TestCase):
         self.assertEqual(arg.name, cos.kwargs["input"].name)
 
         # Second subgraph calculates d = b + c on CPU
-        [add] = find_fun_calls(st_split._run_on_cpu_1, acc_ops.add)
+        [add] = find_fun_calls(st_split._run_on_gpu_1, acc_ops.add)
         self.assertEqual(sin.name, add.kwargs["input"].name)
         self.assertEqual(cos.name, add.kwargs["other"].name)
 
@@ -147,7 +147,7 @@ class TestSplit(unittest.TestCase):
             # Should be "a", "conv.weight", "conv.bias".
             get_attr_nodes = [
                 node.target
-                for node in st_split._run_on_cpu_0.graph.nodes
+                for node in st_split._run_on_gpu_0.graph.nodes
                 if node.op == "get_attr"
             ]
             assert len(get_attr_nodes) == 3 and "a" in get_attr_nodes
@@ -282,7 +282,7 @@ class TestSplit(unittest.TestCase):
             [arg] = find_inputs(st_split)
 
             # First subgraph calculates relu(x) on CPU
-            [relu] = find_fun_calls(st_split._run_on_cpu_0, acc_ops.relu)
+            [relu] = find_fun_calls(st_split._run_on_gpu_0, acc_ops.relu)
             self.assertEqual(arg.name, relu.kwargs["input"].name)
 
             # Second subgraph calculates sin(x) on ACC
@@ -290,7 +290,7 @@ class TestSplit(unittest.TestCase):
             self.assertEqual(arg.name, sin.kwargs["input"].name)
 
             # Third subgraph calculates sum on CPU
-            [add] = find_fun_calls(st_split._run_on_cpu_2, acc_ops.add)
+            [add] = find_fun_calls(st_split._run_on_gpu_2, acc_ops.add)
             self.assertEqual(relu.name, add.kwargs["input"].name)
             self.assertEqual(sin.name, add.kwargs["other"].name)
 
@@ -340,7 +340,7 @@ class TestSplit(unittest.TestCase):
             [arg] = find_inputs(st_split)
 
             # First subgraph calculates b = sin(a) on CPU
-            [sin] = find_fun_calls(st_split._run_on_cpu_0, acc_ops.sin)
+            [sin] = find_fun_calls(st_split._run_on_gpu_0, acc_ops.sin)
             self.assertEqual(arg.name, sin.kwargs["input"].name)
 
             # Second subgraph calculates c = relu(b) on ACC
@@ -348,7 +348,7 @@ class TestSplit(unittest.TestCase):
             self.assertEqual(sin.name, relu.kwargs["input"].name)
 
             # Third subgraph calculates d = cos(c) on CPU
-            [cos] = find_fun_calls(st_split._run_on_cpu_2, acc_ops.cos)
+            [cos] = find_fun_calls(st_split._run_on_gpu_2, acc_ops.cos)
             self.assertEqual(relu.name, cos.kwargs["input"].name)
 
             # Fourth subgraph calculates e = sigmoid(d) on ACC
@@ -356,7 +356,7 @@ class TestSplit(unittest.TestCase):
             self.assertEqual(cos.name, sigmoid.kwargs["input"].name)
 
             # Fifth subgraph calculates f = tanh(e) on CPU
-            [tanh] = find_fun_calls(st_split._run_on_cpu_4, acc_ops.tanh)
+            [tanh] = find_fun_calls(st_split._run_on_gpu_4, acc_ops.tanh)
             self.assertEqual(sigmoid.name, tanh.kwargs["input"].name)
 
         test_splitter(splitter)
@@ -417,7 +417,7 @@ class TestSplit(unittest.TestCase):
             # Main module and a submodule
             assert len(modules) == 2
 
-            assert modules[1][0] == "_run_on_cpu_0"
+            assert modules[1][0] == "_run_on_gpu_0"
 
         test_splitter(splitter)
 
@@ -686,7 +686,7 @@ class TestSplitComplexGraph(unittest.TestCase):
             [arg] = find_inputs(st_split)
 
             # First subgraph calculates b = sin(a) on CPU
-            [sin] = find_fun_calls(st_split._run_on_cpu_0, acc_ops.sin)
+            [sin] = find_fun_calls(st_split._run_on_gpu_0, acc_ops.sin)
             self.assertEqual(arg.name, sin.kwargs["input"].name)
 
             # Second subgraph calculates c = relu(a) and d = cos(a) on ACC
@@ -697,11 +697,11 @@ class TestSplitComplexGraph(unittest.TestCase):
             self.assertEqual(arg.name, cos.kwargs["input"].name)
 
             # Third subgraph calculates the e = b + c and f = e - d on CPU
-            [add] = find_fun_calls(st_split._run_on_cpu_2, acc_ops.add)
+            [add] = find_fun_calls(st_split._run_on_gpu_2, acc_ops.add)
             self.assertEqual(sin.name, add.kwargs["input"].name)
             self.assertEqual(relu.name, add.kwargs["other"].name)
 
-            [sub] = find_fun_calls(st_split._run_on_cpu_2, acc_ops.sub)
+            [sub] = find_fun_calls(st_split._run_on_gpu_2, acc_ops.sub)
             self.assertEqual(add.name, sub.kwargs["input"].name)
             self.assertEqual(cos.name, sub.kwargs["other"].name)
 
@@ -731,7 +731,7 @@ class TestSplitComplexGraph(unittest.TestCase):
             [arg] = find_inputs(module)
 
             # First subgraph calculates b = sin(a) on CPU
-            [sin] = find_fun_calls(module_fx_split._run_on_cpu_0, acc_ops.sin)
+            [sin] = find_fun_calls(module_fx_split._run_on_gpu_0, acc_ops.sin)
             self.assertEqual(arg.name, sin.kwargs["input"].name)
 
             # Second subgraph calculates c = relu(a), d = cos(a) and e = b + c on ACC
@@ -746,7 +746,7 @@ class TestSplitComplexGraph(unittest.TestCase):
             self.assertEqual(relu.name, add.kwargs["other"].name)
 
             # Third subgraph calculates f = e + d on CPU
-            [sub] = find_fun_calls(module_fx_split._run_on_cpu_2, acc_ops.sub)
+            [sub] = find_fun_calls(module_fx_split._run_on_gpu_2, acc_ops.sub)
             self.assertEqual(add.name, sub.kwargs["input"].name)
             self.assertEqual(cos.name, sub.kwargs["other"].name)
 
@@ -812,7 +812,7 @@ class TestSplitNonTensorEdges(unittest.TestCase):
             )
 
             self.assertEqual(
-                {acc_ops.cos}, find_call_targets(module_fx_split._run_on_cpu_1)
+                {acc_ops.cos}, find_call_targets(module_fx_split._run_on_gpu_1)
             )
 
             self.assertEqual(
@@ -856,7 +856,7 @@ class TestSplitNonTensorEdges(unittest.TestCase):
 
             self.assertEqual(
                 {acc_ops.relu, acc_ops.cos},
-                find_call_targets(module_fx_split._run_on_cpu_0),
+                find_call_targets(module_fx_split._run_on_gpu_0),
             )
 
             self.assertEqual(
@@ -905,7 +905,7 @@ class TestSplitNonTensorEdges(unittest.TestCase):
 
             self.assertEqual(
                 {acc_ops.size, acc_ops.getitem, acc_ops.add},
-                find_call_targets(module_fx_split._run_on_cpu_1),
+                find_call_targets(module_fx_split._run_on_gpu_1),
             )
 
             self.assertEqual(
@@ -953,7 +953,7 @@ class TestSplitNonTensorEdges(unittest.TestCase):
 
             self.assertEqual(
                 {acc_ops.size, acc_ops.getitem, acc_ops.add, acc_ops.sigmoid},
-                find_call_targets(module_fx_split._run_on_cpu_1),
+                find_call_targets(module_fx_split._run_on_gpu_1),
             )
 
             # Make sure we can compile to TorchScript
@@ -1140,7 +1140,7 @@ class TestAccFusionsFinder(unittest.TestCase):
             assert len(modules) == 3
 
             assert modules[1][0] == "_run_on_acc_0"
-            assert modules[2][0] == "_run_on_cpu_1"
+            assert modules[2][0] == "_run_on_gpu_1"
 
         test_splitter(splitter)
 
