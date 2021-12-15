@@ -7300,7 +7300,6 @@ def sample_inputs_dropout(op_info, device, dtype, requires_grad, *,
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     if valid_input_dim:
-        # dropout2d : Valid dimensions are (3, 4)
         cases = ((S,) * i for i in valid_input_dim)
     else:
         cases = ((S, S), (S,), ())
