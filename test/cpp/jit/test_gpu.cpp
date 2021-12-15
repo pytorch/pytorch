@@ -110,7 +110,7 @@ bool isPredicated(TensorView* tv, GpuLower& gpulw) {
 // (These tests exercise IrGraphGenerator through a non-trivial IR,
 //  to make sure that it runs w/o crashing. The actual output is not
 //  validated)
-TEST(NVFuserTest, FusionIrGraphGenerator_CUDA) {
+TEST_F(NVFuserTest, FusionIrGraphGenerator_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
@@ -8408,7 +8408,7 @@ TEST_F(NVFuserTest, FusionMagicSchedulerSoftmax_CUDA) {
       lparams);
 }
 
-TEST(NVFuserTest, FusionTestMaskSoftmax_CUDA) {
+TEST_F(NVFuserTest, FusionTestMaskSoftmax_CUDA) {
   // This test is testing the usage of all padding tokens
   // with softmax like Bert might might use in a full padding
   // sequence.
@@ -11701,7 +11701,7 @@ TEST_F(NVFuserTest, FusionIssue549_CUDA) {
       &fusion, cg_outputs, {t0, t1}, {aten_output}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionSimpleCompileRtc_CUDA) {
+TEST_F(NVFuserTest, FusionSimpleCompileRtc_CUDA) {
   FusionExecutor fe;
   std::string kernel = R"(
 __global__ void kernel1(Tensor<float, 1> T0, Tensor<float, 1> T1) {
@@ -19059,7 +19059,7 @@ TEST_F(NVFuserTest, FusionPersistentBufferCalculation4_CUDA) {
       aten_t0.size(1) * dataTypeSize(DataType::Half));
 }
 
-TEST(NVFuserTest, FusionPersistentBufferProjection_CUDA) {
+TEST_F(NVFuserTest, FusionPersistentBufferProjection_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
@@ -19626,7 +19626,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
   testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
-TEST(NVFuserTest, FusionIssue1305Repro_CUDA) {
+TEST_F(NVFuserTest, FusionIssue1305Repro_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
   FusionGuard fg(&fusion);
