@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class Narrow : public TsNode {
+class TORCH_API Narrow : public TsNode {
  public:
   Narrow(
       const Value& input,

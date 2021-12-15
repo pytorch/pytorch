@@ -7,7 +7,7 @@
 namespace torch {
 namespace lazy {
 
-class View : public TsNode {
+class TORCH_API View : public TsNode {
  public:
   View(const Value& input, std::vector<int64_t> output_size);
 

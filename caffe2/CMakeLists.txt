@@ -567,6 +567,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/optim/sgd.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/random.cpp
        ${TORCH_SRC_DIR}/csrc/jit/mobile/train/sequential.cpp
+       ${TORCH_SRC_DIR}/csrc/jit/mobile/upgrader_mobile.cpp
        )
     list(APPEND TORCH_SRCS ${MOBILE_SRCS})
     list(APPEND TORCH_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
@@ -1325,8 +1326,14 @@ if(USE_DISTRIBUTED)
     else()
       if(BUILD_SPLIT_CUDA)
         target_compile_definitions(torch_cuda_cpp PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda_cpp PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       else()
         target_compile_definitions(torch_cuda PUBLIC USE_C10D_NCCL)
+        if(USE_NCCL_WITH_UCC)
+          target_compile_definitions(torch_cuda PUBLIC USE_NCCL_WITH_UCC)
+        endif()
       endif()
     endif()
   endif()
