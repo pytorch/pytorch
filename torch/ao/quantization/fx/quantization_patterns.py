@@ -576,6 +576,7 @@ class CatQuantizeHandler(QuantizeHandler):
 @register_quant_pattern((torch.nn.ReLU, torch.nn.Conv3d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
 @register_quant_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
+# TODO: rename Relu -> ReLU to be more consistent with other classes
 class ConvReluQuantizeHandler(QuantizeHandler):
     def __init__(self, node: Node, modules: Dict[str, torch.nn.Module]):
         super().__init__(node, modules)
@@ -635,7 +636,12 @@ class ConvReluQuantizeHandler(QuantizeHandler):
             output_activation_post_process = \
                 self._maybe_get_last_node_only_observer(modules)
             assert output_activation_post_process is not None
-            if is_reference:
+
+            # We'll always produce reference pattern for torch.nn.Conv*d,
+            # will remove the else branch after we migrated all use cases
+            if is_reference or \
+                    type(self.conv) in [torch.nn.Conv1d, torch.nn.Conv2d, torch.nn.Conv3d] and \
+                    dtypes in [(torch.quint8, torch.qint8, None)]:
                 # produce dequant - float_op - quant pattern
                 dtype = torch.float
                 if activation_int8_quantized:
@@ -682,7 +688,7 @@ class ConvReluQuantizeHandler(QuantizeHandler):
                 # we can have a map from module to reference module
                 # and allow user to register new ones
                 qconv_cls = get_static_quant_module_class(
-                    type(float_conv), is_reference=is_reference)
+                    type(float_conv), is_reference=True)
                 ref_conv = qconv_cls.from_float(float_conv, weight_qparams)  # type: ignore[attr-defined]
                 # if the parent is a fused conv (Sequential), we can replace the first
                 # item to ref conv, otherwise we can update
