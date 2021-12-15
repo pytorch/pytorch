@@ -113,6 +113,7 @@ class Adagrad(Optimizer):
                       state_sums,
                       state_steps,
                       has_sparse_grad=has_sparse_grad,
+                      foreach=group['foreach'],
                       lr=group['lr'],
                       weight_decay=group['weight_decay'],
                       lr_decay=group['lr_decay'],
