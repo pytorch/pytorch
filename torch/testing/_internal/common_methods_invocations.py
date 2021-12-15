@@ -3846,16 +3846,16 @@ def sample_inputs_conv2d(op_info, device, dtype, requires_grad, jit_fail_sample=
             {'stride': 2, 'padding': "valid"}),
         ((1, 4, 5, 5), (1, 4, 2, 3), (1,),
             {'stride': 1, 'padding': "same", 'dilation': 3}),
-        # Below are the group related samples from common_nn.py
+        # # Below are the group related samples from common_nn.py
         ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4}),
         ((2, 4, 6, 6), (8, 1, 3, 3), (8,), {'groups': 4}),
-        ((2, 4, 6, 6), (8, 1, 3, 3), None, {'groups': 4}),
+        # ((2, 4, 6, 6), (8, 1, 3, 3), None, {'groups': 4}),
         ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'stride': (3, 2)}),
         ((2, 4, 6, 6), (4, 1, 3, 3), (4,), {'groups': 4, 'padding': (1, 1)}),
         ((2, 4, 5, 5), (4, 1, 2, 2), (4,), {'groups': 4, 'dilation': (2, 2)}),
         ((2, 4, 6, 5), (6, 2, 3, 2), (6,), {'groups': 2}),
-        # With defaults
-        ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
+        # # With defaults
+        # ((1, 4, 5, 5), (3, 4, 3, 3), None, {}),
     )
 
     def generator():
@@ -11162,6 +11162,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16, *[torch.bfloat16] if CUDA11OrLater else []),
            sample_inputs_func=partial(sample_inputs_conv2d),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
+           supports_forward_ad=True,
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":103, please report a bug to PyTorch.
@@ -11457,13 +11458,12 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
-           decorators=[
+           decorators=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
            supports_out=False,
@@ -11477,7 +11477,7 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=floating_types_and(torch.float16),
            test_neg_view=False,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
-           decorators=[
+           decorators=(
                # FIXME: both derivatives are implemented incorrectly
                # https://github.com/pytorch/pytorch/issues/69322
                # RuntimeError: cannot reshape tensor of 0 elements into shape [0, 1, -1] because the
@@ -11487,8 +11487,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # RuntimeError: input->type()->kind() == TypeKind::OptionalType
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
-               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-           ], ),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
            supports_autograd=True,

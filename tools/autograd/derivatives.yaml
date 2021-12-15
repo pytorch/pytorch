@@ -692,6 +692,7 @@
 
 - name: hardsigmoid(Tensor self) -> Tensor
   self: hardsigmoid_backward(grad, self)
+  result: auto_element_wise
 
 - name: histc(Tensor self, int bins=100, Scalar min=0, Scalar max=0) -> Tensor
   output_differentiability: [False]
@@ -1669,6 +1670,7 @@
 
 - name: constant_pad_nd(Tensor self, int[] pad, Scalar value=0) -> Tensor
   self: constant_pad_nd_backward(grad, pad)
+  result: auto_linear
 
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean) -> Tensor
   self: binary_cross_entropy_backward(grad, self, target, weight, reduction)
@@ -2010,12 +2012,14 @@
 
 - name: convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups) -> Tensor
   input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result: convolution(input_t, weight_p, zeros_like(bias_p), stride, padding, dilation, transposed, output_padding, groups) + convolution(input_p, weight_t, zeros_like(bias_p), stride, padding, dilation, transposed, output_padding, groups) + bias_t.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
 
 # TorchScript serializes calls to _convolution so this entry is present until that is changed to use convolution.
 # Note that the benchmark, deterministic, cudnn_enabled, and allow_tf32 flags are queried from the global context
 # by convolution_backward instead of being passed along from the forward pass.
 - name: _convolution(Tensor input, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) -> Tensor
   input, weight, bias: "grad.defined() ? convolution_backward(grad, input, weight, bias->sizes(), stride, padding, dilation, transposed, output_padding, groups, grad_input_mask) : std::tuple<Tensor, Tensor, Tensor>()"
+  result: _convolution(input_t, weight_p, zeros_like(bias_p), stride, padding, dilation, transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32) +  _convolution(input_p, weight_t, zeros_like(bias_p), stride, padding, dilation, transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled, allow_tf32) + bias_t.unsqueeze(0).unsqueeze(-1).unsqueeze(-1)
 
 - name: convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
   grad_output, input, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, input, stride, padding, dilation, transposed, output_padding, groups, at::globalContext().benchmarkCuDNN(), at::globalContext().deterministicCuDNN() || at::globalContext().deterministicAlgorithms(), at::globalContext().userEnabledCuDNN(), at::globalContext().allowTF32CuDNN(), grad_input_mask)
