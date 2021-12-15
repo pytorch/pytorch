@@ -467,7 +467,6 @@ class TestOperators(TestCase):
         xfail('symeig'),
         xfail('take'),
         xfail('linalg.tensorinv'),
-        xfail('nn.functional.conv_transpose2d', device_type='cuda'),
         xfail('nanmean'),
         xfail('block_diag'),
         xfail('nn.functional.dropout'),
@@ -487,13 +486,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
-
-        # PyTorch changed its convolution recently.
-        # Maybe it is responsible for all of the following changes.
-        xfail('nn.functional.conv_transpose1d'),
-        xfail('nn.functional.conv_transpose2d'),
-        xfail('nn.functional.conv_transpose3d'),
-
     })
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
