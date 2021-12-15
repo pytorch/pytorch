@@ -148,7 +148,7 @@ DEFAULT_PATTERN_TO_FUSER_METHOD: Dict[Pattern, Union[nn.Sequential, Callable]] =
     (nn.ReLU, (nn.BatchNorm1d, nn.Conv1d)): reverse3(fuse_conv_bn_relu),
     (nn.BatchNorm2d, nn.Conv2d): reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm2d, nn.Conv2d)): reverse3(fuse_conv_bn_relu),
-    (nn.BatchNorm3d, nn.Conv2d): reverse2(fuse_conv_bn),
+    (nn.BatchNorm3d, nn.Conv3d): reverse2(fuse_conv_bn),
     (nn.ReLU, (nn.BatchNorm3d, nn.Conv3d)): reverse3(fuse_conv_bn_relu),
     (nn.ReLU, nn.Conv1d): reverse2(nni.ConvReLU1d),
     (nn.ReLU, nn.Conv2d): reverse2(nni.ConvReLU2d),
