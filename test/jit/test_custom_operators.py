@@ -78,14 +78,6 @@ class TestCustomOperators(JitTestCase):
         ):
             torch.ops.aten.type_as(torch.ones(5, 5))
 
-    def test_passing_an_argument_both_as_positional_and_kwarg(self):
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError,
-            "Argument 'self' specified both as positional and keyword argument",
-            ""
-        ):
-            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
-
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,

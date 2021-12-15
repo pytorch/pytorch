@@ -5,6 +5,7 @@ import re
 import builtins
 import torch
 import warnings
+import pdb
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
@@ -21,7 +22,7 @@ from typing import Type
 if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
-from torch._ops import OpOverloadBundle
+from torch._ops import OpOverloadPacket
 
 class Module(object):
     def __init__(self, name, members):
@@ -61,8 +62,8 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    if isinstance(fn, OpOverloadBundle):
-        signature = try_real_annotations(fn.default, loc)
+    if isinstance(fn, OpOverloadPacket):
+        signature = try_real_annotations(fn.op, loc)
     else:
         signature = try_real_annotations(fn, loc)
     if signature is not None and is_method:
@@ -108,7 +109,7 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
-    if isinstance(fn, OpOverloadBundle):
+    if isinstance(fn, OpOverloadPacket):
         fn = fn.default
 
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004

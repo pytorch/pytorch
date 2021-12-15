@@ -1104,6 +1104,12 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     }
   }
 
+  auto opoverloadpacket_type = py::module::import("torch").attr("_ops").attr("OpOverloadPacket");
+  py::bool_ is_overloadpacket = py::isinstance(obj, opoverloadpacket_type);
+  if (is_overloadpacket) {
+    obj = py::getattr(obj, "op");
+  }
+
   bool isRpcAvailable = py::cast<bool>(
       py::module::import("torch.distributed.rpc").attr("is_available")());
 
@@ -1180,12 +1186,6 @@ std::shared_ptr<SugaredValue> toSugaredValue(
     auto script_class = py::cast<ScriptClass>(obj);
     return std::make_shared<PythonClassValue>(
         script_class.class_type_.type_->expect<ClassType>(), obj);
-  }
-
-  auto opoverloadbundle_type = py::module::import("torch").attr("ops").attr("OpOverloadBundle");
-  py::bool_ is_overloadbundle = py::isinstance(obj, opoverloadbundle_type);
-  if (py::cast<bool>(is_overloadbundle)) {
-    obj = opoverloadbundle_type.attr("op")(obj);
   }
 
   if (isNamedTupleClass(obj)) {

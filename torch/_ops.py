@@ -1,3 +1,4 @@
+from typing import overload
 import torch._C
 
 import contextlib
@@ -50,17 +51,7 @@ class OpOverload:
     def arguments(self):
         return self.schema.arguments
 
-# >>> torch.ops.aten.add.default
-# aten::add(Scalar a, Scalar b) -> (Scalar)
-# <torch._ops.OpOverload object at 0x7f54a7dccf40>
-# >>> torch.ops.aten.addmv
-# <torch._ops.DisambiguateOpOverloads object at 0x7f54a7e60c40>
-# >>> torch.ops.aten.addmv.default
-# aten::addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> (Tensor)
-# <torch._ops.OpOverload object at 0x7f54a7dccb50>
-
-# this might be a bit slower than the version before.
-class OpOverloadBundle(types.ModuleType):
+class OpOverloadPacket():
     def __init__(self, qualified_op_name, op_name, op):
         self.qualified_op_name = qualified_op_name
         self.op_name = op_name
@@ -69,16 +60,15 @@ class OpOverloadBundle(types.ModuleType):
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
         if key == '__file__':
-            return 'torch.ops.OpOverloadBundle'
-        # return the overload packet
-        # make sure to disallow this keyword in native functions
-        # can access all overloads except -> overload_name=empty string, schema-> aten::add(Scalar a, Scalar b) -> (Scalar)
-
+            return 'torch.ops.OpOverloadPacket'
         try:
             use_key = "" if key == 'default' else key
             op_ = torch._C.get_operation_overload(self.qualified_op_name, use_key)
             schema = torch.get_schema(self.qualified_op_name, use_key)
-            return OpOverload(op_, schema)
+            overload =  OpOverload(op_, schema)
+            # cache the overload object
+            setattr(self, key, overload)
+            return overload
         except RuntimeError:
             out = getattr(self.op, key)
             return out
@@ -91,11 +81,11 @@ class OpOverloadBundle(types.ModuleType):
             kwargs = {}
         return self.op(*args, **kwargs)
 
-#resolution of torch.fn is different from torch.ops. ... fn
+# resolution of torch.fn is different from torch.ops. ... fn
 # First one is parsing the python objects and then matching the schema -> calls into the unboxed version of the method
 
 # second one is done by JIT. Creates a stack of all the overloads and then tries to match the correct one at runtime
-# always calls into boxed
+# and always calls into boxed version of the method
 
 # autograd codegen mostly creates variabletype, tracertype, inplace or view type and python bindings
 # aten codegen generates tensor methods for the the tensor class
@@ -141,9 +131,9 @@ class _OpNamespace(types.ModuleType):
         # with qualified_op_name
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
-        opoverloadbundle = OpOverloadBundle(qualified_op_name, op_name, op)
-        setattr(self, op_name, opoverloadbundle)
-        return opoverloadbundle
+        opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
+        setattr(self, op_name, opoverloadpacket)
+        return opoverloadpacket
 
 '''
 FYI:
