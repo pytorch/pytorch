@@ -690,15 +690,14 @@ class SimpleIREvaluatorImpl : public IRVisitor {
         }
         size_t buf_size = 1;
         if (dims.size() > 0) {
-          ExprPtr buf_size_expr = immLike(dims[0], 1);
-          ExprPtr negative_one = immLike(dims[0], -1);
+          ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
+          ExprHandle negative_one = ExprHandle(immLike(dims[0], -1));
           for (const auto& i : c10::irange(dims.size())) {
-            buf_size_expr = alloc<Add>(
-                buf_size_expr,
-                alloc<Mul>(
-                    alloc<Add>(dims[i], negative_one), buf->strides()[i]));
+            buf_size_expr = buf_size_expr +
+                ((negative_one + ExprHandle(dims[i])) *
+                 ExprHandle(buf->strides()[i]));
           }
-          buf_size_expr->accept(this);
+          buf_size_expr.node()->accept(this);
           buf_size = value().intValue();
         }
         indices[0]->accept(this);
