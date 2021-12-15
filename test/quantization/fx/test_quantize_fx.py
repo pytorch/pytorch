@@ -2023,13 +2023,21 @@ class TestQuantizeFx(QuantizationTestCase):
             def forward(self, x):
                 return self.linear(x)
 
+        data = torch.rand(8, 5)
         m = M().eval()
         m = prepare_fx(m, {"": default_qconfig})
         m = convert_fx(m)
+        # test deepcopy
         m_copy = copy.deepcopy(m)
+        self.assertEqual(m_copy(data), m(data))
+
+        # test state_dict
         state_dict = m.state_dict()
-        print(m)
-        print(state_dict)
+        m_new = M().eval()
+        m_new = prepare_fx(m_new, {"": default_qconfig})
+        m_new = convert_fx(m_new)
+        m_new.load_state_dict(state_dict)
+        self.assertEqual(m_new(data), m(data))
 
     def test_dequantize(self):
         r""" Test to make sure dequantize node are placed before
