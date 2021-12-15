@@ -41,7 +41,7 @@ std::atomic<uint64_t> next_thread_id_ {0};
 thread_local uint64_t current_thread_id_ = 0;
 
 // Low probability constant
-static const double kLowProb = 0.001;
+static constexpr double kLowProb = 0.001;
 struct CoinflipTLS {
   int tries_left_;
   std::mt19937 genGeo_;
@@ -306,10 +306,11 @@ class CallbackManager {
 
     // otherwise potentially do the sampling
     double sampling_prob = cb.sampling_prob_;
+    constexpr double kLowProbInv = 1 / kLowProb;
     if (pre_sampled) {
       // adjust the sampling rate to account for kLowProb pre-sampling of
       // the RecordFunction
-      sampling_prob /= kLowProb;
+      sampling_prob *= kLowProbInv;
     }
 
     if (sampling_prob < 1.0) {
@@ -321,7 +322,7 @@ class CallbackManager {
       if (sampling_prob < kLowProb) {
         if (coinflip_tls().tries_left_ == 0) {
           coinflip_tls().tries_left_ = sample_geometric();
-          return (sample_zero_one() < sampling_prob / kLowProb);
+          return (sample_zero_one() < sampling_prob * kLowProbInv);
         } else {
           --coinflip_tls().tries_left_;
           return false;
