@@ -1,9 +1,15 @@
 #pragma once
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/DispatchStub.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
+
+using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, bool, bool, int64_t, std::array<bool,3>);
+DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub);
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ConvParams {
