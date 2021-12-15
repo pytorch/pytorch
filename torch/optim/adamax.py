@@ -114,11 +114,11 @@ class Adamax(Optimizer):
                      exp_avgs,
                      exp_infs,
                      state_steps,
+                     foreach=foreach,
                      eps=eps,
                      beta1=beta1,
                      beta2=beta2,
                      lr=lr,
-                     weight_decay=weight_decay,
-                     foreach=foreach)
+                     weight_decay=weight_decay)
 
         return loss
