@@ -1533,6 +1533,24 @@ endif()
 
 caffe2_interface_library(torch_cpu torch_cpu_library)
 
+if(USE_MKLDNN AND NOT APPLE AND NOT WIN32)
+  #[[ oneDNN Graph Preview2 in third_party/ideep/mkl-dnn builds both the static & dynamic libraries,
+  but only the static library is being used with PyTorch, so the dynamic library is deleted.
+  oneDNN Preview4 would only generate a static library, so this snippet would be removed then. ]]
+  install(CODE "execute_process(COMMAND echo \"Deleting ${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so\")")
+  install(CODE "execute_process(COMMAND rm \"${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so\")")
+  install(CODE "execute_process(COMMAND echo \"Deleting ${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so.0\")")
+  install(CODE "execute_process(COMMAND rm \"${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so.0\")")
+  install(CODE "execute_process(COMMAND echo \"Deleting ${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so.0.2\")")
+  install(CODE "execute_process(COMMAND rm \"${PROJECT_SOURCE_DIR}/build/lib/libdnnl_graph.so.0.2\")")
+  install(CODE "execute_process(COMMAND echo \"Deleting ${TORCH_SRC_DIR}/lib/libdnnl_graph.so\")")
+  install(CODE "execute_process(COMMAND rm \"${TORCH_SRC_DIR}/lib/libdnnl_graph.so\")")
+  install(CODE "execute_process(COMMAND echo \"Deleting ${TORCH_SRC_DIR}/lib/libdnnl_graph.so.0\")")
+  install(CODE "execute_process(COMMAND rm \"${TORCH_SRC_DIR}/lib/libdnnl_graph.so.0\")")
+  install(CODE "execute_process(COMMAND echo \"Deleting ${TORCH_SRC_DIR}/lib/libdnnl_graph.so.0.2\")")
+  install(CODE "execute_process(COMMAND rm \"${TORCH_SRC_DIR}/lib/libdnnl_graph.so.0.2\")")
+endif()
+
 if(USE_CUDA)
   caffe2_interface_library(torch_cuda torch_cuda_library)
   if(BUILD_SPLIT_CUDA)
