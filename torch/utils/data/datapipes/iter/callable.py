@@ -1,5 +1,5 @@
 import warnings
-from torch.utils.data import IterDataPipe, _utils, functional_datapipe, DataChunk
+from torch.utils.data import IterDataPipe, _utils, functional_datapipe
 from typing import Callable, Dict, Iterator, Optional, Sized, Tuple, TypeVar
 
 try:
@@ -39,9 +39,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             - Key is used for dict. New key is acceptable.
         fn_args: Positional arguments for `fn`
         fn_kwargs: Keyword arguments for `fn`
-        nesting_level: Determines which level the fn gets applied to, by default it applies to the top level (= 0).
-            This also accepts -1 as input to apply the function to the lowest nesting level. It currently doesn't support
-            argument < -1.
     """
     datapipe: IterDataPipe
     fn: Callable
@@ -55,7 +52,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         *,
         fn_args: Optional[Tuple] = None,
         fn_kwargs: Optional[Dict] = None,
-        nesting_level: int = 0,
     ) -> None:
         super().__init__()
         self.datapipe = datapipe
@@ -76,9 +72,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         self.output_col = output_col
         self.args = () if fn_args is None else fn_args
         self.kwargs = {} if fn_kwargs is None else fn_kwargs
-        if nesting_level < -1:
-            raise ValueError("nesting_level must be -1 or >= 0")
-        self.nesting_level = nesting_level
 
     def _apply_fn(self, data):
         if self.input_col is None and self.output_col is None:
@@ -115,33 +108,9 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         # Convert list back to tuple
         return tuple(data) if t_flag else data
 
-    def _apply(self, data, nesting_level):
-        if nesting_level == 0:
-            return self._apply_fn(data)
-        elif nesting_level > 0:
-            if isinstance(data, DataChunk):
-                return type(data)(
-                    [self._apply(i, nesting_level - 1) for i in data.raw_iterator()]
-                )
-            elif isinstance(data, list):
-                return [self._apply(i, nesting_level - 1) for i in data]
-            else:
-                raise IndexError(
-                    f"nesting_level {self.nesting_level} out of range (exceeds data pipe depth)"
-                )
-        else:
-            if isinstance(data, DataChunk):
-                return type(data)(
-                    [self._apply(i, nesting_level) for i in data.raw_iterator()]
-                )
-            elif isinstance(data, list):
-                return [self._apply(i, nesting_level) for i in data]
-            else:
-                return self._apply_fn(data)
-
     def __iter__(self) -> Iterator[T_co]:
         for data in self.datapipe:
-            yield self._apply(data, self.nesting_level)
+            yield self._apply_fn(data)
 
     def __len__(self) -> int:
         if isinstance(self.datapipe, Sized):
@@ -165,7 +134,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             self.output_col,
             self.args,
             self.kwargs,
-            self.nesting_level,
         )
         return state
 
@@ -177,7 +145,6 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
             self.output_col,
             self.args,
             self.kwargs,
-            self.nesting_level,
         ) = state
         if DILL_AVAILABLE:
             self.fn = dill.loads(dill_function)  # type: ignore[assignment]

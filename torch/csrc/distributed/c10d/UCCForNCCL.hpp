@@ -15,7 +15,8 @@ std::shared_ptr<at::DynamicLibrary> loadTorchUCC() {
     try {
       return std::make_shared<at::DynamicLibrary>(path);
     } catch (const c10::DynamicLibraryError &e) {
-      TORCH_WARN("TORCH_UCC_LIBRARY_PATH is set, but the loading of torch_ucc.so failed with:", e.msg());
+      TORCH_WARN("TORCH_UCC_LIBRARY_PATH is set, "
+                 "but the loading of torch_ucc.so failed with:", e.msg());
     }
   }
   return nullptr;

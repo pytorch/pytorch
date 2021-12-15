@@ -9,9 +9,6 @@
 #include <stdexcept>
 #include <tuple>
 #include <unordered_set>
-#include <mutex>
-
-#include <THC/THC.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/DeviceType.h>
@@ -594,14 +591,12 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream
             << "\nNCCL_DEBUG: " << ncclDebugLevel;
 
-
+#ifdef USE_NCCL_WITH_UCC
   static std::once_flag initialize_ucc_lib_flag;
   std::call_once(initialize_ucc_lib_flag, [&]{
-    ucc_lib_ = loadTorchUCC();
-    if (ucc_lib_ != nullptr) {
+    uccLib_ = loadTorchUCC();
+    if (uccLib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so loaded";
-    } else {
-      LOG(INFO) << "[Rank " << rank_  << "] torch_ucc.so failed to load";
     }
   });
 
@@ -623,6 +618,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     ucc_pg_ = c10::intrusive_ptr<ProcessGroup>::unsafe_steal_from_new(raw_ucc_pg);
     LOG(INFO) << "[Rank " << rank_  << "] ProcessGroupUCC created.";
   }
+#endif
 }
 
 void ProcessGroupNCCL::runHealthCheck() {
@@ -2235,11 +2231,13 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::_allgather_base(
       "nccl:_all_gather_base");
 }
 
+#ifdef USE_NCCL_WITH_UCC
+std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::uccLib_ = nullptr;
+
 bool ProcessGroupNCCL::isUCCAvailable() const {
   return (ucc_pg_ != nullptr);
 }
-
-std::shared_ptr<at::DynamicLibrary> ProcessGroupNCCL::ucc_lib_ = nullptr;
+#endif
 
 } // namespace c10d
 
