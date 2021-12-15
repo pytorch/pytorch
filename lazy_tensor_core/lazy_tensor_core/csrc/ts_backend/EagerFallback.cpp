@@ -93,11 +93,16 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 
 void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
                     c10::DeviceType device_type) {
+  
+  auto const static FALLBACK_VERBOSE = std::getenv("LTC_FALLBACK_VERBOSE"); 
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
   const auto arguments_begin = stack->size() - num_arguments;
 
+  if (FALLBACK_VERBOSE) {
+      std::cerr << "triggering fallback on " << op.schema().name() << std::endl;
+  }
   std::vector<at::Tensor> tensor_args;
   std::vector<int> tensor_args_indices;
 

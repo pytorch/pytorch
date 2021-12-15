@@ -17,8 +17,16 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
                         torch::jit::Stack* stack) {
   LTC_FN_TRACK(3);
   const auto name = c10::toString(op.operator_name());
+<<<<<<< HEAD
 
   // Manually applying the TORCH_LAZY_COUNTER macro.
+=======
+  auto const static FALLBACK_VERBOSE = std::getenv("LTC_FALLBACK_VERBOSE"); 
+  if (FALLBACK_VERBOSE) {
+      std::cerr << "triggering fallback on " << op.schema().name() << std::endl;
+  }
+  // Manually applying the LTC_COUNTER macro.
+>>>>>>> a86001c556 (more diag)
   // We need to do it ourselves and explicitly keep a mapping of counters
   // because this boxed fallback kernel is used by multiple operators,
   // and the macro stamps out a static Counter object with a fixed name

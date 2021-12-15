@@ -8,6 +8,7 @@
 #include <torch/library.h>
 
 #include "ATen/MetaFunctions.h"
+#include "c10/core/Scalar.h"
 #include "lazy_tensor_core/csrc/aten_ltc_bridge.h"
 #include "lazy_tensor_core/csrc/function_call_tracker.h"
 #include "lazy_tensor_core/csrc/ops/cat.h"
@@ -19,6 +20,8 @@
 #include "lazy_tensor_core/csrc/ts_backend/aten_autograd_ops_ts.h"
 #include "lazy_tensor_core/csrc/ts_backend/aten_eager_fallback.h"
 #include "lazy_tensors/computation_client/sys_util.h"
+#include "lazy_tensors/computation_client/metrics.h"
+#include "lazy_tensor_core/csrc/ts_backend/backend_impl.h"
 namespace torch_lazy_tensors {
 namespace ir {
 namespace ops {
@@ -725,6 +728,7 @@ at::Tensor LazyNativeFunctions::view(const at::Tensor& self,
   return CreateAtenFromLtcTensor(
       lazy_tensor_aten_ops::view(self_tensor, torch::lazy::ToI64Vector(size)));
 }
+
 
 void InitializeAtenBindings() {}
 

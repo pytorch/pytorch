@@ -13,6 +13,12 @@
 #include "lazy_tensors/computation_client/sys_util.h"
 
 namespace torch_lazy_tensors {
+
+std::unordered_set<int64_t>& GetDestroyedBackendDatas() {
+  static std::unordered_set<int64_t> set_;
+  return set_;
+}
+
 namespace {
 LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
                                 const torch::lazy::BackendDevice& device) {
@@ -27,7 +33,13 @@ LazyTensor GetOrCreateLtcTensor(const at::Tensor& tensor,
 LazyTensor::Data::~Data() { 
   static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
   if (VERBOSE_DATA) {
-    std::cerr << "Destroying " << this->unique_id << std::endl;
+    if (this->handle) {
+      GetDestroyedBackendDatas().insert(this->handle->GetHandle()); 
+    }
+    std::cerr << "Destroying " << this->unique_id << " ptr "
+    << (this->handle ? reinterpret_cast<void*>(this->handle->GetHandle()) : nullptr) 
+    << std::endl;
+    
   }
   LazyGraphExecutor::Get()->UnregisterTensor(this); 
 }
@@ -460,7 +472,7 @@ void LazyTensor::ApplyPendingGraph() {
   if (CurrentDataHandle() == nullptr) {
     std::vector<LazyTensor> tensors({*this});
     LazyGraphExecutor::Get()->SyncTensorsGraph(&tensors, {}, /*wait=*/true,
-                                               /*sync_ltc_data=*/false);
+                                               /*sync_ltc_data=*/true);
   }
 }
 

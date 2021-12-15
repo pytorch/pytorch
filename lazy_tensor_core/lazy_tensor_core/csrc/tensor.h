@@ -8,6 +8,8 @@
 
 namespace torch_lazy_tensors {
 
+std::unordered_set<int64_t>& GetDestroyedBackendDatas();
+
 class LazyTensor {
  public:
   // This is the core lazy tensor data structure where all the tensor data is
@@ -120,6 +122,7 @@ class LazyTensor {
 
   // Applies the queue of operations in preparation for using the data.
   void ApplyPendingGraph();
+  void AssignIrValue(torch::lazy::Value ir_value) const;
 
  private:
   LazyTensor(const at::Tensor& tensor, const torch::lazy::BackendDevice& device);
@@ -135,8 +138,7 @@ class LazyTensor {
 
   std::shared_ptr<Data> data_ptr() const { return data_; }
 
-  void AssignIrValue(torch::lazy::Value ir_value) const;
-
+  
   void SetTensorData(at::Tensor tensor_data);
 
   torch::lazy::Value CreateTensorNode(torch::lazy::BackendDataPtr data,
