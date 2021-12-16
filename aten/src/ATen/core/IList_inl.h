@@ -129,7 +129,7 @@ namespace at {
 // [Note: ITensorList]
 using ITensorList = c10::IList<at::Tensor>;
 using ITensorListIterator = c10::IListIterator<at::Tensor>;
-// [Note: at::OptionalTensorRefRefList]
+// [Note: IOptTensorRefList]
 using IOptTensorRefList = c10::IList<at::OptionalTensorRef>;
 using IOptTensorRefListIterator = c10::IListIterator<at::OptionalTensorRef>;
 
