@@ -136,7 +136,7 @@ void OptimizeGraph(
 }
 
 // remove unused input 0 from graph
-bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
+bool removeSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   if (graph->inputs().at(0)->type()->is_module()) {
     if (graph->inputs().at(0)->hasUses()) {
       return false;
@@ -144,13 +144,6 @@ bool RemoveSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
     graph->eraseInput(0);
   }
   return true;
-}
-
-// remove "self" from function schema
-c10::FunctionSchema RemoveSelfFromSchema(const c10::FunctionSchema& s) {
-  TORCH_CHECK(s.arguments().size() >= 1 && s.arguments()[0].name() == "self");
-  std::vector<Argument> args({s.arguments().begin() + 1, s.arguments().end()});
-  return s.cloneWithArguments(args);
 }
 
 std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
@@ -445,7 +438,8 @@ StaticModule::StaticModule(
     const StaticModuleOptions& opts)
     : opts_(opts),
       graph_(std::move(graph_and_module.first)),
-      module_(std::move(graph_and_module.second)) {
+      module_(std::move(graph_and_module.second)),
+      num_inputs_(graph_->inputs().size()) {
   // check opt flags
   if (opts.manage_output_tensors) {
     TORCH_CHECK(
@@ -461,11 +455,12 @@ StaticModule::StaticModule(
   // handle schema
   if (module_.has_value()) {
     Method method = module_->get_method("forward");
-    if (RemoveSelfFromGraphInput(graph_)) {
-      schema_ = RemoveSelfFromSchema(method.function().getSchema());
+    schema_ = method.function().getSchema();
+    const auto num_schema_args = schema_->arguments().size();
+    DCHECK(num_schema_args > 0);
+    if (removeSelfFromGraphInput(graph_)) {
       module_ = c10::nullopt;
-    } else {
-      schema_ = method.function().getSchema();
+      num_inputs_ = num_schema_args - 1;
     }
   }
 
@@ -697,7 +692,7 @@ size_t StaticModule::num_outputs() const {
 }
 
 size_t StaticModule::num_inputs() const {
-  return graph_->inputs().size();
+  return num_inputs_;
 }
 
 StaticRuntime& StaticModule::runtime() {
@@ -730,6 +725,7 @@ c10::IValue StaticModule::operator()(
 
 StaticRuntime::StaticRuntime(const StaticModule& sm)
     : static_module_(sm),
+      first_input_is_self_(static_module_.first_input_is_self()),
       manage_output_tensors_enabled_(sm.opts().manage_output_tensors),
       nodes_(sm.nodes()) {
   values_.resize(sm.total_num_values());
@@ -751,81 +747,90 @@ StaticRuntime::StaticRuntime(const StaticModule& sm)
 
 StaticRuntime::~StaticRuntime() = default;
 
-void StaticRuntime::set_inputs(
-    const std::vector<IValue>& args,
-    const KeywordArgs& kwargs) {
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> stack;
-    stack.reserve(static_module_.num_inputs());
-    if (static_module_.first_input_is_self()) {
-      stack.emplace_back(static_module_.module()._ivalue());
-    }
-    stack.insert(stack.end(), args.begin(), args.end());
-
-    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(static_module_.num_inputs(), stack.size());
-    for (const auto i : c10::irange(stack.size())) {
-      Input(i) = std::move(stack[i]);
-    }
-  } else {
-    if (static_module_.first_input_is_self()) {
-      Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
-      for (const auto i : c10::irange(args.size())) {
-        Input(i + 1) = args[i];
-      }
-    } else {
-      DCHECK_EQ(static_module_.num_inputs(), args.size());
-      for (const auto i : c10::irange(args.size())) {
-        Input(i) = args[i];
-      }
-    }
-  }
+void StaticRuntime::set_arg(const size_t idx, std::vector<IValue>&& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = std::move(args[idx]);
 }
 
-void StaticRuntime::set_inputs(
-    std::vector<IValue>&& args,
-    const KeywordArgs& kwargs) {
-  if (!kwargs.empty()) {
-    // This is not ideal
-    TORCH_CHECK(
-        static_module_.schema(),
-        "Schema is not available. Consider creating the Static Runtime "
-        "with StaticModule(const torch::jit::Module& m) instead.");
-    std::vector<c10::IValue> stack;
-    stack.reserve(static_module_.num_inputs());
-    if (static_module_.first_input_is_self()) {
-      stack.emplace_back(static_module_.module()._ivalue());
-    }
-    stack.insert(
-        stack.end(),
-        std::make_move_iterator(args.begin()),
-        std::make_move_iterator(args.end()));
+void StaticRuntime::set_arg(const size_t idx, const std::vector<IValue>& args) {
+  DCHECK(idx < args.size());
+  Input(idx + first_input_is_self_) = args[idx];
+}
 
-    static_module_.schema()->checkAndNormalizeInputs(stack, kwargs);
-    DCHECK_EQ(static_module_.num_inputs(), stack.size());
-    for (const auto i : c10::irange(stack.size())) {
-      Input(i) = std::move(stack[i]);
-    }
-  } else {
-    if (static_module_.first_input_is_self()) {
-      Input(0) = static_module_.module()._ivalue();
-      DCHECK_EQ(static_module_.num_inputs(), args.size() + 1);
-      for (const auto i : c10::irange(args.size())) {
-        Input(i + 1) = std::move(args[i]);
-      }
-    } else {
-      DCHECK_EQ(static_module_.num_inputs(), args.size());
-      for (const auto i : c10::irange(args.size())) {
-        Input(i) = std::move(args[i]);
-      }
-    }
+void StaticRuntime::set_arg(const size_t idx, const IValue& arg) {
+  Input(idx + first_input_is_self_) = arg;
+}
+
+namespace {
+void check_type(const Argument& schema_arg, const IValue& arg) {
+  // Fast path for most common case
+  if (arg.isTensor() &&
+      schema_arg.type()->kind() == c10::TypeKind::TensorType) {
+    return;
   }
+  TORCH_CHECK(arg.type()->isSubtypeOf(schema_arg.type()));
+}
+} // namespace
+
+template <typename IValueList>
+void StaticRuntime::set_inputs(
+    IValueList&& args,
+    const std::unordered_map<std::string, c10::IValue>& kwargs) {
+  const auto total_num_inputs =
+      args.size() + kwargs.size() + first_input_is_self_;
+  TORCH_CHECK(total_num_inputs == static_module_.num_inputs());
+
+  const auto& schema = static_module_.schema();
+  if (first_input_is_self_) {
+    Input(0) = static_module_.module()._ivalue();
+  }
+
+  if (C10_UNLIKELY(!schema)) {
+    TORCH_CHECK(
+        kwargs.empty(),
+        "Schema is not available, but StaticRuntime got kwargs. "
+        "Consider creating the Static Runtime instance "
+        "with StaticModule(const torch::jit::Module& m) instead.");
+    for (size_t i = 0; i < args.size(); ++i) {
+      set_arg(i, std::forward<IValueList>(args));
+    }
+    return;
+  }
+
+  const auto& schema_args = schema->arguments();
+  size_t consumed_kwargs = 0;
+  DCHECK(schema_args.size() > 0);
+
+  for (size_t i = 0; i < schema_args.size() - 1; ++i) {
+    // Start at 1 since the schema always contains `self`.
+    const auto& schema_arg = schema_args[i + 1];
+
+    if (i < args.size()) {
+      check_type(schema_arg, args[i]);
+      set_arg(i, std::forward<IValueList>(args));
+      continue;
+    }
+
+    auto it = kwargs.find(schema_arg.name());
+    if (it != kwargs.end()) {
+      check_type(schema_arg, it->second);
+      set_arg(i, it->second);
+      ++consumed_kwargs;
+      continue;
+    }
+
+    auto maybe_default_val = schema_arg.default_value();
+    if (maybe_default_val) {
+      set_arg(i, *maybe_default_val);
+      continue;
+    }
+
+    TORCH_CHECK(
+        false, "Static runtime is missing required kwarg ", schema_arg.name());
+  }
+  TORCH_CHECK(
+      consumed_kwargs == kwargs.size() &&
+      args.size() + consumed_kwargs == schema_args.size() - 1);
 }
 
 void StaticRuntime::create_memory_planner() {
