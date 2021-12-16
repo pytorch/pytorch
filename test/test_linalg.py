@@ -12,7 +12,7 @@ from math import inf, nan, isnan
 import random
 from random import randrange
 from itertools import product
-from functools import reduce, partial
+from functools import reduce, partial, wraps
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -38,6 +38,18 @@ assert torch.get_default_dtype() is torch.float32
 
 if TEST_SCIPY:
     import scipy
+
+def setLinalgBackendsToDefaultFinally(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        finally:
+            # Set linalg backend back to default to make sure potential failures in one test
+            #   doesn't affect other linalg tests
+            torch.backends.cuda.preferred_linalg_library('default')
+    return _fn
+
 
 class TestLinalg(TestCase):
     def setUp(self):
@@ -2926,16 +2938,14 @@ class TestLinalg(TestCase):
                     svd(a, out=(out_u, out_s, out_v))
 
             # if input contains NaN then an error is triggered for svd
-            error_msg = 'The algorithm failed to converge' \
-                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
-                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
+            # When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+            # When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
             a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
             a[0] = float('nan')
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 svd(a)
-            error_msg = r'\(Batch element 1\): The algorithm failed to converge' \
-                        if (self.device_type == 'cpu' or TEST_WITH_ROCM) \
-                        else 'CUSOLVER_STATUS_EXECUTION_FAILED'
+            error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
             a[1, 0, 0] = float('nan')
             with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -5160,6 +5170,9 @@ class TestLinalg(TestCase):
             with self.assertRaisesRegex(RuntimeError, "tensors to be on the same device"):
                 torch.triangular_solve(b, a, out=(out, clone_a))
 
+        # Trigger the WARN_ONCE deprecation error
+        torch.triangular_solve(b, a)
+
         # if out tensor with wrong shape is passed a warning is given
         with warnings.catch_warnings(record=True) as w:
             out = torch.empty(1, dtype=dtype, device=device)
@@ -5168,8 +5181,8 @@ class TestLinalg(TestCase):
             torch.triangular_solve(b, a, out=(out, clone_a))
             # Check warning occurs
             self.assertEqual(len(w), 2)
-            self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-            self.assertTrue("An output with one or more elements was resized" in str(w[-2].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[0].message))
+            self.assertTrue("An output with one or more elements was resized" in str(w[1].message))
 
     def check_single_matmul(self, x, y, shape):
         a = np.array(x, copy=False)
@@ -8319,6 +8332,28 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.tensordot(torch.tensor(0.), torch.tensor(0.), 0)
         an = torch.from_numpy(np.tensordot(np.zeros((), dtype=np.float32), np.zeros((), dtype=np.float32), 0))
         self.assertEqual(a, an)
+
+    @onlyCUDA
+    @skipCUDAIfNoMagma
+    @skipCUDAIfNoCusolver
+    @setLinalgBackendsToDefaultFinally
+    def test_preferred_linalg_library(self):
+        # The main purpose of this test is to make sure these "backend" calls work normally without raising exceptions.
+        x = torch.randint(2, 5, (2, 4, 4), device='cuda', dtype=torch.double)
+
+        torch.backends.cuda.preferred_linalg_library('cusolver')
+        out1 = torch.linalg.inv(x)
+
+        torch.backends.cuda.preferred_linalg_library('magma')
+        out2 = torch.linalg.inv(x)
+
+        torch.backends.cuda.preferred_linalg_library('default')
+        # Although linalg preferred flags doesn't affect CPU currently,
+        # we set this to make sure the flag can switch back to default normally.
+        out_ref = torch.linalg.inv(x.cpu())
+
+        self.assertEqual(out_ref, out1.cpu())
+        self.assertEqual(out1, out2)
 
 
 instantiate_device_type_tests(TestLinalg, globals())
