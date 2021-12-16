@@ -12,9 +12,14 @@
 #include <iostream>
 #include <string>
 
+int main(int argc, char* argv[]) {
+  ::testing::InitGoogleTest(&argc, argv);
+  int rc = RUN_ALL_TESTS();
+  return rc;
+}
+
 void compare_torchpy_jit(const char* model_filename, const char* jit_filename) {
   // Test
-
   torch::deploy::InterpreterManager m(1);
   torch::deploy::Package p = m.loadPackage(model_filename);
   auto model = p.loadPickle("model", "model.pkl");
@@ -478,9 +483,3 @@ TEST(TorchpyTest, TestPyYAML) {
   EXPECT_EQ(kDocument, dump.toIValue().toString()->string());
 }
 #endif
-
-int main(int argc, char* argv[]) {
-  ::testing::InitGoogleTest(&argc, argv);
-  int rc = RUN_ALL_TESTS();
-  return rc;
-}
