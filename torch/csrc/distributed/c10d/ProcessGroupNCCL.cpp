@@ -2159,9 +2159,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
       rank_,                    // rank
       "gather",                 // colName
       tensor.numel(),           // inSize
-      tensor.numel() *          // outSize
-        this->getSize(),        // dType
-      tensor.scalar_type(),
+      tensor.numel() *
+        this->getSize(),        // outSize
+      tensor.scalar_type(),     // dType
       std::vector<int64_t>(),   // inSplitSizes
       std::vector<int64_t>());  // outSplitSize
 
