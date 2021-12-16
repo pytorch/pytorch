@@ -193,8 +193,8 @@ def minimizer(fail_f: fx.GraphModule, inps, module_fails):
     print([i.shape for i in inps])
     return failing_fx, inps
 
-import subprocess
 def check_nvfuser_subprocess(f, inps):
+    import subprocess
     f.to_folder("temp")
     with open("_temp.py", 'w') as fil:
         fil.write(f'''
