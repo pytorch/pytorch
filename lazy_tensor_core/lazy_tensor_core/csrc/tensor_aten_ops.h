@@ -119,9 +119,6 @@ LazyTensor sub(const LazyTensor& input, const at::Scalar& other,
 std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                                                    bool some, bool compute_uv);
 
-LazyTensor tanh_backward(const LazyTensor& grad_output,
-                         const LazyTensor& output);
-
 // Swap given dimensions of the input.
 LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1);
 
