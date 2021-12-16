@@ -189,14 +189,8 @@ Tensor _cdist_backward(const Tensor& grad, const Tensor& _x1, const Tensor& _x2,
     x2 = x2.expand(tensor2_expand_size).contiguous();
   }
 
-  // TORCH_CHECK(x1.is_contiguous(), "_cdist_backward requires X1 to be contiguous");
-  // TORCH_CHECK(x2.is_contiguous(), "_cdist_backward requires X2 to be contiguous");
-  if (!x1.is_contiguous()) {
-    x1 = x1.contiguous();
-  }
-  if (!x2.is_contiguous()) {
-    x2 = x2.contiguous();
-  }
+  x1 = x1.contiguous();
+  x2 = x2.contiguous();
   TORCH_CHECK(cdist.is_contiguous(), "_cdist_backward requires dist to be contiguous");
   TORCH_CHECK(grad.is_contiguous(), "_cdist_backward requires grad to be contiguous");
   int64_t n = x1.size(-2);

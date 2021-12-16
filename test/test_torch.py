@@ -4930,11 +4930,6 @@ else:
             self.assertFalse(y.is_contiguous())
             self.assertEqual(expected, actual)
 
-            # Check that backward pass does not fail on non-contig inputs
-            x.requires_grad_(True)
-            actual = torch.cdist(x, y, p=2, compute_mode=cm)
-            actual.mean().backward()
-
             x = torch.randn(7, 5, device=device)
             y = torch.randn(5, 3, device=device).t()
             actual = torch.cdist(x, y, p=2, compute_mode=cm)
