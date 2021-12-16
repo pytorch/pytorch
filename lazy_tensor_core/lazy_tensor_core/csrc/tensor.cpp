@@ -49,7 +49,7 @@ LazyTensor LazyTensor::Create(const at::Tensor& tensor, const torch::lazy::Backe
   LazyTensor xtensor(tensor, device);
   static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
   if (VERBOSE_DATA) {
-    std::cerr << "LazyTensor::Create: xtensor " << xtensor.GetUniqueId() << " tensor " << tensor.data_ptr() << " size " << (tensor.nbytes()) << std::endl;
+    std::cerr << "LazyTensor::Create: xtensor " << xtensor.GetUniqueId() << " tensor " << tensor.data_ptr() << " size " << (tensor.nbytes()) << " dtype = " << xtensor.dtype() << std::endl;
   }
   LazyGraphExecutor::Get()->RegisterTensor(xtensor.data_ptr());
   return xtensor;
