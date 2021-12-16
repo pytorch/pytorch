@@ -638,7 +638,9 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
-SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_);
+SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+  return mul_out_sparse_dense(r, sparse_, dense);
+}
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
@@ -654,7 +656,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported. Use mul(sparse, dense) instead.");
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
-  if (!src_.is_sparse()) {
+  if (src_.layout() == kStrided) {
     return mul_out_sparse_dense_cpu(r, t_, src_);
   }
   if (src_._nnz() == 0 || t_._nnz() == 0) {
@@ -742,17 +744,13 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
 }
 
 // --------------------------------------------------------------------
-// mul(Tensor, SparseTensor)
+// mul(SparseTensor, Tensor)
 // --------------------------------------------------------------------
 
-SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+SparseTensor& mul_out_sparse_dense(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
   AT_ASSERT(r.is_sparse());
-  AT_ASSERT(!dense.is_sparse());
+  AT_ASSERT(dense.layout() == kStrided);
   AT_ASSERT(sparse_.is_sparse());
-
-  AT_ASSERT(!dense.is_cuda()); // dispatch argument
-  TORCH_CHECK(!r.is_cuda(), "mul: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "mul: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
   TORCH_CHECK(dense.sizes().equals(sparse_.sizes()), "mul: expected 'self' and 'other' to have same size, but self has size ",
     dense.sizes(), " while other has size ", sparse_.sizes(), " (FYI: dense-sparse multiplication does not currently support broadcasting)");
@@ -780,8 +778,7 @@ SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& spar
     indices.push_back(at::indexing::Slice());
   }
 
-  Tensor r_indices = at::empty({sparse_dim, nnz}, sparse_indices.options());
-  r_indices.copy_(sparse_indices);
+  Tensor r_indices = sparse_indices.clone();
   Tensor r_values = dense.index(indices).to(commonDtype).mul_(sparse_values).to(r.scalar_type());
 
   r.resize_as_(sparse);
