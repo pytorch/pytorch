@@ -132,8 +132,7 @@ class IDEEPConvOp : public IDEEPConvPoolOpBase {
     }
 
     if (fusion_type_ == FUSION_CONV_SUM
-        // NOLINTNEXTLINE(clang-diagnostic-tautological-overlap-compare)
-        && fusion_type_ == FUSION_CONV_SUM_RELU) {
+        || fusion_type_ == FUSION_CONV_SUM_RELU) {
       CAFFE_ENFORCE_EQ(Y,  &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
