@@ -118,6 +118,7 @@ def end_node_matches_reversed_fusion(
     end_node: Node,
     reversed_fusion: NSFusionType,
     gm: GraphModule,
+    seen_nodes: Set[Node],
 ) -> bool:
     """
     Returns true if a pattern ending with `end_node` matches
@@ -125,6 +126,10 @@ def end_node_matches_reversed_fusion(
     """
     cur_node = end_node
     for fusion_idx in range(len(reversed_fusion)):
+        # each node can only belong to one matched pattern
+        if cur_node in seen_nodes:
+            return False
+
         cur_fusion_el = reversed_fusion[fusion_idx]
 
         if cur_node.op == 'call_function':

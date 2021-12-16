@@ -10,7 +10,7 @@
 #include <forward_list>
 #include <tuple>
 #include <ATen/ATen.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/autograd/profiler_utils.h>
 #ifndef _WIN32
 #include <ctime>
@@ -395,7 +395,7 @@ struct RangeEventList {
 };
 
 std::string getNvtxStr(
-    const at::StringView& name,
+    const char* name,
     int64_t sequence_nr,
     const std::vector<std::vector<int64_t>>& shapes);
 
@@ -598,3 +598,15 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
 } // namespace profiler
 }} // namespace torch::autograd
+
+// Mirror symbols in new namespace for transition.
+namespace torch {
+namespace profiler {
+namespace impl {
+using torch::autograd::profiler::computeFlops;
+using torch::autograd::profiler::getTime;
+using torch::autograd::profiler::ProfilerConfig;
+using torch::autograd::profiler::ProfilerState;
+} // impl
+} // profiler
+} // torch

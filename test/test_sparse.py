@@ -12,7 +12,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     do_test_empty_full, load_tests, TEST_NUMPY, IS_WINDOWS, gradcheck, coalescedonoff, \
-    DeterministicGuard
+    DeterministicGuard, first_sample
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -1966,17 +1966,14 @@ class TestSparse(TestCase):
         is_integral_dtype = is_integral(sparse_tensor.dtype)
         self.assertEqual(expected_output, sparse_tensor.log1p().to_dense())
         if is_integral_dtype:
-            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got:"):
+            with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
                 sparse_tensor.coalesce().log1p_()
         else:
             self.assertEqual(expected_output, sparse_tensor.coalesce().log1p_().to_dense())
 
-        if not coalesced and not is_integral_dtype:
+        if not coalesced:
             # test in-place op on uncoalesced input
-            with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                sparse_tensor.log1p_()
-        elif not coalesced and is_integral_dtype:
-            with self.assertRaisesRegex(RuntimeError, "log1p: result type cannot be Integral, got"):
+            with self.assertRaisesRegex(RuntimeError, "log1p_ requires coalesced input"):
                 sparse_tensor.log1p_()
 
         if not is_integral_dtype:
@@ -2120,24 +2117,20 @@ class TestSparse(TestCase):
                     op(sparse_tensor, out=sparse_tensor_out)
                     self.assertEqual(expected_output, sparse_tensor_out.to_dense())
                 else:
-                    with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                    with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
                         op(sparse_tensor, out=sparse_tensor_out)
 
         for op in (torch.Tensor.asin_, torch.Tensor.arcsin_):
             if is_integral_dtype:
                 # test coalesce on integral dtype tensor
-                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
                     op(sparse_tensor.clone().coalesce()).to_dense()
             else:
                 self.assertEqual(expected_output, op(sparse_tensor.clone().coalesce()).to_dense())
 
-            if not coalesced and not is_integral_dtype:
+            if not coalesced:
                 # test in-place op on uncoalesced input
-                with self.assertRaisesRegex(RuntimeError, "in-place on uncoalesced tensors is not supported"):
-                    op(sparse_tensor)
-            elif not coalesced:
-                # test in-place op on integral dtype tensor
-                with self.assertRaisesRegex(RuntimeError, "asin: result type cannot be Integral"):
+                with self.assertRaisesRegex(RuntimeError, "asin_ requires coalesced input"):
                     op(sparse_tensor)
 
     @coalescedonoff
@@ -3430,13 +3423,7 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_sparse_consistency(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
-        sample = samples[0]
-
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         assert isinstance(sample.input, torch.Tensor)
 
         expected = op(sample.input, *sample.args, **sample.kwargs)
@@ -3447,15 +3434,10 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_out(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         if not op.supports_out:
             self.skipTest("Skipped! Out not supported")
 
-        sample = samples[0]
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -3466,20 +3448,15 @@ class TestSparseUnaryUfuncs(TestCase):
 
     @_sparse_unary_ops
     def test_inplace(self, device, dtype, op):
-        samples = op.sample_inputs(device, dtype)
-
-        if len(samples) == 0:
-            self.skipTest("Skipped! No sample inputs!")
-
         if op.inplace_variant is None:
             self.skipTest("Skipped! Out not supported")
 
-        sample = samples[0]
+        sample = first_sample(self, op.sample_inputs(device, dtype))
         sample.input = sample.input.to_sparse().coalesce()
         expect = op(sample.input, *sample.args, **sample.kwargs)
 
         if not torch.can_cast(expect.dtype, dtype):
-            with self.assertRaisesRegex(RuntimeError, "result type"):
+            with self.assertRaisesRegex(RuntimeError, "result type .* can't be cast to"):
                 op.inplace_variant(sample.input, *sample.args, **sample.kwargs)
             return
 
