@@ -6,7 +6,6 @@
 #include <cstdarg>
 #include <exception>
 #include <sstream>
-#include <iostream>
 
 #include <torch/csrc/THP.h>
 
@@ -18,12 +17,9 @@ bool THPException_init(PyObject *module)
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
-  std::cout << "START LOAD\n";
   ASSERT_TRUE(THPException_LinAlgError = PyErr_NewException("torch.LinAlgError", nullptr, nullptr));
-  std::cout << "LOAD EXCEPTION\n";
   ASSERT_TRUE(PyModule_AddObject(module, "LinAlgError", THPException_LinAlgError) == 0);
 
-  std::cout << "ADD OBJECT\n";
   return true;
 }
 
