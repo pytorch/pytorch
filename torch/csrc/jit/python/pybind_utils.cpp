@@ -26,6 +26,10 @@ void clear_registered_instances(void* ptr) {
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
+      if (obj.ptr() == Py_None) {
+        // None gets converted to undefined Tensors
+        return autograd::Variable();
+      }
       auto var = py::cast<autograd::Variable>(obj);
       if (var.is_sparse()) {
         TORCH_WARN_ONCE(

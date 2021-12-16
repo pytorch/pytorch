@@ -694,19 +694,39 @@ struct TORCH_API Tuple : c10::intrusive_ptr_target {
       const ivalue::Tuple& rhs);
 
  private:
-  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type = nullptr)
+  // NOTE: If we try to avoid the overloads without
+  // `std::shared_ptr<TupleType> type` by defaulting it to nullptr, we
+  // end up having to call (part of) the shared_ptr destructor for
+  // `type` even though we should know statically it won't do
+  // anything.
+  explicit Tuple(std::vector<IValue> elements)
+    : elements_(std::move(elements)){}
+
+  explicit Tuple(std::vector<IValue> elements, std::shared_ptr<TupleType> type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(TupleElements&& elements)
+    : elements_(std::move(elements)) {}
+
+  explicit Tuple(TupleElements&& elements, std::shared_ptr<TupleType> type)
     : elements_(std::move(elements)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1)
+    : elements_(std::move(e1)) {}
+
+  explicit Tuple(IValue&& e1, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2)
+    : elements_(std::move(e1), std::move(e2)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2)), type_(std::move(type)) {}
 
-  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type = nullptr)
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3)
+    : elements_(std::move(e1), std::move(e2), std::move(e3)) {}
+
+  explicit Tuple(IValue&& e1, IValue&& e2, IValue&& e3, std::shared_ptr<TupleType> type)
     : elements_(std::move(e1), std::move(e2), std::move(e3)), type_(std::move(type)) {}
 
   friend class c10::intrusive_ptr<Tuple>;
@@ -1471,10 +1491,10 @@ using _guarded_unsigned_long = std::conditional_t<
 
 } // namespace detail
 
-inline const ivalue::Object& IValue::toObjectRef() const {
+inline ivalue::Object& IValue::toObjectRef() const {
   AT_ASSERT(isObject(), "Expected Object but got ", tagKind());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(payload.u.as_intrusive_ptr != c10::UndefinedTensorImpl::singleton(), "Attempted to create null reference");
-  return *static_cast<const c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
+  return *static_cast<c10::ivalue::Object*>(payload.u.as_intrusive_ptr);
 }
 
 // note: when adding a DEFINE_TO case here you should also add a
