@@ -598,3 +598,15 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 
 } // namespace profiler
 }} // namespace torch::autograd
+
+// Mirror symbols in new namespace for transition.
+namespace torch {
+namespace profiler {
+namespace impl {
+using torch::autograd::profiler::computeFlops;
+using torch::autograd::profiler::getTime;
+using torch::autograd::profiler::ProfilerConfig;
+using torch::autograd::profiler::ProfilerState;
+} // impl
+} // profiler
+} // torch
