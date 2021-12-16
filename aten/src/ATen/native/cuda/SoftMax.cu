@@ -944,13 +944,26 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
 
 Tensor masked_softmax_cuda(const Tensor& input, const Tensor& mask) {
     TORCH_CHECK(mask.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
-    TORCH_CHECK(mask.is_contiguous(), "Mask should always be contiguous");
     bool is_transformer_mask = (input.dim() == 4 && mask.dim() == 2 && input.size(0) == mask.size(0) && input.size(2) == mask.size(1) && input.size(3) == mask.size(1));
     TORCH_CHECK(mask.sizes() == input.sizes() || is_transformer_mask, "Mask shape should match input");
     // Always do masked softmax on last dim
     int softmax_elements = input.size(input.dim() - 1);
-    TORCH_CHECK(softmax_elements <= 1024, "TODO: Masked softmax only support softmax elements <= 1024");
+    // Persistent softmax only support softmax_elements <= 1024,
+    // Therefore once softmax_elements > 1024, we need to fallback to vanilla masked_softmax
     Tensor output = at::empty_like(input, input.options());
+    // Fallback to a slower masked softmax solution
+    if (softmax_elements > 1024 || softmax_elements * sizeof(input.element_size()) > 4096 || !mask.is_contiguous()) {
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+          ScalarType::Half,
+          ScalarType::BFloat16,
+          input.scalar_type(),
+          "masked_softmax",
+          [&] {
+            Tensor mask_not = mask.logical_not();
+            output = at::softmax(input.masked_fill(mask_not, -std::numeric_limits<scalar_t>::infinity()), -1);
+          });
+        return output;
+    }
     int batch_count = input.numel() / softmax_elements;
     int chunk_size = input.numel() / input.size(0);
     if (is_transformer_mask) {
