@@ -23,8 +23,10 @@ constexpr int MIOPEN_DIM_MAX = 5;
 namespace at { namespace native {
 
 DEFINE_DISPATCH(cudnn_convolution_backward_stub);
-REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
+DEFINE_DISPATCH(cudnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
+REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub, cudnn_convolution_transpose_backward_fn);
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
   out << "ConvParams {"
@@ -1565,12 +1567,16 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     }
     case ConvBackend::CudnnTranspose:
+    {
       check_input_same_type_as_parameters(input, weight);
-      std::tie(backend_grad_input, backend_grad_weight) = at::cudnn_convolution_transpose_backward(
+      std::array<bool, 2> input_weight_output_mask = {output_mask[0], output_mask[1]};
+      std::tie(backend_grad_input, backend_grad_weight) = cudnn_convolution_transpose_backward_stub(
+        input.device().type(),
         input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.output_padding,
         params.stride, params.dilation, params.groups, params.benchmark, params.deterministic, params.allow_tf32,
-        {output_mask[0], output_mask[1]});
+        input_weight_output_mask);
       break;
+    }
     case ConvBackend::Empty:
       if (output_mask[0]) {
         backend_grad_input = at::zeros_like(input);
