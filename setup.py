@@ -409,7 +409,7 @@ def build_deps():
 install_requires = [
     'typing_extensions',
     'dataclasses; python_version < "3.7"',
-    'setuptools',
+    'setuptools>=49',
 ]
 
 missing_pydep = '''
