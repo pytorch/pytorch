@@ -2414,16 +2414,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(Tensor.trace, (x,))
 
-    @skipCUDAIfNoMagma
-    @allowVmapFallbackUsage
-    def test_symeig(self, device):
-        def op(x):
-            return torch.symeig(x, eigenvectors=True)[0]
-
-        x = torch.randn(3, 3, device=device, requires_grad=True)
-        self._batched_grad_test(op, (x,), {})
-        self._batched_grad_grad_test(op, (x,), {})
-
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
