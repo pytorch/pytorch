@@ -105,7 +105,6 @@ jit_core_sources = [
 # list for the shared files.
 
 core_sources_common = [
-    "torch/csrc/autograd/profiler_utils.cpp",
     "torch/csrc/autograd/autograd_meta.cpp",
     "torch/csrc/autograd/forward_grad.cpp",
     "torch/csrc/jit/frontend/edit_distance.cpp",
@@ -122,6 +121,7 @@ core_sources_common = [
     "torch/csrc/jit/mobile/promoted_prim_ops.cpp",
     "torch/csrc/jit/mobile/prim_ops_registery.cpp",
     "torch/csrc/jit/operator_upgraders/upgraders.cpp",
+    "torch/csrc/profiler/util.cpp",
 ]
 
 torch_unpickler_common = [
@@ -977,6 +977,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/PythonModeTLS.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
+    "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/cpu/FlushDenormal.cpp",
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
