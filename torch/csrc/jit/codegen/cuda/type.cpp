@@ -521,6 +521,7 @@ static const char* supported_casts2string(
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
       return "(int64_t)";
+    case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
       return "(int32_t)";

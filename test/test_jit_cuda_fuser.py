@@ -637,6 +637,16 @@ class TestCudaFuser(JitTestCase):
             o = o + z
             return o
 
+        def t_int(x: torch.Tensor, y: torch.Tensor):
+            o = operation(x, y)
+            o = 2 + o
+            return o
+
+        def t_float(x: torch.Tensor, y: torch.Tensor):
+            o = operation(x, y)
+            o = 2. + o
+            return o
+
         shape = (4, 32, 32)
         if random_data:
             x = (torch.randn(shape, dtype=torch.float, device="cuda") * 5).to(dtype_arg1)
@@ -651,14 +661,16 @@ class TestCudaFuser(JitTestCase):
         if operation in div_like and (dtype_arg2 == torch.int32 or dtype_arg2 == torch.int64):
             y[y == 0] = 1
 
-        o = t(x, y, z)
-        t_jit = torch.jit.script(t)
-        jit_o = t_jit(x, y, z)
-        jit_o = t_jit(x, y, z)
+        for test_fn in [t, t_int, t_float]:
+            o = t(x, y, z)
+            t_jit = torch.jit.script(t)
+            jit_o = t_jit(x, y, z)
+            jit_o = t_jit(x, y, z)
+            jit_o = t_jit(x, y, z)
 
-        self.assertEqual(o.dtype, jit_o.dtype)
-        self.assertEqual(o, jit_o)
-        self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
+            self.assertEqual(o.dtype, jit_o.dtype)
+            self.assertEqual(o, jit_o)
+            self.assertGraphContains(t_jit.graph_for(x, y, z), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
