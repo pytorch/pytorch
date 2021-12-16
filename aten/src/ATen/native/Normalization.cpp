@@ -616,14 +616,15 @@ Tensor instance_norm(
       };
       auto input_cont = input.contiguous(memory_format);
       out = at::empty_like(input_cont);
+      auto slice_numel = input[0].numel();
       for (int64_t i = 0; i < b; i++) {
         at::Tensor buffer = at::batch_norm(input_cont.slice(0, i, i+1),
                                            get_batch_if_defined(weight_, i),
                                            get_batch_if_defined(bias_, i),
                                            get_batch_if_defined(running_mean_, i),
                                            get_batch_if_defined(running_var_, i),
-                                           use_input_stats, momentum, eps, cudnn_enabled).squeeze(0);
-        out[i].copy_(buffer, /* non_blocking= */ true);
+                                           use_input_stats, momentum, eps, cudnn_enabled);
+        out[i].as_strided(slice_numel, 1).copy_(buffer.as_strided(slice_numel, 1), /* non_blocking= */ true);
       }
     } break;
     case at::MemoryFormat::Contiguous: {
