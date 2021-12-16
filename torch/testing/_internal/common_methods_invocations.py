@@ -9919,7 +9919,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', device_type='cuda'),
                # (ROCm) Memory exception on virtual address 0x7f6f3deb7000, node id 4: Page not present
                DecorateInfo(unittest.skip("Skipped! ROCm memory exception"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                   device_type='cuda', dtypes=[torch.complex128], active_if=TEST_WITH_ROCM),
+                            device_type='cuda', dtypes=[torch.complex128], active_if=TEST_WITH_ROCM),
            ),
            supports_inplace_autograd=False,
            sample_inputs_func=sample_inputs_gradient),
