@@ -24,7 +24,7 @@ def adagrad(params: List[Tensor],
     See :class:`~torch.optim.Adagrad` for details.
     """
 
-    if foreach and not has_sparse_grad:
+    if foreach and (not torch.jit.is_scripting()) and (not has_sparse_grad):
         multi.multi_tensor_adagrad(params,
                                    grads,
                                    state_sums,
@@ -190,7 +190,7 @@ def adadelta(params: List[Tensor],
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    if foreach:
+    if foreach and not torch.jit.is_scripting():
         multi.multi_tensor_adadelta(params,
                                     grads,
                                     square_avgs,
@@ -306,7 +306,7 @@ def adamax(params: List[Tensor],
     See :class:`~torch.optim.Adamax` for details.
     """
 
-    if foreach:
+    if foreach and not torch.jit.is_scripting():
         multi.multi_tensor_adamax(params,
                                   grads,
                                   exp_avgs,
