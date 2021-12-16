@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_base_nodes.h>
@@ -18,6 +18,8 @@ namespace torch {
 namespace jit {
 namespace fuser {
 namespace cuda {
+
+class ViewTransform;
 
 //! Returns true if both v1 and v2 are scalars, are the same type of scalars,
 //! and dispatches to the inherited Val type's `->sameAs` call. e.g. if both
@@ -390,6 +392,25 @@ class TORCH_CUDA_CU_API GatherOp : public Expr {
   std::vector<std::vector<Int*>> pad_width_;
 };
 
+class TORCH_CUDA_CU_API ViewOp : public Expr {
+ public:
+  ViewOp(TensorView* out, TensorView* in);
+
+  ViewOp(const ViewOp* src, IrCloner* ir_cloner);
+
+  TensorView* out() const {
+    return out_;
+  }
+
+  TensorView* in() const {
+    return in_;
+  }
+
+ private:
+  TensorView* const out_ = nullptr;
+  TensorView* const in_ = nullptr;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;
@@ -441,6 +462,27 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   static IterDomain* merge(IterDomain* outer, IterDomain* inner);
 
+  //! start_offset and stop_offset defines partial split. Only root
+  //! domains are allowed to have non-zero start and stop offsets.
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      Val* start_offset = nullptr,
+      Val* stop_offset = nullptr);
+
+  //! trim_out_of_bounds controls how the values outside start and stop
+  //! positions are treated. The option is only valid with root
+  //! domains as non-root domains do not have valid start and stop
+  //! positions.
+  //!
+  //! \param trim_out_of_bounds Trims [0, start_] and [-stop_offset_, extent_]
+  static std::pair<IterDomain*, IterDomain*> split(
+      IterDomain* in,
+      Val* factor,
+      bool inner_split,
+      bool trim_out_of_bounds);
+
   bool isReduction() const {
     return getIterType() == IterType::Reduction;
   }
@@ -456,6 +498,10 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
 
   bool isGather() const {
     return getIterType() == IterType::Gather;
+  }
+
+  bool isStride() const {
+    return getIterType() == IterType::Stride;
   }
 
   bool isParallelized() const {
@@ -580,31 +626,15 @@ class TORCH_CUDA_CU_API IterDomain : public Val {
     return isReduction() && extent()->isOneInt();
   }
 
+  //! Split for stride by a given factor. It effectively does an inner
+  //! split by the factor and sets the inner domain as a Stride
+  //! domain.
+  std::pair<IterDomain*, IterDomain*> stridedSplit(int factor);
+
  protected:
   friend TensorDomain;
   friend ReplayTransformations;
   friend IndexReferenceReplay;
-
-  //! start_offset and stop_offset defines partial split. Only root
-  //! domains are allowed to have non-zero start and stop offsets.
-  static std::pair<IterDomain*, IterDomain*> split(
-      IterDomain* in,
-      Val* factor,
-      bool inner_split,
-      Val* start_offset = nullptr,
-      Val* stop_offset = nullptr);
-
-  //! trim_out_of_bounds controls how the values outside start and stop
-  //! positions are treated. The option is only valid with root
-  //! domains as non-root domains do not have valid start and stop
-  //! positions.
-  //!
-  //! \param trim_out_of_bounds Trims [0, start_] and [-stop_offset_, extent_]
-  static std::pair<IterDomain*, IterDomain*> split(
-      IterDomain* in,
-      Val* factor,
-      bool inner_split,
-      bool trim_out_of_bounds);
 
  private:
   //! Valid range is defined as [start:-stop_offset]
@@ -751,6 +781,10 @@ class TORCH_CUDA_CU_API TensorDomain : public Val {
 
   // Reorder axes according to map[old_pos] = new_pos
   void reorder(const std::unordered_map<int, int>& old2new);
+
+  // Transform TensorView according to merge and split transformations
+  TensorDomain* view(
+      const std::vector<std::shared_ptr<ViewTransform>>& transforms);
 
   static std::vector<IterDomain*> orderedAs(
       const std::vector<IterDomain*>& td,

@@ -23,6 +23,7 @@ from torch.ao.ns._numeric_suite import (
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
     AnnotatedConvModel,
+    AnnotatedConvTransposeModel,
     AnnotatedSingleLayerLinearModel,
     LSTMwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
@@ -194,8 +195,10 @@ class TestEagerModeNumericSuite(QuantizationTestCase):
                 for i, val in enumerate(v["quantized"]):
                     self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
 
-        model_list = [AnnotatedConvModel(qengine), AnnotatedConvBnReLUModel(qengine)]
-        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d]
+        model_list = [AnnotatedConvModel(qengine),
+                      AnnotatedConvTransposeModel("qnnpack"),  # ConvT cannot use per channel weights
+                      AnnotatedConvBnReLUModel(qengine)]
+        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d, nn.ConvTranspose2d]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
