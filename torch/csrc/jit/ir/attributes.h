@@ -109,6 +109,29 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType value_;
 };
 
+// Don't forget to update the .cpp file if you update this list. (We
+// can't use some kind of
+// TORCH_FOR_EACH_USED_ATTRIBUTE_VALUE_TEMPLATE_INSTANCE macro to make
+// this nicer because the preprocessor thinks the commas in template
+// argument list are separating macro arguments.)
+extern template class ScalarAttributeValue<
+    c10::complex<double>,
+    AttributeKind::c>;
+extern template class VectorAttributeValue<
+    c10::complex<double>,
+    AttributeKind::cs>;
+extern template class ScalarAttributeValue<double, AttributeKind::f>;
+extern template class VectorAttributeValue<double, AttributeKind::fs>;
+extern template class ScalarAttributeValue<int64_t, AttributeKind::i>;
+extern template class VectorAttributeValue<int64_t, AttributeKind::is>;
+extern template class ScalarAttributeValue<std::string, AttributeKind::s>;
+extern template class VectorAttributeValue<std::string, AttributeKind::ss>;
+extern template class ScalarAttributeValue<at::Tensor, AttributeKind::t>;
+extern template class VectorAttributeValue<at::Tensor, AttributeKind::ts>;
+extern template class ScalarAttributeValue<c10::TypePtr, AttributeKind::ty>;
+extern template class VectorAttributeValue<c10::TypePtr, AttributeKind::tys>;
+extern template class ScalarAttributeValue<at::IValue, AttributeKind::ival>;
+
 using ComplexAttr =
     ScalarAttributeValue<c10::complex<double>, AttributeKind::c>;
 using ComplexValsAttr =
