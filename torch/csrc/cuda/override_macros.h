@@ -1,7 +1,6 @@
 #include <torch/csrc/cuda/undef_macros.h>
 
 #define THPStoragePtr THCPStoragePtr
-#define THWTensorPtr THCTensorPtr
 #define THPTensorPtr THCPTensorPtr
 
 #define THWTensor THCTensor
@@ -39,11 +38,4 @@
 #define THSPTensorStateless THCSPTensorStateless
 
 
-#define LIBRARY_STATE_NOARGS state
-#define LIBRARY_STATE state,
-#define LIBRARY_STATE_TYPE THCState*,
-#define LIBRARY_STATE_TYPE_NOARGS THCState*
 #define TH_GENERIC_FILE THC_GENERIC_FILE
-
-#define THHostTensor TH_CONCAT_3(TH,Real,Tensor)
-#define THHostTensor_(NAME) TH_CONCAT_4(TH,Real,Tensor_,NAME)
