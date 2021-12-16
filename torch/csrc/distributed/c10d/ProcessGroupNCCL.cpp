@@ -2157,7 +2157,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   auto tensor = inputTensors.back();
   RECORD_PARAM_COMMS(
       rank_,                    // rank
-      "gather",             // colName
+      "gather",                 // colName
       tensor.numel(),           // inSize
       tensor.numel() *          // outSize
         this->getSize(),        // dType
