@@ -132,7 +132,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   catch (torch::jit::JITException & e) {                                 \
     throw;                                                               \
   }                                                                      \
-  CATCH_ALL_ERRORS(throw py::error_already_set())
+  catch (const std::exception & e) {                                     \
+    torch::translate_exception_to_python(std::current_exception());      \
+    throw py::error_already_set();                                       \
+  }
 
 #define END_HANDLE_TH_ERRORS_RET(retval)                             \
     }                                                                \
@@ -141,7 +144,10 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
       throw;                                                         \
     }                                                                \
   }                                                                  \
-  CATCH_ALL_ERRORS(return retval)
+  catch (const std::exception & e) {                                 \
+    torch::translate_exception_to_python(std::current_exception());  \
+    return retval;                                                   \
+  }
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
@@ -257,6 +263,9 @@ struct python_error : public std::exception {
 bool THPException_init(PyObject *module);
 
 namespace torch {
+
+// Set python current exception from a C++ exception
+TORCH_PYTHON_API void translate_exception_to_python(const std::exception_ptr &);
 
 TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
