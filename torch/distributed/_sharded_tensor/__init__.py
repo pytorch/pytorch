@@ -461,15 +461,14 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # We don't want autograd recording here for the narrow op and
-    # 'local_shard' should be a leaf variable in the autograd graph
-    with torch.no_grad():
-        # Reshape to get shard for this rank.
-        local_shard = tensor.narrow(
-            sharding_spec.dim,  # type: ignore[arg-type]
-            local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-            local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-        ).contiguous()
+    # Reshape to get shard for this rank and we don't want autograd
+    # recording here for the narrow op and 'local_shard' should be a
+    # leaf variable in the autograd graph.
+    local_shard = tensor.narrow(
+        sharding_spec.dim,  # type: ignore[arg-type]
+        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
+    ).clone().detach().contiguous()
 
     # Sync requires_grad to local_shard.
     local_shard.requires_grad = tensor.requires_grad
