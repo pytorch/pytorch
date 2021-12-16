@@ -164,7 +164,7 @@ class TORCH_API PyTorchStreamWriter final {
   std::string padding_;
   std::ofstream file_stream_;
   std::function<size_t(const void*, size_t)> writer_func_;
-  uint64_t version_ = kProducedFileFormatVersion;
+  uint64_t version_ = kMinSupportedFileFormatVersion;
   bool finalized_ = false;
   bool err_seen_ = false;
   friend size_t ostream_write_func(
