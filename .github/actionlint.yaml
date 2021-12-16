@@ -1,5 +1,6 @@
 self-hosted-runner:
   labels:
+    - linux.large
     - linux.2xlarge
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
