@@ -334,7 +334,7 @@ def to_device(tensors, device):
     """
 
     try:
-        import transformers
+        import transformers.modeling_outputs
         if isinstance(tensors, transformers.modeling_outputs.MaskedLMOutput) \
         or isinstance(tensors, transformers.modeling_outputs.Seq2SeqLMOutput):
             # huggingface transformers return classes as model output with many attributes
@@ -452,14 +452,14 @@ def run_tracing_execute_noops(test, lazy_benchmark):
         ltm.mark_step()
     ltm.set_noop_execution_mode(False)
 
-def merge_with_prefix(prefix, out_dir):
+def merge_with_prefix(prefix, tmp_dir, out_dir):
     results = []
-    rfnames = glob.glob(os.path.join(out_dir, prefix + "*"))
+    rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
     print(f"OUTER: rfnames = {rfnames}")
     for rfname in rfnames:
         results.extend(open(rfname).readlines()[1:]) #skip headr
     print(f"OUTER: results = {results}")
-    with open(prefix + "acc.csv", "w") as acc_csv:
+    with open(os.path.join(out_dir, prefix + "acc.csv"), "w") as acc_csv:
         acc_csv.write(",".join(("dev", "name", "overhead", "pvalue")) + "\n")
         for l in results:
             acc_csv.write(l)
@@ -553,10 +553,16 @@ if __name__ == "__main__" :
         exit(0)
 
     import subprocess
+    import tempfile
+    dirpath = tempfile.mkdtemp()
     for model_name in iter_models(args):
         # if `--run_in_subprocess` is specified, it will override any filters and excludes
         # pass the rest of arguments intact such as device, test, repeat, etc
-        launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}'"
+        # note, the latest output_dir will override the original one and this is exactly what we want
+        # for child processes
+        launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
+
+        print (f"OUTER: Launching {launch_command}")
 
         env = os.environ
         env["LTC_TS_CUDA"] = "1"
@@ -566,5 +572,5 @@ if __name__ == "__main__" :
                     shell=True,
                     stderr=subprocess.STDOUT)
 
-    merge_with_prefix("lazy_overheads_", args.output_dir)
-    merge_with_prefix("lazy_compute_", args.output_dir)
+    merge_with_prefix("lazy_overheads_", dirpath, args.output_dir)
+    merge_with_prefix("lazy_compute_", dirpath, args.output_dir)
