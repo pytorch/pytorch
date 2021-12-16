@@ -16842,7 +16842,7 @@ TEST_F(NVFuserTest, FusionForceBf16Simple_CUDA) {
     TORCH_CHECK(edge_tv->getDataType() == DataType::BFloat16);
   }
 #else
-  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit;
+  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit";
 #endif
 }
 
@@ -16950,7 +16950,7 @@ TEST_F(NVFuserTest, FusionForceBf16NotAllCast_CUDA) {
     }
   }
 #else
-  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit;
+  GTEST_SKIP() << "requires cuda 11.0 or newer toolkit";
 #endif
 }
 
