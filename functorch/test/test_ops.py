@@ -459,7 +459,6 @@ class TestOperators(TestCase):
         xfail('masked_scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
-        xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
         xfail('prod'),
         xfail('put'),
@@ -481,7 +480,6 @@ class TestOperators(TestCase):
         xfail('_masked.prod'), # calls aten::item
         xfail('stft'),
         xfail('nn.functional.glu'),
-
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
@@ -489,9 +487,6 @@ class TestOperators(TestCase):
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestOperators', 'test_vmapvjp', vmapvjp_fail)
     def test_vmapvjp(self, device, dtype, op):
-        # These are too annoying to put into the list above
-        if op.name in {'nn.functional.linear'}:
-            self.skipTest("Skipped! ExpectedF failures")
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
             return
@@ -741,7 +736,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.conv_transpose2d'),
         xfail('nn.functional.gelu'),
         xfail('nn.functional.pad', 'circular'),
-        xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
         xfail('pinverse'),
         xfail('prod'),
@@ -794,7 +788,7 @@ class TestOperators(TestCase):
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         # These are too annoying to put into the list above
-        if op.name in {'nn.functional.linear', 'nn.functional.conv2d'}:
+        if op.name in {'nn.functional.conv2d'}:
             self.skipTest("Skipped! ExpectedF failures")
         if not op.supports_autograd:
             self.skipTest("Skipped! Autograd not supported.")
