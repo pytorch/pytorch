@@ -888,14 +888,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def_static("get", &BoolType::get);
   py::class_<StringType, Type, StringTypePtr>(m, "StringType")
       .def_static("get", &StringType::get);
-  py::class_<DeviceObjType, Type, DeviceObjTypePtr>(
-      m, "DeviceObjType")
+  py::class_<DeviceObjType, Type, DeviceObjTypePtr>(m, "DeviceObjType")
       .def_static("get", &DeviceObjType::get);
-  py::class_<StreamObjType, Type, StreamObjTypePtr>(
-      m, "StreamObjType")
+  py::class_<StreamObjType, Type, StreamObjTypePtr>(m, "StreamObjType")
       .def_static("get", &StreamObjType::get);
-  py::class_<PyObjectType, Type, PyObjectTypePtr>(
-      m, "PyObjectType")
+  py::class_<PyObjectType, Type, PyObjectTypePtr>(m, "PyObjectType")
       .def_static("get", &PyObjectType::get);
   py::class_<NoneType, Type, NoneTypePtr>(m, "NoneType")
       .def_static("get", &NoneType::get);
@@ -931,8 +928,7 @@ void initPythonIRBindings(PyObject* module_) {
       }))
       .def("getKeyType", &DictType::getKeyType)
       .def("getValueType", &DictType::getValueType);
-  py::class_<OptionalType, Type, OptionalTypePtr>(
-      m, "OptionalType")
+  py::class_<OptionalType, Type, OptionalTypePtr>(m, "OptionalType")
       .def(py::init(
           [](TypePtr a) { return OptionalType::create(std::move(a)); }))
       .def_static("ofTensor", &OptionalType::ofTensor)
@@ -970,8 +966,7 @@ void initPythonIRBindings(PyObject* module_) {
             std::move(names_values),
             get_python_cu());
       }));
-  py::class_<InterfaceType, Type, InterfaceTypePtr>(
-      m, "InterfaceType")
+  py::class_<InterfaceType, Type, InterfaceTypePtr>(m, "InterfaceType")
       .def(py::init([](const std::string& qualified_name) {
         return get_python_cu()->get_interface(
             c10::QualifiedName(qualified_name));
