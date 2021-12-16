@@ -133,6 +133,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/monitor/counters.cpp",
+    "torch/csrc/monitor/events.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -378,10 +379,15 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/ir_dump_util.cpp",
     "torch/csrc/lazy/core/ir_metadata.cpp",
     "torch/csrc/lazy/core/ir_util.cpp",
+    "torch/csrc/lazy/core/lazy_graph_executor.cpp",
     "torch/csrc/lazy/core/lazy_view.cpp",
+    "torch/csrc/lazy/core/metrics.cpp",
+    "torch/csrc/lazy/core/multi_wait.cpp",
     "torch/csrc/lazy/core/permutation_util.cpp",
     "torch/csrc/lazy/core/shape.cpp",
+    "torch/csrc/lazy/core/tensor.cpp",
     "torch/csrc/lazy/core/tensor_util.cpp",
+    "torch/csrc/lazy/core/thread_pool.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided.cpp",
     "torch/csrc/lazy/core/view_ops/as_strided_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/diagonal.cpp",
@@ -394,6 +400,12 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/cast.cpp",
+    "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
+    "torch/csrc/lazy/ts_backend/ops/expand.cpp",
+    "torch/csrc/lazy/ts_backend/ops/generic.cpp",
+    "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
@@ -512,6 +524,7 @@ torch_mobile_core = [
     "torch/csrc/jit/mobile/observer.cpp",
     "torch/csrc/jit/mobile/parse_bytecode.cpp",
     "torch/csrc/jit/mobile/parse_operators.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/runtime/register_prim_ops.cpp",
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ]
@@ -563,6 +576,7 @@ libtorch_extra_sources = libtorch_core_jit_sources + [
     "torch/csrc/jit/mobile/train/optim/sgd.cpp",
     "torch/csrc/jit/mobile/train/random.cpp",
     "torch/csrc/jit/mobile/train/sequential.cpp",
+    "torch/csrc/jit/mobile/upgrader_mobile.cpp",
     "torch/csrc/jit/serialization/onnx.cpp",
     "torch/csrc/jit/serialization/export.cpp",
     "torch/csrc/jit/serialization/export_bytecode.cpp",
