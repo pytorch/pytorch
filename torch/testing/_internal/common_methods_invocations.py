@@ -9958,11 +9958,7 @@ op_db: List[OpInfo] = [
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
-           supports_inplace_autograd=False,
-           skips=(
-               # https://github.com/pytorch/pytorch/issues/67512
-               DecorateInfo(unittest.skip("67512"), 'TestCommon', 'test_noncontiguous_samples'),
-           )),
+           supports_inplace_autograd=False),
     OpInfo('linalg.det',
            op=torch.linalg.det,
            variant_test_name='singular',
@@ -9974,8 +9970,6 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack, skipCUDAIfRocm],
            supports_inplace_autograd=False,
            skips=(
-               # https://github.com/pytorch/pytorch/issues/67512
-               DecorateInfo(unittest.skip("67512"), 'TestCommon', 'test_noncontiguous_samples'),
                # Will be removed once https://github.com/pytorch/pytorch/issues/62328 is fixed
                # Probable fix (open PR): https://github.com/pytorch/pytorch/pull/62570
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cuda',
