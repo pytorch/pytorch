@@ -1,5 +1,5 @@
+#include <ATen/CUDAFunctions.h>
 #include <ATen/native/cuda/IndexKernel.h>
-#include <ATen/native/TensorAdvancedIndexing.h>  // For at::native::index_out
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/MemoryOverlap.h>
@@ -28,7 +28,7 @@ static Tensor & masked_select_out_cuda_impl(Tensor & result, const Tensor & self
   // owning and expand_outplace returns a borrow, the returned borrow
   // would dangle.
   auto mask_self_expanded = expand_outplace(*mask_temp, *self_temp);
-  at::native::index_out(
+  at::cuda::index_out(
       result, *std::get<1>(mask_self_expanded),
       c10::List<c10::optional<at::Tensor>>({*std::move(std::get<0>(mask_self_expanded))}));
 
