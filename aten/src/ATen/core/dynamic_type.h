@@ -55,11 +55,9 @@ using DynamicTypePtr = std::shared_ptr<DynamicType>;
  * the same process, however this doesn't hold for mobile devices where we
  * always compiles a model ahead of time, therefore there will be dependencies
  * which are not needed, but built with mobile runtime causing binary size
- * bloat, by design. Why linkers don't strip unused deps? It is because the
- * existing (server) JIT types are defined by overriding virtual functions from
- * the JIT base type, which makes controlling the binary size for mobile even
- * harder because linkers have to include all possible overrides for a single
- * callsite.
+ * bloat, by design. Every basic type like Int, Bool or String will bring their
+ * vtable, typeinfo, constructor, destructor and even more data from their
+ * specializations for STL types to the binary causing a long tail bloat.
  *
  * The core problem is about the complexity to implement and maintain a single
  * type system for both analysis and execution purposes. Although they should

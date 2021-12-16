@@ -167,7 +167,8 @@ class Linear(torch.nn.Module):
         assert type(mod) == cls._FLOAT_MODULE, cls._get_name() + \
             '.from_float only works for ' + cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'sparse_params'), \
-            'Expecting the Linear to have `sparse_params`.'
+            ('Expecting the Linear to have `sparse_params`. Make sure you have provided arguments '
+             'in the `sparsifier.squash_mask(params_to_save=("sparse_block_shape",))` method.')
         sparse_block_shape = mod.sparse_params.get('sparse_block_shape', None)
         assert isinstance(sparse_block_shape, (tuple, list))
         assert len(sparse_block_shape) == 2
