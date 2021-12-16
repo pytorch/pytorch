@@ -86,7 +86,7 @@ class SingletonOrSharedTypePtr {
   SingletonOrSharedTypePtr& operator=(SingletonOrSharedTypePtr&&) noexcept = default;
 
   T* get() const {
-    return repr_.isSharedAndNonNull() ? repr_.shared_.get() : static_cast<T*>(repr_.rawRepr().first);
+    return repr_.isSharedAndNonNull() ? repr_.shared_.repr_.get() : static_cast<T*>(repr_.rawRepr().first);
   }
 
   operator bool() const {
@@ -111,6 +111,13 @@ class SingletonOrSharedTypePtr {
   }
 
  private:
+  // NOTE: SharedPtrWrapper exists to work around a baffling bug in
+  // nvcc; see comment in destroy() below.
+  struct SharedPtrWrapper {
+    SharedPtrWrapper(std::shared_ptr<T> &&x)
+        : repr_(x) {}
+    std::shared_ptr<T> repr_;
+  };
   union Repr {
     Repr() : Repr(nullptr) {}
 
@@ -132,7 +139,7 @@ class SingletonOrSharedTypePtr {
     // union member is active for null pointers.
     Repr(const Repr& rhs) {
       if (rhs.isSharedAndNonNull()) {
-        new (&shared_) std::shared_ptr<T>(rhs.shared_);
+        new (&shared_) SharedPtrWrapper(rhs.shared_);
       } else {
         singleton_ = static_cast<T*>(rhs.rawRepr().first);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
@@ -142,7 +149,7 @@ class SingletonOrSharedTypePtr {
 
     Repr(Repr&& rhs) noexcept {
       if (rhs.isSharedAndNonNull()) {
-        new (&shared_) std::shared_ptr<T>(std::move(rhs.shared_));
+        new (&shared_) SharedPtrWrapper(std::move(rhs.shared_));
       } else {
         singleton_ = static_cast<T*>(rhs.rawRepr().first);
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
@@ -158,7 +165,7 @@ class SingletonOrSharedTypePtr {
         if (isSharedAndNonNull()) {
           shared_ = rhs.shared_;
         } else {
-          new (&shared_) std::shared_ptr<T>(rhs.shared_);
+          new (&shared_) SharedPtrWrapper(rhs.shared_);
         }
       } else {
         if (isSharedAndNonNull()) {
@@ -179,7 +186,7 @@ class SingletonOrSharedTypePtr {
         if (isSharedAndNonNull()) {
           shared_ = std::move(rhs.shared_);
         } else {
-          new (&shared_) std::shared_ptr<T>(std::move(rhs.shared_));
+          new (&shared_) SharedPtrWrapper(std::move(rhs.shared_));
         }
       } else {
         if (isSharedAndNonNull()) {
@@ -192,7 +199,7 @@ class SingletonOrSharedTypePtr {
       return *this;
     }
 
-    std::shared_ptr<T> shared_;
+    SharedPtrWrapper shared_;
 
     struct {
       T* singleton_;
@@ -226,7 +233,12 @@ class SingletonOrSharedTypePtr {
    private:
     void destroy() {
       if (isSharedAndNonNull()) {
-        shared_.~shared_ptr();
+        // Without SharedPtrWrapper, this line would read
+        // `shared_.~shared_ptr()` and nvcc would complain with
+        // "error: expected primary-expression before '>' token"
+        // referring to the "t" in "shared_ptr". SharedPtrWrapper
+        // exists to work around this compiler bug.
+        shared_.~SharedPtrWrapper();
       }
     }
   } repr_;
