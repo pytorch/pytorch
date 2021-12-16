@@ -86,10 +86,7 @@ class Wishart(ExponentialFamily):
             warnings.warn("Low df values detected. Singular samples are highly likely occured for ndim - 1 < df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
-        if self._batch_shape:
-            self._reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
-        else:
-            self._reduced_batch_dims = None
+        self._reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
@@ -118,10 +115,7 @@ class Wishart(ExponentialFamily):
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
         new.df = self.df.expand(df_shape)
 
-        if batch_shape:
-            new._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
-        else:
-            new._reduced_batch_dims = None
+        new._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
