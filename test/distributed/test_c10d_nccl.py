@@ -548,11 +548,11 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         output = [torch.tensor([0]).cuda(i) for i in local_device_ids]
 
-        #           0                   1                   2
-        #   0   [0..11]             [1..12]
-        #   1   [3..14]
-        #   2
-        #   3
+        #  GPU/rank
+        #   0         [1], [2], [3], [4]
+        #   1         [2], [3], [4], [5]
+        #   2         [3], [4], [5], [6]
+        #   3         [4], [5], [6], [7]
 
         # Sum
         tensor_lists = []
@@ -596,13 +596,49 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # Product
         reduce_scatter(output, tensor_lists, c10d.ReduceOp.PRODUCT)
 
+        # math pakcage don't have math.perm until python 3.8, so
+        # we implement a naive version here.
+        def perm(n, k):
+            prod_val = n
+            for val in range(n - k + 1, n):
+                prod_val *= val
+            return prod_val
+
         for i in range(num_gpus):
-            prod_val = self.rank + 1
-            for _ in range(self.world_size - 1):
-                prod_val = prod_val * (prod_val + 1)
+            prod_val = perm(self.rank + self.world_size, self.world_size)
+
             expected = torch.tensor([prod_val])
             # TODO(#38095): Replace assertEqualIgnoreType. See issue #38095
             self.assertEqualIgnoreType(expected, output[i])
+
+        # Test the input params overridden scenarios, aka, when the input is
+        # a list and output is just one tensor.
+        # Sum
+        output_tensor = torch.empty_like(input_per_gpu[0][0]).cuda(self.rank)
+        input_list = [tensor[0].cuda(self.rank) for tensor in input_per_gpu]
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.SUM).wait()
+        expected = torch.tensor(
+            float((1 + self.world_size) * self.world_size / 2) + self.world_size * self.rank
+        )
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Min
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MIN).wait()
+        expected = torch.tensor(self.rank + 1)
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Max
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.MAX).wait()
+        expected = torch.tensor(self.rank + self.world_size)
+        self.assertEqualIgnoreType(expected, output_tensor)
+
+        # Product
+        pg.reduce_scatter(output_tensor, input_list, c10d.ReduceOp.PRODUCT).wait()
+        prod_val = self.rank + 1
+        for k in range(1, self.world_size):
+            prod_val = prod_val * (self.rank + 1 + k)
+        expected = torch.tensor(prod_val)
+        self.assertEqualIgnoreType(expected, output_tensor)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -2051,6 +2087,9 @@ class DistributedDataParallelTest(
     # Most of the tests are referred to
     # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
     class CheckpointOnceModule(nn.Module):
+        """
+        Runs checkpoint for a single layer in the model.
+        """
         def __init__(self):
             super().__init__()
             self.l1 = nn.Linear(20, 20)
@@ -2062,8 +2101,27 @@ class DistributedDataParallelTest(
             return x
 
     class CheckpointTwiceModule(CheckpointOnceModule):
+        """
+        Runs checkpoint for the same layer twice in a model. This simulates use
+        cases such as pipeline parallel where the same layer can be checkpointed
+        more than one time.
+        """
         def __init__(self):
             super().__init__()
+
+        def forward(self, inp):
+            x = self.l1(inp)
+            x = checkpoint(self.l2, x)
+            x = checkpoint(self.l2, x)
+            return x
+
+    class CheckpointTwiceModuleWeightSharing(CheckpointTwiceModule):
+        """
+        Similar to CheckpointTwiceModule but the weights are shared.
+        """
+        def __init__(self):
+            super().__init__()
+            self.l1.weight = self.l2.weight
 
         def forward(self, inp):
             x = self.l1(inp)
@@ -2099,7 +2157,7 @@ class DistributedDataParallelTest(
         static_graph=False,
         run_checkpoint=False,
     ):
-        # to reprodce the same training results
+        # to reproduce the same training results
         torch.cuda.set_device(self.rank)
         torch.manual_seed(31415)
         model = copy.deepcopy(input_model).cuda()
@@ -2131,7 +2189,8 @@ class DistributedDataParallelTest(
                 self.assertTrue(j.grad is not None)
                 self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
 
-    # DDP works as expect when layer is checkpointed only once
+    # DDP works as expect when layer is checkpointed only once,
+    # when find_unused_parameters=False.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_once(self):
@@ -2144,8 +2203,19 @@ class DistributedDataParallelTest(
                 use_bucket_view=use_bucket_view,
                 static_graph=static_graph,
             )
+            if static_graph:
+                # find_unused_parameters does not make a difference, since it is
+                # ignored for static graph.
+                self._test_ddp_checkpointing(
+                    self.CheckpointOnceModule(),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=static_graph,
+                    find_unused_parameters=True,
+                )
 
-    # DDP will fail when there are unused_parameters in the model
+    # DDP will fail when there are unused_parameters in the model and we are not
+    # using static graph training.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_unused_params(self):
@@ -2161,34 +2231,45 @@ class DistributedDataParallelTest(
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     find_unused_parameters=True,
-                    static_graph=False,
                 )
-            # test passes when static_graph is true
-            model = self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                find_unused_parameters=True,
-                static_graph=True,
-            )
 
-    # DDP will fail when the same layer is checkponted twice
+    # DDP will fail when the same layer is checkpointed twice, for both settings
+    # of find_unused_parameters, and non-static graph.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_twice(self):
+    def test_ddp_checkpointing_twice_non_static_graph(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         for use_bucket_view in (True, False):
-            with self.assertRaisesRegex(
+            error_ctx = self.assertRaisesRegex(
                 RuntimeError,
                 "Expected to mark a variable ready only once.",
-            ):
+            )
+
+            with error_ctx:
                 model = self._test_ddp_checkpointing(
                     self.CheckpointTwiceModule(),
                     process_group=process_group,
                     use_bucket_view=use_bucket_view,
                     static_graph=False,
                 )
+
+            with error_ctx:
+                model = self._test_ddp_checkpointing(
+                    self.CheckpointTwiceModule(),
+                    process_group=process_group,
+                    use_bucket_view=use_bucket_view,
+                    static_graph=False,
+                    find_unused_parameters=True,
+                )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpointing_twice_static_graph(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        for use_bucket_view in (True, False):
+            # Test passes when static_graph=True.
             model = self._test_ddp_checkpointing(
                 self.CheckpointTwiceModule(),
                 process_group=process_group,
@@ -2196,7 +2277,8 @@ class DistributedDataParallelTest(
                 static_graph=True,
             )
 
-    # DDP works as expected if there is weight sharing among layers
+    # DDP works as expected if there is weight sharing among layers and we
+    # checkpoint once.
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     def test_ddp_checkpointing_weight_sharing(self):
@@ -2216,6 +2298,24 @@ class DistributedDataParallelTest(
                 static_graph=static_graph,
                 run_checkpoint=True,
             )
+
+    # Checkpointing should work with static graph
+    # in the case of checkpointing same layer twice and
+    # having weights shared across layers.
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_checkpoint_twice_weight_sharing(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        torch.cuda.set_device(self.rank)
+        for use_bucket_view in (True, False):
+            model = self._test_ddp_checkpointing(
+                self.CheckpointTwiceModuleWeightSharing(),
+                process_group=process_group,
+                use_bucket_view=use_bucket_view,
+                static_graph=True,
+            )
+
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
