@@ -5,8 +5,9 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/zeros.h>
+#include <ATen/ops/_has_same_storage_numel.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace torch {
@@ -92,6 +93,9 @@ namespace {
       if (base.strides()[i] != other.strides()[i] && base.sizes()[i] != 1) {
         return false;
       }
+    }
+    if (!at::_has_same_storage_numel(base, other)) {
+      return false;
     }
     return true;
   }
