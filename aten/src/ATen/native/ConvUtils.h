@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/env.h>
