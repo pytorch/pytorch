@@ -1,4 +1,5 @@
 #include <torch/csrc/monitor/counters.h>
+#include <torch/csrc/monitor/events.h>
 
 #include <sstream>
 #include <unordered_set>
@@ -12,6 +13,8 @@ const char* aggregationName(Aggregation agg) {
       return "none";
     case VALUE:
       return "value";
+    case MEAN:
+      return "mean";
     case COUNT:
       return "count";
     case SUM:
@@ -61,40 +64,6 @@ void unregisterStat(Stat<int64_t>* stat) {
   stats().int64s.erase(stat);
 }
 } // namespace detail
-
-template <typename T>
-void closeAndGetStat(Stat<T>* s, std::unordered_map<std::string, T>& m) {
-  s->closeWindow();
-  auto out = s->get();
-  for (auto& kv : out) {
-    std::stringstream key;
-    key << s->name();
-    key << ".";
-    key << aggregationName(kv.first);
-    m[key.str()] = kv.second;
-  }
-}
-
-std::pair<
-    std::unordered_map<std::string, double>,
-    std::unordered_map<std::string, int64_t>>
-closeAndGetStats() noexcept {
-  std::pair<
-      std::unordered_map<std::string, double>,
-      std::unordered_map<std::string, int64_t>>
-      out;
-
-  std::lock_guard<std::mutex> guard(stats().mu);
-
-  for (auto* s : stats().doubles) {
-    closeAndGetStat(s, out.first);
-  }
-  for (auto* s : stats().int64s) {
-    closeAndGetStat(s, out.second);
-  }
-
-  return out;
-}
 
 } // namespace monitor
 } // namespace torch

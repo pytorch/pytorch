@@ -243,10 +243,10 @@ struct TORCH_API Type {
           : shared_(std::move(x)) {}
 
       explicit Repr(std::nullptr_t)
-          : singleton_(nullptr), unused_(nullptr) {}
+          : singletonRepr_(nullptr) {}
 
       explicit Repr(SingletonTypePtr<T> p)
-          : singleton_(p.get()), unused_(nullptr) {}
+          : singletonRepr_(p.get()) {}
 
       ~Repr() {
         destroy();
@@ -259,9 +259,9 @@ struct TORCH_API Type {
         if (rhs.isSharedAndNonNull()) {
           new (&shared_) SharedPtrWrapper(rhs.shared_);
         } else {
-          singleton_ = static_cast<T*>(rhs.rawRepr().first);
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
-          unused_ = nullptr;
+          singletonRepr_.singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.singletonRepr_.unused_ == nullptr);
+          singletonRepr_.unused_ = nullptr;
         }
       }
 
@@ -269,9 +269,9 @@ struct TORCH_API Type {
         if (rhs.isSharedAndNonNull()) {
           new (&shared_) SharedPtrWrapper(std::move(rhs.shared_));
         } else {
-          singleton_ = static_cast<T*>(rhs.rawRepr().first);
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
-          unused_ = nullptr;
+          singletonRepr_.singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.singletonRepr_.unused_ == nullptr);
+          singletonRepr_.unused_ = nullptr;
         }
       }
 
@@ -289,9 +289,9 @@ struct TORCH_API Type {
           if (isSharedAndNonNull()) {
             destroy();
           }
-          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          singletonRepr_.singleton_ = static_cast<T*>(rhs.rawRepr().first);
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.rawRepr().nullIfSingleton_ == nullptr);
-          unused_ = nullptr;
+          singletonRepr_.unused_ = nullptr;
         }
         return *this;
       }
@@ -310,19 +310,20 @@ struct TORCH_API Type {
           if (isSharedAndNonNull()) {
             destroy();
           }
-          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          singletonRepr_.singleton_ = static_cast<T*>(rhs.rawRepr().first);
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.rawRepr().nullIfSingleton_ == nullptr);
-          unused_ = nullptr;
+          singletonRepr_.unused_ = nullptr;
         }
         return *this;
       }
 
       SharedPtrWrapper shared_;
 
-      struct {
+      struct SingletonRepr {
+        explicit SingletonRepr(T* s) : singleton_(s) {}
         T* singleton_;
-        void* unused_;
-      };
+        void* unused_ = nullptr;
+      } singletonRepr_;
       struct RawRepr {
         void* first;
         void* nullIfSingleton_;
