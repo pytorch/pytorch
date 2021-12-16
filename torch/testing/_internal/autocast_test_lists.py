@@ -111,7 +111,6 @@ class AutocastTestLists(object):
             ("matmul", mat0_fp32 + mat1_fp32),
             ("mm", mat0_fp32 + mat1_fp32),
             ("mv", mat0_fp32 + pointwise0_fp32),
-            ("chain_matmul", mat0_fp32 + mat1_fp32 + mat2_fp32),
             ("addbmm", mat0_fp32 + (torch.randn((n, n, n), device=dev, dtype=torch.float32),
                                     torch.randn((n, n, n), device=dev, dtype=torch.float32))),
             ("baddbmm", (torch.randn((n, n, n), device=dev, dtype=torch.float32),
