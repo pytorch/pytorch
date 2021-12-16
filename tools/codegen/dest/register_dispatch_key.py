@@ -23,6 +23,27 @@ import tools.codegen.api.structured as structured
 from tools.codegen.api.translate import translate
 from tools.codegen.selective_build.selector import SelectiveBuilder
 
+def gen_registration_headers(
+        backend_index: BackendIndex,
+        per_operator_headers: bool,
+) -> List[str]:
+    use_native_empty = backend_index.dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA)
+
+    if not per_operator_headers:
+        return [
+            "#include <ATen/Functions.h>",
+            "#include <ATen/NativeFunctions.h>"]
+
+    headers = ["#include <ATen/ops/as_strided_native.h>"]
+    if use_native_empty:
+        headers += [
+            "#include <ATen/ops/empty_native.h>",
+            "#include <ATen/ops/empty_strided_native.h>"]
+    else:
+        headers += [
+            "#include <ATen/ops/empty.h>",
+            "#include <ATen/ops/empty_strided.h>"]
+    return headers
 
 def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if backend_index.dispatch_key == DispatchKey.Meta:
@@ -339,8 +360,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 args_exprs_str = ', '.join(a.name for a in args)
 
                 device_check = '  // No device check\n'
-                # Backends that require device guards presumably also require device checks.
-                if self.backend_index.device_guard:
+                if is_cuda_dispatch_key(self.backend_index.dispatch_key):
                     device_check_args = itertools.chain(
                         f.func.arguments.out,
                         f.func.arguments.flat_positional
@@ -348,16 +368,12 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                     device_check = RegisterDispatchKey.gen_device_check(f.device_check, list(device_check_args), name)
 
                 device_guard = "// DeviceGuard omitted"  # default
-                if f.device_guard and self.backend_index.device_guard:
+                if f.device_guard and is_cuda_dispatch_key(self.backend_index.dispatch_key):
                     has_tensor_options = any(isinstance(a.argument, TensorOptionsArguments) for a in args)
                     if has_tensor_options:
                         # kernel is creating a tensor
-                        device_guard = """
+                        device_guard = """globalContext().lazyInitCUDA();
   const DeviceGuard device_guard(device_or_default(device));"""
-
-                        # CUDA requires special handling
-                        if is_cuda_dispatch_key(self.backend_index.dispatch_key):
-                            device_guard = f"globalContext().lazyInitCUDA();\n{device_guard}"
                     else:
                         # kernel is operating on existing tensors
 
@@ -588,7 +604,7 @@ return {sig.name()}({', '.join(e.expr for e in translate(cpp_sig.arguments(), si
                 class_name = f"structured_{metadata.kernel}_{k.name}"
                 parent_class = f"{self.cpp_namespace}::structured_{metadata.kernel}"
 
-            if self.backend_index.device_guard:
+            if is_cuda_dispatch_key(self.backend_index.dispatch_key):
                 device_check_args = itertools.chain(
                     f.func.arguments.out,
                     f.func.arguments.flat_positional
