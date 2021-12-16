@@ -20,9 +20,7 @@
 
 namespace at {
 
-Context::Context()
-    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
-      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
+Context::Context() = default;
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
@@ -145,6 +143,21 @@ bool Context::allowTF32CuBLAS() const {
 
 void Context::setAllowTF32CuBLAS(bool b) {
   allow_tf32_cublas = b;
+}
+
+at::LinalgBackend Context::linalgPreferredBackend() const {
+  return linalg_preferred_backend;
+}
+
+void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
+  linalg_preferred_backend = b;
+  if (b != at::LinalgBackend::Default) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_linalg_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {

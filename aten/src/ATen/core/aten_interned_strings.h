@@ -42,7 +42,6 @@ _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
 _(aten, convolution_overrideable) \
 _(aten, convolution_backward_overrideable) \
-_(aten, _convolution_nogroup) \
 _(aten, _copy_ignoring_overlaps) \
 _(aten, _cos) \
 _(aten, _cosh) \
@@ -272,15 +271,7 @@ _(aten, cudnn_affine_grid_generator_backward) \
 _(aten, cudnn_batch_norm) \
 _(aten, cudnn_batch_norm_backward) \
 _(aten, cudnn_convolution) \
-_(aten, cudnn_convolution_backward) \
-_(aten, cudnn_convolution_backward_bias) \
-_(aten, cudnn_convolution_backward_input) \
-_(aten, cudnn_convolution_backward_weight) \
 _(aten, cudnn_convolution_transpose) \
-_(aten, cudnn_convolution_transpose_backward) \
-_(aten, cudnn_convolution_transpose_backward_bias) \
-_(aten, cudnn_convolution_transpose_backward_input) \
-_(aten, cudnn_convolution_transpose_backward_weight) \
 _(aten, cudnn_convolution_relu) \
 _(aten, cudnn_convolution_add_relu) \
 _(aten, cudnn_grid_sampler) \
@@ -522,6 +513,8 @@ _(aten, narrow) \
 _(aten, narrow_copy) \
 _(aten, native_batch_norm) \
 _(aten, native_batch_norm_backward) \
+_(aten, native_dropout) \
+_(aten, native_dropout_backward) \
 _(aten, native_layer_norm) \
 _(aten, native_layer_norm_backward) \
 _(aten, native_clone) \
