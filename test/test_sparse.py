@@ -3339,20 +3339,21 @@ class TestSparse(TestCase):
         self.assertRaises(TypeError, assign_to)
 
     def test_sparse_dense_mul(self, device):
-        s = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
-        t23 = s.to_dense()
-        t0 = torch.tensor(2.0, device=device)
-        d = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=device)
+        s_ = torch.sparse_coo_tensor([[0], [1]], [5.0], (2, 3), device=device)
+        for s in [s_, s_.to_dense().to_sparse(1)]:
+            t23 = s.to_dense()
+            t0 = torch.tensor(2.0, device=device)
+            d = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], device=device)
 
-        r = s * 2.0
-        r2 = s * d
-        r3 = t23 * d
+            r = s * 2.0
+            r2 = s * d
+            r3 = t23 * d
 
-        self.assertEqual(r, 2.0 * s)
-        self.assertEqual(r, t0 * s)
-        self.assertEqual(r, s * t0)
-        self.assertEqual(r2.to_dense(), r3)
-        self.assertEqual(r2, s * d)
+            self.assertEqual(r, 2.0 * s)
+            self.assertEqual(r, t0 * s)
+            self.assertEqual(r, s * t0)
+            self.assertEqual(r2.to_dense(), r3)
+            self.assertEqual(r2, s * d)
 
 
 class TestSparseOneOff(TestCase):
