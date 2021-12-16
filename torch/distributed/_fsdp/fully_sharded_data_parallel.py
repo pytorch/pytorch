@@ -191,6 +191,8 @@ class FullyShardedDataParallel(nn.Module):
 
         # Flag to guard against preparing gradients multiple times per backward pass.
         self._pre_backward_hook_has_run = False
+        # Used for prefetching all gather full params in post backward hook
+        self._need_rebuild_full_params = False
 
         # If specified, offload parameter shard to CPU.
         if self.cpu_offload.offload_params:
@@ -616,6 +618,7 @@ class FullyShardedDataParallel(nn.Module):
         def _register_hook(t: torch.Tensor) -> torch.Tensor:
             if t.requires_grad:
                 t.register_hook(_pre_backward_hook)
+                self._need_rebuild_full_params = True
             return t
 
         # Attach hooks to Tensor outputs.
@@ -709,10 +712,14 @@ class FullyShardedDataParallel(nn.Module):
         self._use_param_local_shard([param])
 
         # Prefetch previous layer's full params in backward pass
+        # If next layer's backward computation is done and full params are freed,
+        # no need to prefetch the full params again.
+        # Only prefetch full params if any of the next layer's outputs requires grad
         if (
             self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None and self._my_fsdp_idx_in_graph > 0
             and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1].training_state != TrainingState_.BACKWARD_POST
+            and self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._need_rebuild_full_params
         ):
             self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
 
