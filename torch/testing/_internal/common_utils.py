@@ -1421,7 +1421,9 @@ class RelaxedNumberPair(NumberPair):
         complex: torch.complex64,
     }
 
-    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters) -> None:
+    def __init__(
+            self, actual, expected, *, rtol_override=0.0, atol_override=0.0, check_dtype=None, **other_parameters
+    ) -> None:
         super().__init__(actual, expected, check_dtype=False, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
