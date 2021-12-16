@@ -344,7 +344,7 @@ def _get_analytical_jacobian_forward_ad(fn, inputs, outputs, *, check_grad_dtype
                 dual_outputs = filter(_is_float_or_complex_tensor, raw_outputs)
                 for index_o, d_o in enumerate(dual_outputs):
                     val, res = fwAD.unpack_dual(d_o)
-                    if check_grad_dtypes and val.is_complex() != res.is_complex():
+                    if check_grad_dtypes and res is not None and val.is_complex() != res.is_complex():
                         raise GradcheckError('Forward AD gradient has dtype mismatch.')
 
                     # Remove extra dimension of size 1 corresponding to the reduced input
@@ -1446,6 +1446,8 @@ def gradgradcheck(
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
     check_batched_grad: bool = False,
+    check_fwd_over_rev: bool = False,
+    check_rev_over_rev: bool = True,
     fast_mode: bool = False,
 ) -> bool:
     r"""Check gradients of gradients computed via small finite differences
@@ -1501,6 +1503,15 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
+    assert check_fwd_over_rev or check_rev_over_rev, \
+        "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+    assert not (check_undefined_grad and not check_rev_over_rev), \
+        "Setting check_undefined_grad=True requires check_rev_over_rev to be True"
+    assert not (check_batched_grad and not check_rev_over_rev), (
+        "Setting check_batched_grad=True requires check_rev_over_rev to be True")
+    # TODO: do we want to test this too?
+    # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
+    #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
     tupled_inputs = _as_tuple(inputs)
 
     if grad_outputs is None:
@@ -1533,4 +1544,5 @@ def gradgradcheck(
     return gradcheck(
         new_func, tupled_inputs + tupled_grad_outputs, eps=eps, atol=atol, rtol=rtol, raise_exception=raise_exception,
         nondet_tol=nondet_tol, check_undefined_grad=check_undefined_grad,
-        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode)
+        check_grad_dtypes=check_grad_dtypes, check_batched_grad=check_batched_grad, fast_mode=fast_mode,
+        check_forward_ad=check_fwd_over_rev, check_backward_ad=check_rev_over_rev)
