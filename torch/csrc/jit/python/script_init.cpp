@@ -1021,6 +1021,7 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
   py::class_<UpgraderEntry>(m, "_UpgraderEntry")
+      .def(py::init<int, std::string, std::string>())
       .def_property_readonly(
           "bumped_at_version",
           [](const UpgraderEntry& self) { return self.bumped_at_version; })
@@ -1742,6 +1743,8 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
+  m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,

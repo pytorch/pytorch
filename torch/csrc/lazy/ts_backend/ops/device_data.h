@@ -8,7 +8,7 @@ namespace lazy {
 
 class TORCH_API DeviceData : public TsNode {
  public:
-  DeviceData(std::shared_ptr<BackendData> data);
+  explicit DeviceData(std::shared_ptr<BackendData> data);
 
   std::string ToString() const override;
 
