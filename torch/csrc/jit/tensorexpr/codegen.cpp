@@ -126,15 +126,22 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
                                           BufPtr b1, BufPtr b2) -> bool {
     return std::get<1>(buf_ranges.at(b1)) < std::get<1>(buf_ranges.at(b2));
   };
-  std::vector<BufPtr> buf_to_release;
   for (auto buf : bufs_sorted) {
+    // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
+    // it, and there are no future reuses on its memory).
+    // TODO: reuse memory for bufs with dynamic shapes
+    if (!bufSize(buf)) {
+      buf_allocs.emplace_back(std::make_pair(buf, buf));
+      continue;
+    }
+
     auto start = std::get<0>(buf_ranges.at(buf));
     auto end = std::get<1>(buf_ranges.at(buf));
 
     // Release memory for buffers whose liveness range ends before the creation
     // time of this buf.
     // TODO: optimize in-place opererations and copy operations
-    buf_to_release.clear();
+    std::vector<BufPtr> buf_to_release;
     for (auto& mapped : buf_mem_map) {
       auto buf_mapped = mapped.first;
       auto end_buf_mapped = std::get<1>(buf_ranges.at(buf_mapped));
@@ -152,14 +159,6 @@ std::vector<std::pair<BufPtr, BufPtr>> AllocBufsWithMemReuse(
     for (auto& buf_rl : buf_to_release) {
       mem_up_for_grabs.push_front(buf_mem_map.at(buf_rl));
       buf_mem_map.erase(buf_rl);
-    }
-
-    // If the buf has dynamic shapes, we'll skip it (i.e., allocate memory for
-    // it, and there are no future reuses on its memory).
-    // TODO: reuse memory for bufs with dynamic shapes
-    if (!bufSize(buf)) {
-      buf_allocs.emplace_back(std::make_pair(buf, buf));
-      continue;
     }
 
     bool allocated = false;
