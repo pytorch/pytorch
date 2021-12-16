@@ -2271,7 +2271,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   if (getRank() == opts.rootRank) {
     if (inputTensors.size() != 1) {
       std::stringstream ss;
-      ss << "requires a single-element output list containing a list with "
+      ss << "requires a single-element input list containing a list with "
          << getSize() << " tensors.";
       invalidArgument(ss.str());
     } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
@@ -2291,7 +2291,7 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
   } else {
     // if not in the root rank, initialize inputFlattened as empty place holder
     if (inputTensors.size() != 0) {
-      invalidArgument("requires empty output on non-root");
+      invalidArgument("requires empty input on non-root");
     }
 
     for(int i = 0; i < outputTensors.size(); ++ i) {

@@ -753,23 +753,6 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             opts.rootRank = 0
             pg.scatter([], scatter_list, opts)
 
-        with self.assertRaisesRegex(
-            RuntimeError, "Incorrect input list size"
-        ):
-            # init input
-            scatter_list2 = []
-            for idx in range(num_gpus):
-                gpu_idx = local_device_ids[idx]
-                scatter_list2.append([])
-                for rank in range(self.world_size):
-                    scatter_list2[idx].append(torch.tensor([rank]).cuda(gpu_idx))
-                    scatter_list2[idx].append(torch.tensor([rank]).cuda(gpu_idx))
-
-            opts = c10d.ScatterOptions()
-            opts.rootRank = 0
-            pg.scatter(tensors, scatter_list2, opts)
-
-
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
     def test_reduce_scatter_base_basics(self):
