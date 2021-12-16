@@ -13209,6 +13209,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_flatten,
            skips=(
                # File "pytorch/torch/testing/_internal/common_jit.py", line 306, in test_type
