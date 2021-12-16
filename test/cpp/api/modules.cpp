@@ -1404,7 +1404,6 @@ TEST_F(ModulesTest, Dropout2d) {
     ASSERT_EQ(y.size(2), 2);
     ASSERT_EQ(y.size(3), 2);
     ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
-    ASSERT_TRUE((x.std() <= y.std()).all().item<bool>());
 
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
@@ -1435,7 +1434,6 @@ TEST_F(ModulesTest, Dropout3d) {
     ASSERT_EQ(y.size(3), 2);
     ASSERT_EQ(y.size(4), 2);
     ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
-    ASSERT_TRUE((x.std() <= y.std()).all().item<bool>());
 
     if (inplace) {
       ASSERT_TRUE(y.allclose(x));
