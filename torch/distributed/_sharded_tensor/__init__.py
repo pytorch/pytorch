@@ -14,7 +14,7 @@ from torch.distributed._sharding_spec._internals import (
 from typing import List
 
 from .api import (
-    _register_custom_sharded_op,
+    _register_sharded_op,
     CreateOp,
     Shard,
     ShardMetadata,
@@ -513,10 +513,10 @@ def shard_parameter(
     # Now we can set the attribute appropriately.
     setattr(module, param_name, st)
 
-def custom_sharded_op(op):
+def sharded_op_impl(func):
     """
     Provides a way for users to write their own custom sharded operator. This
-    can be used to override existing ShardedTensor operatorss or write a new
+    can be used to override existing ShardedTensor operators or write a new
     one not supported by ShardedTensor. If the operator in question is covered
     by ``__torch_function__`` dispatch and has a ShardedTensor as any of its
     parameters, the function provided will be invoked for that operator.
@@ -538,12 +538,19 @@ def custom_sharded_op(op):
     There is an additional ``process_group`` parameter which is the
     process_group used for the ShardedTensor and can be used by
     implementations for communications within a sharded implementation.
-    """
-    def decorator_custom_sharded_op(func):
-        _register_custom_sharded_op(op, func)
 
-        @functools.wraps(func)
+    Args:
+        func(Callable): Torch function for which we want to provide a sharded
+            implementation (ex: torch.nn.functional.linear)
+    """
+    def decorator_sharded_func(wrapped_func):
+        _register_sharded_op(func, wrapped_func)
+
+        @functools.wraps(wrapped_func)
         def wrapper(*args, **kwargs):
-            return func(*args, **kwargs)
+            return wrapped_func(*args, **kwargs)
         return wrapper
-    return decorator_custom_sharded_op
+    return decorator_sharded_func
+
+# Import all builtin sharded ops
+from .ops import *  # noqa

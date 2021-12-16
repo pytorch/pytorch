@@ -10,7 +10,7 @@ import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import _sharded_tensor
 from torch.distributed._sharded_tensor import (
-    custom_sharded_op,
+    sharded_op_impl,
     load_with_process_group,
     pre_load_state_dict_hook,
     shard_parameter,
@@ -2129,7 +2129,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @custom_sharded_op(torch.asin)
+        @sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2154,7 +2154,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
         t = torch.rand(10, 10).cuda(self.rank)
 
-        @custom_sharded_op(torch.nn.functional.linear)
+        @sharded_op_impl(torch.nn.functional.linear)
         def my_sharded_linear(types, args, kwargs, process_group):
             return t
 
@@ -2179,12 +2179,12 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @custom_sharded_op(torch.nn.functional.linear)
+            @sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @custom_sharded_op(torch.nn.functional.linear)
+            @sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 
