@@ -57,30 +57,30 @@ bool propWithNoDevice(Node* n) {
 
   for (Value* inp : n->inputs()) {
     auto tensor_type = inp->type()->cast<TensorType>();
-    if (tensor_type) {
+    if (!tensor_type) {
+      continue;
+    }
 
-      bool tensor_is_zerodim =
-          tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
-      bool is_cpu_zerodim =
-          tensor_type->device()->is_cpu() && tensor_is_zerodim;
+    bool tensor_is_zerodim =
+        tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
+    bool is_cpu_zerodim = tensor_type->device()->is_cpu() && tensor_is_zerodim;
 
-      if (seen_any_device) {
-        auto cur_device = tensor_type->device().value();
+    if (seen_any_device) {
+      auto cur_device = tensor_type->device().value();
 
-        if (device != cur_device && !is_cpu_zerodim) {
-          if (only_seen_cpu_zerodim) {
-            device = tensor_type->device();
-            only_seen_cpu_zerodim = false;
-          } else {
-            // Bail on the type not match case
-            return setReturnsToDevice(n, c10::nullopt);
-          }
+      if (device != cur_device && !is_cpu_zerodim) {
+        if (only_seen_cpu_zerodim) {
+          device = tensor_type->device();
+          only_seen_cpu_zerodim = false;
+        } else {
+          // Bail on the type not match case
+          return setReturnsToDevice(n, c10::nullopt);
         }
-      } else {
-        seen_any_device = true;
-        only_seen_cpu_zerodim = is_cpu_zerodim;
-        device = tensor_type->device();
       }
+    } else {
+      seen_any_device = true;
+      only_seen_cpu_zerodim = is_cpu_zerodim;
+      device = tensor_type->device();
     }
   }
   return setReturnsToDevice(n, device);
