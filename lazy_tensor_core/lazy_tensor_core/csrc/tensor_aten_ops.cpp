@@ -452,18 +452,6 @@ std::tuple<LazyTensor, LazyTensor, LazyTensor> svd(const LazyTensor& input,
                          LazyTensor::Create(torch::lazy::Value(node, 2), input.GetDevice()));
 }
 
-LazyTensor tanh_backward(const LazyTensor& grad_output,
-                         const LazyTensor& output) {
-  // Shape stays the same since pow is a unary op
-  std::vector<torch::lazy::Shape> shapes{output.shape().Get()};
-  torch::lazy::NodePtr pow_node =
-      torch::lazy::MakeNode<ir::ops::PowTensorScalar>(output.GetIrValue(), 
-                                                      LazyGraphExecutor::Get()->GetIrValueForScalar(2, output.GetDevice()),
-                                                      std::move(shapes));
-  return mul(grad_output,
-             rsub(LazyTensor::Create(pow_node, output.GetDevice()), 1, 1));
-}
-
 LazyTensor transpose(const LazyTensor& input, int64_t dim0, int64_t dim1) {
   auto input_shape = input.shape();
   auto permute_dims = torch::lazy::MakeTransposePermutation(

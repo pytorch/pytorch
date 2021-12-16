@@ -683,13 +683,6 @@ at::Tensor& LazyNativeFunctions::t_(at::Tensor& self) {
   return self;
 }
 
-at::Tensor LazyNativeFunctions::tanh_backward(const at::Tensor& grad_output,
-                                              const at::Tensor& output) {
-  TORCH_LAZY_FN_COUNTER("lazy::");
-  return CreateAtenFromLtcTensor(lazy_tensor_aten_ops::tanh_backward(
-      TryGetLtcTensor(grad_output), TryGetLtcTensor(output)));
-}
-
 at::Tensor LazyNativeFunctions::transpose(const at::Tensor& self, int64_t dim0,
                                           int64_t dim1) {
   TORCH_LAZY_FN_COUNTER("lazy::");

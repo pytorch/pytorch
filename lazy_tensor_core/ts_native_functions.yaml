@@ -80,6 +80,7 @@ full_codegen:
   - sum
   - sum.dim_IntList
   - tanh
+  - tanh_backward
   - threshold
   - threshold_backward
   - topk
@@ -131,6 +132,5 @@ supported:
   - sub.Scalar
   - view
   - alias
-  - tanh_backward
 autograd:
   - max_pool3d
