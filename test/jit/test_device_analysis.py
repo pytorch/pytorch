@@ -48,15 +48,16 @@ class TestDeviceAnalysis(JitTestCase):
 
         torch._C._jit_pass_propagate_device(graph)
 
-    def assert_device_equal(self, fn, in_devices, expected_device, in_shapes=None):
-        with self.subTest(f"In device: {in_devices}, expected: {expected_device}"):
+    def assert_device_equal(self, fn, in_devices, expected_device, in_shapes=None, subtest_str=""):
+        with self.subTest(f"In device: {in_devices}, expected: {expected_device}, \n {subtest_str}"):
             graph = torch.jit.script(fn).graph
-            print(graph)
-
             self.prop_device_on_graph(graph, in_devices, in_shapes)
             actual_device = self.node_output_device(graph)
 
-            self.assertEqual(actual_device, expected_device, "Failed Verification")
+            if expected_device is None or actual_device is None:
+                self.assertEqual(actual_device, expected_device)
+            else:
+                self.assertEqual(actual_device.type, expected_device.type, "Failed Verification")
 
     def test_device_apply(self):
         # Test if the device is properly applied to the input
@@ -113,21 +114,19 @@ class TestDeviceAnalysis(JitTestCase):
         ]
 
         for fn, shapes, devices in product(fns, input_shapes, device_pairs):
-            with self.subTest(
-                f"{fn.__name__} \n shapes: {shapes}, \n devices: {devices}"
-            ):
-                in0 = torch.rand(shapes[0], device=devices[0])
-                in1 = torch.rand(shapes[1], device=devices[1])
+            subtest_str = f"{fn.__name__} \n shapes: {shapes}, \n devices: {devices}"
+            in0 = torch.rand(shapes[0], device=devices[0])
+            in1 = torch.rand(shapes[1], device=devices[1])
 
-                try:
-                    out = fn(in0, in1)
-                except Exception as e:
-                    if devices[0] == devices[1]:
-                        raise e
-                    else:
-                        continue  # Ignore eager failures on different devices
+            try:
+                out = fn(in0, in1)
+            except Exception as e:
+                if devices[0] == devices[1]:
+                    raise e
+                else:
+                    continue  # Ignore eager failures on different devices
 
-                self.assert_device_equal(fn, devices, out.device, shapes)
+            self.assert_device_equal(fn, devices, out.device, shapes, subtest_str)
 
     def test_zerodim_cpu(self):
         # Allow for minimal testing locally
