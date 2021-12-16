@@ -476,9 +476,6 @@ _(aten, miopen_batch_norm_backward) \
 _(aten, miopen_convolution) \
 _(aten, miopen_convolution_transpose) \
 _(aten, miopen_depthwise_convolution) \
-_(aten, miopen_depthwise_convolution_backward) \
-_(aten, miopen_depthwise_convolution_backward_input) \
-_(aten, miopen_depthwise_convolution_backward_weight) \
 _(aten, miopen_rnn) \
 _(aten, miopen_rnn_backward) \
 _(aten, mish) \
