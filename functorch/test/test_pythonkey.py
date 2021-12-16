@@ -19,6 +19,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
     skipCUDAIfNoMagma, onlyCPU
 import types
 from functools import partial, wraps
+import copy
 
 import functorch
 from functorch import (
@@ -27,7 +28,7 @@ from functorch import (
 )
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
-    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, decomposition_table
+    partition_with_recompute_fwd_in_bwd, pythonkey_decompose, decomposition_table, aot_function, aot_module
 )
 
 from torch.testing._internal.common_device_type import ops, onlyCPU
@@ -257,42 +258,68 @@ def _nop_compile(x, _):
 
 def _outs_and_grads(fn, inps):
     outs = fn(*inps)
-    [out.sum().backward(retain_graph=True) for out in outs]
-    grads = [inp.grad for inp in inps]
-    for inp in inps:
+    [out.sum().backward(retain_graph=True) for out in pytree.tree_flatten(outs)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    for inp in pytree.tree_flatten(inps)[0]:
         inp.grad = None
     return outs, grads
 
-class TestEagerFusion(TestCase):
-    def test_single_output(self):
-        def f(a, b):
-            return a + b
-        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
-        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+
+
+class TestAOTAutograd(TestCase):
+    def verify_aot_autograd(self, f, inp):
+        if isinstance(f, nn.Module):
+            compiled_f = aot_module(f, _nop_compile, _nop_compile)
+        else:
+            compiled_f = aot_function(f, _nop_compile, _nop_compile)
         ref_out, ref_grad = _outs_and_grads(f, inp)
         test_out, test_grad = _outs_and_grads(compiled_f, inp)
         self.assertEqual(ref_out, test_out)
         self.assertEqual(ref_grad, test_grad)
+
+    def test_single_output(self):
+        def f(a, b):
+            return a + b
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        self.verify_aot_autograd(f, inp)
 
     def test_multi_output(self):
         def f(a, b):
             return a + b, a - b
-        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
-        ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, inp)
-        self.assertEqual(ref_out, test_out)
-        self.assertEqual(ref_grad, test_grad)
+        self.verify_aot_autograd(f, inp)
 
     def test_multi_output_list(self):
         def f(a, b):
             return [a + b, a - b]
-        compiled_f = compiled_function(f, _nop_compile, _nop_compile)
         inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
-        ref_out, ref_grad = _outs_and_grads(f, inp)
-        test_out, test_grad = _outs_and_grads(compiled_f, inp)
-        self.assertEqual(ref_out, test_out)
-        self.assertEqual(ref_grad, test_grad)
+        self.verify_aot_autograd(f, inp)
+
+    def test_multi_output_list(self):
+        def f(a, b):
+            return [a + b, a - b]
+        inp = [torch.randn(3, 3, requires_grad=True), torch.randn(3, 3)]
+        self.verify_aot_autograd(f, inp)
+
+    def test_output_dict(self):
+        def f(x):
+            return {'a': x, 'b': x}
+        inp = [torch.randn(3, 3, requires_grad=True)]
+        self.verify_aot_autograd(f, inp)
+
+        def f(x, y):
+            return {'a': x, 'b': y + x}
+        inp = [torch.randn(3, requires_grad=True), torch.randn(3)]
+        self.verify_aot_autograd(f, inp)
+        
+        def f(x):
+            new_d = {}
+            for k in x:
+                new_d[k] = x[k] * 2
+            return new_d
+        inp = [{'a': torch.randn(3, requires_grad=True), 'b': torch.randn(3, requires_grad=True)}]
+        self.verify_aot_autograd(f, inp)
+
 
     def test_module(self):
         mod = nn.Sequential(nn.Linear(32, 32), nn.ReLU())
