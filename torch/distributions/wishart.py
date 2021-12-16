@@ -19,10 +19,7 @@ class Wishart(ExponentialFamily):
     r"""
     Creates a Wishart distribution parameterized by a symmetric positive definite matrix :math:`\Sigma`,
     or its Cholesky decomposition :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`
-    The Wishart distribution can be parameterized either in terms of
-    an outer product of general square root matrix
-    :math:`\mathbf{\Sigma} = \mathbf{P}\mathbf{D}\mathbf{P}^\top = \mathbf{P'}\mathbf{P'}^\top`
-    can be obtained via Cholesky decomposition of the covariance.
+
     Example:
         >>> m = Wishart(torch.eye(2), torch.Tensor([2]))
         >>> m.sample()  #Wishart distributed with mean=`df * I` and
@@ -89,6 +86,10 @@ class Wishart(ExponentialFamily):
             warnings.warn("Low df values detected. Singular samples are highly likely occured for ndim - 1 < df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        if self._batch_shape:
+            self._reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
+        else:
+            self._reduced_batch_dims = None
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
@@ -116,6 +117,11 @@ class Wishart(ExponentialFamily):
         df_shape = batch_shape
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
         new.df = self.df.expand(df_shape)
+
+        if batch_shape:
+            new._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
+        else:
+            new._reduced_batch_dims = None
 
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
@@ -172,7 +178,7 @@ class Wishart(ExponentialFamily):
         diag_V = V.diagonal(dim1=-2, dim2=-1)
         return self.df.view(self._batch_shape + (1, 1,)) * (V.pow(2) + torch.einsum("...i,...j->...ij", diag_V, diag_V))
 
-    def _barttlet_sampling(self, sample_shape=torch.Size()):
+    def _bartlett_sampling(self, sample_shape=torch.Size()):
         p = self._event_shape[-1]  # has singleton shape
 
         # Implemented Sampling using Bartlett decomposition
@@ -186,31 +192,35 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size()):
+    def rsample(self, sample_shape=torch.Size(), max_try=10):
         sample_shape = torch.Size(sample_shape)
-        sample = self._barttlet_sampling(sample_shape)
+        sample = self._bartlett_sampling(sample_shape)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample).logical_not()
-        if len(self._batch_shape):
-            reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
-            is_singular = is_singular.amax(reduced_batch_dims)
+        if self._batch_shape:
+            is_singular = is_singular.amax(self._reduced_batch_dims)
 
         if is_singular.any():
             warnings.warn("Singular sample detected.")
-            sample = sample[is_singular.logical_not()]
 
-            while is_singular.any():
-                new_sample = self._barttlet_sampling(is_singular[is_singular].shape)
+            for _ in range(max_try):
+                if sample_shape or not is_singular.all():
+                    new_sample = self._bartlett_sampling(is_singular[is_singular].shape)
+                    sample = torch.cat(
+                        (sample[is_singular.logical_not()], new_sample[is_singular.logical_not()]),
+                        dim=-(len(self._batch_shape) + 3)
+                    )
+                else:
+                    new_sample = self._bartlett_sampling(sample_shape)
+                    sample = new_sample
 
                 is_singular = self.support.check(new_sample).logical_not()
-                if len(self._batch_shape):
-                    is_singular = is_singular.amax(reduced_batch_dims)
+                if self._batch_shape:
+                    is_singular = is_singular.amax(self._reduced_batch_dims)
 
-                sample = torch.cat(
-                    (sample, new_sample[is_singular.logical_not()]),
-                    dim=-(len(self._batch_shape) + 3)
-                )
+                if not is_singular.any():
+                    break
 
         return sample
 
