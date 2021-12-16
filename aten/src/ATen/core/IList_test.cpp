@@ -8,33 +8,33 @@
 using namespace c10;
 
 static std::vector<at::Tensor> get_tensor_vector() {
-  std::vector<at::Tensor> boxed;
+  std::vector<at::Tensor> tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE; i++) {
-    boxed.emplace_back(at::empty({0}));
+    tensors.emplace_back(at::empty({0}));
   }
-  return boxed;
+  return tensors;
 }
 
 static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
-  std::vector<optional<at::Tensor>> boxed;
+  std::vector<optional<at::Tensor>> optional_tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
     auto opt_tensor = (i % 2 == 0) ? optional<at::Tensor>(at::empty({0})) : nullopt;
-    boxed.emplace_back(opt_tensor);
+    optional_tensors.emplace_back(opt_tensor);
   }
-  return boxed;
+  return optional_tensors;
 }
 
 static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
-  std::vector<at::OptionalTensorRef> unboxed;
+  std::vector<at::OptionalTensorRef> optional_tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
     auto opt_tensor = (i % 2 == 0) ? at::OptionalTensorRef(at::empty({0}))
                                    : at::OptionalTensorRef();
-    unboxed.emplace_back(opt_tensor);
+    optional_tensors.emplace_back(opt_tensor);
   }
-  return unboxed;
+  return optional_tensors;
 }
 
 template <typename T>
