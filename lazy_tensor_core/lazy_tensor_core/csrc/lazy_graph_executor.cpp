@@ -955,9 +955,18 @@ LazyGraphExecutor::ScheduleSyncTensorsGraph(
         }
       }
 
-      for (auto lt : lazy_tensors) {
-        lt.AssignIrValue(torch::lazy::Value());
+      static const auto VERBOSE_DATA = std::getenv("LTC_VERBOSE_DATA");
+      static const auto ENABLE_IR_RESET = std::getenv("LTC_ENABLE_IR_RESET");
+
+      if (ENABLE_IR_RESET) {
+        for (auto lt : lazy_tensors) {
+          if (VERBOSE_DATA) {
+            std::cerr << "resetting IR on " << lt.GetUniqueId() << std::endl;
+          }
+          lt.AssignIrValue(torch::lazy::Value());
+        }
       }
+
     } catch (...) {
       // There are two paths of discovery of an exception happening on an
       // asynchronous task. One happens if the creator of the asynchronous task
