@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/native/ConvUtils.h>
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -114,7 +115,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 #include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/hip/HIPCachingAllocator.h>
 
 #include <functional>
 #include <iterator>
@@ -1285,6 +1286,7 @@ Tensor miopen_convolution_backward_bias(
 */
 }
 
+REGISTER_CUDA_DISPATCH(miopen_convolution_backward_stub, &miopen_convolution_backward);
 
 }}  // namespace
 
