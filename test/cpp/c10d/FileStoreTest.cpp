@@ -66,6 +66,17 @@ void testGetSet(std::string path, std::string prefix = "") {
     EXPECT_EQ(numKeys, 2);
     c10d::test::check(store, "key0", "newValue");
     c10d::test::check(store, "key2", "value2");
+
+    c10d::test::set(store, "-key0", "value-");
+    c10d::test::check(store, "key0", "newValue");
+    c10d::test::check(store, "-key0", "value-");
+    numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 3);
+    c10d::test::deleteKey(store, "-key0");
+    numKeys = fileStore->getNumKeys();
+    EXPECT_EQ(numKeys, 2);
+    c10d::test::check(store, "key0", "newValue");
+    c10d::test::check(store, "key2", "value2");
   }
 
   // Perform get on new instance
