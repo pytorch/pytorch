@@ -594,17 +594,32 @@ class TensorLikePair(Pair):
         if tensor.layout not in {torch.strided, torch.sparse_coo, torch.sparse_csr}:  # type: ignore[attr-defined]
             raise ErrorMeta(ValueError, f"Unsupported tensor layout {tensor.layout}", id=id)
 
-        # TODO: See https://github.com/pytorch/pytorch/issues/68592
-        if tensor.is_meta:
-            raise ErrorMeta(ValueError, "Comparing meta tensors is currently not supported", id=id)
-
     def compare(self) -> None:
         actual, expected = self.actual, self.expected
 
-        self._compare_attributes(actual, expected)
-        actual, expected = self._equalize_attributes(actual, expected)
+        with self._handle_meta_tensor_data_access():
+            self._compare_attributes(actual, expected)
+            actual, expected = self._equalize_attributes(actual, expected)
 
-        self._compare_values(actual, expected)
+            self._compare_values(actual, expected)
+
+    @contextlib.contextmanager
+    def _handle_meta_tensor_data_access(self):
+        """Turns a vanilla :class:`NotImplementedError` stemming from data access on a meta tensor into an expressive
+        :class:`ErrorMeta`.
+
+        Although it looks like meta tensors could be handled upfront, we need to do it lazily: there are use cases
+        where a meta tensor wraps a data tensors and dispatches all operator calls to it. Thus, although the tensor is
+        a meta tensor, it behaves like a regular one.
+        """
+        try:
+            yield
+        except NotImplementedError as error:
+            if "'Meta' backend" not in str(error):
+                raise error
+
+            # TODO: See https://github.com/pytorch/pytorch/issues/68592
+            raise self._make_error_meta(ValueError, "Comparing meta tensors is currently not supported.")
 
     def _compare_attributes(
         self,
@@ -707,9 +722,9 @@ class TensorLikePair(Pair):
 
         .. note::
 
-            You can find a detailed discussion about why only the dequantized variant is checked for closeness rather
-            than checking the individual quantization parameters for closeness and the integer representation for
-            equality in https://github.com/pytorch/pytorch/issues/68548.
+            A detailed discussion about why only the dequantized variant is checked for closeness rather than checking
+            the individual quantization parameters for closeness and the integer representation for equality can be
+            found in https://github.com/pytorch/pytorch/issues/68548.
         """
         return self._compare_regular_values_close(
             actual.dequantize(),
