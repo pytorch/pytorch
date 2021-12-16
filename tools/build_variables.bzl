@@ -398,6 +398,12 @@ lazy_tensor_core_sources = [
     "torch/csrc/lazy/core/view_ops/select_view_update.cpp",
     "torch/csrc/lazy/core/view_ops/view.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
+    "torch/csrc/lazy/ts_backend/ops/arithmetic_ir_ops.cpp",
+    "torch/csrc/lazy/ts_backend/ops/cast.cpp",
+    "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
+    "torch/csrc/lazy/ts_backend/ops/expand.cpp",
+    "torch/csrc/lazy/ts_backend/ops/generic.cpp",
+    "torch/csrc/lazy/ts_backend/ops/scalar.cpp",
     "torch/csrc/lazy/ts_backend/ts_node.cpp",
 ]
 
