@@ -52,8 +52,13 @@ struct TORCH_API AnyType : public Type {
   AnyType() : Type(TypeKind::AnyType) {}
 };
 
-inline std::string toString(TypePtr typePtr) {
-  return typePtr->str();
+inline std::string toString(const Type& type) {
+  return type.str();
+}
+
+// Shim for compatibility with code that uses TypePtr.
+inline std::string toString(const TypePtr& typePtr) {
+  return toString(*typePtr);
 }
 
 inline bool operator!=(const Type& lhs, const Type& rhs) {
@@ -142,7 +147,9 @@ struct TORCH_API UnionType : public Type {
  protected:
     explicit UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
     std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
-    std::string unionStr(TypePrinter printer = nullptr, bool is_annotation_str = false) const;
+    std::string unionStr(
+        TypePrinter printer = nullptr,
+        bool is_annotation_str = false) const;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool has_free_variables_;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)

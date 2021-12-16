@@ -9,10 +9,9 @@
 
 #include <c10/util/Exception.h>
 #include <pybind11/pybind11.h>
-#include <torch/csrc/THP_export.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <c10/util/StringUtil.h>
 #include <ATen/detail/FunctionTraits.h>
 
@@ -259,9 +258,9 @@ bool THPException_init(PyObject *module);
 
 namespace torch {
 
-THP_CLASS std::string processErrorMsg(std::string str);
+TORCH_PYTHON_API std::string processErrorMsg(std::string str);
 
-THP_API bool get_cpp_stacktraces_enabled();
+TORCH_PYTHON_API bool get_cpp_stacktraces_enabled();
 
 // Abstract base class for exceptions which translate to specific Python types
 struct PyTorchError : public std::exception {
