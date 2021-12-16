@@ -50,6 +50,12 @@ def get_full_params(model, recurse=True):
 def _maybe_cuda(model, move_to_cuda):
     return model.cuda() if move_to_cuda else model
 
+def _maybe_wrap_fsdp(model, wrap_fsdp, *args, **kwargs):
+    return (
+        model if not wrap_fsdp
+        else FullyShardedDataParallel(model, *args, **kwargs)
+    )
+
 class DummyProcessGroup:
     def __init__(self, rank: int, size: int):
         self._rank = rank
