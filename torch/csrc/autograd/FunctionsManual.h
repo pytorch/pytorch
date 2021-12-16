@@ -384,7 +384,7 @@ Tensor _lu_with_info_jvp(
 Tensor convolution_jvp(
   const Tensor& input_p, const Tensor& input_t,
   const Tensor& weight_p, const Tensor& weight_t,
-  const Tensor& bias_p, Tensor& bias_t,
+  const Tensor& bias_p, const Tensor& bias_t,
   IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
   bool transposed, IntArrayRef output_padding, int64_t groups
 );
@@ -392,7 +392,7 @@ Tensor convolution_jvp(
 Tensor _convolution_jvp(
   const Tensor& input_p, const Tensor& input_t,
   const Tensor& weight_p, const Tensor& weight_t,
-  const Tensor& bias_p, Tensor& bias_t,
+  const Tensor& bias_p, const Tensor& bias_t,
   IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
   bool transposed, IntArrayRef output_padding, int64_t groups,
   bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
