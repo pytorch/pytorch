@@ -1375,7 +1375,8 @@ class RelaxedBooleanPair(BooleanPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
         # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
-        other_supported_types = (*self._supported_types, *self._supported_number_types, torch.Tensor, np.ndarray)
+        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        other_supported_types = (*self._supported_types, *self._supported_number_types, *tensor_or_array_types)
         if not (
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
             or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
@@ -1431,7 +1432,8 @@ class RelaxedNumberPair(NumberPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
-        other_supported_types = (*self._supported_types, torch.Tensor, np.ndarray)
+        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        other_supported_types = (*self._supported_types, *tensor_or_array_types)
         if not (
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))

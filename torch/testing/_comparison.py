@@ -612,7 +612,7 @@ class TensorLikePair(Pair):
         try:
             yield
         except NotImplementedError as error:
-            if "'Meta' backend" not in str(error):
+            if "meta" not in str(error).lower():
                 raise error
 
             # TODO: See https://github.com/pytorch/pytorch/issues/68592
