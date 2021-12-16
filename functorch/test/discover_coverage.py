@@ -374,6 +374,7 @@ def print_coverage_info(th=100, nn=25):
         'torch.nonzero', # dynamic
         'torch.masked_select', # dynamic
         'torch.prod', # dynamic (backward)
+        'torch.norm', # norm with nuc is not commonly used.
     }
     remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)

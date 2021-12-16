@@ -3197,7 +3197,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('masked_scatter'),
         xfail('masked_select'),
         xfail('nanquantile'),
-        xfail('norm', 'fro'),
         xfail('norm', 'nuc'),
         xfail('ormqr'),
         xfail('put'),
