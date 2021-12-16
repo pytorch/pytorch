@@ -3,7 +3,7 @@
 #ifdef TORCH_ENABLE_LLVM
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 #include <llvm/ExecutionEngine/JITSymbol.h>
 #include <llvm/ExecutionEngine/Orc/Core.h>
