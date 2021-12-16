@@ -205,7 +205,7 @@ class GenLazyNativeFuncDefinition:
         return [f"""\
     // TODO(alanwaketan): Quite a lot inefficient copy-by-value there. Let's optimize it.
     {sig.decl(name=f"{self.class_method_name}::{schema.aten_name}")} {{
-        LTC_FN_COUNTER("lazy::");
+        TORCH_LAZY_FN_COUNTER("lazy::");
         {get_device_str}
         {lazy_tensor_decls_str}
         {meta_str}
