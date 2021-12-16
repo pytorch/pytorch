@@ -41,7 +41,7 @@ def checkpoint_wrapper(
     # Use weakref to avoid creating a refcycle: m -> m.forward -> m. This would
     # leak GPU memory because python won't gc the module when the module is
     # freed.
-    module.forward = partial(  # type: ignore [assignment]
+    module.forward = partial(  # type: ignore[assignment]
         _checkpointed_forward,
         type(module).forward,
         ref(module),
