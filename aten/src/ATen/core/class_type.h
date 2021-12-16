@@ -2,7 +2,6 @@
 
 #include <memory>
 
-#include <ATen/core/qualified_name.h>
 #include <ATen/core/jit_type_base.h>
 #include <c10/util/Optional.h>
 
@@ -17,30 +16,6 @@ namespace c10 {
 
 struct FunctionSchema;
 struct IValue;
-
-struct NamedType;
-using NamedTypePtr = std::shared_ptr<NamedType>;
-using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
-
-struct TORCH_API NamedType : public Type {
-  NamedType(TypeKind tk, c10::optional<QualifiedName> name)
-      : Type(tk), name_(std::move(name)) {
-    TORCH_INTERNAL_ASSERT(
-        tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
-        tk == TypeKind::ClassType || tk == TypeKind::InterfaceType ||
-        tk == TypeKind::EnumType,
-        "If you add a new kind of NamedType, ",
-        "please update the cast<NamedType> specialization and this assert");
-  }
-
-  // Fully qualified name of type
-  // Looks like: "foo.bar.Baz".
-  const c10::optional<QualifiedName>& name() const {
-    return name_;
-  }
-private:
-  c10::optional<QualifiedName> name_;
-};
 
 // This enumerator represents the 'kind' of an attribute - a buffer, a parameter, or neither.
 // This state is mutually exclusive. Buffers and Parameters can only appear on modules.
