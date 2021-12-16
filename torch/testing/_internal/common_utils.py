@@ -1497,7 +1497,7 @@ class TensorOrArrayPair(TensorLikePair):
             # Setting `TestCase._ignore_not_implemented_error = True` has special handling for `NotImplementedError`'s
             # by turning them into `unittest.SkipTest`'s. Thus, if we encounter an meta data access error, we keep the
             # expressive `ErrorMeta` but change its wrapped error type to `NotImplementedError`.
-            if "meta" in str(error):
+            if "meta" in error.msg:
                 error.type = NotImplementedError
             raise error
 
