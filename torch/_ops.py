@@ -59,12 +59,15 @@ class OpOverloadPacket():
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
         if key == '__file__':
-            return 'torch.ops.OpOverloadPacket'
+            return 'torch.ops'
         try:
             use_key = "" if key == 'default' else key
+            # to prevent an infinite loop with getattr call in deepcopy (when __dict__ is empty)
+            if 'qualified_op_name' not in self.__dict__:
+                raise AttributeError
             op_ = torch._C.get_operation_overload(self.qualified_op_name, use_key)
             schema = torch.get_schema(self.qualified_op_name, use_key)
-            overload =  OpOverload(op_, schema)
+            overload = OpOverload(op_, schema)
             # cache the overload object
             setattr(self, key, overload)
             return overload
@@ -131,6 +134,7 @@ class _OpNamespace(types.ModuleType):
         torch.jit._builtins._register_builtin(op, qualified_op_name)
         op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(qualified_op_name, op_name, op)
+        opoverloadpacket.__module__ = self.__module__ + "." + namespace_name
         setattr(self, op_name, opoverloadpacket)
         return opoverloadpacket
 
