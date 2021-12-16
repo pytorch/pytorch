@@ -364,12 +364,13 @@ def _str_intern(inp):
         suffixes.append('size=' + str(tuple(self.shape)))
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
-        suffixes.append('quantization_scheme=' + str(self.qscheme()))
         if self.qscheme() == torch.per_tensor_affine or self.qscheme() == torch.per_tensor_symmetric:
+            suffixes.append('quantization_scheme=per_tensor')
             suffixes.append('scale=' + str(self.q_scale()))
             suffixes.append('zero_point=' + str(self.q_zero_point()))
         elif self.qscheme() == torch.per_channel_affine or self.qscheme() == torch.per_channel_symmetric \
                 or self.qscheme() == torch.per_channel_affine_float_qparams:
+            suffixes.append('quantization_scheme=per_channel')
             suffixes.append('scale=' + str(self.q_per_channel_scales()))
             suffixes.append('zero_point=' + str(self.q_per_channel_zero_points()))
             suffixes.append('axis=' + str(self.q_per_channel_axis()))
