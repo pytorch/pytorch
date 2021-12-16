@@ -212,7 +212,7 @@ def create_joint_forward_backward(fn):
         out = fn(*primals)
         primals = [p for p in pytree.tree_flatten(primals)[0] if p.requires_grad]
         backward_out = []
-        if primals:
+        if primals: # todo(chilli): Make it support it if not all outputs have gradients
             backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, allow_unused=True)
         return out, backward_out
     return joint_forward_backward
@@ -275,8 +275,6 @@ def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, de
                 compiled_bw = bw_compiler(bw_module, bw_args)
             fw_outs = normalize_as_list(compiled_fw(*flat_args))
             ctx.save_for_backward(*fw_outs[num_outs:])
-            if num_outs == 1:
-                return fw_outs[0]
             return tuple(fw_outs[0:num_outs])
 
         @staticmethod
@@ -303,6 +301,27 @@ except ImportError:
     HAS_TREE = False
 compile_cache = None
 
+# Inspired by autodidax (thanks!)
+class PytreeThunk:
+    spec = None
+    # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
+    is_simple = None # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_really_simple = None # if the output spec is a LeafSpec
+
+    def set(self, spec):
+        assert self.spec is None or self.spec == spec
+        self.spec = spec
+        if type(self.spec) in [tuple, list] and all([isinstance(i, pytree.LeafSpec) for i in spec.children_specs]):
+            self.is_simple = True
+        if isinstance(self.spec, pytree.LeafSpec):
+            self.is_really_simple = True
+
+    def unflatten(self, x):
+        if self.is_really_simple:
+            return x[0]
+        if self.is_simple:
+            return x
+        return pytree.tree_unflatten(x, self.spec)
 
 def compiled_function(
     fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False, hasher_type="StaticShapeHasher"
@@ -310,39 +329,45 @@ def compiled_function(
     global compile_cache
     if compile_cache is None:
         compile_cache = CompileCache()
-    cached_fn = None
+    cached_res = None
 
     fn_id = id(fn)
 
     def returned_function(*args, **kwargs):
         global compile_cache
-        nonlocal cached_fn
+        nonlocal cached_res
         if HAS_TREE:
             flattened_args = tree.flatten((args, kwargs))
         else:
             flattened_args, _ = pytree.tree_flatten((args, kwargs))
         num_args = len(flattened_args)
         # Check if the fn is already compiled
-        cached_fn = compile_cache.at(fn_id, num_args, hasher_type, *flattened_args)
+        cached_res = compile_cache.at(fn_id, num_args, hasher_type, *flattened_args)
 
         # Compile the function and save it in the cache
-        if cached_fn is None:
+        if cached_res is None:
             # Compile a new function
             flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
+            out_spec = PytreeThunk()
             def flat_fn(*args):
+                nonlocal out_spec
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
-                return fn(*args, **kwargs)
-
-            cached_fn = create_compiled_function(
+                tree_out = fn(*args, **kwargs)
+                flat_out = pytree.tree_flatten(tree_out)
+                out_spec.set(flat_out[1])
+                return flat_out[0]
+            compiled_fn = create_compiled_function(
                 flat_fn, fw_compiler, bw_compiler, partition_fn, decompose
             ).apply
-
+            cached_res = (compiled_fn, out_spec)
             # Save the compiled_fn in the cache
             compile_cache.insert(
-                fn_id, num_args, hasher_type, cached_fn, *flattened_args
+                fn_id, num_args, hasher_type, cached_res, *flattened_args
             )
 
-        return cached_fn(*flattened_args)
+        cached_fn, out_spec = cached_res
+        out = cached_fn(*flattened_args)
+        return out_spec.unflatten(out)
 
     return returned_function
 
