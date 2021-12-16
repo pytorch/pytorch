@@ -136,6 +136,7 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/monitor/counters.cpp",
+    "torch/csrc/monitor/events.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -976,6 +977,7 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/core/operator_name.cpp",
     "aten/src/ATen/core/PythonModeTLS.cpp",
     "aten/src/ATen/core/register_symbols.cpp",
+    "aten/src/ATen/core/class_type.cpp",
     "aten/src/ATen/core/type.cpp",
     "aten/src/ATen/cpu/FlushDenormal.cpp",
     "aten/src/ATen/detail/CPUGuardImpl.cpp",
