@@ -18,6 +18,7 @@
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
@@ -1990,21 +1991,6 @@ REGISTER_OPERATOR_FUNCTOR(
       };
     });
 
-namespace {
-
-void check_cat_no_zero_dim(const std::vector<at::Tensor>& tensors) {
-  for (const auto i : c10::irange(tensors.size())) {
-    auto& t = tensors[i];
-    TORCH_CHECK(
-        t.dim() > 0,
-        "zero-dimensional tensor (at position ",
-        i,
-        ") cannot be concatenated");
-  }
-}
-
-} // namespace
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_OPERATOR_FUNCTOR(
     prim::VarConcat,
@@ -2018,11 +2004,9 @@ REGISTER_OPERATOR_FUNCTOR(
         }
         auto dim = p_node->Input(num_inputs - 1).toInt();
         if (p_node->Output(0).isNone()) {
-          p_node->Output(0) = at::cat(inputs, dim);
+          p_node->Output(0) = at::native::_cat_cpu(inputs, dim);
           return;
         }
-        check_cat_no_zero_dim(inputs);
-        dim = legacy_cat_wrap_dim(dim, inputs);
         auto& out_t = p_node->Output(0).toTensor();
         fastResizeToZero(out_t);
         at::native::_cat_out_cpu(inputs, dim, out_t);
