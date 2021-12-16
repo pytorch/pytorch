@@ -8,15 +8,16 @@
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 #include <caffe2/serialize/inline_container.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
+#include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/custom_class.h>
-
 #include <exception>
 #include <fstream>
 #include <string>
@@ -202,6 +203,7 @@ class BytecodeDeserializer final {
 
  private:
   TypePtr resolveTypeName(const c10::QualifiedName& qn);
+  void init_upgrader(mobile::Function* function);
   void parseMethods(
       c10::ivalue::TupleElements&& vals,
       c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -298,6 +300,26 @@ void BytecodeDeserializer::parseFunctionSchema(
   }
 }
 
+void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
+  for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    // When kUpgraderByteCode is initialized in upgrader_mobile.h, the mobile
+    // function is initialized with everything (instruction, constants, types,
+    // registerer size and etc), except operator. The operator function is also
+    // static initialized and is available later. The oprator for the upgrader
+    // function will be initialized when the first module is loaded.
+    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+      for (const auto& op : byteCodeFunctionWithOperator.operators) {
+        byteCodeFunctionWithOperator.function.append_operator(
+            op.name,
+            op.overload_name,
+            op.num_specified_args,
+            caffe2::serialize::kMaxSupportedFileFormatVersion);
+      }
+    }
+    function->append_function(byteCodeFunctionWithOperator.function);
+  }
+}
+
 void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
@@ -375,7 +397,7 @@ void BytecodeDeserializer::parseMethods(
       debug_handles_m_tuple =
           std::move(*std::move((*debug_handles)[i]).toTuple()).elements();
     }
-
+    init_upgrader(function.get());
     // 1. First pass all operators from models
     parseOperators(
         std::move(ops_list),
@@ -387,14 +409,18 @@ void BytecodeDeserializer::parseMethods(
     bool use_upgrader =
         (operator_version_ < caffe2::serialize::kProducedFileFormatVersion);
 
-    // 3. If upgrader is needed, change change the OP instrunction to CALL
-    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
-    // function and do the actual change)
     parseInstructions(
         function_name,
         std::move(ins_list),
         debug_handles_m_tuple,
         function.get());
+
+    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // instruction (In next PR, use_upgrader will be parsed to parseInstruction
+    // function and do the actual change)
+    if (use_upgrader) {
+      applyUpgrader(function.get(), operator_version_);
+    }
 
     parseConstants(consts_list, function.get());
 
