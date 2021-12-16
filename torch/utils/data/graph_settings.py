@@ -1,19 +1,19 @@
 import torch.utils.data.graph
 
 
+def get_all_graph_pipes(graph):
+    results = set()
+    for datapipe, sub_graph in graph.items():
+        results.add(datapipe)
+        sub_items = get_all_graph_pipes(sub_graph)
+        for item in sub_items:
+            results.add(item)
+    return results
+
+
 def apply_sharding(datapipe, num_of_instances, instance_id):
     graph = torch.utils.data.graph.traverse(datapipe, exclude_primitive=True)
-
-    def traverse_graph(graph):
-        results = set()
-        for datapipe, sub_graph in graph.items():
-            results.add(datapipe)
-            sub_items = traverse_graph(sub_graph)
-            for item in sub_items:
-                results.add(item)
-        return results
-
-    all_pipes = traverse_graph(graph)
+    all_pipes = get_all_graph_pipes(graph)
     already_applied_to = None
     for pipe in all_pipes:
         if hasattr(pipe, 'is_shardable'):
@@ -24,3 +24,12 @@ def apply_sharding(datapipe, num_of_instances, instance_id):
                                            'Already applied to', already_applied_to, 'while trying to apply to', pipe)
                     pipe.apply_sharding(num_of_instances, instance_id)
                     already_applied_to = pipe
+
+
+def apply_shuffle_settings(datapipe, shuffle):
+    if shuffle is not None:
+        graph = torch.utils.data.graph.traverse(datapipe)
+        all_pipes = get_all_graph_pipes(graph)
+        for pipe in all_pipes:
+            if hasattr(pipe, 'set_shuffle_settings'):
+                pipe.set_shuffle_settings(shuffle)

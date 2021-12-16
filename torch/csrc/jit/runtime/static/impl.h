@@ -269,6 +269,18 @@ class TORCH_API StaticModule {
   size_t num_inputs() const;
   size_t num_outputs() const;
 
+  size_t num_constants() const {
+    return constants_.size();
+  }
+
+  size_t num_intermediate_values() const {
+    return num_intermediate_values_;
+  }
+
+  size_t total_num_values() const {
+    return num_inputs() + num_constants() + num_intermediate_values();
+  }
+
   C10_NODISCARD const std::vector<uint16_t>& output_indices() const {
     return output_indices_;
   }
@@ -330,6 +342,18 @@ class TORCH_API StaticModule {
     return module_.has_value();
   }
 
+  size_t inputs_offset() const {
+    return 0;
+  }
+
+  size_t constants_offset() const {
+    return inputs_offset() + num_inputs();
+  }
+
+  size_t intermediate_values_offset() const {
+    return constants_offset() + num_constants();
+  }
+
   StaticRuntime& runtime();
 
  private:
@@ -361,6 +385,14 @@ class TORCH_API StaticModule {
   FastSet<const Value*> managed_output_tensor_values_{};
   FastSet<const Value*> leaked_values_{};
   ManagedTensorRanges managed_tensor_ranges_{};
+
+  size_t num_intermediate_values_ = 0;
+
+  // Includes self if module_ != nullopt.
+  // Note that we might have num_inputs_ == 0 even if the schema has a `self`
+  // argument. In this case, `self` isn't used in the graph, but the schema
+  // includes it anyways to be consistent with the JIT interpreter.
+  size_t num_inputs_;
 };
 
 class TORCH_API StaticRuntime {
@@ -448,7 +480,7 @@ class TORCH_API StaticRuntime {
     return planner_.get();
   }
 
-  void check_for_memory_leak(bool output_returned = true);
+  bool check_for_memory_leak(bool output_returned = true);
 
   bool is_optimizable_container_type(Node* n) const {
     return static_module_.is_optimizable_container_type(n);
@@ -511,10 +543,18 @@ class TORCH_API StaticRuntime {
       const KeywordArgs& kwargs);
 
   // helper method for copying input args/kwargs into inputs_
+  template <typename IValueList>
   void set_inputs(
-      const std::vector<c10::IValue>& args,
-      const KeywordArgs& kwargs);
-  void set_inputs(std::vector<c10::IValue>&& args, const KeywordArgs& kwargs);
+      IValueList&& args,
+      const std::unordered_map<std::string, c10::IValue>& kwargs);
+
+  // Set Input(idx) to args[idx]. Invoked by set_inputs. Copies or moves
+  // depending on overload.
+  void set_arg(const size_t idx, std::vector<IValue>&& args);
+  void set_arg(const size_t idx, const std::vector<IValue>& args);
+
+  // Set Input(idx) to arg. Always copies. Used for kwargs.
+  void set_arg(const size_t idx, const IValue& arg);
 
   void verify_and_correct_memory_overlap(ProcessedNode& n);
 
@@ -545,6 +585,8 @@ class TORCH_API StaticRuntime {
   // Otherwise, the memory used by activations is cached inside the static
   // runtime.
   const StaticModule& static_module_;
+  // Cache this so we don't have to call static_module_.first_input_is_self()
+  const bool first_input_is_self_;
   bool manage_output_tensors_enabled_ = false;
   std::unique_ptr<MemoryPlanner> planner_;
   // first static_module_.num_inputs() slots are inputs, next

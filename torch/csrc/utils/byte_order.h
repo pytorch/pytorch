@@ -1,6 +1,6 @@
 #pragma once
 
-#include <TH/THHalf.h>
+#include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/Export.h>
 #include <cstddef>
@@ -32,7 +32,7 @@ TORCH_API void THP_decodeInt64Buffer(
     THPByteOrder order,
     size_t len);
 TORCH_API void THP_decodeHalfBuffer(
-    THHalf* dst,
+    c10::Half* dst,
     const uint8_t* src,
     THPByteOrder order,
     size_t len);
