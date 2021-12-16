@@ -392,6 +392,8 @@ void bsrmv<c10::complex<double>>(
       reinterpret_cast<cuDoubleComplex*>(y)));
 }
 
+#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+
 template <>
 void bsrsv2_bufferSize<float>(CUSPARSE_BSRSV2_BUFFER_ARGTYPES(float)) {
   TORCH_CUDASPARSE_CHECK(cusparseSbsrsv2_bufferSize(
@@ -883,6 +885,8 @@ void bsrsm2_solve<c10::complex<double>>(
       policy,
       pBuffer));
 }
+
+#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
 } // namespace sparse
 } // namespace cuda

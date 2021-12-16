@@ -10,6 +10,7 @@
 */
 
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDASparse.h>
 
 namespace at {
 namespace cuda {
@@ -153,6 +154,8 @@ template <>
 void bsrmv<c10::complex<float>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<float>));
 template <>
 void bsrmv<c10::complex<double>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<double>));
+
+#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 
 #define CUSPARSE_BSRSV2_BUFFER_ARGTYPES(scalar_t)                 \
   cusparseHandle_t handle, cusparseDirection_t dirA,              \
@@ -311,6 +314,8 @@ void bsrsm2_solve<c10::complex<float>>(
 template <>
 void bsrsm2_solve<c10::complex<double>>(
     CUSPARSE_BSRSM2_SOLVE_ARGTYPES(c10::complex<double>));
+
+#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
 
 } // namespace sparse
 } // namespace cuda
