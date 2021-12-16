@@ -22,7 +22,7 @@ public_docs = [
 ]
 
 # torch.abs, Tensor.abs, Tensor.abs_ are all considered to be different
-def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/whiteboard'):
+def get_public_overridable_apis(pytorch_root='/raid/rzou/pt/quick'):
     results = {}
     all_overridable_apis = set(torch.overrides.get_testing_overrides().keys())
     for module, module_name, src in public_docs:
@@ -159,18 +159,25 @@ def get_ops_covered_by_opinfos():
             safe_append(ops, alias.op, opinfo)
     return ops
 
+factory_fns = {
+    'tensor', 'zeros', 'ones', 'randn', 'arange', 'rand', 'empty', 'randperm',
+    'linspace', 'logspace', 'hann_window', 'full', 'eye', 'blackman_window',
+    'barlett_window', 'randint', 'range', 'arange',
+}
+
 def get_top_ops(torch_threshold, nn_fn_threshold):
     denylist = set({
-        'tensor', 'load', 'zeros', 'no_grad', 'save', 'from_numpy',
-        'manual_seed', 'ones', 'randn', 'arange', 'rand',
-        'empty', 'randperm', 'linspace', 'set_grad_enabled',
-        'isnan', 'set_default_tensor_type', 'set_num_threads',
-        'set_printoptions', 'range', 'numel',
+        # These are either not real "operators", factory functions
+        # that trivially work, or not-documented ops.
+        'load', 'no_grad', 'save', 'from_numpy',
+        'manual_seed', 'set_grad_enabled',
+        'set_default_tensor_type', 'set_num_threads',
+        'set_printoptions', 'numel',
         'set_default_dtype', 'sparse_coo_tensor', 'set_rng_state',
         'get_rng_state', 'get_default_dtype', 'initial_seed',
-        'get_num_threads', 'quantize_per_tensor', 'logspace',
-        'hann_window', 'is_tensor', 'as_tensor', 'full', 'eye',
-        'equal', 'enable_grad', 'seed', 'is_storage', 'hamming_window',
+        'get_num_threads', 'quantize_per_tensor',
+        'hann_window', 'is_tensor', 'as_tensor',
+        'equal', 'enable_grad', 'seed', 'is_storage',
         'is_floating_point', 'nn.functional.torch',
         'set_flush_denormal', 'set_num_interop_threads', 'dequantize',
         'get_num_interop_threads', 'nn.functional.math',
@@ -191,8 +198,6 @@ def get_top_ops(torch_threshold, nn_fn_threshold):
         'nn.functional.fractional_max_pool3d_with_indices',
         'is_complex',
         'grad',
-        'bartlett_window',
-        'blackman_window',
         'quantize_per_channel',
         'nn.functional.max_pool2d_with_indices',
         'nn.functional.max_pool3d_with_indices',
@@ -205,10 +210,12 @@ def get_top_ops(torch_threshold, nn_fn_threshold):
         'fft', # is namespace
     })
 
-    torch_ops = [op[0] for op in top_ops.top_torch[:torch_threshold]]
-    nn_fn_ops = [op[0] for op in top_ops.get_nn_functional_top_list()[:nn_fn_threshold]]
-    ops = torch_ops + nn_fn_ops
-    ops = [op for op in ops if op not in denylist]
+    torch_ops = [op[0] for op in top_ops.top_torch]
+    nn_fn_ops = [op[0] for op in top_ops.get_nn_functional_top_list()]
+    torch_ops = [op for op in torch_ops if op not in denylist]
+    nn_fn_ops = [op for op in nn_fn_ops if op not in denylist]
+
+    ops = torch_ops[:torch_threshold] + nn_fn_ops[:nn_fn_threshold]
     return ops
 
 def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
@@ -222,6 +229,7 @@ def get_top_ops_not_covered_by_opinfo(torch_threshold=0, nn_fn_threshold=0):
 
     result = [op for op in ops if op not in ops_with_opinfo]
     result = [op for op in result if op not in denylist]
+    result = [op for op in result if op not in factory_fns]
     return result
 
 def get_covered_ops(ops_list, invert=False):
@@ -369,12 +377,14 @@ def print_coverage_info(th=100, nn=25):
     # Allowed exemptions
     vmap_exemptions = {
         'torch.randn_like', # randomness
+        'torch.rand_like', # randomness
         'torch.allclose', # number output
         'torch.unique', # dynamic
         'torch.nonzero', # dynamic
         'torch.masked_select', # dynamic
         'torch.prod', # dynamic (backward)
-        'torch.norm', # norm with nuc is not commonly used.
+        'torch.norm', # norm with nuc is not commonly used; we support the other cases.
+        'torch.svd', # There isn't a bug, it is just nondeterministic so we can't test it.
     }
     remove_from_set(statuses['test_vmap_exhaustive'], vmap_exemptions)
     remove_from_set(statuses['test_vmapvjp'], vmap_exemptions)
@@ -387,7 +397,14 @@ def print_coverage_info(th=100, nn=25):
     print(f"total ops in set: {th + nn}")
     print(f"tested by OpInfo: {th + nn - len(top_ops_not_covered_by_opinfo)}")
     for test in tests:
+        if test in {'test_jvp', 'test_vmapjvp'}:
+            continue
         print(f'{test} failing coverage {len(statuses[test])}')
+
+    # We don't care about these yet
+    del statuses['test_jvp']
+    del statuses['test_vmapjvp']
+
     pprint.pprint(statuses)
 
 print_coverage_info(100, 25)
