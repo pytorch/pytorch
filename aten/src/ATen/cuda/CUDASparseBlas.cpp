@@ -311,6 +311,87 @@ void bsrmm<c10::complex<double>>(
       ldc));
 }
 
+template <>
+void bsrmv<float>(CUSPARSE_BSRMV_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrmv(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nb,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      x,
+      beta,
+      y));
+}
+
+template <>
+void bsrmv<double>(CUSPARSE_BSRMV_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrmv(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nb,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      x,
+      beta,
+      y));
+}
+
+template <>
+void bsrmv<c10::complex<float>>(CUSPARSE_BSRMV_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrmv(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nb,
+      nnzb,
+      reinterpret_cast<const cuComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      reinterpret_cast<const cuComplex*>(x),
+      reinterpret_cast<const cuComplex*>(beta),
+      reinterpret_cast<cuComplex*>(y)));
+}
+
+template <>
+void bsrmv<c10::complex<double>>(
+    CUSPARSE_BSRMV_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrmv(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nb,
+      nnzb,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      reinterpret_cast<const cuDoubleComplex*>(x),
+      reinterpret_cast<const cuDoubleComplex*>(beta),
+      reinterpret_cast<cuDoubleComplex*>(y)));
+}
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
