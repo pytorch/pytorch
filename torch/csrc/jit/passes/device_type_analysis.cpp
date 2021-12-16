@@ -48,41 +48,41 @@ bool setReturnsToDevice(Node* n, c10::optional<Device> device) {
 
 bool propWithNoDevice(Node* n) {
   // Figure out what the common device to propagate is
+  // Types of tensors must match, except CPU zerodim, which any
+  // other type can overwrite
+
   c10::optional<Device> device;
-  bool device_is_zerodim = false;
+  bool seen_any_device = false;
+  bool only_seen_cpu_zerodim = false;
 
   for (Value* inp : n->inputs()) {
     auto tensor_type = inp->type()->cast<TensorType>();
-    if (!tensor_type) {
-      continue;
-    }
+    if (tensor_type) {
 
-    bool tensor_is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
-    if (device) {
-      if (tensor_type->device().has_value()) {
+      bool tensor_is_zerodim =
+          tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
+      bool is_cpu_zerodim =
+          tensor_type->device()->is_cpu() && tensor_is_zerodim;
+
+      if (seen_any_device) {
         auto cur_device = tensor_type->device().value();
-        if (device != cur_device){
-          if (device_is_zerodim && tensor_is_zerodim){
-            // Bail on the both is zero_dim case
-            return setReturnsToDevice(n, c10::nullopt);
-          }
-          if (!device_is_zerodim && !tensor_is_zerodim){
+
+        if (device != cur_device && !is_cpu_zerodim) {
+          if (only_seen_cpu_zerodim) {
+            device = tensor_type->device();
+            only_seen_cpu_zerodim = false;
+          } else {
             // Bail on the type not match case
             return setReturnsToDevice(n, c10::nullopt);
           }
-          if (device_is_zerodim && !tensor_is_zerodim){
-            device = tensor_type->device();
-            device_is_zerodim = false;
-          }
-          // If tensor_is_zerodim  && !device_is_zerodim, do nothing
         }
+      } else {
+        seen_any_device = true;
+        only_seen_cpu_zerodim = is_cpu_zerodim;
+        device = tensor_type->device();
       }
-    } else if(tensor_type->device()) {
-      device = tensor_type->device();
-      device_is_zerodim = tensor_is_zerodim;
     }
   }
-
   return setReturnsToDevice(n, device);
 }
 
@@ -107,7 +107,7 @@ bool defaultDeviceProp(Node* n) {
       if (input_val->isNone()) {
         continue;
       }
-      if (!input_val->isDevice()){
+      if (!input_val->isDevice()) {
         // Bail on union types
         return false;
       }
@@ -170,12 +170,12 @@ struct DeviceTypePropagationPass {
         // This is already been propagated by something else in freezing
       case prim::ListConstruct:
       case prim::ListUnpack:
-        return;  // Not handled for now
+        return; // Not handled for now
       default:
         if (n->kind().is_aten()) {
           return processAtenOps(n);
         } else {
-          return;  // Not handled for now
+          return; // Not handled for now
         }
     }
   }
