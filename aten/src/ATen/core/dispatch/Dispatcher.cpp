@@ -114,6 +114,8 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
   return handle;
 }
 
+OperatorHandle::~OperatorHandle() = default;
+
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto found = libraries_.find(ns);
