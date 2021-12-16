@@ -657,12 +657,16 @@ TEST(StaticRuntime, NanToNum) {
 TEST(StaticRuntime, Stack) {
   const auto stack_dim = R"JIT(
     def forward(self, a: Tensor, b: Tensor, dim: int):
-        return torch.stack((a, b), dim = dim).clone()
+        inputs = [a]
+        inputs.append(b) # mutation to avoid using VarStack
+        return torch.stack(inputs, dim = dim).clone()
   )JIT";
 
   const auto stack_three = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.stack((a, b, c)).clone()
+        inputs = [a, b]
+        inputs.append(c) # mutation to avoid using VarStack
+        return torch.stack(inputs).clone()
   )JIT";
 
   auto a = at::randn({2, 2});
@@ -675,12 +679,15 @@ TEST(StaticRuntime, Stack) {
 
   std::vector<IValue> args1_dim{a, b, 0};
   std::vector<IValue> args2_dim{d, e, 1};
+  std::vector<IValue> args_dim_negative{d, e, -1};
 
   std::vector<IValue> args1_three_tensors{a, b, c};
   std::vector<IValue> args2_three_tensors{d, e, f};
 
   testStaticRuntime(stack_dim, args1_dim);
   testStaticRuntime(stack_dim, args1_dim, args2_dim);
+
+  testStaticRuntime(stack_dim, args_dim_negative);
 
   testStaticRuntime(stack_three, args1_three_tensors);
   testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
@@ -1183,6 +1190,10 @@ TEST(StaticRuntime, VarCat) {
   // 3D tensors - cat dim = 2
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
   testStaticRuntime(var_cat_script, args3);
+
+  // Negative dim
+  std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), -1};
+  testStaticRuntime(var_cat_script, args4);
 
   testStaticRuntime(var_cat_script, args1, args2);
 }
@@ -1718,6 +1729,10 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 2};
   testStaticRuntime(var_stack_script, args3);
 
+  // Negative dim
+  std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), -1};
+  testStaticRuntime(var_stack_script, args4);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
@@ -1844,6 +1859,9 @@ TEST(StaticRuntime, Cat) {
   auto d = at::randn({3, 5});
   std::vector<IValue> args1{c, d, 1};
   testStaticRuntime(cat_script, args0, args1);
+
+  std::vector<IValue> args_dim_negative{c, d, -1};
+  testStaticRuntime(cat_script, args_dim_negative);
 }
 
 TEST(StaticRuntime, Cumsum) {
