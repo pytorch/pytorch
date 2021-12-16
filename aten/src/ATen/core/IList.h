@@ -61,7 +61,9 @@
  *         const typename list_type::const_iterator& it) { ... }
  *   }
  *
- * 4. Add an implementation for each of the already supported types.
+ * 4. Add an specialization for each of the already supported types.
+ *    Finally, for consistency, add them to the tracking list.
+ *    (see [Note: IListTagImpl Specializations])
  *
  *   template <>
  *   class IListTagImpl<at::Tensor, IListTag::Chest>
@@ -78,8 +80,9 @@
  * Suppose we want to add support for a new type: `Matrix`.
  * Here are the steps we would have to go through:
  *
- * 1. Add an implementation for each of the existing tags. For that,
- *    suppose there are only 2 tags: `Unboxed` and `Boxed`.
+ * 1. Add an specialization for each of the existing tags.
+ *    Finally, for consistency, add them to the tracking list.
+ *    (see [Note: IListTagImpl Specializations])
  *
  *   template <>
  *   class IListTagImpl<Matrix, IListTag::Unboxed>
@@ -204,6 +207,18 @@ using IListConstRef = typename ivalue_to_const_ref_overload_return<T>::type;
  *
  * - a function `iterator_get` that returns a reference to `T`, given
  *   the unwrapped iterator.
+ *
+ * Existing Specializations
+ * ========================
+ * [Note: IListTagImpl Specialization]
+ *
+ * For `IList(Iterator)<at::Tensor>`:
+ * - <at::Tensor, IListTag::Unboxed>
+ * - <at::Tensor, IListTag::Boxed>
+ *
+ * For `IList(Iterator)<at::OptionalTensorRef>`:
+ * - <at::OptionalTensorRef, IListTag::Unboxed>
+ * - <at::OptionalTensorRef, IListTag::Boxed>
  */
 template <typename T, IListTag TAG>
 class IListTagImpl {};
@@ -345,10 +360,7 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
  * It is a tagged union of both boxed and unboxed API containers.
  * Working implementations:
  *
- * [Note: ITensorList]
  * - `IList<at::Tensor>`
- *
- * [Note: IOptTensorRefList]
  * - `IList<at::OptionalTensorRef>`
  *
  * What is this for?
