@@ -21,9 +21,9 @@ TEST(BufLiveRange, SingleRangeLine) {
   // Construct Stmt:
   // {
   //   for (int i = 0; i < 32; i++) {
-  //     a[i] = 0; // StmtIndex: 0:0
+  //     a[i] = 0;
   //     for (int j = 0; j < 32; j++) {
-  //       a[i] = (a[i]) + (b[i, j]); // StmtIndex: 0:1:0
+  //       a[i] = (a[i]) + (b[i, j]);
   //     }
   //   }
   // }

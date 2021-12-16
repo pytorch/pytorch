@@ -1,9 +1,11 @@
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <gtest/gtest.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <stdexcept>
 
 #include "deep_wide_pt.h"
 #include "test_utils.h"
@@ -655,12 +657,16 @@ TEST(StaticRuntime, NanToNum) {
 TEST(StaticRuntime, Stack) {
   const auto stack_dim = R"JIT(
     def forward(self, a: Tensor, b: Tensor, dim: int):
-        return torch.stack((a, b), dim = dim).clone()
+        inputs = [a]
+        inputs.append(b) # mutation to avoid using VarStack
+        return torch.stack(inputs, dim = dim).clone()
   )JIT";
 
   const auto stack_three = R"JIT(
     def forward(self, a: Tensor, b: Tensor, c: Tensor):
-        return torch.stack((a, b, c)).clone()
+        inputs = [a, b]
+        inputs.append(c) # mutation to avoid using VarStack
+        return torch.stack(inputs).clone()
   )JIT";
 
   auto a = at::randn({2, 2});
@@ -673,12 +679,15 @@ TEST(StaticRuntime, Stack) {
 
   std::vector<IValue> args1_dim{a, b, 0};
   std::vector<IValue> args2_dim{d, e, 1};
+  std::vector<IValue> args_dim_negative{d, e, -1};
 
   std::vector<IValue> args1_three_tensors{a, b, c};
   std::vector<IValue> args2_three_tensors{d, e, f};
 
   testStaticRuntime(stack_dim, args1_dim);
   testStaticRuntime(stack_dim, args1_dim, args2_dim);
+
+  testStaticRuntime(stack_dim, args_dim_negative);
 
   testStaticRuntime(stack_three, args1_three_tensors);
   testStaticRuntime(stack_three, args1_three_tensors, args2_three_tensors);
@@ -999,9 +1008,9 @@ TEST(StaticRuntime, to) {
 
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
-    auto other = at::randn({4, 3, 1, 2}, b);
+    auto other = at::randn({4, 3, 1, 2}).to(b);
     auto a2 = at::randn({3, 2, 2, 4});
-    auto a2_other = at::randn({3, 2, 2, 4}, b);
+    auto a2_other = at::randn({3, 2, 2, 4}).to(b);
 
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
@@ -1046,6 +1055,11 @@ TEST(StaticRuntime, to) {
       // float->float
       test_to(
           at::ScalarType::Float,
+          non_blocking,
+          copy,
+          c10::MemoryFormat::Contiguous);
+      test_to(
+          at::ScalarType::Bool,
           non_blocking,
           copy,
           c10::MemoryFormat::Contiguous);
@@ -1181,6 +1195,10 @@ TEST(StaticRuntime, VarCat) {
   // 3D tensors - cat dim = 2
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), 2};
   testStaticRuntime(var_cat_script, args3);
+
+  // Negative dim
+  std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 7}), -1};
+  testStaticRuntime(var_cat_script, args4);
 
   testStaticRuntime(var_cat_script, args1, args2);
 }
@@ -1716,6 +1734,10 @@ TEST(StaticRuntime, VarStack) {
   std::vector<IValue> args3 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), 2};
   testStaticRuntime(var_stack_script, args3);
 
+  // Negative dim
+  std::vector<IValue> args4 = {at::randn({4, 5, 6}), at::randn({4, 5, 6}), -1};
+  testStaticRuntime(var_stack_script, args4);
+
   testStaticRuntime(var_stack_script, args1, args2);
 }
 
@@ -1842,6 +1864,9 @@ TEST(StaticRuntime, Cat) {
   auto d = at::randn({3, 5});
   std::vector<IValue> args1{c, d, 1};
   testStaticRuntime(cat_script, args0, args1);
+
+  std::vector<IValue> args_dim_negative{c, d, -1};
+  testStaticRuntime(cat_script, args_dim_negative);
 }
 
 TEST(StaticRuntime, Cumsum) {
@@ -2179,4 +2204,79 @@ TEST(StaticRuntime, Split) {
   testStaticRuntime(src, {a, 1, 0});
   testStaticRuntime(src, {a, 1, 1});
   testStaticRuntime(src, {a, 2, -1}, {b, 2, 2});
+}
+
+namespace {
+
+void maybe_throw(bool should_throw) {
+  if (should_throw) {
+    throw std::runtime_error("test exception");
+  }
+}
+
+TORCH_LIBRARY(static_runtime_tests, m) {
+  // Conservative so this op doesn't get deleted by dead
+  // code elimination
+  m.def(torch::schema(
+      "static_runtime_tests::maybe_throw(bool throw) -> ()",
+      at::AliasAnalysisKind::CONSERVATIVE));
+  m.impl("maybe_throw", maybe_throw);
+}
+
+} // namespace
+
+TEST(StaticRuntime, ModelCrashOnFirstRun) {
+  const auto src = R"JIT(
+    graph(%0: Tensor, %throw: bool):
+        %1: Tensor = aten::mul(%0, %0)
+        static_runtime_tests::maybe_throw(%throw)
+        %2: Tensor = aten::mul(%1, %1)
+        %3: Tensor = aten::mul(%2, %2)
+        return (%3)
+  )JIT";
+
+  auto graph = getGraphFromIR(src);
+  auto static_module = StaticModule(graph);
+  auto& runtime = static_module.runtime();
+
+  std::vector<IValue> args_crash{at::randn({1}), true};
+  std::vector<IValue> args_no_crash{at::randn({1}), false};
+  EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
+
+  // The run didn't finish, we didn't allocate the memory planner
+  EXPECT_EQ(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
+
+  // We guarantee that the runtime is still usable after the crash.
+  // Run again to verify this.
+  compareResultsWithJIT(runtime, graph, args_no_crash);
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
+}
+
+TEST(StaticRuntime, ModelCrashOnSecondRun) {
+  const auto src = R"JIT(
+    graph(%0: Tensor, %throw: bool):
+        %1: Tensor = aten::mul(%0, %0)
+        static_runtime_tests::maybe_throw(%throw)
+        %2: Tensor = aten::mul(%1, %1)
+        %3: Tensor = aten::mul(%2, %2)
+        return (%3)
+  )JIT";
+
+  auto graph = getGraphFromIR(src);
+  auto static_module = StaticModule(graph);
+  auto& runtime = static_module.runtime();
+
+  std::vector<IValue> args_crash{at::randn({1}), true};
+  std::vector<IValue> args_no_crash{at::randn({1}), false};
+  runtime(args_no_crash, {});
+  EXPECT_NE(runtime.get_memory_planner(), nullptr);
+  runtime.check_for_memory_leak();
+
+  EXPECT_THROW(runtime(args_crash, {}), std::runtime_error);
+  runtime.check_for_memory_leak();
+
+  // We guarantee that the runtime is still usable after the crash.
+  // Run again to verify this.
+  compareResultsWithJIT(runtime, graph, args_no_crash);
 }
