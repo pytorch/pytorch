@@ -114,6 +114,15 @@ class ShardedTensor(object):
             :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
             Need to initialize the RPC Framework if specified as ``True``.
             Default: ``False``.
+
+    .. note:: ShardedTensor uses collectives to do various operations, i.e. it
+        uses all_gather to do cross rank validations. For NCCL-based processed
+        groups, internal tensor representations of objects must be moved to the
+        GPU device before communication takes place. In this case, the device
+        used is given by ``torch.cuda.current_device()`` and it is the user's
+        responsiblity to ensure that this is set so that each rank has an
+        individual GPU, via ``torch.cuda.set_device()``
+
     """
 
     def __new__(cls, *args, **kwargs):
@@ -258,14 +267,6 @@ class ShardedTensor(object):
             out (:class `torch.Tensor`, optional): The output full tensor.
                 Must to be provided ONLY on ``dst`` rank.
                 Default: ``None``
-
-    .. note:: For NCCL-based processed groups, internal tensor representations
-        of objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
-        ``torch.cuda.current_device()`` and it is the user's responsiblity to
-        ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``
-
         """
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -640,6 +641,9 @@ class ShardedTensor(object):
                 'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
             )
         return self._remote_shards
+
+    def __hash__(self):
+        return id(self)
 
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'

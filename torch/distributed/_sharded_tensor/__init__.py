@@ -337,15 +337,6 @@ def init_from_local_shards(
         >>> )
         >>> local_shards = [Shard(torch.randn(5, 5), local_shard_metadata)]
         >>> sharded_tensor = init_from_local_shards(local_shards, [10, 5])
-
-    .. note:: `init_from_local_shards` uses collectives to do cross rank
-        validation during initialization. For NCCL-based processed groups,
-        objects must be moved to the GPU device before communication takes
-        place. In this case, the device used is given by
-        ``torch.cuda.current_device()`` and it is the user's responsiblity to
-        ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``.
-
     """
     return ShardedTensor._init_from_local_shards(
         local_shards,
@@ -405,13 +396,6 @@ def shard_parameter(
             Default: 0.
         process_group (ProcessGroup, optional): The process group to work on. If None,
             the default process group will be used.
-
-    .. note:: shard_parameter uses collective to do shards scattering and validation.
-        For NCCL-based processed groups, objects must be moved to the GPU device before
-        communication takes place. In this case, the device used is given by
-        ``torch.cuda.current_device()`` and it is the user's responsiblity to
-        ensure that this is set so that each rank has an individual GPU, via
-        ``torch.cuda.set_device()``
 
     .. warning::
         Only :class:`torch.distributed._sharding_spec.ShardingSpec` is
@@ -476,15 +460,14 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # We don't want autograd recording here for the narrow op and
-    # 'local_shard' should be a leaf variable in the autograd graph
-    with torch.no_grad():
-        # Reshape to get shard for this rank.
-        local_shard = tensor.narrow(
-            sharding_spec.dim,  # type: ignore[arg-type]
-            local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-            local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-        ).contiguous()
+    # Reshape to get shard for this rank and we don't want autograd
+    # recording here for the narrow op and 'local_shard' should be a
+    # leaf variable in the autograd graph.
+    local_shard = tensor.narrow(
+        sharding_spec.dim,  # type: ignore[arg-type]
+        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
+    ).clone().detach().contiguous()
 
     # Sync requires_grad to local_shard.
     local_shard.requires_grad = tensor.requires_grad
