@@ -462,9 +462,6 @@ class NumberPair(Pair):
     def _process_inputs(
         self, actual: Any, expected: Any, *, id: Tuple[Any, ...]
     ) -> Tuple[Union[int, float, complex], Union[int, float, complex]]:
-        number_types = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
-            number_types.append(np.number)
         self._check_inputs_isinstance(actual, expected, cls=self._supported_types)
         actual, expected = [self._to_number(number_like, id=id) for number_like in (actual, expected)]
         return actual, expected
