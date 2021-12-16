@@ -1248,7 +1248,8 @@ void check_gpu_tensors(const std::vector<at::Tensor>& tensors) {
 std::vector<at::Tensor> flatten_for_scatter_gather(
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     std::vector<at::Tensor>& other,
-    size_t world_size) {
+    size_t world_size,
+    bool copy_content=false) {
   if (tensor_lists.size() != other.size()) {
     TORCH_CHECK(false,
         "Tensor list operands to scatter/gather must have the same length");
@@ -1281,6 +1282,15 @@ std::vector<at::Tensor> flatten_for_scatter_gather(
     }
     // Flatten the tensors (from all ranks) into a single big tensor.
     flattened[i] = newLikeFlat(tensor_lists, i);
+
+    // copy the input tensors to the flatten large send buffer
+    // this is used by scatter as we are flattening the input list
+    if (copy_content) {
+      for (const auto j : c10::irange(tensor_lists[i].size())) {
+        flattened[i][j].copy_(tensor_lists[i].at(j));
+      }
+    }
+
   }
   return flattened;
 }
@@ -2232,10 +2242,81 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
-    std::vector<at::Tensor>& /* unused */,
-    std::vector<std::vector<at::Tensor>>& /* unused */,
-    const ScatterOptions& /* unused */) {
-  TORCH_CHECK(false, "ProcessGroupNCCL does not support scatter");
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<std::vector<at::Tensor>>& inputTensors,
+    const ScatterOptions& opts) {
+
+  static auto invalidArgument = [](const std::string& msg) {
+    TORCH_CHECK(false, "ProcessGroupNCCL::scatter: " + msg);
+  };
+
+  assertRootRank(invalidArgument, opts.rootRank, size_);
+  check_gpu_tensors(outputTensors);
+  assertSingleElementInput(invalidArgument, outputTensors);
+
+  std::vector<at::Tensor> inputFlattened;
+
+  // @lint-ignore CLANGTIDY
+  auto tensor = outputTensors.back();
+  RECORD_PARAM_COMMS(
+      rank_,                    // rank
+      "scatter",                // colName
+      tensor.numel(),           // inSize
+      tensor.numel() *          // outSize
+        this->getSize(),        // dType
+      tensor.scalar_type(),
+      std::vector<int64_t>(),   // inSplitSizes
+      std::vector<int64_t>());  // outSplitSize
+
+  if (getRank() == opts.rootRank) {
+    if (inputTensors.size() != 1) {
+      std::stringstream ss;
+      ss << "requires a single-element output list containing a list with "
+         << getSize() << " tensors.";
+      invalidArgument(ss.str());
+    } else if (inputTensors[0].size() != static_cast<size_t>(getSize())) {
+      std::stringstream ss;
+      ss << "Incorrect input list size " << inputTensors[0].size()
+         << ". Input list size should be " << getSize()
+         << ", same as size of the process group.";
+      invalidArgument(ss.str());
+    }
+
+    inputFlattened = flatten_for_scatter_gather(inputTensors, outputTensors, size_, true);
+    check_gpu_tensors(inputFlattened);
+
+    const auto& options = outputTensors[0].options();
+    const auto& sizes = outputTensors[0].sizes();
+    assertTypeAndSizesMatch(invalidArgument, inputTensors[0], options, sizes);
+  } else {
+    // if not in the root rank, initialize inputFlattened as empty place holder
+    if (inputTensors.size() != 0) {
+      invalidArgument("requires empty output on non-root");
+    }
+
+    for(int i = 0; i < outputTensors.size(); ++ i) {
+      inputFlattened.emplace_back(at::empty_like(outputTensors[i], outputTensors[i].options()));
+    }
+  }
+
+  return collective(
+      inputFlattened,
+      outputTensors,
+      [&](at::Tensor& input,
+          at::Tensor& output,
+          ncclComm_t comm,
+          at::cuda::CUDAStream& stream) {
+        const auto root = opts.rootRank;
+        c10::cuda::CUDACachingAllocator::recordStream(
+            output.storage().data_ptr(), stream);
+        torch::cuda::nccl::scatter(input, output, comm, stream, root);
+        return ncclSuccess;
+      },
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
+      [&](std::vector<at::cuda::CUDAStream>& ncclStreams) {},
+      OpType::SCATTER,
+      "nccl:scatter");
+
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::recvAnysource(

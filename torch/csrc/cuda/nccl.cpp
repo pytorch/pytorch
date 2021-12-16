@@ -849,6 +849,45 @@ void gather(
 #endif
 }
 
+void scatter(
+    const at::Tensor& inputs,
+    at::Tensor& outputs,
+    ncclComm_t _comm,
+    at::cuda::CUDAStream& stream,
+    int32_t root) {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
+  using namespace torch::cuda::nccl::detail;
+
+  auto comm = to_nccl_comm(_comm);
+  int numranks, cur_rank;
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  NCCL_CHECK(ncclCommUserRank(comm, &cur_rank));
+
+  size_t count = inputs.numel();
+  auto type = to_nccl_data_type(inputs);
+  auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+
+  NCCL_CHECK(ncclGroupStart());
+  if (cur_rank == root)
+  {
+    for (int r = 0; r < numranks; r++)
+    {
+      const auto* sendbuff =  reinterpret_cast<char*>(inputs[r].data_ptr());
+      NCCL_CHECK(ncclSend(sendbuff, count, type, r, comm, stream));
+    }
+  }
+  NCCL_CHECK(ncclRecv(recvbuff, count, type, root, comm, stream));
+  NCCL_CHECK(ncclGroupEnd());
+
+#else
+  AT_ERROR("scatter is only supported for NCCL lib version >= 2.7.0");
+#endif
+#else
+  AT_ERROR("PyTorch built without NCCL support");
+#endif
+}
+
 
 } // namespace nccl
 } // namespace cuda
