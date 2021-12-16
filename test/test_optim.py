@@ -691,6 +691,31 @@ class TestOptim(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
                 optimizer(None, lr=1e-2, rho=1.1)
 
+    # new test that test_adadelta can be switched to when merge is complete and multitensor is deleted
+    @skipIfRocm
+    def test_adadelta_new(self):
+        optimizer = optim.Adadelta
+        for foreach in [True, False]:
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, foreach=foreach))
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95, foreach=foreach))
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer(
+                    self._build_params_dict(weight, bias, rho=0.95, foreach=foreach)),
+                [lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                 lambda opt: ReduceLROnPlateau(opt)]
+            )
+            self._test_basic_cases(
+                lambda weight, bias: optimizer([weight, bias], weight_decay=1, foreach=foreach)
+            )
+            with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
+                optimizer(None, lr=1e-2, rho=1.1, foreach=foreach)
+
     def test_adadelta_complex(self):
         for optimizer in [optim.Adadelta]:
             self._test_complex_optimizer(

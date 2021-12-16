@@ -209,7 +209,7 @@ def adadelta(params: List[Tensor],
     See :class:`~torch.optim.Adadelta` for details.
     """
 
-    if foreach:
+    if foreach and not torch.jit.is_scripting():
         multi.multi_tensor_adadelta(params,
                                     grads,
                                     square_avgs,
