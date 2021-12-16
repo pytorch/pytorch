@@ -9,15 +9,11 @@ namespace at { namespace native {
 using cudnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub);
 using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
     const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
     at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
+DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub);
 DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub);
-using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, bool, bool, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub);
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ConvParams {
