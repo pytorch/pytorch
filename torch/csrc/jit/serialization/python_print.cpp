@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/ir_views.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/calculate_necessary_args.h>
 
@@ -744,6 +745,21 @@ struct PythonPrintImpl {
   void checkVersion(Node* node) {
     if (node->owningGraph()->get_op_version().has_value()) {
       min_version_ = std::max(min_version_, node->owningGraph()->get_op_version().value());
+    } else {
+      // if there is no version attached to the graph,
+      // we still want to find the min required runtime
+      // to run this model. This can happen when we are
+      // saving a model the first time.
+      if (auto schema = node->maybeSchema()) {
+        auto schema_name = getFullSchemaName(*schema);
+        auto version_entry = get_operator_version_map().find(schema_name);
+        if (version_entry != get_operator_version_map().end()) {
+          const auto& entry = version_entry->second;
+          min_version_ = std::max(
+              min_version_,
+              uint64_t(entry[entry.size() - 1].bumped_at_version));
+        }
+      }
     }
   }
 

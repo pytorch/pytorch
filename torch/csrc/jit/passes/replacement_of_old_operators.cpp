@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
 
 #include <c10/util/Exception.h>
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/frontend/schema_matching.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
@@ -24,7 +25,7 @@ struct OldOpsReplacer {
     auto current_version = graph_->get_op_version().value();
     DepthFirstGraphNodeIterator graph_it(graph_);
     Node* node = graph_it.next();
-    int updated_version = 0;
+    int updated_version = caffe2::serialize::kMinSupportedFileFormatVersion;
     while (node) {
       if (auto schema = node->maybeSchema()) {
         auto schema_name = getFullSchemaName(*schema);
