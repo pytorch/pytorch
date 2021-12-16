@@ -6908,7 +6908,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # Testing bug in #34061 (https://github.com/pytorch/pytorch/issues/34061)
         for n in range(250, 551, 100):
             mat = torch.randn(n, n, dtype=dtype, device=device)
-            q, _ = torch.qr(mat)
+            q, _ = torch.linalg.qr(mat)
             ref_det, ref_logabsdet = reference_slogdet(q)
             test_single_det(q, (ref_det, ref_logabsdet), 'orthogonal')
 
