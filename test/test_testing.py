@@ -766,8 +766,8 @@ class TestAssertClose(TestCase):
                 fn()
 
     def test_meta(self):
-        actual = torch.empty((2, 2))
-        expected = actual.to("meta")
+        actual = torch.empty((2, 2), device="meta")
+        expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
             with self.assertRaisesRegex(ValueError, "meta"):
