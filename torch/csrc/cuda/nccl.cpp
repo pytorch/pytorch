@@ -830,14 +830,21 @@ void gather(
   const auto* sendbuff = reinterpret_cast<char*>(inputs.data_ptr());
 
   NCCL_CHECK(ncclGroupStart());
-  NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
+
   if (cur_rank == root)
   {
     for (int r = 0; r < numranks; r++)
     {
-      auto* recvbuff =  reinterpret_cast<char*>(outputs[r].data_ptr());
-      NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
+      if (r != root) {
+        auto* recvbuff =  reinterpret_cast<char*>(outputs[r].data_ptr());
+        NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
+      } else {
+        // on its own rank, simply copy from the input
+        outputs[r].copy_(inputs);
+      }
     }
+  } else {
+    NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
   NCCL_CHECK(ncclGroupEnd());
 
