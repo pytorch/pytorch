@@ -469,6 +469,7 @@ void nnc_aten_quantized_add(
       {{0u, {out_qscale, out_qzero, toQIntType(a_qdtype)}},
        {1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
+  // NOLINTNEXTLINE
   quantized_add_out(tensors[1], tensors[2], tensors[0]);
 }
 
@@ -499,6 +500,7 @@ void nnc_aten_quantized_mul(
       {{0u, {out_qscale, out_qzero, toQIntType(a_qdtype)}},
        {1u, {a_qscale, a_qzero, toQIntType(a_qdtype)}},
        {2u, {b_qscale, b_qzero, toQIntType(b_qdtype)}}});
+  // NOLINTNEXTLINE
   quantized_mul_out(tensors[1], tensors[2], tensors[0]);
 }
 
@@ -524,6 +526,7 @@ void nnc_aten_quantized_mul_scalar(
       {{0u, {x_qscale, x_qzero, toQIntType(x_qdtype)}},
        {1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
   const double scalar = ((double*)extra_args)[3];
+  // NOLINTNEXTLINE
   quantized_mul_scalar_out(tensors[1], scalar, tensors[0]);
 }
 
@@ -563,8 +566,6 @@ void nnc_aten_quantized_sigmoid(
   const double x_qscale = ((double*)extra_args)[0];
   const int64_t x_qzero = extra_args[1];
   const c10::ScalarType x_qdtype = static_cast<c10::ScalarType>(extra_args[2]);
-  const double out_qscale = ((double*)extra_args)[3];
-  const int64_t out_qzero = extra_args[4];
   auto tensors = constructTensors(
       bufs_num,
       buf_data,
