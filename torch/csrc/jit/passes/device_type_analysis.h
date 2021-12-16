@@ -1,9 +1,12 @@
 #pragma once
 
+// Windows Torch API Macro shouldnt' be needed
+#include <torch/csrc/WindowsTorchApiMacro.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
+struct Graph;
 
 // Transposes the weight matrix for frozen linear modules.
 // and converts it into a matmul
