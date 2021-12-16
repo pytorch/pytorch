@@ -45,7 +45,7 @@ namespace jit {
 namespace tensorexpr {
 struct QIData final {
   double scale;
-  double zero;
+  int64_t zero;
   c10::ScalarType scalarType;
 };
 std::vector<at::Tensor> constructTensors(
