@@ -45,7 +45,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
-  for (int i = 0; i < image_ndim; ++i) {
+  for (const auto i : c10::irange(image_ndim)) {
     CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
@@ -82,7 +82,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
     CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
-    for (int i = 0; i < image_ndim; ++i) {
+    for (const auto i : c10::irange(image_ndim)) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
     CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
@@ -129,7 +129,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(*Y);
   const std::vector<int> output_image_dims = GetDims(*Y);
-  for (int i = 0; i < image_ndim; ++i) {
+  for (const auto i : c10::irange(image_ndim)) {
     CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
@@ -159,7 +159,7 @@ bool LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   if (InputSize() == 3) {
     const auto& bias = Input(BIAS);
     CAFFE_ENFORCE_EQ(bias.dim(), image_ndim + 1);
-    for (int i = 0; i < image_ndim; ++i) {
+    for (const auto i : c10::irange(image_ndim)) {
       CAFFE_ENFORCE_EQ(bias.dim32(i), output_image_dims[i]);
     }
     CAFFE_ENFORCE_EQ(bias.dim32(image_ndim), shape.M);
@@ -200,8 +200,9 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   T* column_buffer_data = column_buffer->template mutable_data<T>();
   T* Y_transposed_buffer_data = Y_transposed_buffer->template mutable_data<T>();
 
-  for (int image_id = 0; image_id < shape.N; ++image_id) {
-    for (int group_id = 0; group_id < group_; ++group_id) {
+  for (const auto image_id : c10::irange(shape.N)) {
+    (void)image_id; // Suppress unused variable warning
+    for (const auto group_id : c10::irange(group_)) {
       if (kernel_.size() == 2) {
         math::Im2Col<T, Context, StorageOrder::NCHW>(
             shape.C / group_,
@@ -302,7 +303,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   Y_transposed_buffer->Resize(shape.Y_transposed_dims);
   T* column_buffer_data = column_buffer->template mutable_data<T>();
   T* Y_transposed_buffer_data = Y_transposed_buffer->template mutable_data<T>();
-  for (int image_id = 0; image_id < shape.N; ++image_id) {
+  for (const auto image_id : c10::irange(shape.N)) {
     math::Im2Col<T, Context, StorageOrder::NHWC>(
         shape.C,
         shape.X_dims[0],
@@ -387,7 +388,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   shape.input_image_size = GetDimsSize(X);
   const std::vector<int> output_image_dims = GetDims(dY);
   shape.output_image_size = GetDimsSize(dY);
-  for (int i = 0; i < image_ndim; ++i) {
+  for (const auto i : c10::irange(image_ndim)) {
     CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
   ConvPoolOpBase<Context>::ComputePads(input_image_dims);
@@ -484,7 +485,7 @@ bool LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   shape.input_image_size = GetDimsSize(X);
   shape.output_image_size = GetDimsSize(dY);
   const std::vector<int> output_image_dims = GetDims(dY);
-  for (int i = 0; i < image_ndim; ++i) {
+  for (const auto i : c10::irange(image_ndim)) {
     CAFFE_ENFORCE_EQ(output_image_dims[i], filter.dim32(i));
   }
 
@@ -568,8 +569,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
   T* dY_transposed_buffer_data =
       dY_transposed_buffer->template mutable_data<T>();
 
-  for (int image_id = 0; image_id < shape.N; ++image_id) {
-    for (int group_id = 0; group_id < group_; ++group_id) {
+  for (const auto image_id : c10::irange(shape.N)) {
+    (void)image_id; // Suppress unused variable warning
+    for (const auto group_id : c10::irange(group_)) {
       if (kernel_.size() == 2) {
         math::Im2Col<T, Context, StorageOrder::NCHW>(
             shape.C / group_,
@@ -681,8 +683,9 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         column_buffer->template mutable_data<T>(),
         &context_);
     const T* const_column_buffer_data = column_buffer->template data<T>();
-    for (int image_id = 0; image_id < shape.N; ++image_id) {
-      for (int group_id = 0; group_id < group_; ++group_id) {
+    for (const auto image_id : c10::irange(shape.N)) {
+      (void)image_id; // Suppress unused variable warning
+      for (const auto group_id : c10::irange(group_)) {
         if (kernel_.size() == 2) {
           math::Col2Im<T, Context, StorageOrder::NCHW>(
               shape.C / group_,
@@ -743,7 +746,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
   T* column_buffer_data = column_buffer->template mutable_data<T>();
   T* dY_transposed_buffer_data =
       dY_transposed_buffer->template mutable_data<T>();
-  for (int image_id = 0; image_id < shape.N; ++image_id) {
+  for (const auto image_id : c10::irange(shape.N)) {
     math::Im2Col<T, Context, StorageOrder::NHWC>(
         shape.C,
         shape.X_dims[0],
@@ -835,7 +838,8 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         column_buffer->template mutable_data<T>(),
         &context_);
     const T* const_column_buffer_data = column_buffer->template data<T>();
-    for (int image_id = 0; image_id < shape.N; ++image_id) {
+    for (const auto image_id : c10::irange(shape.N)) {
+      (void)image_id; // Suppress unused variable warning
       math::Col2Im<T, Context, StorageOrder::NHWC>(
           shape.C,
           shape.X_dims[0],

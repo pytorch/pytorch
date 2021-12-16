@@ -242,13 +242,6 @@ into the repo directory.
   directly.)
 * [aten](aten) - C++ tensor library for PyTorch (no autograd support)
   * [src](aten/src) - [README](aten/src/README.md)
-    * [TH](aten/src/TH)
-      [THC](aten/src/THC) - Legacy library code from the original
-      Torch. Try not to add things here; we're slowly porting these to
-      [native](aten/src/ATen/native).
-      * generic - Contains actual implementations of operators,
-        parametrized over `scalar_t`. Files here get compiled N times
-        per supported scalar type in PyTorch.
     * [ATen](aten/src/ATen)
       * [core](aten/src/ATen/core) - Core functionality of ATen. This
         is migrating to top-level c10 folder.
@@ -470,10 +463,10 @@ of very low signal to reviewers.
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
 - user-facing documentation.
-These are the docs that you see over at [our docs website](pytorch.org/docs).
+These are the docs that you see over at [our docs website](https://pytorch.org/docs).
 - developer facing documentation.
 Developer facing documentation is spread around our READMEs in our codebase and in
-the [PyTorch Developer Wiki](pytorch.org/wiki).
+the [PyTorch Developer Wiki](https://pytorch.org/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
 
 The rest of this section is about user-facing documentation.

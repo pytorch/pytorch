@@ -493,8 +493,8 @@ void make_bag_size_out(
     const bool include_last_offset,
     const bool requires_grad) {
   if (requires_grad || mode == MODE_MEAN || mode == MODE_MAX) {
-    auto num_bags = offsets.size(0) - (include_last_offset ? 1 : 0);
-    bag_size_out = at::zeros({num_bags}, offsets.options());
+    auto num_bags = offsets.sizes()[0] - (include_last_offset ? 1 : 0);
+    at::native::resize_(bag_size_out, {num_bags}, c10::nullopt);
     // Compute this for MODE_MEAN and MODE_MAX (latter needed for backwards)
     if (num_bags != 1) {
       bag_size_out.slice(0, 0, bag_size_out.sizes()[0] - 1, 1) =
@@ -504,6 +504,8 @@ void make_bag_size_out(
     if (num_bags > 0) {
       bag_size_out[-1] = indices.sizes()[0] - offsets[num_bags - 1];
     }
+  } else {
+    at::native::resize_(bag_size_out, offsets.sizes(), c10::nullopt);
   }
 }
 
