@@ -326,6 +326,7 @@ Tensor class reference
     Tensor.diag_embed
     Tensor.diagflat
     Tensor.diagonal
+    Tensor.diagonal_scatter
     Tensor.fill_diagonal_
     Tensor.fmax
     Tensor.fmin
@@ -593,6 +594,7 @@ Tensor class reference
     Tensor.scatter_add_
     Tensor.scatter_add
     Tensor.select
+    Tensor.select_scatter
     Tensor.set_
     Tensor.share_memory_
     Tensor.short
@@ -615,6 +617,7 @@ Tensor class reference
     Tensor.arcsinh_
     Tensor.size
     Tensor.slogdet
+    Tensor.slice_scatter
     Tensor.solve
     Tensor.sort
     Tensor.split
