@@ -84,7 +84,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
     catch (const c10::LinAlgError& e) {                              \
       auto msg = torch::get_cpp_stacktraces_enabled() ?              \
                     e.what() : e.what_without_backtrace();           \
-      PyErr_SetString(torch::linalg::Pytorch_LinAlgError, torch::processErrorMsg(msg)); \
+      PyErr_SetString(THPException_LinAlgError, torch::processErrorMsg(msg));    \
       retstmnt;                                                      \
     }                                                                \
     catch (const c10::Error& e) {                                    \
@@ -151,7 +151,7 @@ static inline void PyErr_SetString(PyObject* type, const std::string& message) {
 
 #define END_HANDLE_TH_ERRORS END_HANDLE_TH_ERRORS_RET(nullptr)
 
-extern PyObject *THPException_FatalError;
+extern PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 // Throwing this exception means that the python error flags have been already
 // set and control should be immediately returned to the interpreter.
@@ -331,17 +331,13 @@ struct AttributeError : public PyTorchError {
   }
 };
 
-namespace linalg {
-extern PyObject *Pytorch_LinAlgError;
-
 // Translates to Python LinAlgError
 struct LinAlgError : public PyTorchError {
   LinAlgError(const char* format, ...) TORCH_FORMAT_FUNC(2, 3);
   PyObject* python_type() override {
-    return Pytorch_LinAlgError;
+    return THPException_LinAlgError;
   }
 };
-}
 
 struct WarningMeta {
   WarningMeta(const c10::SourceLocation& _source_location,

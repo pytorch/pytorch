@@ -6,16 +6,24 @@
 #include <cstdarg>
 #include <exception>
 #include <sstream>
+#include <iostream>
 
 #include <torch/csrc/THP.h>
 
-PyObject *THPException_FatalError;
+PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 #define ASSERT_TRUE(cond) if (!(cond)) return false
 bool THPException_init(PyObject *module)
 {
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
+
+  std::cout << "START LOAD\n";
+  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewException("torch.LinAlgError", nullptr, nullptr));
+  std::cout << "LOAD EXCEPTION\n";
+  ASSERT_TRUE(PyModule_AddObject(module, "LinAlgError", THPException_LinAlgError) == 0);
+
+  std::cout << "ADD OBJECT\n";
   return true;
 }
 
@@ -167,15 +175,11 @@ AttributeError::AttributeError(const char* format, ...) {
   va_end(fmt_args);
 }
 
-namespace linalg {
-PyObject *Pytorch_LinAlgError;
-
 LinAlgError::LinAlgError(const char* format, ...) {
   va_list fmt_args;
   va_start(fmt_args, format);
   msg = formatMessage(format, fmt_args);
   va_end(fmt_args);
-}
 }
 
 void PyWarningHandler::InternalHandler::process(

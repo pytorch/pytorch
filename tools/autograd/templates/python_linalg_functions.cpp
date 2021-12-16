@@ -52,22 +52,6 @@ void initLinalgFunctions(PyObject* module) {
   if (PyModule_AddObject(module, "_linalg", linalg) != 0) {
     throw python_error();
   }
-
-  torch::linalg::Pytorch_LinAlgError = PyErr_NewException("torch.LinAlgError", PyExc_RuntimeError, nullptr);
-  if (!torch::linalg::Pytorch_LinAlgError) {
-    throw python_error();
-  }
-
-  auto torch = PyImport_ImportModule("torch");
-  // auto torch_linalg = PyObject_GetAttrString(torch, "linalg");
-
-  // if (!torch_linalg) {
-  //   throw python_error();
-  // }
-
-  if (PyModule_AddObject(torch, "LinAlgError", torch::linalg::Pytorch_LinAlgError) != 0) {
-    throw python_error();
-  }
 }
 
 // generated methods start here
