@@ -8,6 +8,8 @@
 #include <torch/csrc/jit/passes/device_type_analysis.h>
 #include <torch/library.h>
 #include <memory>
+#include <utility>
+#include "c10/core/DeviceType.h"
 
 namespace torch {
 namespace jit {
@@ -62,8 +64,8 @@ bool propWithNoDevice(Node* n) {
     }
 
     bool is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
-    bool is_cpu_zerodim =
-        is_zerodim && tensor_type->device() && tensor_type->device()->is_cpu();
+    bool is_cpu = tensor_type->device() && tensor_type->device()->is_cpu();
+    bool is_cpu_zerodim = is_zerodim && is_cpu;
 
     if (seen_any_device) {
       if (device != tensor_type->device() && !is_cpu_zerodim) {
@@ -200,11 +202,13 @@ struct DeviceTypePropagationPass {
 // This analysis propagates input device types (if any) throughout the
 // graph.
 bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
-  DeviceTypePropagationPass tp = DeviceTypePropagationPass(graph);
-  bool changed = tp.run();
+  auto tp = std::make_unique<DeviceTypePropagationPass>((graph));
+  bool changed = tp->run();
+  /*
   if (changed) {
     GRAPH_DUMP("After TensorPropertyPropagation pass:", graph);
   }
+  */
   return changed;
 }
 
