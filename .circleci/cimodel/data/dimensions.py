@@ -4,6 +4,7 @@ CUDA_VERSIONS = [
     "102",
     "111",
     "113",
+    "115",
 ]
 
 ROCM_VERSIONS = [

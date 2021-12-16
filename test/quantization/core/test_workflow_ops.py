@@ -751,6 +751,32 @@ class TestFakeQuantizeOps(TestCase):
         Y3r = _fake_quantize_per_channel_affine_reference(X3, scale, zero, axis, mini, maxi)
         self.assertEqual(Y3, Y3r, rtol=tolerance, atol=tolerance)
 
+    @given(X=hu.per_channel_tensor(shapes=hu.array_shapes(1, 5,),
+           qparams=hu.qparams(dtypes=torch.quint8)))
+    def test_fake_quant_per_channel_qparam_range(self, X):
+        X, (scale, zero_point, axis, torch_type) = X
+        quant_min = torch.iinfo(torch_type).min
+        quant_max = torch.iinfo(torch_type).max
+
+        for device in ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']:
+            X = to_tensor(X, device)
+            scale = to_tensor(scale, device)
+
+            # Ensure that zero_point < quant_min.
+            zero_point = torch.tensor(torch.full(zero_point.shape, -1 - quant_min)).to(dtype=torch.int32, device=device)
+
+            # For non-float zero_point, fakequant requires zero_point between quant_min and quant_max.
+            with self.assertRaisesRegex(RuntimeError, "`zero_point` must be between `quant_min` and `quant_max`."):
+                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+
+            # For float zero_point, fakequant can be outside quant_min and quant_max.
+            for zero_point_dtype in [torch.float32, torch.float16]:
+                zero_point = zero_point.to(dtype=zero_point_dtype)
+                Y = torch.fake_quantize_per_channel_affine(X, scale, zero_point, axis, quant_min, quant_max)
+                Y_ref = _fake_quantize_per_channel_affine_reference(X.cpu(), scale.cpu(), zero_point.cpu(),
+                                                                    axis, quant_min, quant_max)
+                np.testing.assert_allclose(Y.cpu().numpy(), Y_ref.cpu().numpy(), rtol=tolerance, atol=tolerance)
+
     def _test_learnable_forward_per_channel(self, X_base, device, scale_base, zero_point_base, axis):
         r"""Tests the forward path of the learnable FakeQuantizePerTensorAffine op.
         """

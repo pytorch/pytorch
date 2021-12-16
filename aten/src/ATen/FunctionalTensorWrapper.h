@@ -95,9 +95,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 
  private:
   const char* tensorimpl_type_name() const override;
-  // Returns true if this FunctionalTensorWrapper is aliased with any other FunctionalTensorWrapper objects.
-  // During a functionalization pass, if we have `b = a.view()`, then a and b should both report as aliased.
-  bool is_aliased() const;
   void set_constructor_metadata();
   functionalization::FunctionalStorageImpl* functional_storage_impl() const;
 

@@ -112,18 +112,12 @@ class TORCH_API BackendImplInterface {
       const ComputationPtr computation) const = 0;
 };
 
-extern std::atomic<const BackendImplInterface*> backend_impl_registry;
-
 class TORCH_API BackendRegistrar {
  public:
   BackendRegistrar(const BackendImplInterface* backend_impl_interface);
 };
 
-static inline const BackendImplInterface* getBackend() {
-  auto p = backend_impl_registry.load();
-  TORCH_CHECK(p, "Lazy tensor backend not registered.");
-  return p;
-}
+TORCH_API const BackendImplInterface* getBackend();
 
 }  // lazy
 }  // torch
