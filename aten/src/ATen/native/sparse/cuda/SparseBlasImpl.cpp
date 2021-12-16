@@ -116,6 +116,13 @@ void block_sparse_triangular_solve_vec(
     bool upper,
     bool transpose,
     bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -216,6 +223,7 @@ void block_sparse_triangular_solve_vec(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
+#endif
 }
 
 void block_sparse_triangular_solve_mat(
@@ -225,6 +233,13 @@ void block_sparse_triangular_solve_mat(
     bool upper,
     bool transpose,
     bool unitriangular) {
+#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+  TORCH_CHECK(
+      false,
+      "Calling triangular solver with block sparse GPU tensors requires compiling ",
+      "PyTorch with ROCm 4.5.0+. ",
+      "Please use PyTorch built with newer ROCm version.");
+#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.is_sparse_csr());
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -338,6 +353,7 @@ void block_sparse_triangular_solve_mat(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
+#endif
 }
 
 void block_sparse_mv(

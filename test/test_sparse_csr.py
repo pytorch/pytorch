@@ -642,6 +642,7 @@ class TestSparseCSR(TestCase):
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
     @onlyCUDA
+    @skipCUDAIfRocm
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_triangular_solve(self, device, dtype):
