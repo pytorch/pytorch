@@ -102,7 +102,6 @@ bool InterpreterState::run(Stack& stack) {
       //   }
       // }
       // std::cout << std::endl;
-      // std::cout << "top " << stack.back().tagKind() << std::endl;
 
       // TODO(iliacher): remove the workaround after RecordFunction is in
       // Dispatcher
