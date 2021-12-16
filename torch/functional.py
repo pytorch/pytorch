@@ -26,7 +26,6 @@ __all__ = [
     'cartesian_prod',
     'block_diag',
     'cdist',
-    'chain_matmul',
     'einsum',
     'histogramdd',
     'istft',
