@@ -136,7 +136,6 @@ libtorch_profiler_sources = [
     "torch/csrc/autograd/profiler_legacy.cpp",
     "torch/csrc/autograd/profiler_kineto.cpp",
     "torch/csrc/monitor/counters.cpp",
-    "torch/csrc/monitor/events.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
