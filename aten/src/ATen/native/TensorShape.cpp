@@ -1310,7 +1310,7 @@ Tensor slice(
 }
 
 Tensor slice_backward(const Tensor& grad, IntArrayRef input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  auto grad_input = at::zeros(input_sizes, grad.options());
+  auto grad_input = at::empty(input_sizes, grad.options(), grad.suggest_memory_format()).zero_();
   grad_input.slice(dim, start, end, step).copy_(grad);
   return grad_input;
 }
