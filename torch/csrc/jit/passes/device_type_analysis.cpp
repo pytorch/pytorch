@@ -66,14 +66,12 @@ bool propWithNoDevice(Node* n) {
       continue;
     }
 
-    bool tensor_is_zerodim =
-        tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
-    bool is_cpu_zerodim = tensor_type->device()->is_cpu() && tensor_is_zerodim;
+    bool is_zerodim = tensor_type->symbolic_sizes().rank().value_or(-1) == 0;
+    bool is_cpu_zerodim =
+        is_zerodim && tensor_type->device() && tensor_type->device()->is_cpu();
 
     if (seen_any_device) {
-      auto cur_device = tensor_type->device().value();
-
-      if (device != cur_device && !is_cpu_zerodim) {
+      if (device != tensor_type->device() && !is_cpu_zerodim) {
         if (only_seen_cpu_zerodim) {
           device = tensor_type->device();
           only_seen_cpu_zerodim = false;
