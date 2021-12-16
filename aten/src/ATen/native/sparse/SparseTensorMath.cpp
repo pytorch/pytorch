@@ -638,7 +638,9 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
   return at::mul_out(self, self, other);  // redispatch!
 }
 
-SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const Tensor& dense, const SparseTensor& sparse_);
+SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+  return mul_out_sparse_dense(r, sparse_, dense);
+}
 
 SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTensor& r) {
   if (src_.dim() == 0) {
@@ -654,7 +656,7 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
   TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported. Use mul(sparse, dense) instead.");
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same sizes, but ", t_.sizes(), " != ", src_.sizes());
 
-  if (!src_.is_sparse()) {
+  if (src_.layout() == kStrided) {
     return mul_out_sparse_dense_cpu(r, t_, src_);
   }
   if (src_._nnz() == 0 || t_._nnz() == 0) {
@@ -742,12 +744,8 @@ SparseTensor& mul_out_sparse_cpu(const Tensor& t_, const Tensor& src_, SparseTen
 }
 
 // --------------------------------------------------------------------
-// mul(Tensor, SparseTensor)
+// mul(SparseTensor, Tensor)
 // --------------------------------------------------------------------
-
-SparseTensor& mul_out_sparse_dense_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
-  return mul_out_sparse_dense(r, sparse_, dense);
-}
 
 SparseTensor& mul_out_sparse_dense(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
   AT_ASSERT(r.is_sparse());

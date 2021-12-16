@@ -438,7 +438,9 @@ struct TensorMulOp {
   }
 };
 
-SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense);
+SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
+  return mul_out_sparse_dense(r, sparse_, dense);
+}
 
 SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& src_, SparseTensor& r_) {
   if (src_.dim() == 0) {
@@ -454,7 +456,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   TORCH_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
   TORCH_CHECK(t_.is_sparse(), "mul(dense, sparse) is not supported. Use mul(sparse, dense) instead.");
 
-  if (!src_.is_sparse()) {
+  if (src_.layout() == kStrided) {
     return mul_out_sparse_dense_cuda(r_, t_, src_);
   }
 
@@ -516,14 +518,6 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   get_sparse_impl(r_)->set_nnz_and_narrow(cpu_resultNnz.accessor<int64_t, 1>()[0]);
 
   return r_._coalesced_(true);
-}
-
-// --------------------------------------------------------------------
-// mul(Tensor, SparseTensor)
-// --------------------------------------------------------------------
-
-SparseTensor& mul_out_sparse_dense_cuda(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
-  return mul_out_sparse_dense(r, sparse_, dense);
 }
 
 // --------------------------------------------------------------------
