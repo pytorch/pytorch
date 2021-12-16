@@ -1469,20 +1469,6 @@
   dispatch:
     CUDA: cudnn_convolution_transpose
 
-# NB: output_padding not strictly needed here, but it's helpful for the float
-# backwards
-- func: cudnn_convolution_transpose_backward(Tensor self, Tensor grad_output, Tensor weight, int[] padding, int[] output_padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32, bool[2] output_mask) -> (Tensor, Tensor)
-  dispatch:
-    CUDA: cudnn_convolution_transpose_backward
-
-- func: cudnn_convolution_transpose_backward_input(Tensor grad_output, Tensor weight, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
-  dispatch:
-    CUDA: cudnn_convolution_transpose_backward_input
-
-- func: cudnn_convolution_transpose_backward_weight(int[] weight_size, Tensor grad_output, Tensor self, int[] padding, int[] stride, int[] dilation, int groups, bool benchmark, bool deterministic, bool allow_tf32) -> Tensor
-  dispatch:
-    CUDA: cudnn_convolution_transpose_backward_weight
-
 - func: cudnn_convolution_relu(Tensor self, Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> Tensor
   dispatch:
     CUDA: cudnn_convolution_relu
