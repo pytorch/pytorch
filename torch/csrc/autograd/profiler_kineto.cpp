@@ -41,7 +41,7 @@ inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return getTime() / 1000;
+  return torch::profiler::impl::getTime() / 1000;
 #endif // USE_KINETO
 }
 }  // namespace
@@ -648,7 +648,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           }
 
           kineto_ctx_ptr->endUS = getTimeUs();
-          state_ptr->reportClientActivity(fn.name().str(), fn.isAsync(), kineto_ctx_ptr);
+          state_ptr->reportClientActivity(fn.name(), fn.isAsync(), kineto_ctx_ptr);
 #ifdef USE_KINETO
           libkineto::api().activityProfiler().popCorrelationId();
 #endif // USE_KINETO

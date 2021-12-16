@@ -110,8 +110,10 @@ class _LRScheduler(object):
                 print('Adjusting learning rate'
                       ' of group {} to {:.4e}.'.format(group, lr))
             else:
-                print('Epoch {:5d}: adjusting learning rate'
-                      ' of group {} to {:.4e}.'.format(epoch, group, lr))
+                epoch_str = ("%.2f" if isinstance(epoch, float) else
+                             "%.5d") % epoch
+                print('Epoch {}: adjusting learning rate'
+                      ' of group {} to {:.4e}.'.format(epoch_str, group, lr))
 
 
     def step(self, epoch=None):
@@ -766,10 +768,12 @@ class ChainedScheduler(_LRScheduler):
                 )
         self._schedulers = list(schedulers)
         self.optimizer = schedulers[0].optimizer
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def step(self):
         for scheduler in self._schedulers:
             scheduler.step()
+        self._last_lr = [group['lr'] for group in self._schedulers[-1].optimizer.param_groups]
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
@@ -929,8 +933,10 @@ class ReduceLROnPlateau(object):
             if old_lr - new_lr > self.eps:
                 param_group['lr'] = new_lr
                 if self.verbose:
-                    print('Epoch {:5d}: reducing learning rate'
-                          ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+                    epoch_str = ("%.2f" if isinstance(epoch, float) else
+                                 "%.5d") % epoch
+                    print('Epoch {}: reducing learning rate'
+                          ' of group {} to {:.4e}.'.format(epoch_str, i, new_lr))
 
     @property
     def in_cooldown(self):
