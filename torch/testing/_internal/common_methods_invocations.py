@@ -10549,11 +10549,6 @@ op_db: List[OpInfo] = [
                     supports_autograd=False,
                     # FIXME: heaviside does not accept scalar inputs
                     skips=(
-                        # NumPy's heaviside promotes bool to float16
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestBinaryUfuncs',
-                                     'test_reference_numerics',
-                                     dtypes=(torch.bool,)),
                         # RuntimeError: heaviside is not yet implemented for tensors with different dtypes.
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
