@@ -37,8 +37,8 @@ except ModuleNotFoundError:
 
 REFERENCE_NORM_MODES = (
     (None, "forward", "backward", "ortho")
-    if packaging.version.parse(np.__version__) >= packaging.version.Version('1.20.0') and (
-        not has_scipy_fft or packaging.version.parse(scipy.__version__) >= packaging.version.Version('1.6.0'))
+    if packaging.version.parse(np.__version__).release >= (1, 20, 0) and (
+        not has_scipy_fft or packaging.version.parse(scipy.__version__).release >= (1, 6, 0))
     else (None, "ortho"))
 
 

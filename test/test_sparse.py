@@ -37,7 +37,7 @@ load_tests = load_tests
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
-    IS_WINDOWS and torch.version.cuda and packaging.version.parse(torch.version.cuda) > packaging.version.Version("11.2")
+    IS_WINDOWS and torch.version.cuda and packaging.version.parse(torch.version.cuda).release > (11, 2)
 ) or (not IS_WINDOWS and CUDA11OrLater)
 
 class TestSparse(TestCase):
