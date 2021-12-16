@@ -1367,26 +1367,27 @@ def check_if_enable(test: unittest.TestCase):
 class RelaxedBooleanPair(BooleanPair):
     """Pair for boolean-like inputs.
 
-    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being an :class:`int` or a
-    0d tensor-like.
+    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being a number or a single
+    element tensor-like.
     """
+    _supported_number_types = NumberPair(0, 0)._supported_types
+
     def _process_inputs(self, actual, expected, *, id):
+        # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
+        # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
+        other_supported_types = (*self._supported_types, *self._supported_number_types, torch.Tensor, np.ndarray)
         if not (
-            (
-                isinstance(actual, self._supported_types)
-                and isinstance(expected, (*self._supported_types, int, torch.Tensor, np.ndarray))
-            )
-            or (
-                isinstance(expected, self._supported_types)
-                and isinstance(actual, (*self._supported_types, int, torch.Tensor, np.ndarray))
-            )
+            (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
+            or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
             raise UnsupportedInputs()
 
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
     def _to_bool(self, bool_like, *, id):
-        if isinstance(bool_like, int):
+        if isinstance(bool_like, np.number):
+            return bool(bool_like.item())
+        elif type(bool_like) in self._supported_number_types:
             return bool(bool_like)
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
@@ -1406,13 +1407,13 @@ class RelaxedBooleanPair(BooleanPair):
 class RelaxedNumberPair(NumberPair):
     """Pair for number-like inputs.
 
-    In contrast to the builtin :class:`NumberPair`, this class also supports one input being a 0d tensor-like or a
-    :class:`enum.Enum`. D(type) checks are disabled, meaning comparing 1 to 1.0 succeeds even when ``check_dtype=True``
-    is passed.
+    In contrast to the builtin :class:`NumberPair`, this class also supports one input being a single element
+    tensor-like or a :class:`enum.Enum`. (D)Type checks are disabled, meaning comparing 1 to 1.0 succeeds even when
+    ``check_dtype=True`` is passed.
 
-    In addition, this class uses looser default tolerances for :class:`float` and :class:`complex` inputs. Also supports
-    overriding the absolute and relative tolerance through the ``@precisionOverride`` and ``@toleranceOverride``
-    decorators.
+    In addition, this class uses looser default tolerances for :class:`float` and :class:`complex` inputs. Also
+    supports overriding the absolute and relative tolerance through the ``@precisionOverride`` and
+    ``@toleranceOverride`` decorators.
     """
     _TYPE_TO_DTYPE = {
         int: torch.int64,
@@ -1420,9 +1421,7 @@ class RelaxedNumberPair(NumberPair):
         complex: torch.complex64,
     }
 
-    def __init__(
-        self, actual, expected, *, rtol_override=0.0, atol_override=0.0, check_dtype=None, **other_parameters
-    ) -> None:
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters) -> None:
         super().__init__(actual, expected, check_dtype=False, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
@@ -1430,15 +1429,10 @@ class RelaxedNumberPair(NumberPair):
     def _process_inputs(self, actual, expected, *, id):
         # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
         # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
+        other_supported_types = (*self._supported_types, torch.Tensor, np.ndarray)
         if not (
-            (
-                isinstance(actual, self._supported_types)
-                and isinstance(expected, (*self._supported_types, torch.Tensor, np.ndarray))
-            )
-            or (
-                isinstance(expected, self._supported_types)
-                and isinstance(actual, (*self._supported_types, torch.Tensor, np.ndarray))
-            )
+                (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
+                or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
             raise UnsupportedInputs()
 
@@ -1473,8 +1467,8 @@ class TensorOrArrayPair(TensorLikePair):
     tensor. On the other hand this class is looser since it converts all inputs into tensors with no regard of their
     relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray` is fine.
 
-    In addition, this class overriding the absolute and relative tolerance through the ``@precisionOverride`` and
-    ``@toleranceOverride`` decorators.
+    In addition, this class supports overriding the absolute and relative tolerance through the ``@precisionOverride``
+    and ``@toleranceOverride`` decorators.
     """
     def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
         super().__init__(actual, expected, **other_parameters)
