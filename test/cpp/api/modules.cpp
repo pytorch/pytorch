@@ -1392,15 +1392,15 @@ TEST_F(ModulesTest, Dropout2d) {
   auto p = 0.5;
   for (const auto inplace : {false, true}) {
     Dropout2d dropout(Dropout2dOptions(p).inplace(inplace));
-    torch::Tensor x = torch::empty({10, 10, 2, 2}).fill_(1 - p);
+    torch::Tensor x = torch::empty({50, 50, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
     ASSERT_EQ(y.ndimension(), 4);
-    ASSERT_EQ(y.size(0), 10);
-    ASSERT_EQ(y.size(1), 10);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
     ASSERT_EQ(y.size(2), 2);
     ASSERT_EQ(y.size(3), 2);
     ASSERT_LT((y.mean() - (1 - p)).abs().item<float>(), 0.05);
@@ -1421,15 +1421,15 @@ TEST_F(ModulesTest, Dropout3d) {
   for (const auto inplace : {false, true}) {
     auto p = 0.5;
     Dropout3d dropout(Dropout3dOptions(p).inplace(inplace));
-    torch::Tensor x = torch::empty({10, 10, 2, 2, 2}).fill_(1 - p);
+    torch::Tensor x = torch::empty({50, 50, 2, 2, 2}).fill_(1 - p);
     if (!inplace) {
       x.requires_grad_(true);
     }
     torch::Tensor y = dropout(x);
 
     ASSERT_EQ(y.ndimension(), 5);
-    ASSERT_EQ(y.size(0), 10);
-    ASSERT_EQ(y.size(1), 10);
+    ASSERT_EQ(y.size(0), 50);
+    ASSERT_EQ(y.size(1), 50);
     ASSERT_EQ(y.size(2), 2);
     ASSERT_EQ(y.size(3), 2);
     ASSERT_EQ(y.size(4), 2);
