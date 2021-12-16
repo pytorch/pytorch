@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 from copy import deepcopy
+import contextlib
 from functools import partial
 
 import torch
@@ -30,7 +31,14 @@ from torch.testing._internal.common_utils import (
 class TestFSDPCheckpoint(FSDPTest):
 
     class SequentialModule(nn.Module):
-        def __init__(self, checkpoint_layer=False, wrap_fsdp=False, *fsdp_args, **fsdp_kwargs):
+        def __init__(
+            self,
+            checkpoint_layer=False,
+            offload_activations=False,
+            wrap_fsdp=False,
+            *fsdp_args,
+            **fsdp_kwargs,
+        ):
             torch.manual_seed(0)
             torch.cuda.manual_seed(0)
             super().__init__()
@@ -39,9 +47,14 @@ class TestFSDPCheckpoint(FSDPTest):
             l3 = nn.Linear(3, 3).cuda()
 
             if checkpoint_layer:
-                l1 = checkpoint_wrapper(l1)
-                l2 = checkpoint_wrapper(l2)
-                l3 = checkpoint_wrapper(l3)
+                ckpt_wrapper = partial(
+                    checkpoint_wrapper,
+                    offload_to_cpu=offload_activations
+                )
+
+                l1 = ckpt_wrapper(l1)
+                l2 = ckpt_wrapper(l2)
+                l3 = ckpt_wrapper(l3)
 
             fsdp_wrapper = partial(
                 _maybe_wrap_fsdp,
@@ -81,16 +94,18 @@ class TestFSDPCheckpoint(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
     )
-    def test_checkpoint_fsdp_wrapping(self, cpu_offload):
+    @parametrize("offload_activations", [True])
+    def test_checkpoint_fsdp_wrapping(self, cpu_offload, offload_activations):
         # Test checkpoint(FSDP(layer1), FSDP(layer2), ....)
         ckpt_sequential_wrapped_fsdp = checkpoint_wrapper(
             TestFSDPCheckpoint.SequentialModule(
                 wrap_fsdp=True, cpu_offload=cpu_offload
-            )
+            ),
+            offload_to_cpu=offload_activations
         )
         # Test FSDP(checkpoint(layer1)), FSDP(checkpoint(layer2)), ....
         inner_ckpt = TestFSDPCheckpoint.SequentialModule(
-            checkpoint_layer=True, wrap_fsdp=True, cpu_offload=cpu_offload
+            checkpoint_layer=True, offload_activations=offload_activations, wrap_fsdp=True, cpu_offload=cpu_offload
         )
 
         baseline = TestFSDPCheckpoint.SequentialModule(
@@ -107,11 +122,26 @@ class TestFSDPCheckpoint(FSDPTest):
             baseline
         ]
 
-        for _ in range(2):
+        offload_to_cpu_event = "Memcpy DtoH"
+
+        for i in range(2):
             losses = []
             outputs = []
             for m in models:
-                out = m(inp)
+                check_offload = (m != baseline and i == 0 and offload_activations)
+                profiler_ctx = (
+                    torch.profiler.profile(use_cuda=True) if check_offload
+                    else contextlib.suppress()
+                )
+                with profiler_ctx as prof:
+                    out = m(inp)
+
+                if check_offload:
+                    event_names = [event.name for event in prof.events()]
+                    offload_occured = any(
+                        offload_to_cpu_event in name for name in event_names
+                    )
+                    self.assertTrue(offload_occured)
                 loss = out.sum()
                 loss.backward()
                 losses.append(loss)
@@ -124,14 +154,15 @@ class TestFSDPCheckpoint(FSDPTest):
         "cpu_offload",
         [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
     )
-    def test_basic_checkpoint_end_to_end(self, cpu_offload):
+    @parametrize("offload_activations", [True, False])
+    def test_basic_checkpoint_end_to_end(self, cpu_offload, offload_activations):
         seq = TestFSDPCheckpoint.SequentialModule().to(torch.cuda.current_device())
         # Runs FSDP with no checkpointing
         fsdp_only_seq = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
         # Runs checkpoint-wrapped FSDP
-        checkpointed_fsdp = checkpoint_wrapper(FSDP(deepcopy(seq), cpu_offload=cpu_offload))
+        checkpointed_fsdp = checkpoint_wrapper(FSDP(deepcopy(seq), cpu_offload=cpu_offload), offload_to_cpu=offload_activations)
         # Runs FSDP-wrapped checkpointed module
-        fsdp_wrapped_checkpoint = FSDP(checkpoint_wrapper(deepcopy(seq)), cpu_offload=cpu_offload)
+        fsdp_wrapped_checkpoint = FSDP(checkpoint_wrapper(deepcopy(seq), offload_to_cpu=offload_activations), cpu_offload=cpu_offload)
         # Runs FSDP with manual calls to checkpoint.
         fsdp_call_checkpoint = FSDP(deepcopy(seq), cpu_offload=cpu_offload)
         # note that reentrant-based checkpointing requires inputs to have grad
@@ -146,14 +177,32 @@ class TestFSDPCheckpoint(FSDPTest):
             fsdp_call_checkpoint
         ]
 
-        for _ in range(6):
+        offload_to_cpu_event = "Memcpy DtoH"
+
+        for i in range(6):
             losses = []
             outputs = []
             for m in models:
-                if m == fsdp_call_checkpoint:
-                    out = checkpoint(m, inp)
-                else:
-                    out = m(inp)
+                check_offload = (
+                    m != fsdp_only_seq and i == 0 and offload_activations
+                )
+                profiler_ctx = (
+                    torch.profiler.profile(use_cuda=True) if check_offload
+                    else contextlib.suppress()
+                )
+                with profiler_ctx as prof:
+                    if m == fsdp_call_checkpoint:
+                        out = checkpoint(m, inp, offload_to_cpu=offload_activations)
+                    else:
+                        out = m(inp)
+
+                if check_offload:
+                    event_names = [event.name for event in prof.events()]
+                    offload_occured = any(
+                        offload_to_cpu_event in name for name in event_names
+                    )
+                    self.assertTrue(offload_occured)
+                    print(" --- validated offload ---")
                 loss = out.sum()
                 loss.backward()
                 losses.append(loss)

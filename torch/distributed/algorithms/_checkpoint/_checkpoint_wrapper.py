@@ -13,7 +13,8 @@ class CheckpointImpl(Enum):
 
 def checkpoint_wrapper(
     module: torch.nn.Module,
-    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT
+    checkpoint_impl: CheckpointImpl = CheckpointImpl.REENTRANT,
+    offload_to_cpu: bool = False,
 ):
     """
     A convenience wrapper for activation checkpointing. If the module is wrapped
@@ -29,6 +30,9 @@ def checkpoint_wrapper(
         checkpoint_impl (Optional[CheckpointImpl]):
             The checkpointing implementation to use. Currently only
             CheckpointImpl.REENTRANT is supported.
+        offload_to_cpu (Optional[bool]):
+            Whether to offload outer activations to CPU. Note that this
+            currently only works with CheckpointImpl.REENTRANT.
     Returns:
         (nn.Module):
             Wrapped module
@@ -38,6 +42,12 @@ def checkpoint_wrapper(
         raise ValueError(
             "No support for non-reentrant based checkpoint implementation."
         )
+
+    if offload_to_cpu and checkpoint_impl != CheckpointImpl.REENTRANT:
+        raise ValueError(
+            "No support for CPU offload activations and non-reentrant based "
+            "checkpoint implementation."
+        )
     # Use weakref to avoid creating a refcycle: m -> m.forward -> m. This would
     # leak GPU memory because python won't gc the module when the module is
     # freed.
@@ -46,11 +56,17 @@ def checkpoint_wrapper(
         type(module).forward,
         ref(module),
         checkpoint_impl,
+        offload_to_cpu
     )
     return module
 
 def _checkpointed_forward(
-    original_forward: Any, weak_self: Any, checkpoint_impl: Any, *args: Any, **kwargs: Any
+    original_forward: Any,
+    weak_self: Any,
+    checkpoint_impl: Any,
+    offload_to_cpu: bool,
+    *args: Any,
+    **kwargs: Any
 ) -> Any:
     module = weak_self()
     # If grads are disabled, call into original forward
@@ -60,6 +76,7 @@ def _checkpointed_forward(
     forward_args = (module, ) + args
     return checkpoint(
         original_forward,
+        offload_to_cpu=offload_to_cpu,
         use_reentrant=(checkpoint_impl == CheckpointImpl.REENTRANT),
         *forward_args,
         **kwargs
