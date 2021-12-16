@@ -385,54 +385,6 @@ def clear_compile_cache():
         compile_cache.clear()
         compile_cache = None
 
-def tvm_compile(fx_module, example_inputs, name = None):
-    import tvm
-    from tvm import relay, auto_scheduler
-    from tvm.contrib import graph_executor
-    import os
-
-    jit_mod = torch.jit.script(fx_module)
-    # jit_mod = torch.jit.trace(fx_module, example_inputs)
-
-    shape_list = [(f"inp_{idx}", i.shape) for idx, i in enumerate(example_inputs)]
-    mod, params = relay.frontend.from_pytorch(jit_mod, shape_list)
-    target = tvm.target.Target("llvm -mcpu=core-avx2")
-    tasks, task_weights = auto_scheduler.extract_tasks(mod['main'], params, target)
-    for task in tasks:
-        print(task.compute_dag)
-    if name is None:
-        log_file = f'{time.time()}.json'
-    else:
-        log_file = f'{name}.json'
-    if len(tasks) != 0:
-        tuner = auto_scheduler.TaskScheduler(tasks, task_weights)
-        if not os.path.exists(log_file):
-            tune_option = auto_scheduler.TuningOptions(
-                num_measure_trials=10000,  # change this to 20000 to achieve the best performance
-                measure_callbacks=[auto_scheduler.RecordToFile(log_file)],
-                # early_stopping=1000,
-                # verbose=2,
-            )
-            tuner.tune(tune_option)
-
-    dev = tvm.cpu(0)
-    with auto_scheduler.ApplyHistoryBest(log_file):
-        with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
-            lib = relay.build(mod, target=target, params=params)
-    dtype = "float32"
-    m = graph_executor.GraphModule(lib["default"](dev))
-    def exec_tvm(*args):
-        for idx, arg in enumerate(args, 0):
-            if arg.dim() != 0:
-
-                m.set_input(f"inp_{idx}", tvm.nd.from_dlpack(torch.utils.dlpack.to_dlpack(arg)))
-        m.run()
-        outs = [torch.utils.dlpack.from_dlpack(m.get_output(i).to_dlpack()) for i in range(m.get_num_outputs())]
-        return outs
-    return exec_tvm
-
-def tvm_function(fn, name):
-    return compiled_function(fn, partial(tvm_compile, name=f'fw_{name}'), partial(tvm_compile, name=f'bw_{name}'))
 
 def compiled_module(mod, *args, **kwargs):
     func_mod, params, buffers = make_functional_with_buffers(mod)
