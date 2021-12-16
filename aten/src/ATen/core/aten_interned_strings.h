@@ -704,7 +704,6 @@ _(aten, thnn_conv_depthwise2d_backward) \
 _(aten, thnn_conv_depthwise2d_forward) \
 _(aten, slow_conv_dilated2d) \
 _(aten, slow_conv_dilated3d) \
-_(aten, slow_conv_dilated3d_backward) \
 _(aten, slow_conv_transpose2d) \
 _(aten, slow_conv_transpose2d_backward) \
 _(aten, slow_conv_transpose3d) \
