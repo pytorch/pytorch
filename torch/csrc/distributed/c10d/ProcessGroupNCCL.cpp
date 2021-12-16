@@ -2167,11 +2167,11 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::gather(
   auto tensor = inputTensors.back();
   RECORD_PARAM_COMMS(
       rank_,                    // rank
-      "gather",             // colName
+      "gather",                 // colName
       tensor.numel(),           // inSize
-      tensor.numel() *          // outSize
-        this->getSize(),        // dType
-      tensor.scalar_type(),
+      tensor.numel() *
+        this->getSize(),        // outSize
+      tensor.scalar_type(),     // dType
       std::vector<int64_t>(),   // inSplitSizes
       std::vector<int64_t>());  // outSplitSize
 
@@ -2262,9 +2262,9 @@ c10::intrusive_ptr<ProcessGroup::Work> ProcessGroupNCCL::scatter(
       rank_,                    // rank
       "scatter",                // colName
       tensor.numel(),           // inSize
-      tensor.numel() *          // outSize
-        this->getSize(),        // dType
-      tensor.scalar_type(),
+      tensor.numel() *
+        this->getSize(),        // outSize
+      tensor.scalar_type(),     // dType
       std::vector<int64_t>(),   // inSplitSizes
       std::vector<int64_t>());  // outSplitSize
 
