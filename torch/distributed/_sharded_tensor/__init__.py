@@ -351,35 +351,21 @@ def state_dict_hook(module, destination, prefix, local_metadata):
     registered to the Module using
     :meth:`torch.nn.Module._register_state_dict_hook`.
     """
-    _recurse_update_dict(module, destination, prefix)
+    for submodule_name, submodule in module.named_modules():
+        for attr_name, attr in submodule.__dict__.items():
+            if isinstance(attr, ShardedTensor):
+                destination[prefix + submodule_name + '.' + attr_name] = attr
 
 def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
     """
     Pre-load state dict hook to add ShardedTensor to the module.
     """
-    _recurse_update_module(module, state_dict, prefix)
-
-def _recurse_update_module(module, state_dict, prefix):
-    for attr_name, attr in module.__dict__.items():
-        key = prefix + attr_name
-        if key in state_dict:
-            if isinstance(state_dict[key], ShardedTensor):
-                setattr(module, attr_name, state_dict[key])
-
     for submodule_name, submodule in module.named_modules():
-        key = prefix + submodule_name
-        if submodule_name:
-            _recurse_update_module(submodule, state_dict, key + '.')
-
-
-def _recurse_update_dict(module, destination, prefix):
-    for attr_name, attr in module.__dict__.items():
-        if isinstance(attr, ShardedTensor):
-            destination[prefix + attr_name] = attr
-
-    for submodule_name, submodule in module.named_modules():
-        if submodule_name != '':
-            _recurse_update_dict(submodule, destination, prefix + submodule_name + '.')
+        for attr_name, attr in submodule.__dict__.items():
+            key = prefix + submodule_name + '.' + attr_name
+            if key in state_dict:
+                if isinstance(state_dict[key], ShardedTensor):
+                    setattr(module, attr_name, state_dict[key])
 
 def shard_parameter(
         module: torch.nn.Module,
@@ -475,15 +461,14 @@ def shard_parameter(
     # Scatter the shards (use broadcast since NCCL doesn't support scatter, this is very inefficient).
     dist.broadcast(tensor, src=src_rank, group=pg)
 
-    # We don't want autograd recording here for the narrow op and
-    # 'local_shard' should be a leaf variable in the autograd graph
-    with torch.no_grad():
-        # Reshape to get shard for this rank.
-        local_shard = tensor.narrow(
-            sharding_spec.dim,  # type: ignore[arg-type]
-            local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
-            local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
-        ).contiguous()
+    # Reshape to get shard for this rank and we don't want autograd
+    # recording here for the narrow op and 'local_shard' should be a
+    # leaf variable in the autograd graph.
+    local_shard = tensor.narrow(
+        sharding_spec.dim,  # type: ignore[arg-type]
+        local_metadata.shard_offsets[sharding_spec.dim],  # type: ignore[union-attr, arg-type, index]
+        local_metadata.shard_sizes[sharding_spec.dim],  # type: ignore[union-attr, index]
+    ).clone().detach().contiguous()
 
     # Sync requires_grad to local_shard.
     local_shard.requires_grad = tensor.requires_grad
