@@ -1,4 +1,6 @@
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>  // for the definition of AT_CUDNN_ENABLED
+#include <ATen/native/ConvUtils.h>
 
 #if AT_CUDNN_ENABLED()
 
@@ -375,33 +377,6 @@ Tensor cudnn_convolution_backward_input(
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
 }
 
-std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
-    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
-  Tensor grad_input, grad_weight;
-  if (input.numel() == 0) {
-    if (output_mask[0]) {
-      grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-    if (output_mask[1]) {
-      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-    }
-  } else {
-    if (output_mask[0]) {
-      grad_input = at::cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-    }
-    if (output_mask[1]) {
-      grad_weight = at::cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-    }
-  }
-
-  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
-}
-
 Tensor cudnn_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
@@ -463,6 +438,33 @@ Tensor cudnn_convolution_backward_weight(
       "cudnn_convolution_backward_weight",
       weight_size, grad_output_t, input_t,
       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+}
+
+std::tuple<at::Tensor,at::Tensor> cudnn_convolution_backward(
+    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
+    bool benchmark, bool deterministic, bool allow_tf32, std::array<bool,2> output_mask) {
+
+  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
+
+  Tensor grad_input, grad_weight;
+  if (input.numel() == 0) {
+    if (output_mask[0]) {
+      grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+    if (output_mask[1]) {
+      grad_weight = at::zeros_like(weight, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+    }
+  } else {
+    if (output_mask[0]) {
+      grad_input = cudnn_convolution_backward_input(input.sizes(), grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+    }
+    if (output_mask[1]) {
+      grad_weight = cudnn_convolution_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+    }
+  }
+
+  return std::tuple<Tensor,Tensor>{grad_input, grad_weight};
 }
 
 Tensor cudnn_convolution_transpose_backward_weight(
@@ -626,6 +628,9 @@ Tensor cudnn_convolution_add_relu(
 
   return output_t;
 }
+
+REGISTER_CUDA_DISPATCH(cudnn_convolution_backward_stub, &cudnn_convolution_backward);
+
 }}
 
 #endif  // AT_CUDNN_ENABLED

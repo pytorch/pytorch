@@ -387,6 +387,10 @@ Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Ten
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 Tensor warn_backwards(const Tensor &grad_output);
 
+std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef stride, at::IntArrayRef dilation, int64_t groups, ::std::array<bool,2> output_mask);
+
 } // namespace details
 } // namespace generated
 } // namespace autograd
