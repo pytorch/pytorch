@@ -234,6 +234,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   OP_DECOMPOSE2(conv2d, padding);
   OP_DECOMPOSE2(conv3d, padding);
   OP_DECOMPOSE(_convolution_mode);
+  OP_DECOMPOSE(frobenius_norm);
   OP_DECOMPOSE(type_as);
   DECOMPOSE_FUNCTIONAL(diag_embed);
   DECOMPOSE_FUNCTIONAL(block_diag);
