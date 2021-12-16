@@ -574,11 +574,6 @@ void nnc_aten_quantized_sigmoid(
       buf_dtypes,
       {{1u, {x_qscale, x_qzero, toQIntType(x_qdtype)}}});
 
-  // Hack for Segmentation model: it uses at::sigmoid for quantized activation,
-  // and at::sigmoid is included into IG app, while quantized::sigmoid
-  // is missing as it is not presented in the original model.
-  // TODO: Use the same operators or add to the models ops list?
-  // auto r = quantized_sigmoid(qx, out_qscale, out_qzero);
   // NOLINTNEXTLINE
   auto r = at::sigmoid(tensors[1]);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
