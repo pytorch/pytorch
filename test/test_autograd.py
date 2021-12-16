@@ -4284,9 +4284,10 @@ for shape in [(1,), ()]:
         self.assertEqual(order.count("Reentrant"), 10)
         self.assertEqual(order[-1], "MyFunction")
 
+    def _run_checkpointing_test(self, device="cpu", offload_to_cpu=False):
+        if device == "cuda" and not torch.cuda.is_available():
+            return
 
-    @slowTest
-    def test_checkpointing(self):
         num_inp = 2000
         nz_inp = 10
         nz_out = 10
@@ -4297,19 +4298,47 @@ for shape in [(1,), ()]:
             nn.Linear(nz_inp, nz_bottleneck),
             nn.ReLU(),
             nn.Linear(nz_bottleneck, nz_inp)
-        )
+        ).to(device)
 
         feat_combined = []
+
+        offload_to_cpu_event = "Memcpy DtoH"
+
         for r in range(num_inp):
-            data_r = torch.empty(1, nz_inp)
+            data_r = torch.empty(1, nz_inp).to(device)
             data_r.uniform_()
             data_r.requires_grad = True
-            feat_r = checkpoint(module, data_r)
+            # Verify offload to CPU occured but check only one iteration so the
+            # test doesn't take too long.
+            check_offload = (r == 0 and device == "cuda" and offload_to_cpu)
+            profiler_ctx = (
+                torch.profiler.profile(use_cuda=(device == 'cuda'))
+                if check_offload else contextlib.suppress()
+            )
+
+            with profiler_ctx as prof:
+                feat_r = checkpoint(
+                    module, data_r, offload_to_cpu=offload_to_cpu
+                )
+
+            if check_offload:
+                event_names = [event.name for event in prof.events()]
+                offload_occured = any(
+                    offload_to_cpu_event in name for name in event_names
+                )
+                self.assertTrue(offload_occured)
+
             feat_combined.append(feat_r)
 
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+
+    @slowTest
+    @parametrize("device", ["cuda", "cpu"])
+    @parametrize("offload_to_cpu", [True, False])
+    def test_checkpointing_foo(self, device, offload_to_cpu):
+        self._run_checkpointing_test(device=device, offload_to_cpu=offload_to_cpu)
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])

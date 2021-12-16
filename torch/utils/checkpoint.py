@@ -55,7 +55,7 @@ def set_device_states(devices, states) -> None:
 class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
-    def forward(ctx, run_function, preserve_rng_state, *args):
+    def forward(ctx, run_function, preserve_rng_state, offload_to_cpu, *args):
         check_backward_validity(args)
         ctx.run_function = run_function
         ctx.preserve_rng_state = preserve_rng_state
@@ -84,6 +84,16 @@ class CheckpointFunction(torch.autograd.Function):
             else:
                 ctx.inputs.append(arg)
 
+        # If offloading activations, move tensor inputs to CPU before saving
+        # them for backwards. This also requires remembering their forward
+        # device and gradient requirement info to properly "recostruct" the
+        # input tensor when it is needed in backward.
+        if offload_to_cpu:
+            ctx.fwd_device = tuple(x.device for x in tensor_inputs)
+            ctx.grad_requirements = tuple(x.requires_grad for x in tensor_inputs)
+            tensor_inputs = tuple(x.to("cpu", non_blocking=True) for x in tensor_inputs)
+        else:
+            ctx.fwd_device = None
         ctx.save_for_backward(*tensor_inputs)
 
         with torch.no_grad():
@@ -101,6 +111,12 @@ class CheckpointFunction(torch.autograd.Function):
         inputs = list(ctx.inputs)
         tensor_indices = ctx.tensor_indices
         tensors = ctx.saved_tensors
+        if ctx.fwd_device is not None:
+            # Input tensors were offloaded to CPU. Restore the correct device
+            # and grad requirement information.
+            tensors = tuple(t.to(ctx.fwd_device[i], non_blocking=True) for i, t in enumerate(tensors))
+            for i, need_grad in enumerate(ctx.grad_requirements):
+                tensors[i].requires_grad_(need_grad)
 
         # Fill in inputs with appropriate saved tensors.
         for i, idx in enumerate(tensor_indices):
@@ -139,10 +155,10 @@ class CheckpointFunction(torch.autograd.Function):
         grads = tuple(inp.grad if isinstance(inp, torch.Tensor) else None
                       for inp in detached_inputs)
 
-        return (None, None) + grads
+        return (None, None, None) + grads
 
 
-def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
+def checkpoint(function, *args, offload_to_cpu: bool = False, use_reentrant: bool = True, **kwargs):
     r"""Checkpoint a model or part of the model
 
     Checkpointing works by trading compute for memory. Rather than storing all
@@ -198,6 +214,10 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         is not supported. If ``use_reentrant=False`` is specified, checkpointing
         will work with :func:`torch.autograd.grad`.
 
+    .. warning::
+        The combination of ``offload_to_cpu=True`` and ``use_reentrant=False``
+        is currently unsupported.
+
     Args:
         function: describes what to run in the forward pass of the model or
             part of the model. It should also know how to handle the inputs
@@ -206,6 +226,19 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             first input as ``activation`` and the second input as ``hidden``
         preserve_rng_state(bool, optional, default=True):  Omit stashing and restoring
             the RNG state during each checkpoint.
+
+        offload_to_cpu(bool, optional, default=False): Offload outer activations
+            to CPU. Currently only supports ``use_reentrant=True``. This helps
+            save additional memory in the case that
+            activations between successively checkpointed modules are large. By
+            enabling this flag, inputs saved for backwards pass by checkpoint
+            will be moved to CPU instead of holding a GPU reference, potentially
+            reducing GPU memory usage when there are no references to the
+            checkpointed layer's inputs. Note that the first and last layers of
+            a module are not likely to benefit from ``offload_to_cpu`` as there
+            are typically other references to the first layer's inputs and the
+            inputs to the final layer are immediately needed by the backwards
+            pass.
         use_reentrant(bool, optional, default=True): Use checkpointing
             implementation that requires re-entrant autograd.
             If ``use_reentrant=False`` is specified, ``checkpoint`` will use an
@@ -218,13 +251,19 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    if not use_reentrant and offload_to_cpu:
+        raise ValueError(
+            f"use_reentrant={use_reentrant} and offload_to_cpu={offload_to_cpu}"
+            " is currently unsupported."
+        )
+
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs:
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
-        return CheckpointFunction.apply(function, preserve, *args)
+        return CheckpointFunction.apply(function, preserve, offload_to_cpu, *args)
     else:
         return _checkpoint_without_reentrant(
             function,
