@@ -10552,7 +10552,7 @@ op_db: List[OpInfo] = [
                         # NumPy's heaviside promotes bool to float16
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
-                                     'test_reference_numerics_heavisidel',
+                                     'test_reference_numerics',
                                      dtypes=(torch.bool,)),
                         # RuntimeError: heaviside is not yet implemented for tensors with different dtypes.
                         DecorateInfo(unittest.expectedFailure,

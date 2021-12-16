@@ -1374,11 +1374,11 @@ class RelaxedBooleanPair(BooleanPair):
         if not (
             (
                 isinstance(actual, self._supported_types)
-                and isinstance(expected, (*self._supported_types, int, float, torch.Tensor, np.ndarray))
+                and isinstance(expected, (*self._supported_types, int, torch.Tensor, np.ndarray))
             )
             or (
                 isinstance(expected, self._supported_types)
-                and isinstance(actual, (*self._supported_types, int, float, torch.Tensor, np.ndarray))
+                and isinstance(actual, (*self._supported_types, int, torch.Tensor, np.ndarray))
             )
         ):
             raise UnsupportedInputs()
@@ -1386,7 +1386,7 @@ class RelaxedBooleanPair(BooleanPair):
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
     def _to_bool(self, bool_like, *, id):
-        if isinstance(bool_like, (int, float)):
+        if isinstance(bool_like, int):
             return bool(bool_like)
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
