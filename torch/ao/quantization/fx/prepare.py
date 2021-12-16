@@ -1322,7 +1322,7 @@ def prepare(
     #   'linear': Linear(...),
     #   'linear.weight_fake_quant': PerChannelMinMaxObserver(...),
     # }
-    modules = dict(model.named_modules())
+    modules = dict(model.named_modules(remove_duplicate=False))
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(model, modules, model.graph, equalization_qconfig_dict, node_name_to_scope)
