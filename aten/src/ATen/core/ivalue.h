@@ -282,6 +282,24 @@ struct TORCH_API IValue final {
       const IValue& lhs,
       const IValue& rhs);
 
+private:
+  static bool isAliasOf(const at::Tensor& a, const at::Tensor& b) {
+    // mkldnn tensors dont have views or storage, so we compare
+    // based on tensor impl. //TODO: find a way to use mkldnn storage
+    if (a.is_mkldnn() || b.is_mkldnn()) {
+      return a.unsafeGetTensorImpl() == b.unsafeGetTensorImpl();
+    } else if (a.is_sparse() || b.is_sparse()) {
+      if (a.is_sparse()) {
+        return isAliasOf(a._values(), b) || isAliasOf(a._indices(), b);
+      } else {
+        return isAliasOf(b._values(), a) || isAliasOf(b._indices(), a);
+      }
+    }
+
+    return a.is_alias_of(b);
+  }
+
+public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {
     if (this->tag != rhs.tag) {
@@ -291,16 +309,7 @@ struct TORCH_API IValue final {
 
     // Tensors should be compared based on internal storage
     if (this->isTensor()) {
-      const auto& thisTensor = this->toTensor();
-      const auto& rhsTensor = rhs.toTensor();
-      // mkldnn tensors dont have views or storage, so we compare
-      // based on tensor impl. //TODO: find a way to use mkldnn storage
-      if (thisTensor.is_mkldnn() || rhsTensor.is_mkldnn()) {
-        return thisTensor.unsafeGetTensorImpl() ==
-            rhsTensor.unsafeGetTensorImpl();
-      }
-
-      return thisTensor.is_alias_of(rhsTensor);
+      return isAliasOf(this->toTensor(), rhs.toTensor());
     }
 
     if (!this->is_intrusive_ptr) {
@@ -872,17 +881,25 @@ struct TORCH_API IValue final {
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
+    size_t hashTensor(const at::Tensor& ten) const {
+      if (ten.is_mkldnn()) {
+        // MKLDNN tensors dont have storage and dont create views
+        // or aliasing so we can just use Tensor pointer, TODO: find way
+        // to use mkldnn storage
+        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+      } else if (ten.is_sparse()) {
+        // COO sparse tensors have a "values" tensor and an "indices" tensor
+        // so this will detect overlap of sparse tensors that share a values
+        // tensor, but not sparse tensors that share an indices tensor.
+        return hashTensor(ten._values());
+      } else {
+        return reinterpret_cast<size_t>(
+            ten.storage().unsafeGetStorageImpl());
+      }
+    }
     size_t operator()(const IValue& val) const {
       if (val.isTensor()) {
-        if (val.toTensor().is_mkldnn()) {
-          // MKLDNN tensors dont have storage and dont create views
-          // or aliasing so we can just use Tensor pointer, TODO: find way
-          // to use mkldnn storage
-          return reinterpret_cast<size_t>(val.toTensor().unsafeGetTensorImpl());
-        } else {
-          return reinterpret_cast<size_t>(
-              val.toTensor().storage().unsafeGetStorageImpl());
-        }
+        return hashTensor(val.toTensor());
       }
       // If it is not a Tensor, then two mutable IValues alias each other only
       // if they are the same pointer.
