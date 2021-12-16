@@ -581,6 +581,9 @@ class FullyShardedDataParallel(nn.Module):
         Returns:
             outputs: new outputs with hooks registered if they requires gradient.
         """
+        # Reset before each backward pass
+        self._need_rebuild_full_params = False
+
         if not torch.is_grad_enabled():
             return outputs  # don't register hooks if grad isn't enabled
 
