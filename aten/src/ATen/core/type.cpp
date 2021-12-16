@@ -958,7 +958,7 @@ void standardizeVectorForUnion(std::vector<TypePtr>* to_flatten) {
   *to_flatten = to_fill;
 }
 
-UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : Type(kind) {
+UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType(kind) {
   TORCH_INTERNAL_ASSERT(!reference.empty(), "Cannot create an empty Union");
 
   standardizeVectorForUnion(reference, &types_);
@@ -1538,7 +1538,7 @@ TensorType::TensorType(
     const VaryingShape<Stride>& strides,
     c10::optional<bool> requires_grad,
     c10::optional<bool> undefined)
-    : Type(TypeKind::TensorType),
+    : SharedType(TypeKind::TensorType),
       scalar_type_(scalar_type),
       device_(device),
       sizes_(sizes),

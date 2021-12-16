@@ -8,7 +8,7 @@
 #include <c10/util/order_preserving_flat_hash_map.h>
 #include <c10/util/Optional.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/core/type_ptr.h>
+#include <ATen/core/jit_type_base.h>
 
 namespace c10 {
 struct IValue;

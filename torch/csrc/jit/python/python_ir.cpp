@@ -719,7 +719,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
 
   using ::c10::Type;
-  py::class_<Type, std::shared_ptr<Type>>(m, "Type")
+  py::class_<Type, TypePtr>(m, "Type")
       .def("__repr__", [](Type& t) { return t.annotation_str(); })
       .def(
           "str",
@@ -732,15 +732,14 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "dim",
           [](Type& t) {
-            auto vshape = t.shared_from_this()->expectRef<TensorType>().sizes();
+            auto vshape = t.expectRef<TensorType>().sizes();
             return vshape.size() ? py::cast(*vshape.size())
                                  : py::cast<py::none>(Py_None);
           })
       .def(
           "undefined",
           [](Type& t) {
-            auto undef =
-                t.shared_from_this()->expectRef<TensorType>().undefined();
+            auto undef = t.expectRef<TensorType>().undefined();
             return undef.has_value() ? py::cast(*undef)
                                      : py::cast<py::none>(Py_None);
           })
@@ -813,15 +812,13 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "scalarType",
           [](Type& t) {
-            auto scalar_type =
-                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            auto scalar_type = t.expectRef<TensorType>().scalarType();
             return (scalar_type) ? toString(*scalar_type) : nullptr;
           })
       .def(
           "dtype",
           [](Type& t) -> py::object {
-            auto scalar_type =
-                t.shared_from_this()->expectRef<TensorType>().scalarType();
+            auto scalar_type = t.expectRef<TensorType>().scalarType();
             if (!scalar_type) {
               return py::none();
             }
@@ -844,7 +841,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "__eq__",
-          [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+          [](const TypePtr& self, const TypePtr& other) {
             if (!other) {
               return false;
             }
@@ -852,7 +849,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "isSubtypeOf",
-          [](std::shared_ptr<Type>& self, std::shared_ptr<Type>& other) {
+          [](const TypePtr& self, const TypePtr& other) {
             if (!other) {
               return false;
             }
@@ -860,8 +857,8 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "is_interface_type",
-          [](const std::shared_ptr<Type>& self) {
-            return self->cast<InterfaceType>() != nullptr;
+          [](const TypePtr& self) {
+            return self->castRaw<InterfaceType>() != nullptr;
           })
       .def_property_readonly(
           "annotation_str", [](const std::shared_ptr<Type>& self) {

@@ -68,7 +68,7 @@ inline bool operator!=(const Type& lhs, const Type& rhs) {
 // common base for all types that have a single sub element
 // e.g. Future[T], Optional[T], List[T]
 template <TypeKind K, typename T>
-struct SingleElementType : public Type {
+struct SingleElementType : public SharedType {
   static const TypeKind Kind = K;
 
   const TypePtr& getElementType() const {
@@ -91,7 +91,7 @@ struct SingleElementType : public Type {
   }
 
  protected:
-  SingleElementType(TypePtr elem) : Type(Kind), elem(std::move(elem)) {
+  SingleElementType(TypePtr elem) : SharedType(Kind), elem(std::move(elem)) {
     if (!this->elem) {
       throw std::runtime_error(c10::str(
             "Can not create ", typeKindToString(Kind), " with None type"));
@@ -104,7 +104,7 @@ struct SingleElementType : public Type {
 
 struct UnionType;
 using UnionTypePtr = std::shared_ptr<UnionType>;
-struct TORCH_API UnionType : public Type {
+struct TORCH_API UnionType : public SharedType {
   friend struct Type;
 
   static const TypeKind Kind = TypeKind::UnionType;
@@ -530,7 +530,7 @@ struct TensorType;
 // TODO: investigate making this SingletonOrSharedTypePtr<TensorType>
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This type represents a single Tensor with a specific size
-struct TORCH_API TensorType : public Type {
+struct TORCH_API TensorType : public SharedType {
   static TensorTypePtr create(const at::Tensor& t);
 
   // used by TensorType::create(size_t dim) which in turn used by
@@ -837,7 +837,7 @@ struct TORCH_API ListType
 
 struct DictType;
 using DictTypePtr = std::shared_ptr<DictType>;
-struct TORCH_API DictType : public Type {
+struct TORCH_API DictType : public SharedType {
   friend struct Type;
   static const TypeKind Kind = TypeKind::DictType;
 
@@ -902,7 +902,7 @@ struct TORCH_API DictType : public Type {
 
  private:
   DictType(TypePtr key, TypePtr value)
-      : Type(TypeKind::DictType),
+      : SharedType(TypeKind::DictType),
         has_free_variables(
             key->hasFreeVariables() || value->hasFreeVariables()) {
     types.reserve(2);
@@ -999,9 +999,9 @@ struct NamedType;
 using NamedTypePtr = std::shared_ptr<NamedType>;
 using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
 
-struct TORCH_API NamedType : public Type {
+struct TORCH_API NamedType : public SharedType {
   NamedType(TypeKind tk, c10::optional<QualifiedName> name)
-      : Type(tk), name_(std::move(name)) {
+      : SharedType(tk), name_(std::move(name)) {
     TORCH_INTERNAL_ASSERT(
         tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
         tk == TypeKind::ClassType || tk == TypeKind::InterfaceType ||
@@ -1227,7 +1227,8 @@ using NumberTypePtr = SingletonTypePtr<NumberType>;
 //
 // WARNING: if you add a new subtype of NumberType that is not
 // represented by a global singleton, you need to change NumberTypePtr
-// to a SingletonOrSharedTypePtr!
+// to a SingletonOrSharedTypePtr and deal with NumberType needing to
+// both inherit and not inherit from SharedType!
 struct TORCH_API NumberType : public Type {
   bool operator==(const Type& rhs) const override;
 
@@ -1529,7 +1530,7 @@ private:
 struct VarType;
 using VarTypePtr = std::shared_ptr<VarType>;
 // This type represents a type variable, used in FunctionSchema
-struct VarType : public Type {
+struct VarType : public SharedType {
   static VarTypePtr create(std::string name_) {
     return VarTypePtr(new VarType(std::move(name_)));
   }
@@ -1549,7 +1550,7 @@ struct VarType : public Type {
 
  private:
   VarType(std::string name_)
-      : Type(TypeKind::VarType), name_(std::move(name_)) {}
+      : SharedType(TypeKind::VarType), name_(std::move(name_)) {}
   std::string name_;
 };
 
@@ -2569,7 +2570,7 @@ template<>
 inline typename detail::CastReturnType<NamedType>::type Type::cast<NamedType>() {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-    return std::static_pointer_cast<NamedType>(shared_from_this());
+    return std::static_pointer_cast<NamedType>(static_cast<NamedType *>(this)->shared_from_this());
   }
   return nullptr;
 }
@@ -2578,7 +2579,7 @@ template<>
 inline typename detail::CastConstReturnType<NamedType>::type Type::cast<NamedType>() const {
   if (kind() == TypeKind::TupleType || kind() == TypeKind::FunctionType ||
       kind() == TypeKind::ClassType || kind() == TypeKind::InterfaceType) {
-    return std::static_pointer_cast<const NamedType>(shared_from_this());
+    return std::static_pointer_cast<const NamedType>(static_cast<const NamedType *>(this)->shared_from_this());
   }
   return nullptr;
 }

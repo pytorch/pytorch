@@ -1,7 +1,7 @@
 #pragma once
 
 #include <ATen/core/ivalue_to.h>
-#include <ATen/core/type_ptr.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/macros/Macros.h>
 #include <c10/macros/Export.h>
 #include <c10/util/TypeTraits.h>

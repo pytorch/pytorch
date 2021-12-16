@@ -57,6 +57,7 @@ enum class TypeKind {
 TORCH_API const char* typeKindToString(TypeKind kind);
 
 struct Type;
+struct SharedType;
 
 // Use this to customize how a Type is printed using `annotation_str()`. If
 // c10::nullopt is returned, `annotation_str()` falls through to its default
@@ -117,13 +118,23 @@ template <typename T>
 struct CastConstReturnType<T, typename std::enable_if<IsSingletonType<T>::value>::type> {
   using type = SingletonTypePtr<const T>;
 };
+
+template <typename T>
+struct as_shared_type {
+  using type = SharedType*;
+};
+
+template <typename T>
+struct as_shared_type<const T*> {
+  using type = const SharedType *;
+};
 } // namespace detail
 
-struct TORCH_API Type : std::enable_shared_from_this<Type> {
+struct TORCH_API Type {
  private:
   TypeKind kind_;
 
- protected:
+  protected:
   Type(TypeKind kind) : kind_(kind) {}
 
   virtual std::string annotation_str_impl(TypePrinter printer) const {
@@ -131,6 +142,228 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
 
  public:
+  template <typename T>
+  class SingletonOrSharedTypePtr {
+   public:
+    using element_type = typename std::shared_ptr<T>::element_type;
+
+    SingletonOrSharedTypePtr() = default;
+
+    /* implicit */ SingletonOrSharedTypePtr(std::shared_ptr<T> x)
+        : repr_(std::move(x)) {}
+
+    template <typename U, std::enable_if_t<std::is_convertible<U*, T*>::value, bool> = true>
+    /* implicit */ SingletonOrSharedTypePtr(std::shared_ptr<U> x)
+        : repr_(std::move(x)) {}
+
+    /* implicit */ SingletonOrSharedTypePtr(std::nullptr_t)
+        : repr_(nullptr) {}
+
+    /* implicit */ SingletonOrSharedTypePtr(SingletonTypePtr<T> p)
+        : repr_(p) {}
+
+    template <typename U, std::enable_if_t<std::is_convertible<U*, T*>::value, bool> = true>
+    /* implicit */ SingletonOrSharedTypePtr(SingletonTypePtr<U> p)
+        : repr_(SingletonTypePtr<T>(p.get())) {}
+
+
+    // We need to support construction from T* for pybind. The problem
+    // is that it's not clear if we are supposed to be taking shared
+    // ownership or not.
+    //
+    // Case 1: if T is known statically to derive from SharedType, we should use
+    // shared_from_this() and take shared_ownership.
+    //
+    // Case 2: if T is exactly Type, we need to do a dynamic_cast to
+    // check if it's a SharedType and do the right thing.
+    //
+    // Case 3: Otherwise, T is not a SharedType. (debug-check this
+    // assumption!) Use a singleton pointer.
+
+    template <typename U = T, std::enable_if_t<std::is_base_of<SharedType, U>::value, bool> = true>
+    /* implicit */ SingletonOrSharedTypePtr(T* p) : SingletonOrSharedTypePtr(static_cast<typename detail::as_shared_type<U>::type>(p)->shared_from_this()) {}
+
+    template <typename U = T, std::enable_if_t<std::is_same<Type, U>::value, bool> = true>
+    /* implicit */ SingletonOrSharedTypePtr(T* p) {
+      if (auto* shared_p = dynamic_cast<typename detail::as_shared_type<U>::type>(p)) {
+        repr_ = Repr(shared_p->shared_from_this());
+      } else {
+        repr_ = Repr(p);
+      }
+    }
+
+    template <typename U = T, std::enable_if_t<!std::is_same<Type, U>::value && !std::is_base_of<SharedType, U>::value, bool> = true>
+    /* implicit */ SingletonOrSharedTypePtr(T* p)
+        : repr_(p) {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dynamic_cast<typename detail::as_shared_type<U>::type>(p) == nullptr);
+    }
+
+    SingletonOrSharedTypePtr(const SingletonOrSharedTypePtr&) = default;
+    SingletonOrSharedTypePtr(SingletonOrSharedTypePtr&&) noexcept = default;
+    SingletonOrSharedTypePtr& operator=(const SingletonOrSharedTypePtr&) = default;
+    SingletonOrSharedTypePtr& operator=(SingletonOrSharedTypePtr&&) noexcept = default;
+
+    T* get() const {
+      return repr_.isSharedAndNonNull() ? repr_.shared_.repr_.get() : static_cast<T*>(repr_.rawRepr().first);
+    }
+
+    operator bool() const {
+      return repr_.isNonNull();
+    }
+
+    bool operator==(std::nullptr_t) const {
+      return !repr_.isNonNull();
+    }
+
+    bool operator!=(std::nullptr_t) const {
+      return repr_.isNonNull();
+    }
+
+    template <typename U = T, std::enable_if_t<!std::is_same<std::remove_const_t<U>, void>::value, bool> = true>
+    U& operator*() const {
+      return *get();
+    }
+
+    T* operator->() const {
+      return get();
+    }
+
+  private:
+    // NOTE: SharedPtrWrapper exists to work around a baffling bug in
+    // nvcc; see comment in destroy() below.
+    struct SharedPtrWrapper {
+      SharedPtrWrapper(std::shared_ptr<T> &&x)
+          : repr_(x) {}
+      std::shared_ptr<T> repr_;
+    };
+    union Repr {
+      Repr() : Repr(nullptr) {}
+
+      explicit Repr(std::shared_ptr<T> x)
+          : shared_(std::move(x)) {}
+
+      explicit Repr(std::nullptr_t)
+          : singleton_(nullptr), unused_(nullptr) {}
+
+      explicit Repr(SingletonTypePtr<T> p)
+          : singleton_(p.get()), unused_(nullptr) {}
+
+      ~Repr() {
+        destroy();
+      }
+
+      // NOTE: the only non-UB way to access our null state is through
+      // rawRepr(), because our copy operation doesn't preserve which
+      // union member is active for null pointers.
+      Repr(const Repr& rhs) {
+        if (rhs.isSharedAndNonNull()) {
+          new (&shared_) SharedPtrWrapper(rhs.shared_);
+        } else {
+          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
+          unused_ = nullptr;
+        }
+      }
+
+      Repr(Repr&& rhs) noexcept {
+        if (rhs.isSharedAndNonNull()) {
+          new (&shared_) SharedPtrWrapper(std::move(rhs.shared_));
+        } else {
+          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.unused_ == nullptr);
+          unused_ = nullptr;
+        }
+      }
+
+      Repr& operator=(const Repr& rhs) {
+        if (&rhs == this) {
+          return *this;
+        }
+        if (rhs.isSharedAndNonNull()) {
+          if (isSharedAndNonNull()) {
+            shared_ = rhs.shared_;
+          } else {
+            new (&shared_) SharedPtrWrapper(rhs.shared_);
+          }
+        } else {
+          if (isSharedAndNonNull()) {
+            destroy();
+          }
+          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.rawRepr().nullIfSingleton_ == nullptr);
+          unused_ = nullptr;
+        }
+        return *this;
+      }
+
+      Repr& operator=(Repr&& rhs) noexcept {
+        if (&rhs == this) {
+          return *this;
+        }
+        if (rhs.isSharedAndNonNull()) {
+          if (isSharedAndNonNull()) {
+            shared_ = std::move(rhs.shared_);
+          } else {
+            new (&shared_) SharedPtrWrapper(std::move(rhs.shared_));
+          }
+        } else {
+          if (isSharedAndNonNull()) {
+            destroy();
+          }
+          singleton_ = static_cast<T*>(rhs.rawRepr().first);
+          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(rhs.rawRepr().nullIfSingleton_ == nullptr);
+          unused_ = nullptr;
+        }
+        return *this;
+      }
+
+      SharedPtrWrapper shared_;
+
+      struct {
+        T* singleton_;
+        void* unused_;
+      };
+      struct RawRepr {
+        void* first;
+        void* nullIfSingleton_;
+      };
+
+      // It is UB to read the singleton part of Repr if it was
+      // constructed as a shared_ptr and vice versa, but memcpying out
+      // the representation is always OK, so here's an accessor to obey
+      // the letter of the law.
+      RawRepr rawRepr() const {
+        RawRepr repr;
+        memcpy(&repr, reinterpret_cast<const char *>(this), sizeof(RawRepr));
+        return repr;
+      }
+
+      bool isNonNull() const {
+        auto repr = rawRepr();
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(repr.nullIfSingleton_ == nullptr || repr.first != nullptr);
+        return repr.first != nullptr;
+      }
+
+      bool isSharedAndNonNull() const {
+        return rawRepr().nullIfSingleton_ != nullptr;
+      }
+
+     private:
+      void destroy() {
+        if (isSharedAndNonNull()) {
+          // Without SharedPtrWrapper, this line would read
+          // `shared_.~shared_ptr()` and nvcc would complain with
+          // "error: expected primary-expression before '>' token"
+          // referring to the "t" in "shared_ptr". SharedPtrWrapper
+          // exists to work around this compiler bug.
+          shared_.~SharedPtrWrapper();
+        }
+      }
+    } repr_;
+  };
+
+  using TypePtr = SingletonOrSharedTypePtr<Type>;
+
   virtual bool operator==(const Type& rhs) const = 0;
 
   // subtyping relation. By default, we return true for the case
@@ -174,13 +407,13 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   template <typename T>
   typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
-    isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
+  isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
 
   template <typename T>
   typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
-    isSubtypeOfExt(SingletonTypePtr<T> rhs, std::ostream* why_not) const {
+  isSubtypeOfExt(SingletonTypePtr<T> rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
 
@@ -237,7 +470,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T, std::enable_if_t<!detail::IsSingletonType<T>::value, bool> = true>
   typename detail::CastReturnType<T>::type cast() {
     if (T::Kind == kind()) {
-      return std::static_pointer_cast<T>(shared_from_this());
+      return std::static_pointer_cast<T>(static_cast<T*>(this)->shared_from_this());
     }
     return nullptr;
   }
@@ -252,7 +485,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   template <typename T, std::enable_if_t<!detail::IsSingletonType<T>::value, bool> = true>
   typename detail::CastConstReturnType<T>::type cast() const {
     if (T::Kind == kind()) {
-      return std::static_pointer_cast<const T>(shared_from_this());
+      return std::static_pointer_cast<const T>(static_cast<const T*>(this)->shared_from_this());
     }
     return nullptr;
   }
@@ -313,20 +546,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
   // create a new version of this type, replacing its contained types with
   // contained_types
-  TypePtr withContained(std::vector<TypePtr> contained_types) {
-    auto current_contained = containedTypes();
-    // Types with no contained_types don't need this call. Check before calling!
-    //
-    // (We can't support this efficiently because types without
-    // contained types may be singletons, in which case
-    // shared_from_this will crash; we would have to provide a virtual
-    // typeptr_from_this or isSingleton.)
-    TORCH_INTERNAL_ASSERT(!current_contained.empty() && current_contained.size() == contained_types.size());
-    if (current_contained.equals(contained_types)) {
-      return shared_from_this();
-    }
-    return createWithContained(std::move(contained_types));
-  }
+  TypePtr withContained(std::vector<TypePtr> contained_types);
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
@@ -335,6 +555,99 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
         "type with contained types did not overload createWithContained: ",
         str());
   }
+
 };
 
+template <typename T>
+using SingletonOrSharedTypePtr = Type::SingletonOrSharedTypePtr<T>;
+
+
+template <typename T, typename U>
+bool operator==(const SingletonOrSharedTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return (void*)x.get() == (void*)y.get();
 }
+
+template <typename T, typename U>
+bool operator==(const SingletonOrSharedTypePtr<T>& x, const std::shared_ptr<U>& y) {
+  return (void*)x.get() == (void*)y.get();
+}
+
+template <typename T, typename U>
+bool operator==(const std::shared_ptr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return (void*)x.get() == (void*)y.get();
+}
+
+template <typename T, typename U>
+bool operator==(const SingletonOrSharedTypePtr<T>& x, const SingletonTypePtr<U>& y) {
+  return (void*)x.get() == (void*)y.get();
+}
+
+template <typename T, typename U>
+bool operator==(const SingletonTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return (void*)x.get() == (void*)y.get();
+}
+
+template <typename T, typename U>
+bool operator!=(const SingletonOrSharedTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return !(x == y);
+}
+
+template <typename T, typename U>
+bool operator!=(const SingletonOrSharedTypePtr<T>& x, const std::shared_ptr<U>& y) {
+  return !(x == y);
+}
+
+template <typename T, typename U>
+bool operator!=(const std::shared_ptr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return !(x == y);
+}
+
+template <typename T, typename U>
+bool operator!=(const SingletonOrSharedTypePtr<T>& x, const SingletonTypePtr<U>& y) {
+  return !(x == y);
+}
+
+template <typename T, typename U>
+bool operator!=(const SingletonTypePtr<T>& x, const SingletonOrSharedTypePtr<U>& y) {
+  return !(x == y);
+}
+
+using TypePtr = SingletonOrSharedTypePtr<Type>;
+using ConstTypePtr = SingletonOrSharedTypePtr<const Type>;
+
+// Explicitly enable MaybeOwned<shared_ptr<T>>, rather than allowing
+// MaybeOwned to be used for any type right away.
+template <typename T>
+struct MaybeOwnedTraits<SingletonOrSharedTypePtr<T>>
+    : public MaybeOwnedTraitsGenericImpl<SingletonOrSharedTypePtr<T>> {};
+
+// Base class for Types that are guaranteed to be owned by std::shared_ptr.
+struct TORCH_API SharedType : public Type, public std::enable_shared_from_this<SharedType> {
+  using Type::Type;
+};
+
+inline TypePtr Type::withContained(std::vector<TypePtr> contained_types) {
+  auto current_contained = containedTypes();
+  // Types with no contained_types don't need this call. Check before calling!
+  //
+  // (We can't support this efficiently because types without
+  // contained types may be singletons, in which case
+  // shared_from_this will crash; we would have to provide a virtual
+  // typeptr_from_this or isSingleton.)
+  TORCH_INTERNAL_ASSERT(!current_contained.empty() && current_contained.size() == contained_types.size());
+  if (current_contained.equals(contained_types)) {
+    return std::static_pointer_cast<Type>(static_cast<SharedType *>(this)->shared_from_this());
+  }
+  return createWithContained(std::move(contained_types));
+}
+
+} // namespace c10
+
+namespace std {
+template <typename T>
+struct hash<c10::SingletonOrSharedTypePtr<T>> {
+  size_t operator()(const c10::SingletonOrSharedTypePtr<T>& x) const {
+    return std::hash<T*>()(x.get());
+  }
+};
+} // namespace std

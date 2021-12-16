@@ -3,7 +3,7 @@
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/blob.h>
 #include <ATen/core/ivalue_to.h>
-#include <ATen/core/type_ptr.h>
+#include <ATen/core/jit_type_base.h>
 #include <c10/util/C++17.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
