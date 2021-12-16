@@ -8,7 +8,7 @@ import re
 from subprocess import check_call, check_output, CalledProcessError
 import sys
 import sysconfig
-from setuptools import distutils  # type: ignore[import]
+from distutils.version import LooseVersion
 from typing import IO, Any, Dict, List, Optional, Union, cast
 
 from . import which
@@ -120,10 +120,10 @@ class CMake:
             return cmake_command
         cmake3 = which('cmake3')
         cmake = which('cmake')
-        if cmake3 is not None and CMake._get_version(cmake3) >= distutils.version.LooseVersion("3.10.0"):
+        if cmake3 is not None and CMake._get_version(cmake3) >= LooseVersion("3.10.0"):
             cmake_command = 'cmake3'
             return cmake_command
-        elif cmake is not None and CMake._get_version(cmake) >= distutils.version.LooseVersion("3.10.0"):
+        elif cmake is not None and CMake._get_version(cmake) >= LooseVersion("3.10.0"):
             return cmake_command
         else:
             raise RuntimeError('no cmake or cmake3 with version >= 3.10.0 found')
@@ -134,7 +134,7 @@ class CMake:
 
         for line in check_output([cmd, '--version']).decode('utf-8').split('\n'):
             if 'version' in line:
-                return distutils.version.LooseVersion(line.strip().split(' ')[2])
+                return LooseVersion(line.strip().split(' ')[2])
         raise RuntimeError('no version found')
 
     def run(self, args: List[str], env: Dict[str, str]) -> None:
