@@ -145,9 +145,9 @@ std::vector<at::Tensor> constructTensors(
             buf_data_vec[i],
             buf_dims_vec[i],
             buf_strides_vec[i],
-            std::get<0>(*qd),
-            std::get<1>(*qd),
-            std::get<2>(*qd));
+            qd->scale,
+            qd->zero,
+            qd->scalarType);
         tensors.emplace_back(tensor);
       } else {
         auto tensor = at::from_blob(
@@ -600,18 +600,22 @@ void nnc_aten_quantized_cat(
     int64_t* extra_args) {
   std::vector<std::pair<size_t, QIData>> qdata;
   const auto in_bufs_num = bufs_num - 1;
+  const double out_qscale = ((double*)extra_args)[3 * in_bufs_num + 1];
+  const int64_t out_qzero = extra_args[3 * in_bufs_num + 2];
+  qdata.emplace_back(
+      0u,
+      QIData{
+          out_qscale, out_qzero, static_cast<c10::ScalarType>(extra_args[2])});
   for (const size_t i : c10::irange(in_bufs_num)) {
     const double qscale = ((double*)extra_args)[3 * i + 0];
     const int64_t qzero = extra_args[3 * i + 1];
     const c10::ScalarType qdtype =
         static_cast<c10::ScalarType>(extra_args[3 * i + 2]);
-    qdata.emplace_back(i + 1u, std::make_tuple(qscale, qzero, qdtype));
+    qdata.emplace_back(i + 1u, QIData{qscale, qzero, qdtype});
   }
   auto tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
   const int64_t dim = extra_args[3 * in_bufs_num + 0];
-  const double out_qscale = ((double*)extra_args)[3 * in_bufs_num + 1];
-  const int64_t out_qzero = extra_args[3 * in_bufs_num + 2];
   auto qxs = c10::List<at::Tensor>(
       std::vector<at::Tensor>(tensors.begin() + 1, tensors.end()));
   auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);

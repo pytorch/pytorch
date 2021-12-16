@@ -43,7 +43,11 @@
 namespace torch {
 namespace jit {
 namespace tensorexpr {
-using QIData = std::tuple<double, int64_t, c10::ScalarType>;
+struct QIData final {
+  double scale;
+  double zero;
+  c10::ScalarType scalarType;
+};
 std::vector<at::Tensor> constructTensors(
     int64_t bufs_num,
     void** buf_data,
