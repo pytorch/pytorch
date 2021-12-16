@@ -41,5 +41,9 @@ size_t Shape::numel() const {
   return elts;
 }
 
+hash_t Shape::hash() const {
+  return HashCombine(Hash(scalar_type_), DataHash(sizes_.data(), sizes_.size() * sizeof(int64_t)));
+}
+
 }  // namespace lazy
 }  // namespace torch
