@@ -1489,16 +1489,21 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    # TODO: Remove this when https://github.com/pytorch/pytorch/issues/68592 is resolved
-    def _check_supported(self, tensor, *, id) -> None:
-        # Performing any operation on a meta tensor that would require data, will raise a `NotImplementedError`.
-        # Setting `TestCase._ignore_not_implemented_error = True` turns it into `unittest.SkipTest`. Thus, we also
-        # raise a `NotImplementedError` here instead of the more fitting `ValueError` that would be raised by
-        # `TensorLikePair._check_supported()`.
-        if tensor.is_meta:
-            raise ErrorMeta(NotImplementedError, "Comparing meta tensors is currently not supported", id=id)
-
-        super()._check_supported(tensor, id=id)
+    @contextlib.contextmanager
+    def _handle_meta_tensor_data_access(self):
+        try:
+            with super()._handle_meta_tensor_data_access():
+                yield
+        except ErrorMeta as error:
+            # Performing any operation on a meta tensor that would require data, will raise a `NotImplementedError`.
+            # `TensorLikePair._handle_meta_tensor_data_access()` will turn that into an expressive `ErrorMeta` wrapping
+            # a more fitting `ValueError`.
+            # Setting `TestCase._ignore_not_implemented_error = True` has special handling for `NotImplementedError`'s
+            # by turning them into `unittest.SkipTest`'s. Thus, if we encounter an meta data access error, we keep the
+            # expressive `ErrorMeta` but change its wrapped error type to `NotImplementedError`.
+            if "meta" in str(error):
+                error.type = NotImplementedError
+            raise error
 
 
 class UnittestPair(Pair):
