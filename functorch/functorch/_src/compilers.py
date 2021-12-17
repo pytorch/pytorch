@@ -3,6 +3,7 @@ from functools import partial
 from .aot_autograd import draw_graph
 import time
 
+
 def ts_compile(fx_g, _):
     for node in fx_g.graph.nodes:
         if node.target == torch.ops.aten.new_zeros:
@@ -44,14 +45,17 @@ def ts_compile(fx_g, _):
     f = torch.jit.optimize_for_inference(f)
     return f
 
+
 def _draw_graph_compile(fx_g, _, name):
     draw_graph(fx_g, name)
     return fx_g
 
+
 def draw_graph_compile(name):
     return partial(draw_graph_compile, name=name)
 
-def _tvm_compile(fx_module, example_inputs, name = None):
+
+def _tvm_compile(fx_module, example_inputs, name=None):
     import tvm
     from tvm import relay, auto_scheduler
     from tvm.contrib import graph_executor
@@ -85,8 +89,8 @@ def _tvm_compile(fx_module, example_inputs, name = None):
     with auto_scheduler.ApplyHistoryBest(log_file):
         with tvm.transform.PassContext(opt_level=3, config={"relay.backend.use_auto_scheduler": True}):
             lib = relay.build(mod, target=target, params=params)
-    dtype = "float32"
     m = graph_executor.GraphModule(lib["default"](dev))
+
     def exec_tvm(*args):
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
@@ -97,8 +101,10 @@ def _tvm_compile(fx_module, example_inputs, name = None):
         return outs
     return exec_tvm
 
+
 def tvm_compile(name):
     return partial(tvm_compile, name=name)
+
 
 def nop(f, _):
     print(f.code)

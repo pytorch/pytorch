@@ -15,8 +15,7 @@ import unittest
 import warnings
 import math
 from typing import Callable, Type
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, \
-    skipCUDAIfNoMagma, onlyCPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU
 from functools import partial
 
 import functorch
@@ -38,7 +37,7 @@ import numpy as np
 
 USE_TORCHVISION = False
 try:
-    import torchvision
+    import torchvision  # noqa: F401
     USE_TORCHVISION = True
 except ImportError:
     warnings.warn("Couldn't import torchvision. Some of our tests use it, try "
@@ -47,6 +46,8 @@ except ImportError:
                   UserWarning)
 
 # TestCase for _argnums_partial, an important helper funciton
+
+
 class TestArgnumsPartial(TestCase):
     def test_invalid_argnum_type(self):
         x = torch.randn(3)
@@ -59,6 +60,7 @@ class TestArgnumsPartial(TestCase):
             _argnums_partial(torch.sin, args, (0.0,))
 
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
+
         def f(a, b, c, d, e):
             return a
         with self.assertRaisesRegex(RuntimeError, "must be int"):
@@ -90,6 +92,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_flat_args_with_positive_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
+
         def f(a, b, c, d, e):
             return a
 
@@ -103,6 +106,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_flat_args_with_negative_int_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
+
         def f(a, b, c, d, e):
             return a
 
@@ -117,6 +121,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_flat_args_with_tuple_argnum(self):
         args = (0.1, 1.1, 2.1, 3.1, 4.1)
+
         def f(a, b, c, d, e):
             return a
 
@@ -130,6 +135,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_pytree_args(self):
         args = ((0.1, 1.1), 2.0, [3.1])
+
         def f(a, b, c):
             return a[0] + a[1] + b + c[0]
 
@@ -153,6 +159,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_argnums_reorders(self):
         args = ((0.1, 1.1, 2.1), 3.1, 4.1)
+
         def f(a, b, c):
             return a[0] + a[1] + a[2] + b + c
 
@@ -163,6 +170,7 @@ class TestArgnumsPartial(TestCase):
 
     def test_function_with_default_args(self):
         args = ((0.1, 1.1, 2.1), 3.1)
+
         def f(a, b, c=4.1):
             return a[0] + a[1] + a[2] + b + c
 
@@ -176,6 +184,7 @@ class TestArgnumsPartial(TestCase):
         f_new, res = _argnums_partial(f, args, -1)
         self.assertEqual(res, args[-1:])
         self.assertEqual(f_new(*res), expected)
+
 
 class TestGradTransform(TestCase):
     def test_primitive(self, device):
@@ -313,23 +322,25 @@ class TestGradTransform(TestCase):
     def test_escaped_wrappers_are_marked_as_dead(self, device):
         x = torch.randn([], device=device)
         escaped = []
+
         def foo(x):
             y = x.sin()
             escaped.append(y)
             return y
 
-        result = grad(foo)(x)
+        grad(foo)(x)
         self.assertEqual(functorch._C.dlevel(escaped[0]), -1)
 
     def test_escaped_wrappers_are_ignored(self, device):
         x = torch.randn([], device=device)
         escaped = []
+
         def foo(x):
             y = x.sin()
             escaped.append(y)
             return y
 
-        result = grad(foo)(x)
+        grad(foo)(x)
 
         something = escaped[0].sum()
         self.assertEqual(functorch._C.dlevel(something), 0)
@@ -352,6 +363,7 @@ class TestGradTransform(TestCase):
 
     def test_conj_bit(self):
         x = torch.tensor(1+1j)
+
         def foo(x):
             assert not x.is_conj()
             y = x.conj()
@@ -489,6 +501,7 @@ class TestGradTransform(TestCase):
 
     def test_grad_pytree_inputs(self, device):
         x = torch.randn([], device=device)
+
         def f(a, b):
             x, y = a
             return 1 * x + 2 * y + 3 * b['foo']
@@ -511,7 +524,7 @@ class TestGradTransform(TestCase):
     def test_zero_grad(self, device):
         def f(x):
             return (x['a']**2.0).sum()
-        inps = ({'a':torch.randn(10, device=device) + 3, 'b':torch.randn(10, device=device)})
+        inps = ({'a': torch.randn(10, device=device) + 3, 'b': torch.randn(10, device=device)})
         grads = grad(f)(inps)
         self.assertNotEqual(grads['a'].sum(), 0.0)
         self.assertEqual(grads['b'].sum(), 0.0)
@@ -856,6 +869,7 @@ class TestGradTransform(TestCase):
         z, = torch.autograd.grad(y, x)
         self.assertEqual(z, 2)
 
+
 class TestVmapOfGrad(TestCase):
     def test_per_sample_grads_inplace_view(self, device):
         def compute_loss(weight, x, t):
@@ -977,9 +991,11 @@ class TestVmapOfGrad(TestCase):
         output.backward(v)
         self.assertEqual(result, x.grad)
 
+
 jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subtest(jacfwd, name='jacfwd')])
 
 FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
+
 
 class TestJac(TestCase):
     @jacrev_and_jacfwd
@@ -1124,7 +1140,7 @@ class TestJac(TestCase):
         expected = ((torch.tensor(1., device=device), torch.tensor(2., device=device)),)
         self.assertEqual(result, expected)
 
-        result = jacapi(f )(*args)
+        result = jacapi(f)(*args)
         expected = (torch.tensor(1., device=device), torch.tensor(2., device=device))
         self.assertEqual(result, expected)
 
@@ -1248,6 +1264,7 @@ class TestJac(TestCase):
     def test_empty_output(self, device, jacapi):
         x = torch.randn(3, device=device)
         y = torch.randn(3, device=device)
+
         def f(x, y):
             return ()
 
@@ -1297,40 +1314,40 @@ class TestJac(TestCase):
     def test_empty_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be non-empty"):
-            z = jacapi(torch.sin, argnums=())(x)
+            jacapi(torch.sin, argnums=())(x)
 
     @jacrev_and_jacfwd
     def test_out_of_bounds_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
-            z = jacapi(torch.sin, argnums=2)(x)
+            jacapi(torch.sin, argnums=2)(x)
 
     @jacrev_and_jacfwd
     def test_negative_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "only 1 positional inputs"):
-            z = jacapi(torch.sin, argnums=-2)(x)
+            jacapi(torch.sin, argnums=-2)(x)
 
     @jacrev_and_jacfwd
     def test_repeated_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be unique"):
-            z = jacapi(torch.sin, argnums=(0, 0))(x)
+            jacapi(torch.sin, argnums=(0, 0))(x)
 
     @jacrev_and_jacfwd
     def test_float_argnums(self, device, jacapi):
         x = torch.randn(3, device=device)
         with self.assertRaisesRegex(RuntimeError, "must be int or Tuple"):
-            z = jacapi(torch.sin, argnums=0.0)(x)
+            jacapi(torch.sin, argnums=0.0)(x)
         with self.assertRaisesRegex(RuntimeError, "must be int"):
-            z = jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
+            jacapi(torch.multiply, argnums=(1, 0.0))(x, x)
 
     def test_hessian_simple(self, device):
         def f(x):
             return x.sin()
 
         x = torch.randn(3, device=device)
-        result = hessian(f)(x)
+        hessian(f)(x)
 
     def _test_against_reference(self, f, inputs, jacapi):
         def foo(inputs):
@@ -1409,6 +1426,7 @@ class TestJac(TestCase):
         y = torch.randn(3)
         self._test_against_reference(f, (x, y), jacapi)
 
+
 class TestHessian(TestCase):
     def _test_against_reference(self, f, inputs):
         def foo(inputs):
@@ -1450,6 +1468,7 @@ class TestHessian(TestCase):
         x = torch.randn(2, device=device)
         y = torch.randn(3, device=device)
         self._test_against_reference(f, (x, y))
+
 
 class TestJvp(TestCase):
     def test_inplace_on_captures(self, device):
@@ -1627,6 +1646,7 @@ class TestJvp(TestCase):
         with self.assertRaisesRegex(RuntimeError, "a Tensor or Tensors"):
             jvp(h, (x,), (t,))
 
+
 class TestCustomFunction(TestCase):
     @onlyCPU
     def test_basic(self, device):
@@ -1659,6 +1679,7 @@ class TestCustomFunction(TestCase):
         self.assertTrue(called_vjp)
 
         assert torch.allclose(x.grad, 3 * x.cos())
+
 
 class TestComposability(TestCase):
     def test_grad_grad(self, device):
@@ -1767,7 +1788,6 @@ class TestExamplesCorrectness(TestCase):
 
         net, params = make_functional(ThreeLayerNet().to(device))
         K = 20
-        losses = []
         num_tasks = 4
         alpha = 0.1
 
@@ -1778,6 +1798,7 @@ class TestExamplesCorrectness(TestCase):
             for _ in range(outer_batch_size):
                 As.append(np.random.uniform(low=0.1, high=.5))
                 phases.append(np.random.uniform(low=0., high=np.pi))
+
             def get_batch():
                 xs, ys = [], []
                 for A, phase in zip(As, phases):
@@ -1810,8 +1831,7 @@ class TestExamplesCorrectness(TestCase):
         task = sample_tasks(num_tasks, K)
 
         # Compute with vmap+grad
-        inner_losses = vmap(partial(get_loss_for_task, True))\
-                            (task[0], task[1], task[2], task[3])
+        inner_losses = vmap(partial(get_loss_for_task, True))(task[0], task[1], task[2], task[3])
         loss2 = sum(inner_losses)/len(inner_losses)
         result_grads = torch.autograd.grad(loss2, params)
 
@@ -1835,6 +1855,7 @@ class TestExamplesCorrectness(TestCase):
         n_way = 5
         n_inner_iter = 2
         num_tasks = 2
+
         class Flatten(nn.Module):
             def forward(self, input):
                 return input.view(input.size(0), -1)
@@ -1886,7 +1907,7 @@ class TestExamplesCorrectness(TestCase):
         # Get some sample inputs...
         x_spt = torch.randn(num_tasks, 25, 1, 28, 28, dtype=dtype, device=device)
         y_spt = torch.randint(0, 5, (num_tasks, 25), device=device)
-        x_qry = torch.randn(num_tasks, 75, 1, 28, 28, dtype=dtype,device=device)
+        x_qry = torch.randn(num_tasks, 75, 1, 28, 28, dtype=dtype, device=device)
         y_qry = torch.randint(0, 5, (num_tasks, 75), device=device)
 
         # compute with vmap + grad
@@ -2111,6 +2132,7 @@ class TestExamplesCorrectness(TestCase):
         expected_grads = [torch.stack(shards) for shards in zip(*expected_grads)]
 
         self.assertEqual(result_grads, expected_grads)
+
 
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(

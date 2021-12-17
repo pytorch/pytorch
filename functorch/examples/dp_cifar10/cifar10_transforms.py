@@ -24,13 +24,13 @@ from opacus.utils.module_modification import convert_batchnorm_modules
 from torchvision.datasets import CIFAR10
 from tqdm import tqdm
 
-from functools import partial
 import functorch
 from functorch import vmap, grad_and_value
 from functorch import make_functional
 
 # disable warning spam
 functorch._C._set_vmap_fallback_warning_enabled(False)
+
 
 def save_checkpoint(state, is_best, filename="checkpoint.tar"):
     torch.save(state, filename)
@@ -47,6 +47,7 @@ def compute_norms(sample_grads):
     norms = [sample_grad.view(batch_size, -1).norm(2, dim=-1) for sample_grad in sample_grads]
     norms = torch.stack(norms, dim=0).norm(2, dim=0)
     return norms
+
 
 def clip_and_accumulate_and_add_noise(model, max_per_sample_grad_norm=1.0, noise_multiplier=1.0):
     sample_grads = tuple(param.grad_sample for param in model.parameters())
@@ -72,6 +73,7 @@ def clip_and_accumulate_and_add_noise(model, max_per_sample_grad_norm=1.0, noise
     for param, param_grad in zip(model.parameters(), grads):
         param.grad = param_grad
         del param.grad_sample
+
 
 def train(args, model, train_loader, optimizer, epoch, device):
     model.train()
@@ -106,10 +108,10 @@ def train(args, model, train_loader, optimizer, epoch, device):
         # computes gradients by running both the forward and backward pass.
         # We want to extract some intermediate
         # values from the computation (i.e. the loss and output).
-        # 
+        #
         # To extract the loss, we use the `grad_and_value` API, that returns the
         # gradient of the weights w.r.t. the loss and the loss.
-        # 
+        #
         # To extract the output, we use the `has_aux=True` flag.
         # `has_aux=True` assumes that `f` returns a tuple of two values,
         # where the first is to be differentiated and the second "auxiliary value"
@@ -151,6 +153,7 @@ def train(args, model, train_loader, optimizer, epoch, device):
                 f"Loss: {np.mean(losses):.6f} "
                 f"Acc@1: {np.mean(top1_acc):.6f} "
             )
+
 
 def test(args, model, test_loader, device):
     model.eval()

@@ -598,6 +598,7 @@ method_only_ops = [
     'view_as',
 ]
 
+
 def get_nn_functional_top_list():
     top_nn_functional_ = {k: v for k, v in top_nn_functional}
     for _, count, functional_name in top_nn_module:
@@ -613,6 +614,7 @@ def get_nn_functional_top_list():
     top_nn_functional_ = [(k, v) for k, v in top_nn_functional_.items()]
     top_nn_functional_.sort(key=lambda x: x[1], reverse=True)
     return top_nn_functional_
+
 
 usage_count = {}
 for k, v in get_nn_functional_top_list():

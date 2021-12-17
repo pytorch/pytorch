@@ -1,5 +1,4 @@
 import re
-import pprint
 
 """
 Instructions:
@@ -12,13 +11,15 @@ with open('result.txt') as f:
     lines = f.readlines()
 
 failed = [line for line in lines if line.startswith('FAILED')]
-p = re.compile('FAILED test/test_\w+.py::\w+::(\S+)')
+p = re.compile('FAILED test/test_\w+.py::\w+::(\S+)')  # noqa: W605
+
 
 def get_failed_test(line):
     m = p.match(line)
     if m is None:
         return None
     return m.group(1)
+
 
 base_names = {
     'test_grad_',
@@ -41,8 +42,10 @@ failed_tests = sorted(failed_tests)
 
 suggested_xfails = {}
 
+
 def remove_device_dtype(test):
     return '_'.join(test.split('_')[:-2])
+
 
 def belongs_to_base(test, base):
     if not test.startswith(base):
@@ -52,6 +55,7 @@ def belongs_to_base(test, base):
         if test.startswith(candidate):
             return False
     return True
+
 
 def sanitize_base(base):
     if base.startswith('nn_functional_'):
@@ -64,11 +68,13 @@ def sanitize_base(base):
         base = f'_masked.{base[len("_masked_"):]}'
     return base
 
+
 def any_starts_with(strs, thing):
     for s in strs:
         if s.startswith(thing):
             return True
     return False
+
 
 def get_suggested_xfails(base, tests):
     result = []
@@ -92,6 +98,7 @@ def get_suggested_xfails(base, tests):
             continue
         result.append(f"skip('{sanitized_base}'),")
     return result
+
 
 result = {base: get_suggested_xfails(base, failed_tests) for base in base_names}
 for k, v in result.items():

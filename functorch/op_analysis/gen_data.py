@@ -1,10 +1,9 @@
 import yaml
 import csv
 import torch
-import functorch
-import re
 import sys
 import os
+
 
 class CapturedOutput(object):
     """
@@ -60,6 +59,7 @@ class CapturedOutput(object):
                 break
             self.capturedtext += char
 
+
 def get_ops_for_key(key):
     all_out = CapturedOutput()
     with all_out:
@@ -76,6 +76,7 @@ def get_ops_for_key(key):
         cleaned_ops.append(i[6:].strip())
     return set(cleaned_ops)
 
+
 def gen_data(special_op_lists, analysis_name):
     all_ops = get_ops_for_key(None)
     composite_ops = get_ops_for_key('CompositeImplicitAutograd')
@@ -83,7 +84,7 @@ def gen_data(special_op_lists, analysis_name):
 
     ops = yaml.load(open('../../pytorch/aten/src/ATen/native/native_functions.yaml', 'r').read(), Loader=yaml.CLoader)
 
-    annotated_ops = {a.strip(): b.strip() for a,b in list(csv.reader(open('annotated_ops.txt')))}
+    annotated_ops = {a.strip(): b.strip() for a, b in list(csv.reader(open('annotated_ops.txt')))}
     from collections import defaultdict
 
     uniq_ops = []
@@ -112,7 +113,6 @@ def gen_data(special_op_lists, analysis_name):
     def annotate_ops(ops, is_unique):
         categorization = defaultdict(int)
         for op in ops:
-            old_tcnt = sum(categorization.values())
             if op['name'][-1] == '_':
                 categorization['inplace'] += 1
                 op['meta'] = 'inplace'
@@ -141,11 +141,12 @@ def gen_data(special_op_lists, analysis_name):
                 categorization['batch_norm'] += 1
                 op['meta'] = 'batch_norm'
                 continue
-            if 'Tensor' not in op['func'] or'Tensor' not in op['ret_type']:
+            if 'Tensor' not in op['func'] or 'Tensor' not in op['ret_type']:
                 categorization['non_tensor'] += 1
                 op['meta'] = 'non_tensor'
                 continue
-            if 'cudnn' in op['name'] or 'mkldnn' in op['name'] or 'miopen' in op['name'] or 'native' in op['name'] or 'thnn' in op['name'] or 'slow' in op['name']:
+            if 'cudnn' in op['name'] or 'mkldnn' in op['name'] or 'miopen' in op['name'] or \
+                    'native' in op['name'] or 'thnn' in op['name'] or 'slow' in op['name']:
                 categorization['backend'] += 1
                 op['meta'] = 'backend'
                 continue
@@ -157,18 +158,21 @@ def gen_data(special_op_lists, analysis_name):
                 op['meta'] = 'core unknown'
         return categorization
 
-    # categorization = annotate_ops(uniq_ops, True)
-    categorization = annotate_ops(ops, False)
-
     with open(f"{analysis_name}", 'w') as f:
         for op in ops:
-            info = [op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)] + [check(op) for check in special_op_lists]
+            info = [
+                op['full_name'], op['meta'], not (op['full_name'] in noncomposite_ops)
+            ] + [check(op) for check in special_op_lists]
             f.write(','.join([str(i) for i in info]) + '\n')
+
 
 def name_check(lst):
     return lambda x: x['name'] in lst
+
+
 def full_name_check(lst):
     return lambda x: x['full_name'] in lst
+
 
 # Generates batching rule data
 gen_data([full_name_check(get_ops_for_key('FuncTorchBatched'))], 'vmap')

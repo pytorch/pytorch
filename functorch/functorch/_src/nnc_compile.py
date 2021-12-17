@@ -6,8 +6,6 @@
 
 import time
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import torch._C._te as te
 import torch.fx as fx
 import torch.utils._pytree as pytree
@@ -16,9 +14,10 @@ from torch.fx.passes.shape_prop import ShapeProp, TensorMetadata
 import operator
 import functools
 
+
 def truncate(model, k):
     model = fx.symbolic_trace(model)
-    new_graph= fx.Graph()
+    new_graph = fx.Graph()
     env = {}
 
     cnt = 0
@@ -33,6 +32,8 @@ def truncate(model, k):
     return fx.GraphModule(model, new_graph)
 
 # NNC Lowering Pass
+
+
 def remove_args(model: torch.nn.Module, args):
     fx_model = fx.symbolic_trace(model)
     for node in fx_model.graph.nodes:
@@ -42,14 +43,17 @@ def remove_args(model: torch.nn.Module, args):
     fx_model.recompile()
     return fx_model
 
+
 def get_dim_args(dims):
     dim_args = []
     for dim in dims:
         dim_args.append(te.DimArg(te.ExprHandle.int(dim), 'i' + str(len(dim_args))))
     return dim_args
 
+
 def get_te_shapes(shape):
     return [te.ExprHandle.int(i) for i in shape]
+
 
 def to_expr(x):
     if isinstance(x, int):
@@ -58,6 +62,7 @@ def to_expr(x):
         return te.ExprHandle.float(x)
     else:
         raise RuntimeError(f"type {type(x)} not supported")
+
 
 def get_nnc_type(dtype):
     if dtype == torch.float:
@@ -74,16 +79,20 @@ def get_nnc_type(dtype):
         raise RuntimeError(f"type nyi {dtype}")
 
 
-lowering_functions = { }
+lowering_functions = {}
+
+
 def index_or_broadcast(shape, *args):
     out = []
     for idx, arg in enumerate(args):
-        if idx >= len(shape): continue
+        if idx >= len(shape):
+            continue
         if shape[idx] == 1:
             out.append(to_expr(0))
         else:
             out.append(arg)
     return out
+
 
 def ones_like_lower(name, out_shape, inp_shapes, args):
     def f(*idxs):
@@ -91,11 +100,13 @@ def ones_like_lower(name, out_shape, inp_shapes, args):
     res = te.Compute(name, get_dim_args(out_shape), f)
     return res
 
+
 def zeros_like_lower(name, out_shape, inp_shapes, args):
     def f(*idxs):
         return to_expr(0.0)
     res = te.Compute(name, get_dim_args(out_shape), f)
     return res
+
 
 def full_like_lower(name, out_shape, inp_shapes, args):
     def f(*idxs):
@@ -106,8 +117,10 @@ def full_like_lower(name, out_shape, inp_shapes, args):
 
 def prod(x, start=1):
     t = start
-    for i in x: t *= i
+    for i in x:
+        t *= i
     return t
+
 
 def encode_idxs(shape, idxs):
     assert(len(shape) == len(idxs))
@@ -118,10 +131,12 @@ def encode_idxs(shape, idxs):
         cur *= dim
     return out
 
+
 def reshape_lower(name, out_shape, inp_shapes, args):
     X, shape = args
     start_shape = list(inp_shapes[0][0])
     end_shape = out_shape
+
     def get_orig_idxs(idxs):
         absolute_new = encode_idxs(end_shape, idxs)
         new_idxs = []
@@ -151,10 +166,12 @@ def reshape_lower(name, out_shape, inp_shapes, args):
 #     res = te.Compute(name, get_dim_args(out_shape), f)
 #     return res
 
+
 def dot_lower(name, out_shape, inp_shapes, args):
     mul_te = te.lower('aten::mul', list(args), get_te_shapes(inp_shapes[0][0]), get_nnc_type(inp_shapes[0][1]))
     res = te.lower('aten::sum', [mul_te.buf()], get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
     return (res.buf(), [mul_te.stmt(), res.stmt()])
+
 
 def mv_lower(name, out_shape, inp_shapes, args):
     A = args[0]
@@ -170,35 +187,42 @@ def mv_lower(name, out_shape, inp_shapes, args):
     s = torch._C._te.ExternalCall(C, "nnc_aten_mv", [A, B], [])
     return C, [s]
 
+
 def digamma_lower(name, out_shape, inp_shapes, args):
     out = te.BufHandle('out', get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
     s = te.ExternalCall(out, "nnc_aten_digamma", [args[0]], [])
     return out, [s]
 
+
 def ger_lower(name, out_shape, inp_shapes, args):
-    A = args[0]
-    B = args[1]
     A_len = inp_shapes[0][0][0]
     B_len = inp_shapes[1][0][0]
     A_squeeze = te.lower('aten::unsqueeze', [args[0], 1], get_te_shapes([A_len, 1]), get_nnc_type(inp_shapes[0][1]))
     B_squeeze = te.lower('aten::unsqueeze', [args[1], 0], get_te_shapes([1, B_len]), get_nnc_type(inp_shapes[1][1]))
-    out = te.lower('aten::mul', [A_squeeze.buf(), B_squeeze.buf()], get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
+    out = te.lower('aten::mul', [A_squeeze.buf(), B_squeeze.buf()],
+                   get_te_shapes(out_shape), get_nnc_type(inp_shapes[0][1]))
     return out.buf(), [A_squeeze.stmt(), B_squeeze.stmt(), out.stmt()]
+
 
 def triangular_solve_lower(name, out_shape, inp_shapes, args):
     A = args[0]
     B = args[1]
     C = torch._C._te.BufHandle('C', get_te_shapes(out_shape[0]), get_nnc_type(inp_shapes[0][1]))
-    s = torch._C._te.ExternalCall(C, "nnc_aten_triangular_solve", [A, B], [to_expr(args[2]), to_expr(args[3]), to_expr(args[4])])
+    s = torch._C._te.ExternalCall(C, "nnc_aten_triangular_solve", [A, B], [
+                                  to_expr(args[2]), to_expr(args[3]), to_expr(args[4])])
     return (C, None), [s]
+
 
 def binary_cross_entropy_lower(name, out_shape, inp_shapes, args):
     self_ = args[0]
     target = args[1]
-    if args[2] != None or args[3] == 2:
+    if args[2] is not None or args[3] == 2:
         raise RuntimeError(f"weight={args[2]} and reduction={args[3]} not supported")
+
     def f(*idxs):
-        return to_expr(0.0) - (self_.load(idxs).log() * target.load(idxs) + (to_expr(1.0) - target.load(idxs)) * (to_expr(1.0) - self_.load(idxs)).log())
+        out = (to_expr(1.0) - target.load(idxs)) * (to_expr(1.0) - self_.load(idxs)).log()
+        return to_expr(0.0) - (self_.load(idxs).log() * target.load(idxs) + out)
+
     val = te.Compute(name, get_dim_args(inp_shapes[0][0]), f)
     if args[3] == 0:
         return val.buf(), [val.stmt()]
@@ -208,14 +232,17 @@ def binary_cross_entropy_lower(name, out_shape, inp_shapes, args):
 
 def binary_cross_entropy_with_logits_lower(name, out_shape, inp_shapes, args):
     pred = te.lower('aten::sigmoid', [args[0]], get_te_shapes(inp_shapes[0][0]), get_nnc_type(inp_shapes[0][1]))
-    loss_buf, loss_stmts = binary_cross_entropy_lower('binary_cross_entropy', out_shape, list(inp_shapes) + [None], [pred, args[1], args[3], args[4]])
+    loss_buf, loss_stmts = binary_cross_entropy_lower(
+        'binary_cross_entropy', out_shape, list(inp_shapes) + [None], [pred, args[1], args[3], args[4]])
     return loss_buf, [pred.stmt()] + loss_stmts
+
 
 def detach_lower(name, out_shape, inp_shapes, args):
     return args[0], []
 
 # def clone_lower(name, out_shape, inp_shapes, args):
 #     return args[0], []
+
 
 lowering_functions[torch.ops.aten.full_like] = full_like_lower
 lowering_functions[torch.ops.aten.zeros_like] = zeros_like_lower
@@ -234,7 +261,6 @@ lowering_functions[torch.ops.aten.detach] = detach_lower
 # lowering_functions[torch.ops.aten.clone] = clone_lower
 
 
-
 func_to_aten = {
     operator.add: torch.ops.aten.add,
     operator.mul: torch.ops.aten.mul,
@@ -249,6 +275,7 @@ def process_shape(x):
         return torch.Size([1])
     return x
 
+
 def map_node_meta(f, node_meta):
     if isinstance(node_meta, TensorMetadata):
         return f(node_meta)
@@ -258,8 +285,15 @@ def map_node_meta(f, node_meta):
         return list([map_node_meta(f, i) for i in node_meta])
     return f(node_meta)
 
+
 def lower_function(node, op, nnc_args, args):
-    inp_shapes = fx.node.map_aggregate(args, lambda arg: (process_shape(arg.meta['tensor_meta'].shape), arg.meta['tensor_meta'].dtype) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None)
+    inp_shapes = fx.node.map_aggregate(
+        args,
+        lambda arg: (
+            process_shape(arg.meta['tensor_meta'].shape),
+            arg.meta['tensor_meta'].dtype
+        ) if isinstance(arg, fx.Node) and 'tensor_meta' in arg.meta else None
+    )
     out_shape = map_node_meta(lambda x: process_shape(x.shape), node.meta['tensor_meta'])
     if op in lowering_functions:
         out = lowering_functions[op](node.name, out_shape, inp_shapes, nnc_args)
@@ -274,6 +308,8 @@ def lower_function(node, op, nnc_args, args):
         return out[0], out[1]
 
 # This will not work properly in the presence of aliasing/views
+
+
 def remove_inplace(fx_model: fx.GraphModule) -> torch.nn.Module:
     new_map = {}
     for node in fx_model.graph.nodes:
@@ -283,7 +319,8 @@ def remove_inplace(fx_model: fx.GraphModule) -> torch.nn.Module:
             new_map[node.args[0]] = node
     return fx_model
 
-def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) -> torch.nn.Module:
+
+def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest=False) -> torch.nn.Module:
     """
     nnc_compile(model, example_inputs) returns a function with the same args
     as `model.forward`, with an extra argument corresponding to where the
@@ -291,7 +328,6 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     tensors with the same shapes as example_inputs), and passes them to an
     NNC executor.
     """
-    t = fx_model.graph.flatten_inps(*example_inputs)
     ShapeProp(fx_model).propagate(*fx_model.graph.flatten_inps(*example_inputs))
     fx_model = remove_inplace(fx_model)
 
@@ -299,18 +335,14 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     # of an NNC computation.
     env = {}
 
-
     def get_te_type(node):
         return get_nnc_type(node.meta['tensor_meta'].dtype)
 
-    def gen_compute(args):
-        te_args = [env[arg.name] for arg in args]
-
-    def lookup_env(l):
-        res = fx.node.map_aggregate(l, lambda x: env[x.name] if isinstance(x, fx.Node) else x)
+    def lookup_env(inpt):
+        res = fx.node.map_aggregate(inpt, lambda x: env[x.name] if isinstance(x, fx.Node) else x)
         return res
 
-    def fetch_attr(target : str):
+    def fetch_attr(target: str):
         target_atoms = target.split('.')
         attr_itr = fx_model
         for i, atom in enumerate(target_atoms):
@@ -357,7 +389,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
                 continue
         elif node.op == 'output':
             args = node.args
-            args = pytree.tree_map(lambda x: list(x) if isinstance(x, fx.immutable_collections.immutable_list) else x, args)
+            args = pytree.tree_map(lambda x: list(x) if isinstance(
+                x, fx.immutable_collections.immutable_list) else x, args)
             flat_args, _ = pytree.tree_flatten(list(args))
             te_args = lookup_env(flat_args)
             outs = (list(te_args), [(i.meta['tensor_meta'].shape, i.meta['tensor_meta'].dtype) for i in flat_args])
@@ -366,14 +399,13 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             # attributes and pass them in as inputs to NNC.
             module_attrs.append(node)
             shapes = get_te_shapes(process_shape(node.meta['tensor_meta'].shape))
-            placeholder = te.BufHandle(node.name, shapes,  get_te_type(node))
+            placeholder = te.BufHandle(node.name, shapes, get_te_type(node))
             env[node.name] = placeholder
             attr_bufs.append(placeholder)
             inputs_or_attrs.add(placeholder)
         else:
             print(node.op, node.target)
             raise RuntimeError("not yet implemented")
-
 
     if len(compute_stmts) == 0:
         raise RuntimeError("Doesn't support compiling empty")
@@ -388,7 +420,8 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
     loopnest.simplify()
     loopnest.prepare_for_codegen()
     stmt = te.simplify(loopnest.root_stmt())
-    cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x) for x in [env[i.name] for i in module_attrs] + inputs + buf_outs])
+    cg = te.construct_codegen('llvm', stmt, [te.BufferArg(x)
+                              for x in [env[i.name] for i in module_attrs] + inputs + buf_outs])
 
     module_stuff = [fetch_attr(i.target).contiguous().data for i in module_attrs]
 
@@ -400,7 +433,10 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
             ph_to_inp_map[outs[idx][0]] = attr_bufs.index(outs[idx][0])
 
     def get_outs(inps):
-        return [inps[ph_to_inp_map[buf]] if buf in inputs_or_attrs else torch.empty(shape, dtype=dtype) for buf, (shape,dtype) in outs]
+        return [
+            inps[ph_to_inp_map[buf]] if buf in inputs_or_attrs else torch.empty(shape, dtype=dtype)
+            for buf, (shape, dtype) in outs
+        ]
 
     def f(*inps):
         inps = fx_model.graph.flatten_inps(*inps)
@@ -415,6 +451,7 @@ def nnc_compile(fx_model: fx.GraphModule, example_inputs, get_loopnest = False) 
         return results
     return f
 
+
 def make_nnc(f):
     @functools.wraps(f)
     def wrapped(*args):
@@ -425,13 +462,13 @@ def make_nnc(f):
 
     return wrapped
 
+
 def get_ops(fx_model: fx.GraphModule):
     vals = set()
     for node in fx_model.graph.nodes:
         if node.op == 'call_function':
             vals.add(node.target.__name__)
     return vals
-
 
 
 ################################
@@ -444,11 +481,12 @@ def bench(f, warmup=3, iters=1000):
     begin = time.time()
     for _ in range(iters):
         f()
-    print(time.time()-begin)
+    print(time.time() - begin)
+
 
 if __name__ == '__main__':
     def f(a, b):
-        return (torch.cos(a)* torch.sin(b))[:2000]
+        return (torch.cos(a) * torch.sin(b))[:2000]
 
     mod = fx.symbolic_trace(f)
     inps = (torch.randn(5000), torch.randn(5000))
