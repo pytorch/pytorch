@@ -13,6 +13,7 @@
     // pass -- jiterator not supported on HIP platforms
     #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
 #else
+    #define USE_JITERATOR
     #define jiterator_stringify(...) std::string(#__VA_ARGS__);
 #endif
 
@@ -262,8 +263,6 @@ static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
-enum class BinaryFuncVariant {NoScalar, RhsScalar, LhsScalar};
-
 struct NvrtcFunction {
   CUmodule module = CUmodule();
   CUfunction function = nullptr;
@@ -273,12 +272,10 @@ std::string generate_code(
     int nTensors,
     const std::string& func,
     const std::string& name,
-    const std::string& f_input_type,
-    const std::string& compute_type,
+    const std::string& common_type,
     const std::string& result_type,
     bool contiguous,
     bool dynamic_casting,
-    BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0);
 
@@ -288,7 +285,7 @@ NvrtcFunction jit_pwise_function(
 
 void launch_jitted_pwise_function(
     NvrtcFunction function,
-    std::array<void*, 7>& args,
+    std::array<void*, 6>& args,
     const int nBlocks,
     const int kBlockSize);
 
