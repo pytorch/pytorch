@@ -27,10 +27,12 @@ DEFINE_DISPATCH(cudnn_convolution_transpose_backward_stub);
 DEFINE_DISPATCH(convolution_depthwise3x3_winograd_stub);
 DEFINE_DISPATCH(miopen_convolution_backward_stub);
 DEFINE_DISPATCH(miopen_convolution_transpose_backward_stub);
+DEFINE_DISPATCH(miopen_depthwise_convolution_backward_stub);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_backward_stub, cudnn_convolution_backward_fn);
 REGISTER_NO_CPU_DISPATCH(cudnn_convolution_transpose_backward_stub, cudnn_convolution_transpose_backward_fn);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_backward_stub, miopen_convolution_backward_fn);
 REGISTER_NO_CPU_DISPATCH(miopen_convolution_transpose_backward_stub, miopen_convolution_transpose_backward_fn);
+REGISTER_NO_CPU_DISPATCH(miopen_depthwise_convolution_backward_stub, miopen_depthwise_convolution_backward_fn);
 
 std::ostream& operator<<(std::ostream & out, const ConvParams& params) {
   out << "ConvParams {"
@@ -1625,7 +1627,8 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward(
       break;
     case ConvBackend::MiopenDepthwise:
       std::tie(backend_grad_input, backend_grad_weight, backend_grad_bias) =
-          at::miopen_depthwise_convolution_backward(
+          miopen_depthwise_convolution_backward_stub(
+            input.device().type(),
             input.contiguous(backend_memory_format), grad_output, weight, params.padding, params.stride,
             params.dilation, params.groups, params.benchmark, params.deterministic, output_mask);
       break;
