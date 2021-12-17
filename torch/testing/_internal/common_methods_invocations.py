@@ -8761,13 +8761,7 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
-           sample_inputs_func=sample_inputs_cdist,
-           skips=(
-               # RuntimeError: _cdist_backward requires X1 to be contiguous
-               DecorateInfo(unittest.skip("_cdist_backward requires X1 to be contiguous"),
-                            'TestCommon', 'test_noncontiguous_samples'),
-           )
-           ),
+           sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
                    dtypes=floating_types_and(torch.bfloat16),
