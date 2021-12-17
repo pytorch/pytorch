@@ -38,7 +38,7 @@ from torch.testing._internal.common_quantized import (
 
 
 @skipIfNoFBGEMM
-class TestFusion(QuantizationTestCase):
+class TestFuseEager(QuantizationTestCase):
     def test_fuse_module_train(self):
         model = ModelForFusion(default_qat_qconfig).train()
         # Test step by step fusion
