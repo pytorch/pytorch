@@ -514,7 +514,7 @@ class TestLinalg(TestCase):
         A = A.reshape((1, 3, 3))
         A = A.repeat(5, 1, 1)
         A[4, -1, -1] = 0  # Now A[4] is not positive definite
-        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 4\): The factorization could not be completed'):
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 4\): The factorization could not be completed'):
             torch.linalg.cholesky(A)
 
         # if out tensor with wrong shape is passed a warning is given
@@ -706,7 +706,7 @@ class TestLinalg(TestCase):
         expected_info = torch.zeros(A.shape[:-2], dtype=torch.int32, device=device)
         expected_info[3] = 2
         self.assertEqual(info, expected_info)
-        with self.assertRaisesRegex(RuntimeError, r'\(Batch element 3\): The factorization could not be completed'):
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The factorization could not be completed'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -2948,7 +2948,7 @@ class TestLinalg(TestCase):
             error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
             a[1, 0, 0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, error_msg):
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
                 svd(a)
 
     @skipCUDAIfNoMagmaAndNoCusolver
@@ -7627,7 +7627,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.randn(3, 3, device=device, dtype=dtype)
         a[1, 1] = 0
         if self.device_type == 'cpu':
-            with self.assertRaisesRegex(RuntimeError, r"cholesky_inverse: The diagonal element 2 is zero"):
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
                 torch.cholesky_inverse(a)
         # cholesky_inverse on GPU does not raise an error for this case
         elif self.device_type == 'cuda':
