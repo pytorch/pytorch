@@ -8,10 +8,13 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
+import torch.nn.quantized as nnq
+toq = torch.ops.quantized
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
     QuantizationTestCase,
+    NodeSpec,
 )
 from torch.quantization import (
     ObserverBase,
@@ -52,10 +55,10 @@ class QuantizeDBRTestCase(QuantizationTestCase):
     ):
         m_copy = copy.deepcopy(m)
 
-        m.qconfig = qconfig
+        qconfig_dict = {'': qconfig}
 
         mp = _quantize_dbr.prepare(
-            m, example_args, fuse_modules=fuse_modules)
+            m, qconfig_dict, example_args, fuse_modules=fuse_modules)
         out_p = mp(*example_args)
         # print(mp)
         mq = _quantize_dbr.convert(mp)
@@ -126,8 +129,8 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
         self.assertTrue(isinstance(mp.conv, nni.ConvReLU2d))
         self.assertTrue(isinstance(mp.child[0], nni.ConvReLU2d))
 
@@ -177,8 +180,8 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         stored in observers and fake quants.
         """
         m = nn.Sequential(nn.Conv2d(1, 1, 1)).eval()
-        m.qconfig = torch.quantization.default_qconfig
-        mp = _quantize_dbr.prepare(m, (torch.randn(1, 1, 1, 1),))
+        qconfig = torch.quantization.default_qconfig
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (torch.randn(1, 1, 1, 1),))
         for _, mod in mp.named_modules():
             if isinstance(mod, (ObserverBase, FakeQuantizeBase)):
                 scale, zp = mod.calculate_qparams()
@@ -230,10 +233,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
             copy.deepcopy(m), qconfig, (torch.randn(1, 1, 2, 2),))
 
         # test backprop does not crash
-        m.qconfig = qconfig
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
-        mp = _quantize_dbr.prepare(m, (inputs,))
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
         loss = (output - labels).sum()
@@ -264,10 +266,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self._test_auto_tracing(m, qconfig, (torch.randn(1, 1, 2, 2),))
 
         # test backprop does not crash
-        m.qconfig = qconfig
         inputs = torch.randn(1, 1, 1, 1)
         inputs.requires_grad = True
-        mp = _quantize_dbr.prepare(m, (inputs,))
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, (inputs,))
         output = mp(inputs)
         labels = torch.randn(1, 1, 1, 1)
         loss = (output - labels).sum()
@@ -947,9 +948,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
+        qconfig = torch.quantization.default_qconfig
         example_args = (torch.randn(1, 1, 2, 2),)
-        mp = _quantize_dbr.prepare(m, example_args)
+        mp = _quantize_dbr.prepare(m, {'': qconfig}, example_args)
         out_p = mp(*example_args)
         mq = _quantize_dbr.convert(copy.deepcopy(mp))
         out_q = mq(*example_args)
@@ -976,6 +977,152 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 v['node_output']['mq'][0]['ref_node_target_type'],
                 v['node_output']['mq'][0]['sqnr']])
 
+    def test_qconfig_dict_global(self):
+        """
+        Verifies that the '' option of qconfig_dict works
+        """
+
+        # regular case
+        m = nn.Sequential(nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': torch.quantization.default_qconfig}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nnq.Conv2d))
+
+        # quantization turned off
+        m = nn.Sequential(nn.Conv2d(1, 1, 1))
+        qconfig_dict = {'': None}
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nn.Conv2d))
+
+    def test_qconfig_dict_object_type_module(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on module types.
+        """
+        m = nn.Sequential(
+            nn.Conv2d(1, 1, 1),
+            nn.Hardswish(),
+            nn.Conv2d(1, 1, 1),
+        )
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (nn.Conv2d, torch.quantization.default_qconfig),
+                (nn.Hardswish, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0], nnq.Conv2d))
+        self.assertTrue(isinstance(mq[1], nn.Hardswish))
+        self.assertTrue(isinstance(mq[2], nnq.Conv2d))
+
+    def test_qconfig_dict_object_type_function(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = x * x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (torch.add, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 1,
+            NodeSpec.call_function(toq.add): 0,
+            NodeSpec.call_function(toq.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_object_type_function_global_none(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types when global qconfig is None.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                return x
+
+        m = M()
+        qconfig_dict = {
+            '': None,
+            'object_type': [
+                (torch.add, torch.quantization.default_qconfig),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 0,
+            NodeSpec.call_function(toq.add): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
+
+    def test_qconfig_dict_module_name(self):
+        """
+        Verifies that the 'module_name' option of qconfig_dict works
+        on module types.
+        """
+        m = nn.Sequential(
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+            ),
+            nn.Conv2d(1, 1, 1),
+            nn.Sequential(
+                nn.Conv2d(1, 1, 1),
+                nn.Conv2d(1, 1, 1),
+            ),
+        )
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'module_name': [
+                ('0', torch.quantization.default_qconfig),
+                ('1', None),
+                ('2.0', None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        self.assertTrue(isinstance(mq[0][0], nnq.Conv2d))
+        self.assertTrue(isinstance(mq[1], nn.Conv2d))
+        self.assertTrue(isinstance(mq[2][0], nn.Conv2d))
+        self.assertTrue(isinstance(mq[2][1], nnq.Conv2d))
+
     def test_serialization(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -988,26 +1135,34 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 x2 = self.linear(x1)
                 return x2
 
-        qconfig = torch.quantization.default_qconfig
-        example_inputs = (torch.randn(1, 1, 1, 1),)
+        input_shape = (1, 1, 1, 1)
+        example_inputs = (torch.randn(*input_shape),)
 
         m = M().eval()
         m.qconfig = torch.quantization.default_qconfig
         m = _quantize_dbr.prepare(m, example_inputs)
         m = _quantize_dbr.convert(m)
+        m_copy = copy.deepcopy(m)
 
-        m_loaded = M().eval()
-        m_loaded.qconfig = torch.quantization.default_qconfig
-        m_loaded = _quantize_dbr.prepare(m_loaded, example_inputs)
-        m_loaded = _quantize_dbr.convert(m_loaded)
+        # Ensure the two models have different weights
+        conv_qweight = torch._empty_affine_quantized(input_shape, scale=100, zero_point=50, dtype=torch.qint8)
+        linear_qweight = torch._empty_affine_quantized([1, 1], scale=200, zero_point=25, dtype=torch.qint8)
+        m_copy.conv.set_weight_bias(conv_qweight, torch.zeros(1))
+        m_copy.linear.set_weight_bias(linear_qweight, torch.zeros(1))
 
+        # Results should be different without loading from serialized state_dict
+        expected = m(example_inputs[0])
+        actual = m_copy(example_inputs[0])
+        self.assertFalse(_allclose(expected, actual))
+
+        # Results should be the same after loading from serialized state_dict
         with tempfile.NamedTemporaryFile() as f:
             torch.save(m.state_dict(), f.name)
             loaded_state_dict = torch.load(f.name)
-            m_loaded.load_state_dict(loaded_state_dict)
+            m_copy.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
-        actual = m_loaded(example_inputs[0])
-        torch.allclose(expected, actual)
+        actual = m_copy(example_inputs[0])
+        self.assertTrue(_allclose(expected, actual))
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):

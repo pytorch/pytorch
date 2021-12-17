@@ -16,14 +16,15 @@ from ..quantize import (
 from ..observer import (
     ObserverBase,
 )
-from ..qconfig import QConfigAny
-from ..qconfig import is_reuse_input_qconfig
-from .qconfig_utils import (
-    convert_dict_to_ordered_dict,
-    generate_qconfig_map,
+from ..qconfig import QConfigAny, is_reuse_input_qconfig
+from ..qconfig_dict_utils import (
     get_flattened_qconfig_dict,
-    update_qconfig_for_fusion,
+    convert_dict_to_ordered_dict,
     update_qconfig_for_qat,
+)
+from .qconfig_utils import (
+    generate_qconfig_map,
+    update_qconfig_for_fusion,
 )
 
 from .quantization_patterns import (
@@ -53,8 +54,8 @@ from .match_utils import (
     find_matches,
 )
 
+from ..utils import _parent_name
 from .utils import (
-    _parent_name,
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
@@ -82,7 +83,7 @@ from ..utils import (
     activation_is_int8_quantized,
 )
 
-from .backend_config_dict.utils import (
+from .backend_config.utils import (
     get_pattern_to_quantize_handlers,
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
@@ -174,8 +175,10 @@ def is_pattern_dtype_config_supported_by_backend(
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config_dict)
     dtype_configs: List[Dict[str, torch.dtype]] = pattern_to_dtype_configs.get(pattern, [])
 
-    input_node = matched_nodes[0]
-    output_node = matched_nodes[-1]
+    # TODO: this only checks one input and one output, need to generalize to multiple
+    # inputs/output
+    input_node = matched_nodes[-1]
+    output_node = matched_nodes[0]
     for dtype_config in dtype_configs:
         # check if arg dtype are supported
         supported = True
