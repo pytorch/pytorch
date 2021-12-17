@@ -692,7 +692,7 @@ class TestLinalg(TestCase):
         A[-1, -1] = 0  # Now A is singular
         _, info = torch.linalg.cholesky_ex(A)
         self.assertEqual(info, 3)
-        with self.assertRaisesRegex(RuntimeError, r'minor of order 3 is not positive-definite'):
+        with self.assertRaisesRegex(torch.linalg.LinAlgError, r'minor of order 3 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
         # if at least one matrix in the batch is not positive definite,
@@ -2943,7 +2943,7 @@ class TestLinalg(TestCase):
             error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|The algorithm failed to converge)'
             a = torch.full((3, 3), float('nan'), dtype=dtype, device=device)
             a[0] = float('nan')
-            with self.assertRaisesRegex(RuntimeError, error_msg):
+            with self.assertRaisesRegex(torch.linalg.LinAlgError, error_msg):
                 svd(a)
             error_msg = r'(CUSOLVER_STATUS_EXECUTION_FAILED|\(Batch element 1\): The algorithm failed to converge)'
             a = torch.randn(3, 33, 33, dtype=dtype, device=device)
