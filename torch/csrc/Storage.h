@@ -15,6 +15,6 @@
 #define THPStorageBaseStr TH_CONCAT_STRING_2(Real,StorageBase)
 
 #include <torch/csrc/generic/Storage.h>
-#include <torch/csrc/THGenerateByteType.h>
+#include <TH/THGenerateByteType.h>
 
 #endif
