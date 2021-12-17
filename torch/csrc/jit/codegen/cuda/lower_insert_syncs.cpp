@@ -69,7 +69,8 @@ class SmemAllocMap {
 };
 
 //! Insert WAR sync for a given ForLoop
-class LocalSyncInserterForLoop {
+class LocalSyncInserterForLoop : public kir::KirVisitor {
+  using kir::KirVisitor::handle;
   using TvSet = std::unordered_set<const kir::TensorView*>;
 
  public:
@@ -118,7 +119,7 @@ class LocalSyncInserterForLoop {
     return all_smem_outputs_;
   }
 
-  void handle(kir::Expr* expr) {
+  void handle(kir::Expr* expr) final {
     if (ir_utils::isTVOp(expr)) {
       is_last_op_sync_ = false;
 
@@ -133,33 +134,22 @@ class LocalSyncInserterForLoop {
       // For parent SyncInserter
       addOutputSmemTvs(expr, all_smem_outputs_);
       addInputSmemTvs(expr, all_smem_inputs_);
-    } else if (auto sync = dynamic_cast<kir::Sync*>(expr)) {
-      handle(sync);
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    } else if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    } else if (auto alloc = dynamic_cast<kir::Allocate*>(expr)) {
-      alloc_map_.insert(alloc);
+    } else {
+      kir::KirVisitor::handle(expr);
     }
   }
 
-  void handle(kir::Sync* sync) {
+  void handle(kir::Allocate* alloc) final {
+    alloc_map_.insert(alloc);
+  }
+
+  void handle(kir::Sync* sync) final {
     is_last_op_sync_ = true;
     initial_sync_ = true;
     final_.clear();
   }
 
-  void handle(kir::IfThenElse* ite) {
-    for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
-    }
-    for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
-    }
-  }
-
-  void handle(kir::ForLoop* fl) {
+  void handle(kir::ForLoop* fl) final {
     LocalSyncInserterForLoop child_sync_inserter(fl, alloc_map_);
 
     const auto& child_inputs = child_sync_inserter.all_smem_inputs();
@@ -297,33 +287,20 @@ class LocalSyncInserter {
   SmemAllocMap alloc_map_;
 };
 
-class ExprFlattener : private kir::OptOutDispatch {
+class ExprFlattener : private kir::KirVisitor {
  private:
+  using kir::KirVisitor::handle;
+
   void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      kir::OptOutDispatch::handle(expr);
+      kir::KirVisitor::handle(expr);
     } else {
-      exprs_.push_back(expr);
-    }
-  }
-
-  void handle(kir::ForLoop* fl) final {
-    for (auto expr : fl->body().exprs()) {
-      handle(expr);
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
-    }
-    for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
+      flat_exprs_.push_back(expr);
     }
   }
 
  private:
-  std::vector<kir::Expr*> exprs_;
+  std::vector<kir::Expr*> flat_exprs_;
 
  public:
   //! Flattens scopes extracting out a single ordered list of exprs.
@@ -333,11 +310,11 @@ class ExprFlattener : private kir::OptOutDispatch {
     for (auto expr : loop_nests) {
       flattener.handle(expr);
     }
-    return flattener.exprs_;
+    return flattener.flat_exprs_;
   }
 };
 
-class ValidatePlacementAfterWrites : private kir::OptOutDispatch {
+class ValidatePlacementAfterWrites : private kir::KirVisitor {
  public:
   //! Validate no expr in writes found under loop
   static void validate(
@@ -348,12 +325,14 @@ class ValidatePlacementAfterWrites : private kir::OptOutDispatch {
   }
 
  private:
+  using kir::KirVisitor::handle;
+
   ValidatePlacementAfterWrites(const std::unordered_set<kir::Expr*>& writes)
       : writes_(writes) {}
 
   void handle(kir::Expr* expr) final {
     if (expr->isA<kir::ForLoop>() || expr->isA<kir::IfThenElse>()) {
-      kir::OptOutDispatch::handle(expr);
+      kir::KirVisitor::handle(expr);
     } else {
       TORCH_INTERNAL_ASSERT(
           writes_.find(expr) == writes_.end(),
@@ -362,27 +341,14 @@ class ValidatePlacementAfterWrites : private kir::OptOutDispatch {
     }
   }
 
-  void handle(kir::ForLoop* fl) final {
-    for (auto expr : fl->body().exprs()) {
-      handle(expr);
-    }
-  }
-
-  void handle(kir::IfThenElse* ite) final {
-    for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
-    }
-    for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
-    }
-  }
-
  private:
   const std::unordered_set<kir::Expr*>& writes_;
 };
 
-class ReadAfterWriteSyncs : public kir::OptOutDispatch {
+class ReadAfterWriteSyncs : public kir::KirVisitor {
  private:
+  using kir::KirVisitor::handle;
+
   //! Traverse up the loop stack from loops_it and if a halo loop is
   //! found, place a given sync expr before the outer-most halo loop.
   bool insertBeforeHaloLoop(
@@ -420,10 +386,9 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
 
     if (halo_loop_it == for_loops_.begin()) {
       // place in global scope
-      auto place_before_it =
-          std::find(loop_nests_.begin(), loop_nests_.end(), halo_loop);
-      TORCH_INTERNAL_ASSERT(place_before_it != loop_nests_.end());
-      loop_nests_.insert(place_before_it, sync_expr);
+      auto place_before_it = std::find(exprs_.begin(), exprs_.end(), halo_loop);
+      TORCH_INTERNAL_ASSERT(place_before_it != exprs_.end());
+      exprs_.insert(place_before_it, sync_expr);
     } else {
       auto place_in = *(halo_loop_it - 1);
       place_in->body().insert_before(halo_loop, sync_expr);
@@ -434,7 +399,7 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
 
   void handle(kir::Expr* expr) final {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      kir::OptOutDispatch::handle(expr);
+      kir::KirVisitor::handle(expr);
       return;
     }
 
@@ -460,16 +425,16 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
         // Sync should be placed at global scope, after its outer most loop if
         // it has one.
         kir::Expr* place_after = for_loops_.size() > 0 ? for_loops_[0] : expr;
-        // Find location in loop_nests_
+        // Find location in exprs_
         auto place_after_it =
-            std::find(loop_nests_.begin(), loop_nests_.end(), place_after);
+            std::find(exprs_.begin(), exprs_.end(), place_after);
         TORCH_INTERNAL_ASSERT(
-            place_after_it != loop_nests_.end(),
+            place_after_it != exprs_.end(),
             "Could not figure out where to place synchronization. ",
             "Tried to place after, ",
             toString(place_after),
             ", but could not find this expression at the global scope.");
-        loop_nests_.insert(place_after_it + 1, sync_expr);
+        exprs_.insert(place_after_it + 1, sync_expr);
       } else {
         // Find the last loop in computeAt of out_tv, this is the loop where we
         // would place an allocation for out_tv
@@ -514,16 +479,6 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
     }
   }
 
-  void handle(kir::ForLoop* fl) final {
-    for_loops_.push_back(fl);
-    // Modifying in place, make a copy of the vector
-    const std::vector<kir::Expr*> exprs = fl->body().exprs();
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-    for_loops_.pop_back();
-  }
-
   void handle(kir::IfThenElse*) final {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -553,14 +508,13 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
     return last_writes;
   }
 
-  ReadAfterWriteSyncs(std::vector<kir::Expr*> _loop_nests)
-      : loop_nests_(std::move(_loop_nests)) {
+  ReadAfterWriteSyncs(const std::vector<kir::Expr*>& _exprs) {
     // Fusion shared_memory values
     // Tracks if shared memory is modified
     std::unordered_map<kir::Val*, kir::Expr*> smem;
 
     // Flatten all the expressions
-    auto flattened_exprs = ExprFlattener::flatten(loop_nests_);
+    auto flattened_exprs = ExprFlattener::flatten(_exprs);
 
     kir::Expr* prev_tv_expr = nullptr;
     for (auto expr : flattened_exprs) {
@@ -589,11 +543,7 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
       prev_tv_expr = expr;
     }
 
-    // Insert read after write syncs
-    const std::vector<kir::Expr*> exprs = loop_nests_;
-    for (auto expr : exprs) {
-      handle(expr);
-    }
+    kir::KirVisitor::handle(_exprs);
 
     TORCH_INTERNAL_ASSERT(
         sync_after_.empty(), "Didn't place all required syncs.");
@@ -613,17 +563,11 @@ class ReadAfterWriteSyncs : public kir::OptOutDispatch {
   //! it is not placed before those write expressions.
   std::deque<std::unordered_set<kir::Expr*>> last_writes_;
 
-  //! Keep track of for loops while inserting syncthreads
-  std::vector<kir::ForLoop*> for_loops_;
-
-  //! Loop-nests where syncthreads are inserted
-  std::vector<kir::Expr*> loop_nests_;
-
  public:
   static std::vector<kir::Expr*> insert(
       const std::vector<kir::Expr*>& loop_nests) {
     ReadAfterWriteSyncs inserter(loop_nests);
-    return inserter.loop_nests_;
+    return inserter.exprs_;
   }
 };
 

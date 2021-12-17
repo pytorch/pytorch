@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower_warp_reduce.h>
@@ -189,7 +190,7 @@ class EliminateDeadBroadcastAndAllocate {
 //!
 //!   3. EliminateDeadBroadcastAndAllocate removes the broadcast ops
 //!    and corresponding allocations if they're un-used after step 2.
-class FuseBroadcastWithWarpReduce {
+class FuseBroadcastWithWarpReduce : private kir::KirVisitor {
  public:
   static std::vector<kir::Expr*> fuse(const std::vector<kir::Expr*>& exprs) {
     FuseBroadcastWithWarpReduce fuse_broadcast_map(exprs);
@@ -210,38 +211,20 @@ class FuseBroadcastWithWarpReduce {
             std::unordered_map<kir::TensorView*, kir::Allocate*>>());
     running_visible_allocation_stack_.emplace_back(
         std::make_unique<std::vector<kir::Allocate*>>());
-
-    for (auto expr : exprs) {
-      handle(expr);
-    }
+    kir::KirVisitor::handle(exprs);
   }
 
-  void handle(kir::Expr* expr) {
-    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-      return;
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-      return;
-    }
-
-    // Process expr inputs if needs replacement
-    for (auto inp : expr->inputs()) {
-      if (auto input_ti = dynamic_cast<kir::TensorIndex*>(inp)) {
-        auto replace = findMaybeReplacedTensorIndex(input_ti);
-        if (replace.has_value()) {
-          val_replacement_map_[input_ti] = replace.value();
+  void handle(kir::Expr* expr) final {
+    if (ir_utils::isTVOp(expr)) {
+      // Process expr inputs if needs replacement
+      for (auto inp : expr->inputs()) {
+        if (auto input_ti = dynamic_cast<kir::TensorIndex*>(inp)) {
+          auto replace = findMaybeReplacedTensorIndex(input_ti);
+          if (replace.has_value()) {
+            val_replacement_map_[input_ti] = replace.value();
+          }
         }
       }
-    }
-
-    // Handle reduction definitions
-    if (auto reduction = dynamic_cast<kir::ReductionOp*>(expr)) {
-      handle(reduction);
-    } else if (auto broadcast = dynamic_cast<kir::BroadcastOp*>(expr)) {
-      handle(broadcast);
-    } else if (auto allocate = dynamic_cast<kir::Allocate*>(expr)) {
-      handle(allocate);
     }
   }
 
@@ -256,7 +239,7 @@ class FuseBroadcastWithWarpReduce {
     return true;
   }
 
-  void handle(kir::ForLoop* for_loop) {
+  void handle(kir::ForLoop* for_loop) final {
     // Keep track of visible reduction outputs
     bool open_nest_level = openLoopNestLevel(for_loop->iter_domain());
     if (open_nest_level) {
@@ -275,7 +258,7 @@ class FuseBroadcastWithWarpReduce {
     }
   }
 
-  void handle(kir::IfThenElse* ite) {
+  void handle(kir::IfThenElse* ite) final {
     running_visible_allocation_stack_.emplace_back(
         std::make_unique<std::vector<kir::Allocate*>>());
     for (auto expr : ite->thenBody().exprs()) {
@@ -292,7 +275,7 @@ class FuseBroadcastWithWarpReduce {
 
   //! Place this allocate on the list of currently visible allocations,
   //!  organized by loop nest level.
-  void handle(kir::Allocate* allocate) {
+  void handle(kir::Allocate* allocate) final {
     if (allocate->memoryType() != MemoryType::Local) {
       return;
     }
@@ -375,7 +358,7 @@ class FuseBroadcastWithWarpReduce {
 
   //! Updates map of serially visible reduction tvs, see comment on
   //!  running_kir_tv_to_allocate_map_.
-  void handle(kir::ReductionOp* reduction) {
+  void handle(kir::ReductionOp* reduction) final {
     if (!isOpOutputRegisterTV(reduction)) {
       return;
     }
@@ -390,7 +373,7 @@ class FuseBroadcastWithWarpReduce {
         reduction_ti_out->view()) = reduction_allocate;
   }
 
-  void handle(kir::BroadcastOp* broadcast) {
+  void handle(kir::BroadcastOp* broadcast) final {
     if (!isOpInputRegisterTV(broadcast) || !isOpOutputRegisterTV(broadcast)) {
       return;
     }

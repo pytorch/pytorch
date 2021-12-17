@@ -478,6 +478,42 @@ void OptOutDispatch::handle(GridBroadcast* stmt) {
 void OptOutDispatch::handle(GridWelford* stmt) {
   unhandled(stmt);
 }
+
+std::vector<Expr*> KirVisitor::handle(const std::vector<Expr*>& exprs) {
+  exprs_ = std::vector<Expr*>(exprs);
+  for (auto expr : exprs) {
+    handle(expr);
+  }
+  return exprs_;
+}
+
+void KirVisitor::handle(ForLoop* fl) {
+  for_loops_.push_back(fl);
+  scope_.push_back(&fl->body());
+  auto body_exprs = std::vector<Expr*>(fl->body().exprs());
+  for (auto expr : body_exprs) {
+    handle(expr);
+  }
+  scope_.pop_back();
+  for_loops_.pop_back();
+}
+
+void KirVisitor::handle(IfThenElse* ite) {
+  scope_.push_back(&ite->thenBody());
+  auto then_exprs = std::vector<Expr*>(ite->thenBody().exprs());
+  for (auto expr : then_exprs) {
+    handle(expr);
+  }
+  scope_.pop_back();
+
+  scope_.push_back(&ite->elseBody());
+  auto else_exprs = std::vector<Expr*>(ite->elseBody().exprs());
+  for (auto expr : else_exprs) {
+    handle(expr);
+  }
+  scope_.pop_back();
+}
+
 } // namespace kir
 } // namespace cuda
 } // namespace fuser

@@ -23,14 +23,12 @@ namespace cuda {
 
 namespace {
 
-class ConditionalFromPredicateModifier {
+class ConditionalFromPredicateModifier : public kir::KirVisitor {
  public:
   ConditionalFromPredicateModifier(const std::vector<kir::Expr*>& exprs) {
     FUSER_PERF_SCOPE(
         "GpuLower::Lower::ConditionalFromPredicateModifier::process");
-    for (auto* expr : exprs) {
-      handle(expr);
-    }
+    kir::KirVisitor::handle(exprs);
   }
 
   const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
@@ -38,12 +36,10 @@ class ConditionalFromPredicateModifier {
   }
 
  private:
-  void handle(kir::Expr* expr) {
-    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    } else if (expr != nullptr && expr->predicate() != nullptr) {
+  using kir::KirVisitor::handle;
+
+  void handle(kir::Expr* expr) final {
+    if (expr != nullptr && expr->predicate() != nullptr) {
       // Replace expr predicate with bool conditional
       auto conditional = generateConditional(expr->predicate());
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
@@ -51,6 +47,8 @@ class ConditionalFromPredicateModifier {
       TORCH_INTERNAL_ASSERT(expr->predicate()->value() != nullptr);
       setWritePredicate(expr, conditional);
     }
+
+    kir::KirVisitor::handle(expr);
   }
 
   void setWritePredicate(kir::Expr* expr, kir::Bool* read_cond) {
@@ -66,42 +64,21 @@ class ConditionalFromPredicateModifier {
     }
   }
 
-  void handle(kir::ForLoop* fl) {
-    for_loops_structure_.push_back(fl);
-
-    const auto exprs_copy = fl->body().exprs();
-    for (auto expr : exprs_copy) {
-      handle(expr);
-    }
-
-    for_loops_structure_.pop_back();
-  }
-
-  void handle(kir::IfThenElse* ite) {
+  void handle(kir::IfThenElse* ite) final {
     TORCH_INTERNAL_ASSERT(ite->predicate() != nullptr);
 
     // If ite already has Bool conditional, handle internal expressions
     // Otherwise, generate conditional and update predicate
-    if (ite->predicate()->hasValue()) {
-      const auto then_exprs_copy = ite->thenBody().exprs();
-      for (auto expr : then_exprs_copy) {
-        handle(expr);
-      }
-
-      const auto else_exprs_copy = ite->elseBody().exprs();
-      for (auto expr : else_exprs_copy) {
-        handle(expr);
-      }
-    } else {
+    if (!ite->predicate()->hasValue()) {
       auto conditional = generateConditional(ite->predicate());
       TORCH_INTERNAL_ASSERT(conditional != nullptr);
       TORCH_INTERNAL_ASSERT(conditional->isA<kir::Bool>());
 
       // Update bool conditional in-place
       ite->predicate()->setValue(conditional);
-      handle(ite);
       TORCH_INTERNAL_ASSERT(ite->predicate()->value() != nullptr);
     }
+    kir::KirVisitor::handle(ite);
   }
 
   // Generate conditional according to PredicateType
@@ -114,14 +91,14 @@ class ConditionalFromPredicateModifier {
       case PredicateType::Padding: {
         return PredicateCompute::getInlinePredicate(
             pred->expr(),
-            for_loops_structure_,
+            for_loops_,
             pred->thread_pred(),
             pred->predicate_type());
       }
       case PredicateType::Vectorize: {
         std::vector<kir::ForLoop*> outer_loops;
         kir::ForLoop* vectorized_loop = nullptr;
-        for (auto loop : for_loops_structure_) {
+        for (auto loop : for_loops_) {
           if (loop->iter_domain()->parallelType() == ParallelType::Vectorize) {
             vectorized_loop = loop;
             break;
@@ -134,8 +111,7 @@ class ConditionalFromPredicateModifier {
         return UnswitchPredicate::get(outer_loops, vectorized_loop);
       }
       case PredicateType::Unswitch: {
-        return UnswitchPredicate::get(
-            for_loops_structure_, pred->unrolled_loop());
+        return UnswitchPredicate::get(for_loops_, pred->unrolled_loop());
       }
       case PredicateType::Manual: {
         return pred->value();
@@ -149,10 +125,6 @@ class ConditionalFromPredicateModifier {
  private:
   // We will track which loops in the incoming IR will be replaced and by what
   std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
-
-  // A depth-first ordering of nested for loops
-  // It is used for indexing and predicate generation
-  std::vector<kir::ForLoop*> for_loops_structure_;
 };
 
 } // namespace

@@ -13,11 +13,11 @@ namespace cuda {
 
 namespace {
 
-class MagicZeroInserter : public kir::OptOutDispatch {
+class MagicZeroInserter : public kir::KirVisitor {
  public:
   static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
     MagicZeroInserter inserter(exprs);
-    return inserter.loop_nests_;
+    return inserter.exprs_;
   }
 
  private:
@@ -27,41 +27,24 @@ class MagicZeroInserter : public kir::OptOutDispatch {
   };
 
   MagicZeroInserter(const std::vector<kir::Expr*>& exprs)
-      : loop_nests_(exprs), ir_builder(GpuLower::current()->kernel()) {
-    loop_nests_.insert(
-        loop_nests_.begin(), ir_builder.create<kir::InitMagicZero>());
-    for (auto expr : exprs) {
-      kir::OptOutDispatch::handle(expr);
-    }
+      : ir_builder(GpuLower::current()->kernel()) {
+    kir::KirVisitor::handle(exprs);
+    // exprs_ isn't copied over until kir::KirVisitor::handle is called. This
+    // will be easier once we have an insertion class as we can just mark insert
+    // before the first expr
+    exprs_.insert(exprs_.begin(), ir_builder.create<kir::InitMagicZero>());
     insertAll();
   }
 
-  void handle(kir::IfThenElse* ite) {
-    scope_nest_.push_back(&ite->thenBody());
-    for (auto expr : ite->thenBody().exprs()) {
-      kir::OptOutDispatch::handle(expr);
-    }
-    scope_nest_.pop_back();
-    scope_nest_.push_back(&ite->elseBody());
-    for (auto expr : ite->elseBody().exprs()) {
-      kir::OptOutDispatch::handle(expr);
-    }
-    scope_nest_.pop_back();
-  }
-
-  void handle(kir::ForLoop* fl) {
+  void handle(kir::ForLoop* fl) final {
     if (fl->isUnrolled()) {
       kir::Scope* scope = nullptr;
-      if (!scope_nest_.empty()) {
-        scope = scope_nest_.back();
+      if (!scope_.empty()) {
+        scope = scope_.back();
       }
       insertion_list_.push_back({scope, fl});
     } else {
-      scope_nest_.push_back(&fl->body());
-      for (auto expr : fl->body().exprs()) {
-        kir::OptOutDispatch::handle(expr);
-      }
-      scope_nest_.pop_back();
+      kir::KirVisitor::handle(fl);
     }
   }
 
@@ -71,22 +54,16 @@ class MagicZeroInserter : public kir::OptOutDispatch {
       auto scope = info.scope;
       if (scope == nullptr) {
         // place in global scope
-        auto loop_it = std::find(loop_nests_.begin(), loop_nests_.end(), fl);
-        TORCH_INTERNAL_ASSERT(loop_it != loop_nests_.end());
+        auto loop_it = std::find(exprs_.begin(), exprs_.end(), fl);
+        TORCH_INTERNAL_ASSERT(loop_it != exprs_.end());
         // Place after the loop
         loop_it++;
-        loop_nests_.insert(loop_it, ir_builder.create<kir::UpdateMagicZero>());
+        exprs_.insert(loop_it, ir_builder.create<kir::UpdateMagicZero>());
       } else {
         scope->insert_after(fl, ir_builder.create<kir::UpdateMagicZero>());
       }
     }
   }
-
-  //! Keep track for loop structure
-  std::vector<kir::Scope*> scope_nest_;
-
-  // Keep a copy of the expressions provided
-  std::vector<kir::Expr*> loop_nests_;
 
   kir::IrBuilder ir_builder;
 

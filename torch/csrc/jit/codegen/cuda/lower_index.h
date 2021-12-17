@@ -15,6 +15,8 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+// TODO: Need kir mutator as IndexLowering is replacing expr's with versions
+// that are doing indexing
 class TORCH_CUDA_CU_API IndexLowering : private kir::OptOutConstDispatch {
  public:
   static std::vector<kir::Expr*> getIndexedExprs(

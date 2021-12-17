@@ -52,32 +52,32 @@ class TORCH_CUDA_CU_API OptOutConstDispatch : public PolymorphicBase {
   virtual void handle(const Val*);
 
   // Vals
-  virtual void handle(const IterDomain* stmt);
-  virtual void handle(const TensorDomain* stmt);
-  virtual void handle(const TensorView* stmt);
-  virtual void handle(const Bool* stmt);
-  virtual void handle(const Double* stmt);
-  virtual void handle(const Int* stmt);
-  virtual void handle(const NamedScalar* stmt);
-  virtual void handle(const Predicate* stmt);
-  virtual void handle(const TensorIndex* stmt);
+  virtual void handle(const IterDomain*);
+  virtual void handle(const TensorDomain*);
+  virtual void handle(const TensorView*);
+  virtual void handle(const Bool*);
+  virtual void handle(const Double*);
+  virtual void handle(const Int*);
+  virtual void handle(const NamedScalar*);
+  virtual void handle(const Predicate*);
+  virtual void handle(const TensorIndex*);
 
   // Exprs
-  virtual void handle(const UnaryOp* stmt);
-  virtual void handle(const BinaryOp* stmt);
-  virtual void handle(const TernaryOp* stmt);
-  virtual void handle(const ReductionOp* stmt);
-  virtual void handle(const WelfordOp* stmt);
-  virtual void handle(const BroadcastOp* stmt);
-  virtual void handle(const Allocate* stmt);
-  virtual void handle(const Sync* stmt);
-  virtual void handle(const InitMagicZero* stmt);
-  virtual void handle(const UpdateMagicZero* stmt);
-  virtual void handle(const ForLoop* stmt);
-  virtual void handle(const IfThenElse* stmt);
-  virtual void handle(const GridReduction* stmt);
-  virtual void handle(const GridBroadcast* stmt);
-  virtual void handle(const GridWelford* stmt);
+  virtual void handle(const UnaryOp*);
+  virtual void handle(const BinaryOp*);
+  virtual void handle(const TernaryOp*);
+  virtual void handle(const ReductionOp*);
+  virtual void handle(const WelfordOp*);
+  virtual void handle(const BroadcastOp*);
+  virtual void handle(const Allocate*);
+  virtual void handle(const Sync*);
+  virtual void handle(const InitMagicZero*);
+  virtual void handle(const UpdateMagicZero*);
+  virtual void handle(const ForLoop*);
+  virtual void handle(const IfThenElse*);
+  virtual void handle(const GridReduction*);
+  virtual void handle(const GridBroadcast*);
+  virtual void handle(const GridWelford*);
 };
 
 class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
@@ -92,32 +92,32 @@ class TORCH_CUDA_CU_API OptOutDispatch : public PolymorphicBase {
 
   // Vals
 
-  virtual void handle(IterDomain* stmt);
-  virtual void handle(TensorDomain* stmt);
-  virtual void handle(TensorView* stmt);
-  virtual void handle(Bool* stmt);
-  virtual void handle(Double* stmt);
-  virtual void handle(Int* stmt);
-  virtual void handle(NamedScalar* stmt);
-  virtual void handle(Predicate* stmt);
-  virtual void handle(TensorIndex* stmt);
+  virtual void handle(IterDomain*);
+  virtual void handle(TensorDomain*);
+  virtual void handle(TensorView*);
+  virtual void handle(Bool*);
+  virtual void handle(Double*);
+  virtual void handle(Int*);
+  virtual void handle(NamedScalar*);
+  virtual void handle(Predicate*);
+  virtual void handle(TensorIndex*);
 
   // Exprs
-  virtual void handle(UnaryOp* stmt);
-  virtual void handle(BinaryOp* stmt);
-  virtual void handle(TernaryOp* stmt);
-  virtual void handle(ReductionOp* stmt);
-  virtual void handle(WelfordOp* stmt);
-  virtual void handle(BroadcastOp* stmt);
-  virtual void handle(Allocate* stmt);
-  virtual void handle(Sync* stmt);
-  virtual void handle(InitMagicZero* stmt);
-  virtual void handle(UpdateMagicZero* stmt);
-  virtual void handle(ForLoop* stmt);
-  virtual void handle(IfThenElse* stmt);
-  virtual void handle(GridReduction* stmt);
-  virtual void handle(GridBroadcast* stmt);
-  virtual void handle(GridWelford* stmt);
+  virtual void handle(UnaryOp*);
+  virtual void handle(BinaryOp*);
+  virtual void handle(TernaryOp*);
+  virtual void handle(ReductionOp*);
+  virtual void handle(WelfordOp*);
+  virtual void handle(BroadcastOp*);
+  virtual void handle(Allocate*);
+  virtual void handle(Sync*);
+  virtual void handle(InitMagicZero*);
+  virtual void handle(UpdateMagicZero*);
+  virtual void handle(ForLoop*);
+  virtual void handle(IfThenElse*);
+  virtual void handle(GridReduction*);
+  virtual void handle(GridBroadcast*);
+  virtual void handle(GridWelford*);
 };
 
 class TORCH_CUDA_CU_API OptInConstDispatch : public OptOutConstDispatch {
@@ -134,6 +134,33 @@ class TORCH_CUDA_CU_API OptInDispatch : public OptOutDispatch {
 
  protected:
   virtual void unhandled(Node* stmt) final;
+};
+
+// Base visitor class that visits all nodes in provided vector<Expr*>.
+//
+// Includes visiting through scopes like IfThenElse and ForLoop, and tracks them
+// in scopes_ and for_loops_.
+//
+// Makes a copy of exprs at exprs_ which could be used to modify and return.
+//
+// When traversing through ITE/FLs it will use a copy
+// of the provided expressions to make it safe to insert/delete nodes.
+//
+// Provides a simple base class to inherit from for typical kir passes
+class KirVisitor : public OptOutDispatch {
+ public:
+  std::vector<Expr*> handle(const std::vector<Expr*>& expr);
+
+ protected:
+  using OptOutDispatch::handle;
+
+  virtual void handle(ForLoop*) override;
+  virtual void handle(IfThenElse*) override;
+
+ protected:
+  std::vector<ForLoop*> for_loops_;
+  std::vector<Scope*> scope_;
+  std::vector<Expr*> exprs_;
 };
 
 } // namespace kir

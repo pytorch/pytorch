@@ -1,9 +1,9 @@
-#include <torch/csrc/jit/codegen/cuda/dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_builder.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_allocation.h>
@@ -17,8 +17,10 @@ namespace cuda {
 
 namespace {
 
-class AllocationInserter : public kir::OptOutDispatch {
+class AllocationInserter : public kir::KirVisitor {
  private:
+  using kir::KirVisitor::handle;
+
   struct AllocationInformation {
     // The for loop that the initialization of this allocation must be
     // placed in, nullptr if not within a loop
@@ -69,7 +71,7 @@ class AllocationInserter : public kir::OptOutDispatch {
     kir::ForLoop* alloc_for_loop = nullptr;
     size_t alloc_fl_idx_next = 0;
 
-    for (auto fl : for_loops) {
+    for (auto fl : for_loops_) {
       if (alloc_pos == fuser_tv->getComputeAtPosition()) {
         break;
       }
@@ -119,16 +121,16 @@ class AllocationInserter : public kir::OptOutDispatch {
     info.init_for_loop = init_for_loop;
 
     if (info.init_for_loop == nullptr) {
-      info.init_place_before = for_loops.size() > 0 ? for_loops[0] : expr;
+      info.init_place_before = for_loops_.size() > 0 ? for_loops_[0] : expr;
     } else {
-      if (info.init_for_loop == for_loops.back()) {
+      if (info.init_for_loop == for_loops_.back()) {
         // Inline allocation, place before expr
         info.init_place_before = expr;
       } else {
         // Place allocation after the last computeAt axis
         // TODO: may be more efficient to place before the first non-computeAt
         // axis
-        info.init_place_before = for_loops.at(fl_idx_next);
+        info.init_place_before = for_loops_.at(fl_idx_next);
       }
     }
 
@@ -140,12 +142,12 @@ class AllocationInserter : public kir::OptOutDispatch {
     } else {
       info.alloc_for_loop = alloc_for_loop;
       if (info.alloc_for_loop == nullptr) {
-        info.alloc_place_before = for_loops.size() > 0 ? for_loops[0] : expr;
+        info.alloc_place_before = for_loops_.size() > 0 ? for_loops_[0] : expr;
       } else {
         // Since there must be an inner unswitched domain,
         // alloc_for_loop should never be the inner-most loop.
-        TORCH_INTERNAL_ASSERT(info.alloc_for_loop != for_loops.back());
-        info.alloc_place_before = for_loops.at(alloc_fl_idx_next);
+        TORCH_INTERNAL_ASSERT(info.alloc_for_loop != for_loops_.back());
+        info.alloc_place_before = for_loops_.at(alloc_fl_idx_next);
       }
     }
   }
@@ -464,7 +466,7 @@ class AllocationInserter : public kir::OptOutDispatch {
 
   void handle(kir::Expr* expr) override {
     if (!ir_utils::isTVOp(expr) || expr->isA<kir::Allocate>()) {
-      OptOutDispatch::handle(expr);
+      KirVisitor::handle(expr);
       return;
     }
 
@@ -551,16 +553,6 @@ class AllocationInserter : public kir::OptOutDispatch {
         std::move(lower_alloc_info_ptr);
   }
 
-  void handle(kir::ForLoop* fl) final {
-    for_loops.push_back(fl);
-    // Modifying in place, make a copy of the vector
-    const std::vector<kir::Expr*> exprs = fl->body().exprs();
-    for (auto expr : exprs) {
-      handle(expr);
-    }
-    for_loops.pop_back();
-  }
-
   void handle(kir::IfThenElse*) final {
     TORCH_INTERNAL_ASSERT(
         false,
@@ -568,15 +560,10 @@ class AllocationInserter : public kir::OptOutDispatch {
         "this pass should be run before any conditionals are placed in code.");
   }
 
-  AllocationInserter(std::vector<kir::Expr*> _loop_nests)
-      : loop_nests_(std::move(_loop_nests)),
-        gpu_lower(GpuLower::current()),
-        ir_builder(gpu_lower->kernel()) {
-    // Compute all allocations
-    const std::vector<kir::Expr*> exprs = loop_nests_;
-    for (auto expr : exprs) {
-      handle(expr);
-    }
+  AllocationInserter(const std::vector<kir::Expr*>& exprs)
+      : gpu_lower(GpuLower::current()), ir_builder(gpu_lower->kernel()) {
+    // Compute all allocations. Will copy const& exprs -> exprs_
+    kir::KirVisitor::handle(exprs);
 
     // First, place allocations of dynamic smem tensors at the very
     // beginning of the expr list. Traverse backward as they should be
@@ -590,7 +577,7 @@ class AllocationInserter : public kir::OptOutDispatch {
       // loops
       if (alloc.buffer->memoryType() == MemoryType::Shared &&
           !kir::ExpressionEvaluator::isConst(alloc.alloc_expr->size())) {
-        loop_nests_.insert(loop_nests_.begin(), alloc.alloc_expr);
+        exprs_.insert(exprs_.begin(), alloc.alloc_expr);
       }
     }
 
@@ -604,16 +591,16 @@ class AllocationInserter : public kir::OptOutDispatch {
         continue;
       }
       if (alloc.alloc_for_loop == nullptr) {
-        auto place_before_it = std::find(
-            loop_nests_.begin(), loop_nests_.end(), alloc.alloc_place_before);
+        auto place_before_it =
+            std::find(exprs_.begin(), exprs_.end(), alloc.alloc_place_before);
         TORCH_INTERNAL_ASSERT(
-            place_before_it != loop_nests_.end(),
+            place_before_it != exprs_.end(),
             "Could not figure out where to place allocation. ",
             "Use of the buffer, ",
             toString(alloc.buffer),
             ", could not be found.",
             toString(alloc.alloc_place_before));
-        loop_nests_.insert(place_before_it, alloc.alloc_expr);
+        exprs_.insert(place_before_it, alloc.alloc_expr);
       } else {
         alloc.alloc_for_loop->body().insert_before(
             alloc.alloc_place_before, alloc.alloc_expr);
@@ -626,11 +613,11 @@ class AllocationInserter : public kir::OptOutDispatch {
         continue;
       }
       if (alloc.init_for_loop == nullptr) {
-        auto place_before_it = std::find(
-            loop_nests_.begin(), loop_nests_.end(), alloc.init_place_before);
+        auto place_before_it =
+            std::find(exprs_.begin(), exprs_.end(), alloc.init_place_before);
         // Don't need a check here as if the allocation placement succeeded
         // this will too
-        loop_nests_.insert(place_before_it, alloc.init_expr);
+        exprs_.insert(place_before_it, alloc.init_expr);
       } else {
         alloc.init_for_loop->body().insert_before(
             alloc.init_place_before, alloc.init_expr);
@@ -641,19 +628,14 @@ class AllocationInserter : public kir::OptOutDispatch {
  private:
   std::deque<AllocationInformation> allocs;
 
-  std::vector<kir::ForLoop*> for_loops;
-
-  std::vector<kir::Expr*> loop_nests_;
-
   GpuLower* gpu_lower;
 
   kir::IrBuilder ir_builder;
 
  public:
-  static std::vector<kir::Expr*> insert(
-      const std::vector<kir::Expr*>& loop_nests) {
-    AllocationInserter inserter(loop_nests);
-    return inserter.loop_nests_;
+  static std::vector<kir::Expr*> insert(const std::vector<kir::Expr*>& exprs) {
+    AllocationInserter inserter(exprs);
+    return inserter.exprs_;
   }
 };
 

@@ -18,16 +18,14 @@ namespace cuda {
 
 namespace {
 
-class MisalignedVectorizationModifier {
+class MisalignedVectorizationModifier : public kir::KirVisitor {
  public:
   void process(const std::vector<kir::Expr*>& exprs) {
     FUSER_PERF_SCOPE(
         "GpuLower::Lower::MisalignedVectorizationModifier::process");
     // Run through loop nests
     // Find for-loops with misaligned vectorization domains
-    for (auto* expr : exprs) {
-      handle(expr);
-    }
+    kir::KirVisitor::handle(exprs);
   }
 
   const std::unordered_map<kir::Expr*, kir::Expr*>& replacementMap() const {
@@ -35,38 +33,14 @@ class MisalignedVectorizationModifier {
   }
 
  private:
-  void handle(kir::Expr* expr) {
-    if (auto for_loop = dynamic_cast<kir::ForLoop*>(expr)) {
-      handle(for_loop);
-    } else if (auto ite = dynamic_cast<kir::IfThenElse*>(expr)) {
-      handle(ite);
-    }
-  }
-
-  void handle(kir::ForLoop* fl) {
-    for_loops_structure_.push_back(fl);
-
-    // Make copy of exprs because we replace them inplace in fl
-    const auto exprs_copy = fl->body().exprs();
-
+  void handle(kir::ForLoop* fl) final {
     if (containsAnyDirectChildMisalignedVectorize(fl)) {
-      auto new_fl = handleMisalignedVectorize(for_loops_structure_, fl);
+      for_loops_.push_back(fl);
+      auto new_fl = handleMisalignedVectorize(for_loops_, fl);
       expr_replacement_map_.insert({fl, new_fl});
+      for_loops_.pop_back();
     } else {
-      for (auto expr : exprs_copy) {
-        handle(expr);
-      }
-    }
-
-    for_loops_structure_.pop_back();
-  }
-
-  void handle(kir::IfThenElse* ite) {
-    for (auto expr : ite->thenBody().exprs()) {
-      handle(expr);
-    }
-    for (auto expr : ite->elseBody().exprs()) {
-      handle(expr);
+      kir::KirVisitor::handle(fl);
     }
   }
 
@@ -374,7 +348,7 @@ class MisalignedVectorizationModifier {
   // vectorize flag - Do not generate for loop header
   // shift value - Add shift to global indices generated within for loop
   std::vector<kir::ForLoop*> cloneForLoops(
-      const std::vector<kir::ForLoop*>& for_loops,
+      const std::vector<kir::ForLoop*>& for_loops_,
       kir::Val* loop_stop,
       kir::Val* pred_stop,
       bool vectorize,
@@ -382,7 +356,7 @@ class MisalignedVectorizationModifier {
     kir::IrBuilder ir_builder(GpuLower::current()->kernel());
     std::vector<kir::ForLoop*> cloned_for_loops;
 
-    for (auto fl : for_loops) {
+    for (auto fl : for_loops_) {
       auto first_expr = fl->body().exprs().front();
       bool has_vectorize_op = isVectorizeSetOp(fl, first_expr);
 
@@ -450,8 +424,8 @@ class MisalignedVectorizationModifier {
   // Enable vectorize flag in child For-Loop
   kir::Expr* findFirstVectorizedSetOp(
       std::vector<kir::ForLoop*>& for_loop_structure,
-      const std::vector<kir::ForLoop*>& for_loops) {
-    for (auto fl : for_loops) {
+      const std::vector<kir::ForLoop*>& for_loops_) {
+    for (auto fl : for_loops_) {
       auto first_expr = fl->body().exprs().front();
       bool has_vectorize_op = isVectorizeSetOp(fl, first_expr);
       if (has_vectorize_op) {
@@ -574,10 +548,6 @@ class MisalignedVectorizationModifier {
  private:
   // We will track which loops in the incoming IR will be replaced and by what
   std::unordered_map<kir::Expr*, kir::Expr*> expr_replacement_map_;
-
-  // A depth-first ordering of nested for loops
-  // It is used for indexing and predicate generation
-  std::vector<kir::ForLoop*> for_loops_structure_;
 };
 
 } // namespace
