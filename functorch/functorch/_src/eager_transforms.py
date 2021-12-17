@@ -32,6 +32,7 @@ def _create_differentiable(inps, level=None):
                          f'got {type(x)}')
     return tree_map(create_differentiable, inps)
 
+
 def _undo_create_differentiable(inps, level=None):
     def unwrap_tensors(x):
         if isinstance(x, torch.Tensor):
@@ -44,22 +45,27 @@ def _undo_create_differentiable(inps, level=None):
 
     return tree_map(unwrap_tensors, inps)
 
+
 def _is_differentiable(maybe_tensor):
     if not isinstance(maybe_tensor, torch.Tensor):
         return False
     return maybe_tensor.requires_grad
 
+
 def _any_differentiable(tensor_or_tuple_of_tensors):
     flat_args, _ = tree_unflatten(tensor_or_tuple_of_tensors)
     return any(tuple(map(_is_differentiable, flat_args)))
+
 
 def _wrap_tensor_for_grad(maybe_tensor, level):
     if not isinstance(maybe_tensor, torch.Tensor):
         return maybe_tensor
     return _wrap_for_grad(maybe_tensor, level)
 
+
 def _wrap_all_tensors(tensor_pytree, level):
     return tree_map(partial(_wrap_tensor_for_grad, level=level), tensor_pytree)
+
 
 def _as_tuple(val):
     if isinstance(val, tuple):
@@ -67,6 +73,8 @@ def _as_tuple(val):
     return (val,)
 
 # Version of autograd.grad that handles outputs that don't depend on inputs
+
+
 def _autograd_grad(outputs, inputs, grad_outputs=None, retain_graph=False, create_graph=True):
     if grad_outputs is None:
         diff_outputs = tuple(out for out in outputs if out.requires_grad)
@@ -272,9 +280,11 @@ def vjp(f: Callable, *primals, has_aux=False):
     else:
         return results, wrapper
 
+
 def _safe_zero_index(x):
     assert len(x) == 1
     return x[0]
+
 
 def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
     """
@@ -388,13 +398,13 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
         flat_output, output_spec = tree_flatten(output)
         if len(flat_output) == 0:
             raise RuntimeError(
-                f'jacrev(f, ...)(*args): expected f to return at least one Tensor, '
-                f'got no Tensors.')
+                'jacrev(f, ...)(*args): expected f to return at least one Tensor, '
+                'got no Tensors.')
         for out in flat_output:
             if isinstance(out, torch.Tensor):
                 continue
             raise RuntimeError(
-                f'jacrev(f, ...)(*args): expected f to only return Tensors as '
+                'jacrev(f, ...)(*args): expected f to only return Tensors as '
                 f'outputs, got {type(out)}')
         # NB: vjp already checks that all outputs are tensors
         # Step 1: Construct grad_outputs by splitting the standard basis
@@ -478,6 +488,7 @@ def jacrev(f: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False):
 # - one of shape [3, 3] for the first output
 # - one of shape [   3] for the second output
 
+
 def _construct_standard_basis_for(tensors, tensor_numels):
     # This function:
     # - constructs a N=sum(tensor_numels) standard basis. i.e. an NxN identity matrix.
@@ -508,6 +519,7 @@ def _construct_standard_basis_for(tensors, tensor_numels):
                    for chunk, tensor in zip(chunks, tensors))
     return chunks
 
+
 def _validate_and_wrap_argnum(argnum, num_args):
     if not isinstance(argnum, int):
         raise RuntimeError(f'argnum must be int, got: {type(argnum)}')
@@ -517,12 +529,14 @@ def _validate_and_wrap_argnum(argnum, num_args):
         return argnum + num_args
     raise RuntimeError(f'Got argnum={argnum}, but only {num_args} positional inputs')
 
+
 def _check_unique_non_empty(argnums):
     if isinstance(argnums, tuple):
         if len(argnums) == 0:
             raise RuntimeError("argnums must be non-empty")
         if len(set(argnums)) != len(argnums):
             raise RuntimeError(f"argnums elements must be unique, got {argnums}")
+
 
 def _replace_args(old_args, new_args, argnums):
     if isinstance(argnums, int):
@@ -534,9 +548,13 @@ def _replace_args(old_args, new_args, argnums):
             raise RuntimeError(
                 "new_args should have the same size as argnums. "
                 f"Argnums size {len(argnums)}, new_args size {len(new_args)}")
-        get_right_elem = lambda i : new_args[argnums.index(i)] if i in argnums else old_args[i]
+
+        def get_right_elem(i):
+            return new_args[argnums.index(i)] if i in argnums else old_args[i]
+
         return tuple(get_right_elem(i) for i in range(len(old_args)))
     raise RuntimeError(f'argnums must be int or Tuple[int, ...], got: {type(argnums)}')
+
 
 def _validate_and_wrap_argnums(argnums, num_args):
     if isinstance(argnums, int):
@@ -544,6 +562,7 @@ def _validate_and_wrap_argnums(argnums, num_args):
     if isinstance(argnums, tuple):
         return tuple(_validate_and_wrap_argnum(argnum, num_args) for argnum in argnums)
     raise AssertionError("Should never get here")
+
 
 def _slice_argnums(args, argnums, as_tuple=True):
     if not isinstance(argnums, int) and not isinstance(argnums, tuple):
@@ -557,6 +576,7 @@ def _slice_argnums(args, argnums, as_tuple=True):
             return args[argnums]
     return tuple(args[i] for i in argnums)
 
+
 def _argnums_partial(f, args, argnums):
     def f_wrapper(*wrapper_args):
         replaced_args = _replace_args(args, wrapper_args, argnums)
@@ -565,11 +585,14 @@ def _argnums_partial(f, args, argnums):
     wrapper_args = wrapper_args if isinstance(wrapper_args, tuple) else (wrapper_args, )
     return (f_wrapper, wrapper_args)
 
+
 JVP_NESTING = 0
+
 
 @contextlib.contextmanager
 def noop():
     yield
+
 
 def assert_flat_tuple_of_tensors(elts, api, argname):
     if not isinstance(elts, tuple):
@@ -584,6 +607,7 @@ def assert_flat_tuple_of_tensors(elts, api, argname):
     if len(elts) == 0:
         raise RuntimeError(
             f'{api}: Expected {argname} to be a non-empty tuple of Tensors.')
+
 
 def assert_output_is_tensor_or_tensors(output, api):
     if isinstance(output, torch.Tensor):
@@ -602,6 +626,7 @@ def assert_output_is_tensor_or_tensors(output, api):
             f'{api}: Expected output of f to be a Tensor or Tensors, got '
             f'{type(out)} as an output')
 
+
 def assert_non_empty_list_of_tensors(output, api, argname):
     if len(output) == 0:
         raise RuntimeError(
@@ -613,18 +638,21 @@ def assert_non_empty_list_of_tensors(output, api, argname):
             f'{api}: Expected {argname} to only contain Tensors, got '
             f'{type(out)}')
 
+
 jvp_str = 'jvp(f, primals, tangents)'
+
 
 def safe_unpack_dual(dual, strict):
     primal, tangent = fwAD.unpack_dual(dual)
     if tangent is None:
         if strict:
             raise RuntimeError(
-                    f'jvp(f, primals, tangents, strict=True): '
-                    f'The output of f is independent of '
-                    f'the inputs. This is not allowed with strict=True.')
+                'jvp(f, primals, tangents, strict=True): '
+                'The output of f is independent of '
+                'the inputs. This is not allowed with strict=True.')
         tangent = torch.zeros_like(primal)
     return primal, tangent
+
 
 def jvp(f, primals, tangents, *, strict=False):
     if not isinstance(primals, tuple):
@@ -670,11 +698,13 @@ def jvp(f, primals, tangents, *, strict=False):
         _grad_decrement_nesting()
         JVP_NESTING -= 1
 
+
 def safe_unflatten(tensor, dim, shape):
     if len(shape) == 0:
         assert tensor.shape[dim] == 1
         return tensor.squeeze(dim)
     return tensor.unflatten(dim, shape)
+
 
 def jacfwd(f, argnums=0):
     def wrapper_fn(*args):
@@ -707,8 +737,10 @@ def jacfwd(f, argnums=0):
         return tree_unflatten(jac_outs_ins, spec)
     return wrapper_fn
 
+
 def hessian(f, argnums=0):
     return jacfwd(jacrev(f, argnums), argnums)
+
 
 def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """
@@ -782,6 +814,7 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
             return grad_input, (output, aux)
         return grad_input, output
     return wrapper
+
 
 def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
     """``grad`` operator helps computing gradients of :attr:`func` with respect to the

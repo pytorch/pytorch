@@ -41,8 +41,8 @@ def cross_entropy(input, target, weight=None, size_average=None,
         target = target.unsqueeze(0)
 
     result = _old_cross_entropy(
-            input, target, weight, size_average,
-            ignore_index, reduce, reduction, **kwargs)
+        input, target, weight, size_average,
+        ignore_index, reduce, reduction, **kwargs)
     if reduction == 'none':
         return result.squeeze(0)
     return result

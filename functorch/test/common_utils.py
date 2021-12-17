@@ -17,11 +17,10 @@ import unittest
 
 IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
 
+
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
     outs = []
     for idx in range(batch_size):
-        idx_args = []
-        idx_kwargs = {}
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
         assert(args_spec == dims_spec)
@@ -56,6 +55,7 @@ def get_exhaustive_batched_inputs(arg_values, kwarg_values, batch_size=3, bdims=
             return (arg, None)
     for bdim in bdims:
         batch_choices = []
+
         def add_batch_choices(a):
             if isinstance(a, torch.Tensor):
                 batched_val = add_batch_dim(a, bdim, batch_size)
@@ -111,18 +111,24 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, compute_loop_
             loop_out = pytree.tree_map(lambda v: torch.ones(2, *v.shape, dtype=v.dtype, device=v.device) + v, loop_out)
         else:
             loop_out = None
-        batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(torch.ones(2), *batched_args, **kwarg_values)
+        batched_out = vmap(vmap(f, in_dims=vmap1_dims), in_dims=vmap2_dims)(
+            torch.ones(2), *batched_args, **kwarg_values)
         yield (loop_out, batched_out)
+
 
 def opinfo_in_dict(opinfo, d):
     return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
+
 
 def xfail(op_name, variant_name=None, *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, True)
 
 # TODO: this doesn't work in python < 3.8
+
+
 def skip(op_name, variant_name=None, *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
+
 
 def skipOps(test_case_name, base_test_name, to_skip):
     all_opinfos = functorch_lagging_op_db + additional_op_db
@@ -153,6 +159,7 @@ def skipOps(test_case_name, base_test_name, to_skip):
         return fn
     return wrapped
 
+
 class DisableVmapFallback:
     def __enter__(self):
         self.prev_state = functorch._C._is_vmap_fallback_enabled()
@@ -161,11 +168,12 @@ class DisableVmapFallback:
     def __exit__(self, *ignored):
         functorch._C._set_vmap_fallback_enabled(self.prev_state)
 
+
 def check_vmap_fallback(test_case, thunk, opinfo, dry_run=False):
     try:
         with DisableVmapFallback():
             thunk()
-    except:
+    except Exception:
         if not dry_run:
             raise
         if opinfo.variant_test_name:

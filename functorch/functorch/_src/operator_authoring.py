@@ -13,7 +13,12 @@ from functorch._C import PointwiseOperatorCompileCache, PointwiseOperatorCompile
 FOLD_ALIASES = True
 _SHAPE_TYPES = {"one", "other"}
 _STRIDE_TYPES = {"zero", "one", "contiguous", "transposed_contiguous", "as_arg"}
-_identity = lambda x: x
+
+
+def _identity(x):
+    return x
+
+
 _TORCH_TO_EXPR_MAP = {
     "sin": _te.sin,
     "cos": _te.cos,

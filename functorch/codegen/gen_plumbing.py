@@ -1,5 +1,4 @@
 import argparse
-import re
 
 from codegen_outofplacebatching import deindent, get_signatures, gen_unwraps
 

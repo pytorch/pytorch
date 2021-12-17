@@ -10,12 +10,15 @@ from functorch import jacrev, vmap
 sigma = 0.5
 epsilon = 4.
 
+
 def lennard_jones(r):
     return epsilon * ((sigma / r)**12 - (sigma / r)**6)
+
 
 def lennard_jones_force(r):
     """Get magnitude of LJ force"""
     return -epsilon * ((-12 * sigma**12 / r**13) + (6 * sigma**6 / r**7))
+
 
 training_size = 1000
 r = torch.linspace(0.5, 2 * sigma, requires_grad=True)
@@ -40,6 +43,7 @@ model = nn.Sequential(
     nn.Linear(16, 1)
 )
 
+
 def make_prediction(model, drs):
     norms = torch.norm(drs, dim=1).reshape(-1, 1)
     energies = model(norms)
@@ -48,8 +52,10 @@ def make_prediction(model, drs):
     forces = -network_derivs * drs / norms
     return energies, forces
 
+
 def loss_fn(energies, forces, predicted_energies, predicted_forces):
     return mse_loss(energies, predicted_energies) + 0.01 * mse_loss(forces, predicted_forces) / 3
+
 
 optimiser = torch.optim.Adam(model.parameters(), lr=1e-3)
 
