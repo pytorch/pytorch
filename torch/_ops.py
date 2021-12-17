@@ -29,6 +29,9 @@ class OpOverload:
         self.op = op
         self.schema = schema
 
+    def __deepcopy__(self, memo=None):
+        return self
+
     def __call__(self, *args, **kwargs):
         return self.op(*args, **kwargs or {})
 
@@ -56,15 +59,18 @@ class OpOverloadPacket():
         self.op_name = op_name
         self.op = op
 
+    def __deepcopy__(self, memo=None):
+        return self
+
+    # def __repr__(self):
+    #     return f"OpOverloadPacket({self.op_name}, {id(self)})"
+
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
         if key == '__file__':
             return 'torch.ops'
         try:
             use_key = "" if key == 'default' else key
-            # to prevent an infinite loop with getattr call in deepcopy (when __dict__ is empty)
-            if 'qualified_op_name' not in self.__dict__:
-                raise AttributeError
             op_ = torch._C.get_operation_overload(self.qualified_op_name, use_key)
             schema = torch.get_schema(self.qualified_op_name, use_key)
             overload = OpOverload(op_, schema)
