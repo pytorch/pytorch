@@ -260,15 +260,18 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     # Check the compiler name
     if any(name in compiler_path for name in _accepted_compilers_for_platform()):
         return True
-    # If ccache is used the compiler path is /usr/bin/ccache. Check by -v flag.
+    # If compiler wrapper is used try to infer the actual compiler by invoking it with -v flag
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
-        # Check for 'gcc' or 'g++'
+        # Check for 'gcc' or 'g++' for sccache warpper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
             return False
         compiler_path = os.path.realpath(results[0].strip())
+        # On RHEL/CentOS c++ is a gcc compiler wrapper
+        if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+            return True
         return any(name in compiler_path for name in _accepted_compilers_for_platform())
     if IS_MACOS:
         # Check for 'clang' or 'clang++'

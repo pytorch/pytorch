@@ -97,9 +97,7 @@ static PyObject * THPStorage_(new)(PyObject *_self, PyObject *noargs)
     /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  PyObject *_ret = THPStorage_(New)(new_storage.get());
-  new_storage.release();
-  return _ret;
+  return THPStorage_(New)(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
 
@@ -223,7 +221,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
   }
 
   uint8_t* src = (uint8_t*) buffer.buf;
-  c10::StorageImpl* storage = c10::make_intrusive<at::StorageImpl>(
+  auto storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
     size_bytes,
 #if defined(THC_GENERIC_FILE)
@@ -231,8 +229,7 @@ static PyObject * THPStorage_(fromBuffer)(PyObject *_unused, PyObject *args, PyO
 #else
     c10::GetDefaultCPUAllocator(),
 #endif
-    /*resizable=*/true)
-    .release();
+    /*resizable=*/true);
 
   if (scalar_type == at::kByte || scalar_type == at::kChar) {
     memcpy(storage->data(), src + offset, count);
@@ -304,28 +301,26 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
-  c10::StorageImpl* storage;
 
 #ifdef THC_GENERIC_FILE
   THError("not available yet for CUDA");
-  storage = NULL;
+  return nullptr;
 #else
   size_t actual_nbytes = -1;
-  storage = c10::make_intrusive<at::StorageImpl>(
+  auto storage = c10::make_intrusive<at::StorageImpl>(
     c10::StorageImpl::use_byte_size_t(),
     nbytes,
     at::MapAllocator::makeDataPtr(
       filename, shared, nbytes, &actual_nbytes),
     /*allocator=*/nullptr,
-    /*resizable=*/false)
-    .release();
+    /*resizable=*/false);
 
   if (nbytes <= 0) {
     storage->set_nbytes(actual_nbytes);
   }
-#endif
 
-  return (PyObject*)THPStorage_(New)(storage);
+  return (PyObject*)THPStorage_(New)(std::move(storage));
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -369,11 +364,10 @@ PyObject * THPStorage_(newWithFile)(PyObject *_unused, PyObject *args)
                   "_new_with_file: need to specify element size");
   uint64_t element_size = THPUtils_unpackUInt64(element_size_obj);
 
-  c10::StorageImpl *storage = THPStorage_(readFileRaw<int>)(fd, nullptr, element_size);
-  if (storage == nullptr)
+  auto storage = THPStorage_(readFileRaw<int>)(fd, {}, element_size);
+  if (!storage.defined())
     return nullptr;
-  PyObject *result = THPStorage_(New)(storage);
-  return result;
+  return THPStorage_(New)(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 
@@ -396,8 +390,10 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
     // but it is currently unnecessary to support this.
     THPUtils_assert(offset == Py_None,
                     "_set_from_file: offset is NYI for filelike objects");
-    c10::StorageImpl *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata, element_size);
-    if (storage == nullptr) {
+
+    auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
+    auto storage = THPStorage_(readFileRaw<PyObject*>)(file, std::move(self_storage), element_size);
+    if (!storage.defined()) {
       return nullptr;
     }
     Py_INCREF(self);
@@ -412,8 +408,9 @@ static PyObject *THPStorage_(setFromFile)(PyObject *_self, PyObject *args)
   }
   THPUtils_assert(fd != -1, "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  c10::StorageImpl *storage = THPStorage_(readFileRaw<int>)(fd, self->cdata, element_size);
-  if (storage == nullptr)
+  auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
+  auto storage = THPStorage_(readFileRaw<int>)(fd, self_storage, element_size);
+  if (!storage.defined())
     return nullptr;
   Py_INCREF(self);
 

@@ -103,7 +103,6 @@ TESTS = discover_tests(
         'test_kernel_launch_checks',
         'test_metal',
         'test_nnapi',
-        'test_python_dispatch',
         'test_functionalization',
         'test_segment_reductions',
         'test_static_runtime',
