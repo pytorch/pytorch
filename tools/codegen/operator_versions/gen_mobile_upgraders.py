@@ -59,7 +59,8 @@ ONE_UPGRADER_SRC = CodeTemplate("""
     }),""")
 
 
-ONE_UPGRADER_IN_VERSION_MAP = CodeTemplate("""Upgrader({${upgrader_min_version}, ${upgrader_max_version}, "${upgrader_name}", ${bytecode_func_index}})""")  # noqa: E501
+ONE_UPGRADER_IN_VERSION_MAP = CodeTemplate("""Upgrader({${upgrader_min_version}, ${upgrader_max_version}, "${upgrader_name}", ${bytecode_func_index}}),
+""")  # noqa: E501
 
 ONE_OPERATOR_IN_VERSION_MAP = CodeTemplate("""
     {std::string("${operator_name}"),
@@ -155,6 +156,8 @@ def construct_constants(constants_list_from_yaml: List[Any]) -> str:
             convert_constant = "true" if constant_from_yaml else "false"
         elif constant_from_yaml is None:
             convert_constant = ""
+        elif isinstance(constant_from_yaml, int):
+            convert_constant = str(constant_from_yaml)
         else:
             raise ValueError(
                 f"The type of {constant_from_yaml} is {type(constant_from_yaml)}. "
@@ -222,12 +225,13 @@ def construct_version_maps(upgrader_bytecode_function_to_index_map: Dict[str, An
     for op_name in sorted_version_map:
         upgraders_in_version_map_part = []
         # TODO: remove the skip after these two operators schemas are fixed
-        if op_name == "aten::full.names" or op_name == "aten::full.out":
+        if op_name == "aten::full.names" or op_name == "aten::full.out" or op_name == "aten::full":
             continue
         for upgrader_entry in sorted_version_map[op_name]:
             # Split a string by "_" and filter empty string in the list
             # For example: "div__Scalar_0_3" => ['div', 'Scalar', '0', '3']
             upgrader_info = list(filter(lambda token: token != "", upgrader_entry.upgrader_name.split('_')))
+            print("upgrader_info: ", upgrader_info)
             upgrader_min_version = upgrader_info[2]
             upgrader_max_version = upgrader_info[3]
             upgrader_name = upgrader_entry.upgrader_name

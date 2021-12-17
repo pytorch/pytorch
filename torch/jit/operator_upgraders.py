@@ -23,6 +23,10 @@ with torch._jit_internal._disable_emit_hooks():
         return self.divide(other, rounding_mode='trunc')
 
     @torch.jit.script
+    def div_Tensor_4_5(self: torch.Tensor, other: torch.Tensor) -> torch.Tensor:
+        return torch.add(self, other)
+
+    @torch.jit.script
     def div_Scalar_0_3(self: torch.Tensor, other: Union[int, float]) -> torch.Tensor:
         if (self.is_floating_point() or isinstance(other, float)):
             return self.true_divide(other)

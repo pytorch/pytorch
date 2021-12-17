@@ -14,9 +14,14 @@ struct UpgraderEntry {
 
 static std::unordered_map<std::string, std::vector<UpgraderEntry>> operatorVersionMap(
     {{"aten::div.Tensor",
-      {{4,
-        "div_Tensor_0_3",
-        "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"}}},
+      {
+          {4,
+           "div_Tensor_0_3",
+           "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"},
+          {6,
+           "div_Tensor_4_5",
+           "aten::div.Tensor(Tensor self, Tensor other) -> Tensor"},
+      }},
      {"aten::div.Scalar",
       {{4,
         "div_Scalar_0_3",
