@@ -6655,6 +6655,50 @@ class TestNN(NNTestCase):
         self.assertEqual(g1, g2, atol=1e-4, rtol=0)
         self.assertTrue((g1 == g1).all().item())  # check that we don't have NaN
 
+    def test_CTCLoss_no_batch_dim(self):
+        input_length = 40
+        vocab_size = 3
+        batch_size = 1
+        target_length = 12
+
+        log_probs = torch.randn(input_length, batch_size, vocab_size).log_softmax(2).requires_grad_()
+        targets = torch.randint(low=1, high=vocab_size - 1, size=(batch_size, target_length), dtype=torch.long)
+        input_lengths = batch_size * [input_length]
+        target_lengths = batch_size * [target_length]
+
+        log_probs_no_bd = log_probs.squeeze(1)
+        targets_no_bd = targets.squeeze(0)
+        input_lengths_no_bd = torch.tensor(input_length)
+        target_lengths_no_bd = torch.tensor(target_length)
+
+        for reduction in ['none', 'sum', 'mean']:
+            res_cpu = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths,
+                                                   reduction=reduction, zero_infinity=True)
+            res_cpu_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd, targets_no_bd, input_lengths_no_bd, target_lengths_no_bd,
+                                                         reduction=reduction, zero_infinity=True)
+
+            grad_out = torch.randn_like(res_cpu)
+            grad_cpu, = torch.autograd.grad(res_cpu, log_probs, grad_out)
+            grad_out_no_bd = grad_out.detach().clone().double().requires_grad_()
+            grad_cpu_no_bd, = torch.autograd.grad(res_cpu_no_bd, log_probs_no_bd, grad_out_no_bd)
+
+            with torch.backends.cudnn.flags(enabled=False):
+                res_gpu = torch.nn.functional.ctc_loss(log_probs.cuda(), targets.cuda(), input_lengths, target_lengths,
+                                                       reduction=reduction, zero_infinity=True)
+                res_gpu_no_bd = torch.nn.functional.ctc_loss(log_probs_no_bd.cuda(), targets_no_bd.cuda(), input_lengths_no_bd, target_lengths_no_bd,
+                                                             reduction=reduction, zero_infinity=True)
+
+                grad_gpu, = torch.autograd.grad(res_gpu.cuda(), log_probs.cuda(), grad_out.cuda())
+                grad_gpu_no_bd, = torch.autograd.grad(res_gpu_no_bd.cuda(), log_probs_no_bd.cuda(), grad_out.cuda())
+
+            self.assertEqual(res_cpu, res_cpu_no_bd, atol=1e-4, rtol=0)
+            self.assertEqual(res_cpu, res_gpu, atol=1e-4, rtol=0)
+            self.assertEqual(res_cpu, res_gpu_no_bd, atol=1e-4, rtol=0)
+
+            self.assertEqual(grad_cpu.squeeze(1), grad_cpu_no_bd, atol=1e-4, rtol=0)
+            self.assertEqual(grad_cpu, grad_gpu, atol=1e-4, rtol=0)
+            self.assertEqual(grad_cpu.squeeze(1), grad_cpu_no_bd, atol=1e-4, rtol=0)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
