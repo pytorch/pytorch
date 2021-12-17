@@ -1489,8 +1489,17 @@ struct ProfileOp : public Node {
     callback_ = std::move(callback);
   }
 
+  bool hasRun() const {
+    return has_run_;
+  }
+
+  void setHasRun(bool has_run) {
+    has_run_ = has_run;
+  }
+
  private:
   std::function<void(std::vector<IValue>&)> callback_;
+  bool has_run_ = false;
 };
 
 struct TORCH_API ProfileIValueOp : public Node {
