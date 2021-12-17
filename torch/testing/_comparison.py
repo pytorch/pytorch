@@ -50,6 +50,14 @@ _DTYPE_PRECISIONS = {
     torch.complex64: (1.3e-6, 1e-5),
     torch.complex128: (1e-7, 1e-7),
 }
+# The default tolerances of torch.float32 are used for quantized dtypes, because quantized tensors are compared in
+# their dequantized and floating point representation. For more details see `TensorLikePair._compare_quantized_values`
+_DTYPE_PRECISIONS.update(
+    {
+        dtype: _DTYPE_PRECISIONS[torch.float32]
+        for dtype in (torch.quint8, torch.quint2x4, torch.quint4x2, torch.qint8, torch.qint32)
+    }
+)
 
 
 def default_tolerances(*inputs: Union[torch.Tensor, torch.dtype]) -> Tuple[float, float]:
@@ -609,7 +617,7 @@ class TensorLikePair(Pair):
                 raise error
 
             # TODO: See https://github.com/pytorch/pytorch/issues/68592
-            raise self._make_error_meta(ValueError, "Comparing meta tensors is currently not supported.")
+            raise self._make_error_meta(NotImplementedError, "Comparing meta tensors is currently not supported.")
 
     def _compare_attributes(
         self,
@@ -1089,7 +1097,8 @@ def assert_close(
     Raises:
         ValueError: If no :class:`torch.Tensor` can be constructed from an input.
         ValueError: If only ``rtol`` or ``atol`` is specified.
-        ValueError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the future.
+        NotImplementedError: If a tensor is a meta tensor. This is a temporary restriction and will be relaxed in the
+            future.
         AssertionError: If corresponding inputs are not Python scalars and are not directly related.
         AssertionError: If ``allow_subclasses`` is ``False``, but corresponding inputs are not Python scalars and have
             different types.
@@ -1124,6 +1133,16 @@ def assert_close(
     | :attr:`~torch.complex64`  | ``1.3e-6`` | ``1e-5`` |
     +---------------------------+------------+----------+
     | :attr:`~torch.complex128` | ``1e-7``   | ``1e-7`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint8`     | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint2x4`   | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.quint4x2`   | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.qint8`      | ``1.3e-6`` | ``1e-5`` |
+    +---------------------------+------------+----------+
+    | :attr:`~torch.qint32`     | ``1.3e-6`` | ``1e-5`` |
     +---------------------------+------------+----------+
     | other                     | ``0.0``    | ``0.0``  |
     +---------------------------+------------+----------+
