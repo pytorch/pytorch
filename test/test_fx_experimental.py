@@ -1545,6 +1545,7 @@ class TestNormalizeOperators(JitTestCase):
             "atleast_3d",
             "svd_lowrank",  # implemented with a lambda
             "pca_lowrank",  # implemented with a lambda
+            "column_stack",
         }
 
         # Unsupported input types
