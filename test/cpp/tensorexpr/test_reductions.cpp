@@ -1550,11 +1550,12 @@ TEST(Reductions, ReductionCacheConsumerAccess) {
   StmtPtr result = IRSimplifier::simplify(l.root_stmt());
   SimpleIREvaluator cg(result, {a, b, e});
 
+  std::cout << *cg.stmt() << std::endl;
   std::ostringstream oss;
   oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: Alias(sum_local,scale);
 #CHECK: sum[l1] = (sum[l1]) + (scale[
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
@@ -1601,7 +1602,7 @@ TEST(Reductions, ReductionSplitCacheConsumerAccess) {
   oss << *cg.stmt();
   const std::string& expected_ir =
       R"IR(
-#CHECK: Allocate(sum_local); // dtype=float, dims=[4]
+#CHECK: Alias(sum_local,scale);
 #CHECK: sum[l1_inner + 4 * l1_outer] = (sum[l1_inner + 4 * l1_outer]) + (scale[((m1_1 + 12 * n1_1) + 1536 * l1_outer) + 384 * l1_inner]);
 #CHECK: for (int i = 0; i < 4
 #CHECK:   sum_local[i] = sum[i + 4 * l_outer];
