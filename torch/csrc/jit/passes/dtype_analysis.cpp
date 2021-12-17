@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/function_schema.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -11,13 +10,6 @@
 #include <torch/csrc/jit/passes/dtype_analysis.h>
 #include <torch/csrc/jit/passes/utils/op_registry.h>
 #include <torch/library.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/empty.h>
-#endif
-
 #include <algorithm>
 #include <memory>
 #include <stdexcept>

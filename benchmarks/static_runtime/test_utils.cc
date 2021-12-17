@@ -1,4 +1,3 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include "test_utils.h"
@@ -10,13 +9,6 @@
 #include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#else
-#include <ATen/ops/allclose.h>
-#endif
-
 #include <memory>
 #include <unordered_map>
 

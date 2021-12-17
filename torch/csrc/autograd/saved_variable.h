@@ -4,7 +4,7 @@
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/saved_variable_hooks.h>
 
-#include <ATen/core/Tensor.h>
+#include <ATen/ATen.h>
 
 #include <cstdint>
 #include <memory>
