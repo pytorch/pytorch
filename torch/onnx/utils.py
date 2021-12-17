@@ -13,7 +13,6 @@ import re
 import collections
 import contextlib
 import copy
-import itertools
 import numbers
 import warnings
 from torch._six import string_classes
@@ -678,8 +677,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
             export_type=ExportTypes.PROTOBUF_FILE, opset_version=None,
             do_constant_folding=True, dynamic_axes=None, keep_initializers_as_inputs=None,
             fixed_batch_size=False, custom_opsets=None, add_node_names=True,
-            onnx_shape_inference=True, export_modules_as_functions=False,
-            use_readable_names=False):
+            onnx_shape_inference=True, export_modules_as_functions=False):
 
     export_modules_as_functions = _setup_trace_module_map(model, export_modules_as_functions)
 
@@ -736,8 +734,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
                                 val_do_constant_folding,
                                 fixed_batch_size=fixed_batch_size,
                                 training=training,
-                                dynamic_axes=dynamic_axes,
-                                use_readable_names=use_readable_names)
+                                dynamic_axes=dynamic_axes)
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
@@ -810,7 +807,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
 def _replace_unique_output_ids(graph, params):
     for n in graph.nodes():
-        for v in itertools.chain(n.inputs()):
+        for v in n.inputs():
             if v.debugName() != str(v.unique()):
                 continue
             old_name = v.debugName()
