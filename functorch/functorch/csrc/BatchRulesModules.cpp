@@ -95,10 +95,10 @@ Tensor _convolution_decomp(
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
   // Ignore everything. If the user called this in the normal way,
   // then they should be fine.
-  (void*) benchmark;
-  (void*) deterministic;
-  (void*) cudnn_enabled;
-  (void*) allow_tf32;
+  (void) benchmark;
+  (void) deterministic;
+  (void) cudnn_enabled;
+  (void) allow_tf32;
   return at::convolution(
       input_r, weight_r, bias_r_opt, stride_, padding_, dilation_, transposed_, output_padding_, groups_);
 }
@@ -149,73 +149,73 @@ bool first_dim_has_size_1(const Tensor& value, int64_t bdim) {
   return value.size(0) == 1;
 }
 
-std::tuple<Tensor,int64_t,Tensor,int64_t> cudnn_conv_per_sample_grad_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
-    const Tensor& grad_output, optional<int64_t> grad_output_bdim,
-    const Tensor& weight, optional<int64_t> weight_bdim,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark,
-    bool deterministic, bool allow_tf32, std::array<bool, 2> output_mask) {
-  TORCH_INTERNAL_ASSERT(self_bdim && grad_output_bdim && !weight_bdim);
-  // TODO: No clue if this works if the first non-batch dim isn't size 1
-  TORCH_INTERNAL_ASSERT(first_dim_has_size_1(self, *self_bdim));
-  TORCH_INTERNAL_ASSERT(self.dim() == 5);
-
-  auto bdim_size = self.size(*self_bdim);
-  auto self_ = reshape_dim_into(*self_bdim, 0, self);
-  auto in_channels = self_.size(1);
-  auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
-
-  auto grad_self = at::cudnn_convolution_backward_input(
-      self_.sizes(), grad_output_, weight,
-      padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
-  grad_self = reshape_dim_outof(0, bdim_size, grad_self);
-
-  // Copied from https://github.com/pytorch/opacus/blob/master/opacus/grad_sample/conv.py
-  auto A = at::im2col(self_, {weight.size(2), weight.size(3)}, dilation, padding, stride);
-  auto B = grad_output_.reshape({bdim_size, -1, A.size(-1)});
-  auto grad_sample = at::einsum("noq,npq->nop", {B, A});
-  grad_sample = grad_sample.view({
-      bdim_size, groups, -1, groups, in_channels / groups,
-      weight.size(2) * weight.size(3) });
-  grad_sample = at::einsum("ngrg...->ngr...", {grad_sample});
-  grad_sample = grad_sample.reshape(
-      {bdim_size, weight.size(0), weight.size(1), weight.size(2), weight.size(3)});
-
-  return std::make_tuple(grad_self, 0, grad_sample, 0);
-}
-
-std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & self, const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, bool allow_tf32, std::array<bool, 2> output_mask) {
-  auto maybe_layer = maybeCurrentDynamicLayer();
-  TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
-  int64_t cur_level = maybe_layer->layerId();
-
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor grad_output_value;
-  optional<int64_t> grad_output_bdim;
-  std::tie(grad_output_value, grad_output_bdim) = unwrapTensorAtLevel(grad_output, cur_level);
-  Tensor weight_value;
-  optional<int64_t> weight_bdim;
-  std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
-
-  if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
-    c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
-    auto result = cudnn_conv_per_sample_grad_rule(
-        self_value, self_bdim,
-        grad_output_value, grad_output_bdim,
-        weight_value, weight_bdim,
-        padding, stride, dilation, groups,
-        benchmark, deterministic, allow_tf32, output_mask);
-    return std::make_tuple(
-        makeBatched(std::get<0>(result), std::get<1>(result), cur_level),
-        makeBatched(std::get<2>(result), std::get<3>(result), cur_level));
-  }
-
-  static auto op = c10::Dispatcher::singleton()
-    .findSchemaOrThrow("aten::cudnn_convolution_backward", "");
-  return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
-}
+// std::tuple<Tensor,int64_t,Tensor,int64_t> cudnn_conv_per_sample_grad_rule(
+//     const Tensor& self, optional<int64_t> self_bdim,
+//     const Tensor& grad_output, optional<int64_t> grad_output_bdim,
+//     const Tensor& weight, optional<int64_t> weight_bdim,
+//     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark,
+//     bool deterministic, bool allow_tf32, std::array<bool, 2> output_mask) {
+//   TORCH_INTERNAL_ASSERT(self_bdim && grad_output_bdim && !weight_bdim);
+//   // TODO: No clue if this works if the first non-batch dim isn't size 1
+//   TORCH_INTERNAL_ASSERT(first_dim_has_size_1(self, *self_bdim));
+//   TORCH_INTERNAL_ASSERT(self.dim() == 5);
+//
+//   auto bdim_size = self.size(*self_bdim);
+//   auto self_ = reshape_dim_into(*self_bdim, 0, self);
+//   auto in_channels = self_.size(1);
+//   auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
+//
+//   auto grad_self = at::cudnn_convolution_backward_input(
+//       self_.sizes(), grad_output_, weight,
+//       padding, stride, dilation, groups, benchmark, deterministic, allow_tf32);
+//   grad_self = reshape_dim_outof(0, bdim_size, grad_self);
+//
+//   // Copied from https://github.com/pytorch/opacus/blob/master/opacus/grad_sample/conv.py
+//   auto A = at::im2col(self_, {weight.size(2), weight.size(3)}, dilation, padding, stride);
+//   auto B = grad_output_.reshape({bdim_size, -1, A.size(-1)});
+//   auto grad_sample = at::einsum("noq,npq->nop", {B, A});
+//   grad_sample = grad_sample.view({
+//       bdim_size, groups, -1, groups, in_channels / groups,
+//       weight.size(2) * weight.size(3) });
+//   grad_sample = at::einsum("ngrg...->ngr...", {grad_sample});
+//   grad_sample = grad_sample.reshape(
+//       {bdim_size, weight.size(0), weight.size(1), weight.size(2), weight.size(3)});
+//
+//   return std::make_tuple(grad_self, 0, grad_sample, 0);
+// }
+//
+// std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & self, const Tensor & grad_output, const Tensor & weight, IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool benchmark, bool deterministic, bool allow_tf32, std::array<bool, 2> output_mask) {
+//   auto maybe_layer = maybeCurrentDynamicLayer();
+//   TORCH_INTERNAL_ASSERT(maybe_layer.has_value());
+//   int64_t cur_level = maybe_layer->layerId();
+//
+//   Tensor self_value;
+//   optional<int64_t> self_bdim;
+//   std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+//   Tensor grad_output_value;
+//   optional<int64_t> grad_output_bdim;
+//   std::tie(grad_output_value, grad_output_bdim) = unwrapTensorAtLevel(grad_output, cur_level);
+//   Tensor weight_value;
+//   optional<int64_t> weight_bdim;
+//   std::tie(weight_value, weight_bdim) = unwrapTensorAtLevel(weight, cur_level);
+//
+//   if (self_bdim.has_value() && self_value.dim() == 5 && first_dim_has_size_1(self_value, *self_bdim) && grad_output_bdim.has_value() && !weight_bdim.has_value()) {
+//     c10::impl::ExcludeDispatchKeyGuard guard(kBatchedKey);
+//     auto result = cudnn_conv_per_sample_grad_rule(
+//         self_value, self_bdim,
+//         grad_output_value, grad_output_bdim,
+//         weight_value, weight_bdim,
+//         padding, stride, dilation, groups,
+//         benchmark, deterministic, allow_tf32, output_mask);
+//     return std::make_tuple(
+//         makeBatched(std::get<0>(result), std::get<1>(result), cur_level),
+//         makeBatched(std::get<2>(result), std::get<3>(result), cur_level));
+//   }
+//
+//   static auto op = c10::Dispatcher::singleton()
+//     .findSchemaOrThrow("aten::cudnn_convolution_backward", "");
+//   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
+// }
 
 std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
     const Tensor& weight, optional<int64_t> weight_bdim,
@@ -563,9 +563,9 @@ struct CudnnGridSampleBackwardBatchRuleHelper {
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   VMAP_SUPPORT("convolution", convolution_batch_rule);
   m.impl("_convolution", _convolution_decomp);
-  m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
-  m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
-  m.impl("cudnn_convolution", cudnn_convolution_plumbing);
+  // m.impl("mkldnn_convolution", mkldnn_convolution_decomp);
+  // m.impl("cudnn_convolution_backward", cudnn_convolution_backward_plumbing);
+  // m.impl("cudnn_convolution", cudnn_convolution_plumbing);
 
   EXISTING_BDIM(im2col);
   EXISTING_BDIM(im2col_backward);
