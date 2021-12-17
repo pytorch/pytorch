@@ -14,4 +14,4 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
-#include <THC/THCGenerateByteType.h>
+#include <torch/csrc/THCGenerateByteType.h>
