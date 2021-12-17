@@ -464,7 +464,9 @@ void LazyGraphExecutor::SyncTensorsGraph(
   SyncTensorsConfig config;
   config.sync_ltc_data = sync_ltc_data;
 
-  auto async = SyncTensorsGraphInternal(tensors, devices, config);
+  // use_current_thread=false would be the same as the existing behavior; it could be changed to
+  // true but needs to be tested first
+  auto async = SyncTensorsGraphInternal(tensors, devices, config, /*use_current_thread=*/false);
   if (wait && async != nullptr) {
     async->mwait.Wait();
   }
@@ -497,9 +499,9 @@ void LazyGraphExecutor::WaitDeviceOps(c10::ArrayRef<BackendDevice> devices) {
 }
 
 std::vector<at::Tensor> LazyGraphExecutor::GetTensors(
-    std::vector<LazyTensor>* tensors) {
+    std::vector<LazyTensor>* tensors, bool use_current_thread) {
   VLOG(4) << "Trying to get the value of " << tensors->size() << " tensor(s)";
-  return GetTensorsFused(tensors);
+  return GetTensorsFused(tensors, use_current_thread);
 }
 
 size_t LazyGraphExecutor::IncTrimCounter() {
@@ -745,7 +747,8 @@ LazyGraphExecutor::PostOrderData LazyGraphExecutor::RunPostOrder(
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
     std::vector<LazyTensor>* tensors,
     SyncTensorCollection* coll,
-    PostOrderData* po_data) {
+    PostOrderData* po_data,
+    bool use_current_thread) {
   ComputationCache::TypePtr cached_computation =
       LookupCachedCompile(coll->hash);
   if (cached_computation == nullptr) {
@@ -758,7 +761,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
       tensors,
       coll,
       std::move(po_data->parameters_data),
-      std::move(cached_computation));
+      std::move(cached_computation),
+      use_current_thread);
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
@@ -889,7 +893,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     SyncTensorsGraphInternal(
         std::vector<LazyTensor>* tensors,
         c10::ArrayRef<std::string> devices,
-        const SyncTensorsConfig& config) {
+        const SyncTensorsConfig& config,
+        bool use_current_thread) {
   SyncTensorCollection coll = CollectSyncTensors(*tensors, config);
   if (coll.indices.empty()) {
     return nullptr;
@@ -900,7 +905,7 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
   PostOrderData po_data = RunPostOrder(*tensors, coll.indices);
   coll.hash = HashCombine(coll.hash, Hash(po_data.parameter_sequence));
   VLOG(4) << "Parameter sequence graph hash " << HashToString(coll.hash);
-  std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data);
+  std::shared_ptr<Async> async = TryRunCachedSync(tensors, &coll, &po_data, use_current_thread);
   if (async != nullptr) {
     return async;
   }
@@ -918,7 +923,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
       tensors,
       &coll,
       std::move(compile_result.parameters_data),
-      std::move(cached_computation));
+      std::move(cached_computation),
+      use_current_thread);
 }
 
 std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
@@ -926,7 +932,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         SyncTensorCollection* coll,
         std::vector<BackendDataPtr> parameters_data,
         std::vector<BackendDataPtr> tensors_data,
-        ComputationCache::TypePtr cached_computation) {
+        ComputationCache::TypePtr cached_computation,
+        bool use_current_thread) {
   std::shared_ptr<Async> async = std::make_shared<Async>(
       coll,
       std::move(parameters_data),
@@ -975,7 +982,15 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
     }
   };
 
-  ScheduleIoClosure(async->mwait.Completer(std::move(syncfn)));
+  auto closure = async->mwait.Completer(std::move(syncfn));
+
+  if (use_current_thread) {
+    closure();
+  } else {
+    ScheduleIoClosure(closure);
+  }
+  // Critical to return the real 'async' even when use_current_thread since it maintains
+  // state about the computation/tensors
   return async;
 }
 
@@ -984,20 +999,22 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::
         std::vector<LazyTensor>* tensors,
         SyncTensorCollection* coll,
         std::vector<BackendDataPtr> parameters_data,
-        ComputationCache::TypePtr cached_computation) {
+        ComputationCache::TypePtr cached_computation,
+        bool use_current_thread) {
   auto tensors_data = FetchTensorData(tensors, coll->config, coll->indices);
   return ScheduleSyncTensorsGraph(
       coll,
       std::move(parameters_data),
       std::move(tensors_data),
-      std::move(cached_computation));
+      std::move(cached_computation),
+      use_current_thread);
 }
 
 std::vector<at::Tensor> LazyGraphExecutor::GetTensorsFused(
-    std::vector<LazyTensor>* tensors) {
+    std::vector<LazyTensor>* tensors, bool use_current_thread) {
   SyncTensorsConfig config;
   config.force_ltc_data = false;
-  auto async = SyncTensorsGraphInternal(tensors, {}, config);
+  auto async = SyncTensorsGraphInternal(tensors, {}, config, use_current_thread);
   if (async != nullptr) {
     async->mwait.Wait();
   }

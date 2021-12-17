@@ -54,8 +54,10 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
   }
 
   // Call the actual boxed CPU fallback.
+  // we definitely want to use the current thread here- it adds latency to hand off to a
+  // background thread for fallback
   eager_fallback(op, stack,
-                 torch::lazy::getBackend()->EagerFallbackDeviceType());
+                 torch::lazy::getBackend()->EagerFallbackDeviceType(), /*use_current_thread=*/true);
 }
 
 TORCH_LIBRARY_IMPL(_, Lazy, m) {

@@ -7,6 +7,6 @@
 namespace torch_lazy_tensors {
 
 void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
-                    c10::DeviceType device_type);
+                    c10::DeviceType device_type, bool use_main_thread);
 
 }
