@@ -233,17 +233,29 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     The module is passed the input and target in batched form with a single item.
     The output is squeezed to compare with the no-batch input.
     """
-    single_batch_input_args = [input.unsqueeze(0) for input in args]
-    with freeze_rng_state():
-        return m(*single_batch_input_args).squeeze(0)
+    def get_and_pop(key, default):
+        v = kwargs.get(key, default)
+        if key in kwargs:
+            kwargs.pop(key)
+        return v
 
-def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
-    """Reference function for criterion supporting no batch dimensions."""
-    output = no_batch_dim_reference_fn(m, *args, **kwargs)
-    reduction = get_reduction(m)
-    if reduction == 'none':
-        return output.squeeze(0)
-    # reduction is 'sum' or 'mean' which results in a 0D tensor
+    batch_dim = 0 if get_and_pop('batch_first', True) else 1
+    kwargs_to_batchify = get_and_pop('kwargs_to_batchify', {})
+    is_criterion = get_and_pop('is_criterion', False)
+
+    for k, v in kwargs.items():
+        if k in kwargs_to_batchify and v is not None:
+            bdim = kwargs_to_batchify[k]
+            kwargs[k] = v.unsqueeze(bdim)
+
+    single_batch_input_args = [input.unsqueeze(batch_dim) for input in args]
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs).squeeze(batch_dim)
+
+    if is_criterion:
+        reduction = get_reduction(m)
+        if reduction == 'none':
+            return output.squeeze(0)
     return output
 
 
@@ -264,28 +276,12 @@ def no_batch_dim_reference_mha(m, p, *args, **kwargs):
         return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
-def no_batch_dim_reference_transformerencoderlayer(m, p, *args, **kwargs):
-    """Reference function for TransformerEncoderLayer supporting no batch dimensions.
-    The module is passed the input and target in batched form with a single item.
-    The output is squeezed to compare with the no-batch input.
-    """
-    dim = 0 if kwargs.get('batch_first', True) else 1
-    if 'batch_first' in kwargs:
-        kwargs.pop('batch_first')
-    if 'src_key_padding_mask' in kwargs and kwargs['src_key_padding_mask'] is not None:
-        kwargs['src_key_padding_mask'] = kwargs['src_key_padding_mask'].unsqueeze(0)
-    single_batch_input_args = [input.unsqueeze(dim) for input in args]
-    with freeze_rng_state():
-        output = m(*single_batch_input_args, **kwargs)
-        return output.squeeze(dim)
-
-
 def generate_regression_criterion_inputs(make_input):
     return [
         ModuleInput(
             constructor_input=FunctionInput(reduction=reduction),
             forward_input=FunctionInput(make_input(shape=(4, )), make_input(shape=4,)),
-            reference_fn=no_batch_dim_reference_criterion_fn,
+            reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True),
             desc='no_batch_dim_{}'.format(reduction)
         ) for reduction in ['none', 'mean', 'sum']]
 
@@ -403,7 +399,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 forward_input=FunctionInput(
                     make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
-                reference_fn=no_batch_dim_reference_transformerencoderlayer,
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=True, kwargs_to_batchify={'src_key_padding_mask': 0}),
                 desc='no_batch_dim_batch_first'
             ))
 
@@ -413,7 +410,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
                 forward_input=FunctionInput(
                     make_input(shape=(3, 4)), src_mask=src_mask, src_key_padding_mask=src_key_padding_mask
                 ),
-                reference_fn=partial(no_batch_dim_reference_transformerencoderlayer, batch_first=False),
+                reference_fn=partial(no_batch_dim_reference_fn,
+                                     batch_first=False, kwargs_to_batchify={'src_key_padding_mask': 0}),
                 desc='no_batch_dim'
             ))
 
