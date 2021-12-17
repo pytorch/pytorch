@@ -235,6 +235,21 @@ at::Tensor quantized_relu(const at::Tensor& qx) {
                       .typed<at::Tensor(at::Tensor)>();
   return op.call(qx);
 }
+
+void quantized_upsample_nearest2d_out(
+    const at::Tensor& input,
+    c10::optional<at::IntArrayRef> output_size,
+    c10::optional<at::ArrayRef<double>> scale_factors,
+    at::Tensor& output) {
+  const auto op = c10::Dispatcher::singleton()
+                      .findSchemaOrThrow("quantized::upsample_nearest2d", "out")
+                      .typed<at::Tensor&(
+                          const at::Tensor&,
+                          c10::optional<at::IntArrayRef>,
+                          c10::optional<at::ArrayRef<double>>,
+                          at::Tensor&)>();
+  op.call(input, output_size, scale_factors, output);
+}
 #endif // _WIN32
 
 #ifdef C10_MOBILE
@@ -629,11 +644,9 @@ void nnc_aten_upsample_nearest2d(
   const auto is_quantized = x_qdtype != -1;
   c10::optional<std::vector<std::pair<size_t, QIData>>> qdata;
   if (is_quantized) {
+    const auto qdtype = at::toQIntType(static_cast<c10::ScalarType>(x_qdtype));
     qdata = {
-        {1u,
-         {x_qscale,
-          x_qzero,
-          at::toQIntType(static_cast<c10::ScalarType>(x_qdtype))}}};
+        {0u, {x_qscale, x_qzero, qdtype}}, {1u, {x_qscale, x_qzero, qdtype}}};
   }
   auto tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes, qdata);
@@ -644,14 +657,19 @@ void nnc_aten_upsample_nearest2d(
   double scale_factor_h = ((double*)extra_args)[5];
   double scale_factor_w = ((double*)extra_args)[6];
 
-  auto r = at::upsample_nearest2d(
-      x,
-      (output_size_h != -1)
-          ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
-          : c10::nullopt,
-      (scale_factor_h != -1.f) ? c10::optional<at::ArrayRef<double>>(
-                                     {scale_factor_h, scale_factor_w})
-                               : c10::nullopt);
+  c10::optional<at::IntArrayRef> output_size = (output_size_h != -1)
+      ? c10::optional<at::IntArrayRef>({output_size_h, output_size_w})
+      : c10::nullopt;
+  c10::optional<at::ArrayRef<double>> scale_factors = (scale_factor_h != -1.f)
+      ? c10::optional<at::ArrayRef<double>>({scale_factor_h, scale_factor_w})
+      : c10::nullopt;
+  if (is_quantized) {
+    quantized_upsample_nearest2d_out(
+        tensors[1], output_size, scale_factors, tensors[0]);
+    return;
+  }
+  // TODO: Use out op variant for non-quantized
+  auto r = at::upsample_nearest2d(tensors[1], output_size, scale_factors);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());
 }
 
