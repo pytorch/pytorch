@@ -45,6 +45,22 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   const Tensor& values() const { return values_; }
   int nnz() { return values_.size(0); }
 
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const override {
+  TORCH_INTERNAL_ASSERT(false, "shallow_copy_and_detach not implemented for SparseCsrTensorImpl");
+}
+
+c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const override {
+  TORCH_INTERNAL_ASSERT(false, "shallow_copy_and_detach not implemented for SparseCsrTensorImpl");
+}
+
+void shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) override {
+  TORCH_INTERNAL_ASSERT(false, "shallow_copy_from not implemented for SparseCsrTensorImpl");
+}
+
  private:
   explicit SparseCsrTensorImpl(
       at::DispatchKeySet key_set,
