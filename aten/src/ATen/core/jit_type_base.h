@@ -1,12 +1,14 @@
 #pragma once
 
 #include <functional>
-#include <string>
 #include <memory>
+#include <string>
+
+#include <ATen/core/qualified_name.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 
 namespace c10 {
 
@@ -62,8 +64,7 @@ using ConstTypePtr = std::shared_ptr<const Type>;
 // Use this to customize how a Type is printed using `annotation_str()`. If
 // c10::nullopt is returned, `annotation_str()` falls through to its default
 // implementation.
-using TypePrinter =
-    std::function<c10::optional<std::string>(const Type&)>;
+using TypePrinter = std::function<c10::optional<std::string>(const Type&)>;
 
 struct TORCH_API Type : std::enable_shared_from_this<Type> {
  private:
@@ -84,16 +85,17 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
   // if this returns false and the why_not stream is non-null, it contains
   // additional details that describe why this is not a subtype of 'rhs'.
-  // This additional information should only contain details that are not obvious
-  // from the annotation_str() that describes the type. For instance it is clear that `int <: str` is false
-  // but not clear why `Foo <: InterfaceBar` might be false.
+  // This additional information should only contain details that are not
+  // obvious from the annotation_str() that describes the type. For instance it
+  // is clear that `int <: str` is false but not clear why `Foo <: InterfaceBar`
+  // might be false.
   virtual bool isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const;
   virtual bool is_module() const;
   bool isSubtypeOf(const Type& rhs) const {
     return isSubtypeOfExt(rhs, nullptr);
   }
-  // Compatibility shims to accommodate existing code that passes shared_ptrs around.
-  // Ideally, we would just delete this, but it should be harmless.
+  // Compatibility shims to accommodate existing code that passes shared_ptrs
+  // around. Ideally, we would just delete this, but it should be harmless.
   template <typename T>
   typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
   isSubtypeOf(const std::shared_ptr<T>& rhs) const {
@@ -237,4 +239,29 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
   }
 };
 
-}
+struct NamedType;
+using NamedTypePtr = std::shared_ptr<NamedType>;
+using ConstNamedTypePtr = std::shared_ptr<const NamedType>;
+
+struct TORCH_API NamedType : public Type {
+  NamedType(TypeKind tk, c10::optional<QualifiedName> name)
+      : Type(tk), name_(std::move(name)) {
+    TORCH_INTERNAL_ASSERT(
+        tk == TypeKind::TupleType || tk == TypeKind::FunctionType ||
+            tk == TypeKind::ClassType || tk == TypeKind::InterfaceType ||
+            tk == TypeKind::EnumType,
+        "If you add a new kind of NamedType, ",
+        "please update the cast<NamedType> specialization and this assert");
+  }
+
+  // Fully qualified name of type
+  // Looks like: "foo.bar.Baz".
+  const c10::optional<QualifiedName>& name() const {
+    return name_;
+  }
+
+ private:
+  c10::optional<QualifiedName> name_;
+};
+
+} // namespace c10
