@@ -81,6 +81,8 @@ SeenOpInfo = collections.namedtuple(
         # This is False if some packable args are results of other functions.
         # bool
         'op_packing_only_uses_module_attributes',
+        # QConfig for the op, can be None
+        'qconfig',
     ],
 )
 def seen_op_info_repr(self) -> str:
@@ -189,6 +191,9 @@ def get_func_output_obs_type(
     if is_module:
         return FuncOutputObsType.NONE
 
+    if seen_op_info.qconfig is None:
+        return FuncOutputObsType.NONE
+
     # check for ops which need packed weights but the weights are
     # coming from another function
     if not seen_op_info.op_packing_only_uses_module_attributes:
@@ -220,6 +225,8 @@ def converted_func_needs_scale_zp(seen_op_info: SeenOpInfo) -> bool:
     op_type = seen_op_info.type
     is_module = isinstance(op_type, type(torch.nn.Module))
     if is_module:
+        return False
+    if seen_op_info.qconfig is None:
         return False
     if op_type in add_and_mul_ops:
         # check if both arguments are tensors

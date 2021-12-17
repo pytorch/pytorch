@@ -8,10 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 import torch.nn.quantized as nnq
+toq = torch.ops.quantized
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
     skip_if_no_torchvision,
     QuantizationTestCase,
+    NodeSpec,
 )
 from torch.quantization import (
     ObserverBase,
@@ -1024,6 +1026,40 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         self.assertTrue(isinstance(mq[0], nnq.Conv2d))
         self.assertTrue(isinstance(mq[1], nn.Hardswish))
         self.assertTrue(isinstance(mq[2], nnq.Conv2d))
+
+    def test_qconfig_dict_object_type_function(self):
+        """
+        Verifies that the 'object_type' option of qconfig_dict works
+        on function types.
+        """
+        class M(nn.Module):
+            def forward(self, x):
+                x = x + x
+                x = x * x
+                return x
+
+        m = M()
+        # TODO(future PR): also implement global qconfig being None
+        # and individual functions having qconfigs
+        qconfig_dict = {
+            '': torch.quantization.default_qconfig,
+            'object_type': [
+                (torch.add, None),
+            ],
+        }
+        example_args = (torch.randn(1, 1, 1, 1),)
+        mp = _quantize_dbr.prepare(m, qconfig_dict, example_args)
+        mp(*example_args)
+        mq = _quantize_dbr.convert(mp)
+        mq(*example_args)
+        rewritten = mq.rewrite_for_scripting()
+        expected_occurrence = {
+            NodeSpec.call_function(torch.add): 1,
+            NodeSpec.call_function(toq.add): 0,
+            NodeSpec.call_function(toq.mul): 1,
+        }
+        self.checkGraphModuleNodes(
+            rewritten, expected_node_occurrence=expected_occurrence)
 
     def test_qconfig_dict_module_name(self):
         """
