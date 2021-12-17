@@ -1,22 +1,17 @@
 # Owner(s): ["oncall: jit"]
 
 from itertools import product as product
-from typing import NamedTuple, Optional
 import io
 import os
-import pathlib
 import random
 import sys
 
-from torch import Tensor
-from torch.testing._internal.common_utils import TemporaryFileName
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import (JitTestCase,
-                                               clear_class_registry)
+from torch.testing._internal.jit_utils import JitTestCase
 from torch.jit.mobile import _load_for_lite_interpreter
 
 if __name__ == "__main__":
@@ -134,16 +129,14 @@ class TestSaveLoad(JitTestCase):
 
         # Loads historic module
         try:
-            # v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt")
             v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.ptl")
-            v3_mobile_module = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl")
+            v3_mobile_module = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
         self._verify_count("aten::div", v3_module, 6)  # true_divide and divide alias to div
         self._verify_count('prim::Constant[value="trunc"]', v3_module, 1)  # rounding_mode argument
-        # self._verify_count('prim::Constant[value="trunc"]', v3_mobile_module, 1)  # rounding_mode argument
-        # self._verify_count('aten::div', v3_mobile_module, 6)  # rounding_mode argument
 
         current_module = self._save_load_module(MyModule)
         current_mobile_module = self._save_load_mobile_module(MyModule)
@@ -161,8 +154,6 @@ class TestSaveLoad(JitTestCase):
                 if isinstance(m_results, Exception):
                     self.assertTrue(isinstance(fn_result, Exception))
                 else:
-                    # print("m_results: ", type(m_results))
-                    # print("fn_result: ", type(fn_result))
                     if(isinstance(fn_result, tuple)):
                         if(len(fn_result) != len(m_results)):
                             for result in fn_result:
@@ -196,7 +187,8 @@ class TestSaveLoad(JitTestCase):
 
         try:
             v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_inplace_v3.pt")
-            v3_mobile_module = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_inplace_v2.ptl")
+            v3_mobile_module = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_inplace_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
@@ -218,22 +210,16 @@ class TestSaveLoad(JitTestCase):
                 if isinstance(m_result, Exception):
                     self.assertTrue(fn_result, Exception)
                 else:
-                    # print("m_results: ", type(m_result))
-                    # print("fn_result: ", type(fn_result))
-                    # print("fn_result: ", fn_result)
-                    # print("m_result: ", m_result)
                     self.assertEqual(m_result, fn_result)
                     self.assertEqual(m_result, a)
 
             _helper(v3_module, historic_div_)
-            # _helper(v3_mobile_module, historic_div_)
-            _helper(v3_mobile_module, current_module)
-            _helper(v3_mobile_module, current_mobile_module)
-            # _helper(v3_mobile_module, historic_div_)
+            _helper(v3_mobile_module, historic_div_)
 
             # Recreates a since it was modified in place
             a = torch.tensor((val_a,))
             _helper(current_module, torch.Tensor.div_)
+            _helper(current_mobile_module, torch.Tensor.div_)
 
     def test_versioned_div_tensor_out(self):
         def historic_div_out(self, other, out):
@@ -250,7 +236,8 @@ class TestSaveLoad(JitTestCase):
 
         try:
             v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_out_v3.pt")
-            v3_mobile_module = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_out_v3.pt")
+            v3_mobile_module = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_out_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
@@ -310,9 +297,11 @@ class TestSaveLoad(JitTestCase):
 
         try:
             v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v3.pt")
-            v3_mobile_module_float = _load_for_lite_interpreter(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v2.ptl")
+            v3_mobile_module_float = _load_for_lite_interpreter(
+                pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v2.ptl")
             v3_module_int = torch.jit.load(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v3.pt")
-            v3_mobile_module_int = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v2.ptl")
+            v3_mobile_module_int = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
@@ -377,8 +366,10 @@ class TestSaveLoad(JitTestCase):
         try:
             v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_float_v3.pt")
             v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_reciprocal_int_v3.pt")
-            v3_mobile_module_float = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl")
-            v3_mobile_module_int = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl")
+            v3_mobile_module_float = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl")
+            v3_mobile_module_int = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
@@ -458,8 +449,10 @@ class TestSaveLoad(JitTestCase):
             v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_float_v3.pt")
             v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_int_v3.pt")
 
-            v3_module_mobile_float = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v3.pt")
-            v3_module_mobile_int = _load_for_lite_interpreter(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v3.pt")
+            v3_module_mobile_float = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v3.pt")
+            v3_module_mobile_int = _load_for_lite_interpreter(
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v3.pt")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
