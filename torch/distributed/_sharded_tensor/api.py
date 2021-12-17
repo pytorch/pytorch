@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    Callable,
     Dict,
     List,
     Optional,
@@ -26,14 +27,6 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import (
-    kaiming_uniform_,
-    normal_,
-    sharded_embedding,
-    sharded_embedding_bag,
-    sharded_linear,
-    uniform_,
-)
 from .shard import Shard
 from .utils import (
     get_current_process_group,
@@ -48,6 +41,19 @@ from .utils import (
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
+
+# Custom sharded ops
+_SHARDED_OPS: Dict[str, Callable] = {}
+def _register_sharded_op(op, func):
+    from inspect import signature
+    if len(signature(func).parameters) != 4:
+        raise TypeError(
+            f'Custom sharded op function expects signature: '
+            f'(types, args, kwargs, process_group), but received '
+            f'signature: {signature(func)}')
+
+    global _SHARDED_OPS
+    _SHARDED_OPS[op] = func
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
@@ -114,6 +120,15 @@ class ShardedTensor(object):
             :class:`torch.distributed.rpc.RRef`s pointing to remote shards.
             Need to initialize the RPC Framework if specified as ``True``.
             Default: ``False``.
+
+    .. note:: ShardedTensor uses collectives to do various operations, i.e. it
+        uses all_gather to do cross rank validations. For NCCL-based processed
+        groups, internal tensor representations of objects must be moved to the
+        GPU device before communication takes place. In this case, the device
+        used is given by ``torch.cuda.current_device()`` and it is the user's
+        responsiblity to ensure that this is set so that each rank has an
+        individual GPU, via ``torch.cuda.set_device()``
+
     """
 
     def __new__(cls, *args, **kwargs):
@@ -271,13 +286,11 @@ class ShardedTensor(object):
         # will revise this part with CPU support and use dist.gather()
         # once NCCL support for gather() is ready
         # https://github.com/pytorch/pytorch/issues/66187
-        device = torch.device(f"cuda:{rank % world_size}")
-        with torch.cuda.device(device):
-            dist.all_gather_object(
-                obj=local_shards,
-                object_list=gathered_shards,
-                group=self._process_group,
-            )
+        dist.all_gather_object(
+            obj=local_shards,
+            object_list=gathered_shards,
+            group=self._process_group,
+        )
 
         if rank == dst:
             dims = len(full_size)
@@ -330,22 +343,11 @@ class ShardedTensor(object):
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
-            if isinstance(process_group, dist.ProcessGroupNCCL):
-                # with GPU/NCCL, we need to set a device for all_gather_object
-                # to use as we need to know which device we should put the
-                # serialized tensor on before the NCCL collective.
-                with torch.cuda.device(current_rank):
-                    dist.all_gather_object(
-                        gathered_metadatas,
-                        local_sharded_tensor_metadata,
-                        group=process_group
-                    )
-            else:
-                dist.all_gather_object(
-                    gathered_metadatas,
-                    local_sharded_tensor_metadata,
-                    group=process_group
-                )
+            dist.all_gather_object(
+                gathered_metadatas,
+                local_sharded_tensor_metadata,
+                group=process_group
+            )
         else:
             gathered_metadatas = [local_sharded_tensor_metadata]
 
@@ -545,18 +547,8 @@ class ShardedTensor(object):
         return self._sharding_spec
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        if func == torch.nn.functional.linear:
-            return sharded_linear(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding:
-            return sharded_embedding(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding_bag:
-            return sharded_embedding_bag(types, args, kwargs, self._process_group)
-        elif func == torch.nn.init.normal_:
-            return normal_(types, args, kwargs)
-        elif func == torch.nn.init.uniform_:
-            return uniform_(types, args, kwargs)
-        elif func == torch.nn.init.kaiming_uniform_:
-            return kaiming_uniform_(types, args, kwargs)
+        if func in _SHARDED_OPS:
+            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
