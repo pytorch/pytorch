@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/cuda/im2col.cuh>
 #include <ATen/native/cuda/vol2col.cuh>
 #include <ATen/native/DilatedConvolutionUtils.h>
