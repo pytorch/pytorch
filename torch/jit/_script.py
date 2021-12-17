@@ -1270,7 +1270,7 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return create_script_dict(obj)
     if isinstance(obj, list):
         return create_script_list(obj)
-
+    isoverloadpacket = isinstance(obj, torch._ops.OpOverloadPacket)
     if inspect.isclass(obj):
         qualified_name = _qualified_name(obj)
         # If this type is a `nn.Module` subclass, they probably meant to pass
@@ -1301,7 +1301,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
             _rcb = _jit_internal.createResolutionCallbackFromFrame(_frames_up + 1)
         _compile_and_register_class(obj, _rcb, qualified_name)
         return obj
-    elif inspect.isfunction(obj) or inspect.ismethod(obj):
+    elif inspect.isfunction(obj) or inspect.ismethod(obj) or isoverloadpacket:
+        if isoverloadpacket:
+            obj = obj.op
         qualified_name = _qualified_name(obj)
         # this is a decorated fn, and we need to the underlying fn and its rcb
         if hasattr(obj, "__script_if_tracing_wrapper"):

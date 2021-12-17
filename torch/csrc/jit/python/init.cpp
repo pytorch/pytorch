@@ -1261,7 +1261,7 @@ void initJITBindings(PyObject* module) {
           })
       .def("has_storage", &DeserializationStorageContext::hasStorage);
 
-  m.def("get_schema", [](const std::string& op_name, const std::string& overload_name) {
+  m.def("_get_schema", [](const std::string& op_name, const std::string& overload_name) {
     auto symbol = Symbol::fromQualString(op_name);
     auto operations = getAllOperatorsFor(symbol);
     for (const auto& op: operations) {
@@ -1273,7 +1273,7 @@ void initJITBindings(PyObject* module) {
   });
 
   m.def(
-      "get_operation_overload",
+      "_get_operation_overload",
       [](const std::string& op_name, const std::string& overload_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);

@@ -71,8 +71,8 @@ class OpOverloadPacket():
             return 'torch.ops'
         try:
             use_key = "" if key == 'default' else key
-            op_ = torch._C.get_operation_overload(self.qualified_op_name, use_key)
-            schema = torch.get_schema(self.qualified_op_name, use_key)
+            op_ = torch._C._get_operation_overload(self.qualified_op_name, use_key)
+            schema = torch._get_schema(self.qualified_op_name, use_key)
             overload = OpOverload(op_, schema)
             # cache the overload object
             setattr(self, key, overload)
