@@ -1,4 +1,5 @@
-#include <torch/csrc/autograd/profiler.h>
+#include <torch/csrc/autograd/profiler_legacy.h>
+
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/jit/frontend/code_template.h>
 
@@ -23,34 +24,6 @@
 #include <iostream>
 
 namespace torch { namespace autograd { namespace profiler {
-
-std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs) {
-  std::vector<FileLineFunc> entries;
-  entries.reserve(cs.size());
-  for (const auto& entry : cs) {
-    auto& range = entry.range;
-    if (range.source()) {
-      auto& src = range.source();
-      if (src && src->filename()) {
-        auto line = src->starting_line_no() +
-            src->lineno_for_offset(range.start());
-        entries.emplace_back(FileLineFunc{*(src->filename()), line, entry.filename});
-      }
-    }
-  }
-  return entries;
-}
-
-std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs) {
-  std::vector<std::string> cs_str;
-  cs_str.reserve(cs.size());
-  for (const auto& entry : cs) {
-    std::stringstream loc;
-    loc << entry.filename << "(" << entry.line << "): " << entry.funcname;
-    cs_str.push_back(loc.str());
-  }
-  return cs_str;
-}
 
 // We decompose the profiler logic into the following components:
 //
@@ -216,7 +189,7 @@ void ProfilerThreadLocalState::pushRange(
     return;
   }
   if (config_.state == ProfilerState::NVTX) {
-    cuda_stubs()->nvtxRangePushA(getNvtxStr(
+    cuda_stubs()->nvtxRangePushA(torch::profiler::impl::getNvtxStr(
         fn.name(), fn.seqNr(), shapes).c_str());
   } else {
     LegacyEvent evt(
@@ -232,8 +205,8 @@ void ProfilerThreadLocalState::pushRange(
     evt.setFwdThreadId(fn.forwardThreadId());
     evt.setScope((uint8_t)fn.scope());
     if (config_.with_flops) {
-      evt.setExtraArgs(saveExtraArgs(fn));
-      evt.setFlops(computeFlops(std::string(fn.name()), evt.extraArgs()));
+      evt.setExtraArgs(torch::profiler::impl::saveExtraArgs(fn));
+      evt.setFlops(torch::profiler::impl::computeFlops(std::string(fn.name()), evt.extraArgs()));
     }
 
 // TODO: will unify the two macros BUILD_LITE_INTERPRETER and C10_MOBILE soon.
@@ -241,9 +214,9 @@ void ProfilerThreadLocalState::pushRange(
     // backward nodes source range corresponds to the forward node
     // TODO: consider using C++ stack trace
     if (config_.with_stack && fn.scope() != at::RecordScope::BACKWARD_FUNCTION) {
-      auto cs = prepareCallstack(jit::currentCallstack());
+      auto cs = torch::profiler::impl::prepareCallstack(jit::currentCallstack());
       if (cs.empty()) {
-        cs = prepareCallstack(jit::tracer::pythonCallstack());
+        cs = torch::profiler::impl::prepareCallstack(jit::tracer::pythonCallstack());
       }
       evt.setStack(callstackStr(cs));
     }
@@ -296,53 +269,6 @@ bool ProfilerThreadLocalState::memoryProfilingEnabled() const {
   return config_.profile_memory;
 }
 
-std::string getNvtxStr(
-    const char* name,
-    int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) {
-  if (sequence_nr >= -1 || shapes.size() > 0) {
-    std::stringstream s;
-#if defined(USE_ROCM)
-    s << name;
-#endif
-    if (sequence_nr >= 0) {
-#if defined(USE_ROCM)
-      s << ", seq = " << sequence_nr;
-#else
-      s << name << ", seq = " << sequence_nr;
-#endif
-    } else if (sequence_nr == -1) {
-#if !defined(USE_ROCM)
-      s << name;
-#endif
-    }
-    if (shapes.size() > 0) {
-      s << ", sizes = [";
-      for (const auto idx : c10::irange(shapes.size())) {
-        if (shapes[idx].size() > 0) {
-          s << "[";
-          for (size_t dim = 0; dim < shapes[idx].size(); ++dim) {
-            s << shapes[idx][dim];
-            if (dim < shapes[idx].size() - 1) {
-              s << ", ";
-            }
-          }
-          s << "]";
-        } else {
-          s << "[]";
-        }
-        if (idx < shapes.size() - 1) {
-          s << ", ";
-        }
-      }
-      s << "]";
-    }
-    return s.str();
-  } else {
-    return name;
-  }
-}
-
 RangeEventList& ProfilerThreadLocalState::getEventList(int64_t thread_id) {
   if (thread_id < 0) {
     thread_id = at::RecordFunction::currentThreadId();
@@ -358,24 +284,6 @@ RangeEventList& ProfilerThreadLocalState::getEventList(int64_t thread_id) {
     list_ptr = event_list.get();
   }
   return *list_ptr;
-}
-
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
-  std::vector<std::vector<int64_t>> sizes;
-  sizes.reserve(fn.inputs().size());
-  for (const c10::IValue& input : fn.inputs()) {
-    if (!input.isTensor()) {
-      sizes.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
-    } else {
-      sizes.emplace_back();
-    }
-  }
-  return sizes;
 }
 
 namespace {
@@ -442,7 +350,7 @@ void pushProfilingCallbacksLegacy() {
         }
 
         if (state_ptr->config().report_input_shapes) {
-          auto sizes = inputSizes(fn);
+          auto sizes = torch::profiler::impl::inputSizes(fn);
           state_ptr->pushRange(fn, record_cuda, std::move(sizes));
         } else {
           state_ptr->pushRange(fn, record_cuda);
