@@ -166,8 +166,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
     def test_function_import_fx_fusion_patterns(self):
         function_list = [
             'FuseHandler',
-            'ConvOrLinearBNReLUFusion',
-            'ModuleReLUFusion'
+            'DefaultFuseHandler'
         ]
         self._test_function_import('fx.fusion_patterns', function_list)
 
