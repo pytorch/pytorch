@@ -168,7 +168,6 @@ Tensor layer_norm(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-
   return std::get<0>(at::native_layer_norm(input, normalized_shape, weight, bias, eps));
 }
 

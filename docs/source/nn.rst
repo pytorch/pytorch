@@ -453,3 +453,14 @@ Lazy Modules Initialization
     :template: classtemplate.rst
 
     nn.modules.lazy.LazyModuleMixin
+
+Stateless API
+-------------
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.utils._stateless.per_sample_call

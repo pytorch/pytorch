@@ -3,7 +3,6 @@ import contextlib
 import torch
 from torch.expanded_weights.expanded_weights_impl import ExpandedWeight
 
-
 @contextlib.contextmanager
 def reparametrize_module(module, parameters_and_buffers):
     # Parametrization does not support to change submodules directly
@@ -48,10 +47,12 @@ def functional_call(module, parameters_and_buffers, args, kwargs=None):
 def per_sample_call(module, batch_size, args, kwargs=None):
     r"""
     per_sample_call(module, batch_size, args, kwargs=None) -> Tensor
+
     Invoked just like a forward pass, ``per_sample_call`` will produce the same
     forward result. Then, when backward is invoked, the parameters of ``module``
     will have a ``grad_sample`` field populated with the per sample gradients
     instead of the batched gradients
+
     Args:
         module: The module to get per sample gradients with respect to. All trainable
           parameters will compute per sample gradients, located in a ``grad_sample``
@@ -60,7 +61,9 @@ def per_sample_call(module, batch_size, args, kwargs=None):
         args: Tuple of positional args passed to ``module`` to perform the forward pass
         kwargs: Dict of named args passed to ``module`` to perform the forward pass.
           Default: None
+
     Examples::
+
         >>> model = nn.Linear(4, 3)
         >>> batched_input = torch.randn(5, 4)  # batch size of 5
         >>> res = per_sample_call(model, batched_input.shape[0], batched_input).sum()

@@ -2289,6 +2289,8 @@
 
 - func: group_norm(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05, bool cudnn_enabled=True) -> Tensor
 
+- func: _group_norm_all_outputs(Tensor input, int num_groups, Tensor? weight=None, Tensor? bias=None, float eps=1e-05) -> (Tensor, Tensor, Tensor)
+
 - func: native_group_norm(Tensor input, Tensor? weight, Tensor? bias, int N, int C, int HxW, int group, float eps) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU, CUDA: native_group_norm
@@ -2393,6 +2395,8 @@
 
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
+
+- func: _instance_norm_all_outputs(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
 
 - func: inverse(Tensor self) -> Tensor
   variants: function, method
