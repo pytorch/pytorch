@@ -6,6 +6,7 @@ import torch
 from torch.distributed._sharding_spec import (
     ChunkShardingSpec,
     ShardingSpec,
+    ReshardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
@@ -16,6 +17,8 @@ from typing import List
 from .api import (
     _register_sharded_op,
     CreateOp,
+    ModuleResharder,
+    PartialTensor,
     Shard,
     ShardMetadata,
     ShardedTensor,
@@ -539,3 +542,11 @@ def sharded_op_impl(func):
 
 # Import all builtin sharded ops
 from .ops import *  # noqa: F403
+
+def reshard_output(
+        module: torch.nn.Module,
+        resharding_spec: ReshardingSpec) -> ModuleResharder:
+    """
+    Replaces a module with a new module that will reshard its output.
+    """
+    return ModuleResharder(module, resharding_spec)

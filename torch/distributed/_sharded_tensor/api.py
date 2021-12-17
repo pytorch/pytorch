@@ -1,3 +1,5 @@
+from __future__ import annotations
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
@@ -18,6 +20,7 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
+    ReshardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
@@ -25,8 +28,14 @@ from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
     validate_non_overlapping_shards_metadata,
 )
+from torch.distributed.nn.functional import (
+    reduce_scatter,
+)
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
+from .ops import (
+    elementwise_ops,
+)
 from .shard import Shard
 from .utils import (
     get_current_process_group,
@@ -550,9 +559,46 @@ class ShardedTensor(object):
         """
         return self._sharding_spec
 
+    def reshard(self, resharding_spec: ReshardingSpec) -> Union[ShardedTensor, torch.Tensor]:
+        """
+        Reshards a tensor given the resharding_spec, if output_local_tensors is
+        True in resharding_spec.
+
+        It would output the local shard on each rank instead of ShardedTensor
+        (only works for a single local shard).
+        """
+        # TODO: implement the reshard for ShardedTensor to ShardedTensor.
+        output_local_tensors = resharding_spec.output_local_tensors
+        if not output_local_tensors:
+            raise RuntimeError(
+                "Reshard not supported for ShardedTensor output yet."
+            )
+        from torch.distributed._sharded_tensor.ops._common import (
+            _result_distribute_with_col_rearrange,
+        )
+        local_shard = self.local_shards()[0].tensor
+        local_results = []
+        for i in range(local_shard.size(0)):
+            local_results.append(local_shard[i].t().contiguous())
+
+        # Distribute results to each rank with col rearrangement.
+        output = _result_distribute_with_col_rearrange(
+            local_results,
+            local_shard,
+            len(self._metadata.shards_metadata),
+            self,
+            self._process_group,
+        )
+
+        # transpose the output and return result.
+        return output.t().contiguous()
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
             return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
+        elif func == torch.nn.functional.gelu:
+            kwargs['op'] = torch.nn.functional.gelu
+            return elementwise_ops(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
@@ -750,3 +796,61 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                           device=local_device, )
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
+
+
+class PartialTensor(object):
+    """
+    PartialTensor is an abstraction to represent Tensors that need
+    aggregation across multiple devices and multiple processes.
+
+    PartialTensor is initialized in an SPMD like fashion where each rank
+    initializes the PartialTensor. The PartialTensor object on each rank
+    then only stores the local partial shard and provides global metadata
+    for all the shards.
+
+    PartialTensor doesn't provide any Tensor like operations but is a
+    wrapper providing the Tensor representing the local partial shard
+    and the global metadata.
+
+    Using these, users can apply custom distributed sharded computations
+    on top of this primitive. The local shards are all initialized using
+    the create_op specified by tensor_init_params.create_op, e.g.,
+    torch.ones, or torch.empty.
+
+    Args:
+        local_partial_results (List(Tensor)):
+            Partial results are stored across ranks and in a form of a list.
+    """
+
+    def __init__(self, local_partial_results):
+        self.local_partial_results = local_partial_results
+
+    def __post_init__(self):
+        if not isinstance(self.local_partial_results, Iterable):
+            raise ValueError('local_partial_results needs to be a Iterable.')
+        for tensor in self.local_partial_results:
+            if not isinstance(tensor, torch.Tensor):
+                raise ValueError('Element in local_partial_results needs to be a Tensor.')
+
+    def reshard(self, _resharding_spec: ReshardingSpec) -> torch.Tensor:
+        """
+        Consolidate all partial tensors across multiple ranks based on resharding
+        spec.
+        """
+        local_result = torch.empty_like(self.local_partial_results[0])
+        return reduce_scatter(local_result, self.local_partial_results)
+
+
+class ModuleResharder(torch.nn.Module):
+    """
+    A module that will reshard its output based on the resharding_spec.
+    """
+
+    def __init__(self, original_module, resharding_spec):
+        super().__init__()
+        self.original_module = original_module
+        self.resharding_spec = resharding_spec
+
+    def forward(self, *args, **kwargs):
+        output = self.original_module(*args, **kwargs)
+        return output.reshard(self.resharding_spec, **kwargs)
