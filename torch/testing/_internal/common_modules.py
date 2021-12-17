@@ -402,7 +402,7 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
 
     # Samples below are for validating the no-batch-dim support.
     key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
-    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((2, 3, 3)))
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3)))
     for src_mask, src_key_padding_mask, norm_first in itertools.product(attn_masks, key_padding_masks, (True, False)):
         samples.append(
             ModuleInput(
