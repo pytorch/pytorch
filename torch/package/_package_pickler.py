@@ -3,7 +3,6 @@ from pickle import EXT1, EXT2, EXT4, GLOBAL, STACK_GLOBAL, Pickler, PicklingErro
 from pickle import _compat_pickle, _extension_registry, _getattribute, _Pickler  # type: ignore[attr-defined]
 from struct import pack
 from types import FunctionType
-import sys
 
 from .importer import Importer, ObjMismatchError, ObjNotFoundError, sys_importer
 
@@ -94,10 +93,7 @@ class PackagePickler(_Pickler):
     dispatch[FunctionType] = save_global
 
 
-def create_pickler(data_buf, importer):
-    protocol = 3
-    if sys.version_info >= (3, 4):
-        protocol = 4
+def create_pickler(data_buf, importer, protocol=4):
     if importer is sys_importer:
         # if we are using the normal import library system, then
         # we can use the C implementation of pickle which is faster

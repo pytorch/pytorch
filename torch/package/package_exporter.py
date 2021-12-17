@@ -25,7 +25,6 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import Storage
 from torch.utils.hooks import RemovableHandle
-import sys
 
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
@@ -552,7 +551,8 @@ class PackageExporter:
     def save_pickle(
         self, package: str,
         resource: str, obj: Any,
-        dependencies: bool = True
+        dependencies: bool = True,
+        pickle_protocol: int = 4,
     ):
         """Save a python object to the archive using pickle. Equivalent to :func:`torch.save` but saving into
         the archive rather than a stand-alone file. Stanard pickle does not save the code, only the objects.
@@ -570,10 +570,13 @@ class PackageExporter:
             obj (Any): The object to save, must be picklable.
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
+
+        assert ((pickle_protocol == 4) or (pickle_protocol == 3)), "torch.package only supports pickle protocols 3 and 4"
+
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
         data_buf = io.BytesIO()
-        pickler = create_pickler(data_buf, self.importer)
+        pickler = create_pickler(data_buf, self.importer, protocol=pickle_protocol)
         pickler.persistent_id = self._persistent_id
         pickler.dump(obj)
         data_value = data_buf.getvalue()
@@ -587,36 +590,46 @@ class PackageExporter:
         )
 
         def _check_mocked_error(module: str, field: str):
+            if self._can_implicitly_extern(module):
+                return
             for pattern, pattern_info in self.patterns.items():
-                if pattern_info.action == _ModuleProviderAction.MOCK:
-                    if pattern.matches(module):
+                if pattern.matches(module):
+                    if pattern_info.action == _ModuleProviderAction.MOCK:
                         raise NotImplementedError(
                             f"Object '{field}' from module {module} was mocked out during packaging "
                             f"but is being used in resource - {resource} in package {package}"
                             "If this error is happening during 'save_pickle', please ensure that your "
                             "pickled object doesn't contain any mocked objects."
                         )
+                    else:
+                        return
 
         if dependencies:
             all_dependencies = []
             module = None
             field = None
+            memo = defaultdict(int)
+            memo_count = 0
             for opcode, arg, pos in pickletools.genops(data_value):
-                if sys.version_info >= (3, 4):
+                if pickle_protocol == 4:
                     if opcode.name == "SHORT_BINUNICODE" or opcode.name == "BINUNICODE8":
                         assert isinstance(arg, str)
                         module = field
                         field = arg
+                        memo[memo_count] = arg
                     elif opcode.name == "BINGET_LONG" or opcode.name == "BINGET" or opcode.name == "GET":
+                        assert isinstance(arg, int)
                         module = field
-                        field = None
+                        field = memo[arg]
+                    elif opcode.name == "MEMOIZE":
+                        memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
                         if module is None:
                             continue
                         elif module not in all_dependencies:
                             all_dependencies.append(module)
                         _check_mocked_error(module, field)
-                elif opcode.name == "GLOBAL":  # a global reference
+                elif pickle_protocol == 3 and opcode.name == "GLOBAL":  # a global reference
                     assert isinstance(arg, str)
                     module, field = arg.split(" ")
                     if module not in all_dependencies:
