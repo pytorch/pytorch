@@ -10,18 +10,8 @@
 #include <forward_list>
 #include <tuple>
 #include <ATen/ATen.h>
+#include <torch/csrc/profiler/util.h>
 #include <torch/csrc/Export.h>
-#include <torch/csrc/autograd/profiler_utils.h>
-#ifndef _WIN32
-#include <ctime>
-#endif
-#if defined(C10_IOS) && defined(C10_MOBILE)
-#include <sys/time.h> // for gettimeofday()
-#endif
-
-#include <ATen/record_function.h>
-
-#include <torch/csrc/jit/frontend/source_range.h>
 
 struct CUevent_st;
 typedef std::shared_ptr<CUevent_st> CUDAEventStub;
@@ -68,33 +58,6 @@ private:
 
 TORCH_API void registerCUDAMethods(CUDAStubs* stubs);
 TORCH_API const CUDAStubs* cudaStubs();
-
-constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
-  return ((a + b - 1) / b) * b;
-}
-
-inline int64_t getTime(bool allow_monotonic = false) {
-#if defined(C10_IOS) && defined(C10_MOBILE)
-// clock_gettime is only available on iOS 10.0 or newer. Unlike OS X, iOS can't rely on
-// CLOCK_REALTIME, as it is defined no matter if clock_gettime is implemented or not
-  struct timeval now;
-  gettimeofday(&now, NULL);
-  return static_cast<int64_t>(now.tv_sec) * 1000000000 + static_cast<int64_t>(now.tv_usec) * 1000;
-#elif defined(_WIN32) || defined(__MACH__)
-  using namespace std::chrono;
-  using clock = std::conditional<high_resolution_clock::is_steady, high_resolution_clock, steady_clock>::type;
-  return duration_cast<nanoseconds>(clock::now().time_since_epoch()).count();
-#else
-  // clock_gettime is *much* faster than std::chrono implementation on Linux
-  struct timespec t{};
-  auto mode = CLOCK_REALTIME;
-  if (allow_monotonic) {
-    mode = CLOCK_MONOTONIC;
-  }
-  clock_gettime(mode, &t);
-  return static_cast<int64_t>(t.tv_sec) * 1000000000 + static_cast<int64_t>(t.tv_nsec);
-#endif
-}
 
 enum class C10_API_ENUM EventKind : uint16_t {
   Mark,
@@ -394,11 +357,6 @@ struct RangeEventList {
   static const size_t kReservedCapacity = 1024;
 };
 
-std::string getNvtxStr(
-    const char* name,
-    int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes);
-
 enum class C10_API_ENUM ProfilerState {
   Disabled = 0,
   CPU, // CPU-only profiling
@@ -526,15 +484,6 @@ struct TORCH_API TLSLegacyProfilerGuard {
   const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
-struct TORCH_API FileLineFunc {
-  std::string filename;
-  size_t line;
-  std::string funcname;
-};
-TORCH_API std::vector<FileLineFunc> prepareCallstack(const std::vector<jit::StackEntry>& cs);
-TORCH_API std::vector<std::string> callstackStr(const std::vector<FileLineFunc>& cs);
-TORCH_API std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn);
-
 struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   explicit ProfilerThreadLocalState(const ProfilerConfig& config)
@@ -603,8 +552,6 @@ struct TORCH_API ProfilerThreadLocalState : public c10::MemoryReportingInfoBase 
 namespace torch {
 namespace profiler {
 namespace impl {
-using torch::autograd::profiler::computeFlops;
-using torch::autograd::profiler::getTime;
 using torch::autograd::profiler::ProfilerConfig;
 using torch::autograd::profiler::ProfilerState;
 } // impl
