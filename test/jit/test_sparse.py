@@ -64,14 +64,15 @@ class TestSparse(JitTestCase):
         class SparseTensorModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = torch.rand(3, 4).to_sparse_csr()
-                self.b = torch.rand(3, 4).to_sparse_csr()
+                self.a = torch.rand(4, 4).to_sparse_csr()
+                self.b = torch.rand(4, 4).to_sparse_csr()
 
 
             def forward(self, x):
-                return x + self.a + self.b
 
-        x = torch.rand(3, 4).to_sparse_csr()
+                return x.matmul(self.a).matmul(self.b)
+
+        x = torch.rand(4, 4).to_sparse_csr()
 
         m = SparseTensorModule()
         unfrozen_result = m.forward(x)
@@ -96,13 +97,13 @@ class TestSparse(JitTestCase):
         class SparseTensorModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.a = torch.rand(3, 4).to_sparse_csr()
-                self.b = torch.rand(3, 4).to_sparse_csr()
+                self.a = torch.rand(4, 4).to_sparse_csr()
+                self.b = torch.rand(4, 4).to_sparse_csr()
 
             def forward(self, x):
-                return x + self.a + self.b
+                return x.matmul(self.a).matmul(self.b)
 
-        x = torch.rand(3, 4).to_sparse_csr()
+        x = torch.rand(4, 4).to_sparse_csr()
         m = SparseTensorModule()
         expected_result = m.forward(x)
 
