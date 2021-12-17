@@ -276,21 +276,19 @@ def add_auto_observation(
                         # for functions, this is the parent module FQN
                         module_id_to_fqn[id(v)] = fqn
 
-                        # For now this value depends on Eager mode propagation
-                        # of configs. In the future it might be cleaner to
-                        # calculate this from qconfig_dict.
-                        has_qconfig = hasattr(v, 'qconfig') and v.qconfig is not None
-                        if has_qconfig and not is_leaf(v):
-                            if v is self:
-                                # for the top level module only, specify input
-                                # and output dtypes
-                                v._auto_quant_state = AutoQuantizationState(
-                                    qconfig_dict, fqn,
-                                    input_dtypes, output_dtypes)
-                                pass
-                            else:
-                                v._auto_quant_state = AutoQuantizationState(
-                                    qconfig_dict, fqn)
+                        if is_leaf(v):
+                            continue
+
+                        if v is self:
+                            # for the top level module only, specify input
+                            # and output dtypes
+                            v._auto_quant_state = AutoQuantizationState(
+                                qconfig_dict, fqn,
+                                input_dtypes, output_dtypes)
+                            pass
+                        else:
+                            v._auto_quant_state = AutoQuantizationState(
+                                qconfig_dict, fqn)
 
                 global_op_idx[0] = 0
 
