@@ -43,8 +43,8 @@ template <typename T>
 class Stat;
 
 namespace {
-inline std::bitset<NUM_AGGREGATIONS> merge(
-    std::initializer_list<Aggregation>& list) {
+template <typename T>
+inline std::bitset<NUM_AGGREGATIONS> merge(T& list) {
   std::bitset<NUM_AGGREGATIONS> a;
   for (Aggregation b : list) {
     a.set(b);
@@ -82,7 +82,7 @@ class Stat {
   };
 
  public:
-  Stat(std::string name, std::initializer_list<Aggregation> aggregations)
+  Stat(std::string name, std::vector<Aggregation> aggregations)
       : name_(std::move(name)), aggregations_(merge(aggregations)) {
     detail::registerStat(this);
   }
@@ -219,6 +219,12 @@ class IntervalStat : public Stat<T> {
       std::chrono::milliseconds windowSize)
       : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
 
+  IntervalStat(
+      std::string name,
+      std::vector<Aggregation> aggregations,
+      std::chrono::milliseconds windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
  protected:
   virtual uint64_t currentWindowId() const {
     auto now = std::chrono::steady_clock::now().time_since_epoch();
@@ -248,6 +254,12 @@ class FixedCountStat : public Stat<T> {
   FixedCountStat(
       std::string name,
       std::initializer_list<Aggregation> aggregations,
+      int64_t windowSize)
+      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
+
+  FixedCountStat(
+      std::string name,
+      std::vector<Aggregation> aggregations,
       int64_t windowSize)
       : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
 
