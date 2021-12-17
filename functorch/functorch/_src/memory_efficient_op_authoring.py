@@ -1,7 +1,4 @@
-from functorch._src.python_key import pythonkey_decompose
 import torch
-from torch import fx
-from torch.fx.proxy import GraphAppendingTracer
 from typing import Iterable
 from .aot_autograd import compiled_function, partition_with_recompute_fwd_in_bwd
 

@@ -1,5 +1,4 @@
-from functorch import make_fx
-import time
+import os
 import torch
 import torch.nn as nn
 from functorch import make_functional_with_buffers, make_fx
@@ -10,19 +9,17 @@ from torch.fx import immutable_collections
 import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch.fx.passes import graph_drawer
-import operator
-import os
-import inspect
 from functorch._C import CompileCache
-from functools import partial
-from typing import Callable
 from .python_key import pythonkey_decompose
 from .decompositions import register_decomposition
 
-pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (list(x), None), lambda x, c: immutable_collections.immutable_list(x))
-pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (list(x.values()), list(x.keys())), lambda x, c: immutable_collections.immutable_dict({key: value for key, value in zip(c, x)}))
+pytree._register_pytree_node(immutable_collections.immutable_list, lambda x: (
+    list(x), None), lambda x, c: immutable_collections.immutable_list(x))
+pytree._register_pytree_node(immutable_collections.immutable_dict, lambda x: (list(x.values()), list(
+    x.keys())), lambda x, c: immutable_collections.immutable_dict({key: value for key, value in zip(c, x)}))
 
 aten = torch.ops.aten
+
 
 def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_graph"):
     base, ext = os.path.splitext(fname)
@@ -34,6 +31,8 @@ def draw_graph(traced: torch.fx.GraphModule, fname: str, figname: str = "fx_grap
     getattr(x, "write_" + ext.lstrip("."))(f"{base}{ext}")
 
 # todo(chilli): clean this up/make it more understandable
+
+
 def default_partition(fx_module: fx.GraphModule, _joint_inputs):
     bw_nodes = set()
     saved_nodes = set()
@@ -72,7 +71,7 @@ def default_partition(fx_module: fx.GraphModule, _joint_inputs):
 
     for node in fx_module.graph.nodes:
         if node in bw_nodes or node in bw_outputs:
-            value_remap[node] = bw_graph.node_copy(node, lambda n : value_remap[n])
+            value_remap[node] = bw_graph.node_copy(node, lambda n: value_remap[n])
 
     assert(num_fwd_outputs + num_bwd_outputs == len(output_node.args[0]))
     bwd_outputs = [value_remap[i] for i in bw_outputs]
@@ -85,9 +84,10 @@ def default_partition(fx_module: fx.GraphModule, _joint_inputs):
     value_remap = {}
     for node in fx_module.graph.nodes:
         if node not in bw_nodes and node.op != 'output':
-            value_remap[node] = fw_graph.node_copy(node, lambda n : value_remap[n])
+            value_remap[node] = fw_graph.node_copy(node, lambda n: value_remap[n])
 
-    fwd_outputs = [value_remap[i] for i in output_node.args[0][:num_fwd_outputs]] + [value_remap[n] for n in saved_nodes]
+    fwd_outputs = [value_remap[i] for i in output_node.args[0]
+                   [:num_fwd_outputs]] + [value_remap[n] for n in saved_nodes]
     if len(fwd_outputs) == 1:
         fwd_outputs = fwd_outputs[0]
     fw_graph.output(fwd_outputs)
@@ -96,10 +96,14 @@ def default_partition(fx_module: fx.GraphModule, _joint_inputs):
     bw_module.graph.lint()
     return fw_module, bw_module
 
+
 class InvalidNodeBase(object):
     def __repr__(self):
         return "Invalid Node"
+
+
 InvalidNode = InvalidNodeBase()
+
 
 def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     """
@@ -153,6 +157,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     new_graph.lint()
     return new_graph
 
+
 def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inputs):
     """
     Partitions the joint graph such that the backward recomputes the forward.
@@ -162,7 +167,6 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
     outputs to just original forward or backward outputs. And then we run the
     resulting graphs through dead code elimintation.
     """
-
 
     def is_primal(node):
         return node.op == "placeholder" and "tangents" not in node.target
@@ -198,7 +202,7 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
                     break
 
     # Now, we re-generate the fwd/bwd graphs.
-    # NB: This might increase compilation time, but I doubt it matters  
+    # NB: This might increase compilation time, but I doubt it matters
     fwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs + saved_values)
     bwd_graph = _extract_graph_with_inputs_outputs(joint_module.graph, saved_values + tangent_inputs, bwd_outputs)
 
@@ -207,19 +211,22 @@ def partition_with_recompute_fwd_in_bwd(joint_module: fx.GraphModule, _joint_inp
 
     return fwd_module, bwd_module
 
+
 def create_joint_forward_backward(fn):
     def joint_forward_backward(primals, tangents):
         out = fn(*primals)
         primals = [p for p in pytree.tree_flatten(primals)[0] if p.requires_grad]
         backward_out = []
-        if primals: # todo(chilli): Make it support it if not all outputs have gradients
+        if primals:  # todo(chilli): Make it support it if not all outputs have gradients
             backward_out = torch.autograd.grad(out, primals, grad_outputs=tangents, allow_unused=True)
         return out, backward_out
     return joint_forward_backward
 
+
 def draw_joint_graph(graph, joint_inputs, file_name="full_graph.png"):
     draw_graph(graph, file_name)
     return default_partition(graph, joint_inputs)
+
 
 def normalize_as_list(x):
     if isinstance(x, tuple):
@@ -227,6 +234,7 @@ def normalize_as_list(x):
     elif isinstance(x, list):
         return x
     return [x]
+
 
 def create_compiled_function(flat_fn, fw_compiler, bw_compiler, partition_fn, decompose):
 
@@ -302,11 +310,13 @@ except ImportError:
 compile_cache = None
 
 # Inspired by autodidax (thanks!)
+
+
 class PytreeThunk:
     spec = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
-    is_simple = None # if the output spec is a tuple/list, we won't bother unflattening it.
-    is_really_simple = None # if the output spec is a LeafSpec
+    is_simple = None  # if the output spec is a tuple/list, we won't bother unflattening it.
+    is_really_simple = None  # if the output spec is a LeafSpec
 
     def set(self, spec):
         assert self.spec is None or self.spec == spec
@@ -322,6 +332,7 @@ class PytreeThunk:
         if self.is_simple:
             return x
         return pytree.tree_unflatten(x, self.spec)
+
 
 def compiled_function(
     fn, fw_compiler, bw_compiler, partition_fn=default_partition, decompose=False, hasher_type="StaticShapeHasher"
@@ -349,6 +360,7 @@ def compiled_function(
             # Compile a new function
             flattened_args, args_spec = pytree.tree_flatten((args, kwargs))
             out_spec = PytreeThunk()
+
             def flat_fn(*args):
                 nonlocal out_spec
                 args, kwargs = pytree.tree_unflatten(args, args_spec)
@@ -404,6 +416,7 @@ def compiled_module(mod, *args, **kwargs):
             )
 
     return CompiledModule()
+
 
 aot_function = compiled_function
 aot_module = compiled_module
