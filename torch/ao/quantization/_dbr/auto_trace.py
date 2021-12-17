@@ -205,9 +205,11 @@ def add_auto_observation(
                             global_disable_torch_function_override
                         global_disable_torch_function_override = True
 
+                        # mypy ignore is used instead of assert because this
+                        # runs on every forward and assert has a performance cost
                         args, kwargs = parent_qstate.op_prepare_before_hook(
                             cur_module, args, kwargs, first_call, qtensor_id,
-                            fqn, cur_module)
+                            fqn, cur_module)  # type: ignore[arg-type]
 
                         # original forward
                         output = orig_module_call(self, *args, **kwargs)
