@@ -3,7 +3,7 @@ from torch.fx.graph import Node
 from .pattern_utils import (
     register_fusion_pattern,
 )
-from .utils import _parent_name
+from ..utils import _parent_name
 from .quantization_types import QuantizerCls, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
