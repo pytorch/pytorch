@@ -5,12 +5,12 @@
 #include <string>
 #include <type_traits>
 #include <ATen/ATen.h>
+#include <torch/csrc/THConcat.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_compat.h>
 
 #ifdef USE_CUDA
-#include <THC/THC.h>
 #include <c10/cuda/CUDAStream.h>
 #endif
 
@@ -126,8 +126,8 @@
 #define THPUtils_assert(cond, ...) THPUtils_assertRet(nullptr, cond, __VA_ARGS__)
 #define THPUtils_assertRet(value, cond, ...)                                   \
 if (THP_EXPECT(!(cond), 0)) { THPUtils_setError(__VA_ARGS__); return value; }
-THP_API void THPUtils_setError(const char *format, ...);
-THP_API void THPUtils_invalidArguments(
+TORCH_PYTHON_API void THPUtils_setError(const char *format, ...);
+TORCH_PYTHON_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
@@ -149,7 +149,7 @@ template <typename T>
 struct THPUtils_typeTraits {};
 
 #include <torch/csrc/generic/utils.h>
-#include <TH/THGenerateByteType.h>
+#include <torch/csrc/THGenerateByteType.h>
 
 std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
