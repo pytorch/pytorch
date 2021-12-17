@@ -392,6 +392,502 @@ void bsrmv<c10::complex<double>>(
       reinterpret_cast<cuDoubleComplex*>(y)));
 }
 
+#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
+
+template <>
+void bsrsv2_bufferSize<float>(CUSPARSE_BSRSV2_BUFFER_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsv2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsv2_bufferSize<double>(CUSPARSE_BSRSV2_BUFFER_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsv2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsv2_bufferSize<c10::complex<float>>(
+    CUSPARSE_BSRSV2_BUFFER_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsv2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      reinterpret_cast<cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsv2_bufferSize<c10::complex<double>>(
+    CUSPARSE_BSRSV2_BUFFER_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsv2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      reinterpret_cast<cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsv2_analysis<float>(CUSPARSE_BSRSV2_ANALYSIS_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsv2_analysis(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_analysis<double>(CUSPARSE_BSRSV2_ANALYSIS_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsv2_analysis(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_analysis<c10::complex<float>>(
+    CUSPARSE_BSRSV2_ANALYSIS_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsv2_analysis(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      reinterpret_cast<const cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_analysis<c10::complex<double>>(
+    CUSPARSE_BSRSV2_ANALYSIS_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsv2_analysis(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      descrA,
+      reinterpret_cast<const cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_solve<float>(CUSPARSE_BSRSV2_SOLVE_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsv2_solve(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      x,
+      y,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_solve<double>(CUSPARSE_BSRSV2_SOLVE_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsv2_solve(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      x,
+      y,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_solve<c10::complex<float>>(
+    CUSPARSE_BSRSV2_SOLVE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsv2_solve(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      reinterpret_cast<const cuComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      reinterpret_cast<const cuComplex*>(x),
+      reinterpret_cast<cuComplex*>(y),
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsv2_solve<c10::complex<double>>(
+    CUSPARSE_BSRSV2_SOLVE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsv2_solve(
+      handle,
+      dirA,
+      transA,
+      mb,
+      nnzb,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      reinterpret_cast<const cuDoubleComplex*>(x),
+      reinterpret_cast<cuDoubleComplex*>(y),
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_bufferSize<float>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsm2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsm2_bufferSize<double>(CUSPARSE_BSRSM2_BUFFER_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsm2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsm2_bufferSize<c10::complex<float>>(
+    CUSPARSE_BSRSM2_BUFFER_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsm2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      reinterpret_cast<cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsm2_bufferSize<c10::complex<double>>(
+    CUSPARSE_BSRSM2_BUFFER_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsm2_bufferSize(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      reinterpret_cast<cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      pBufferSizeInBytes));
+}
+
+template <>
+void bsrsm2_analysis<float>(CUSPARSE_BSRSM2_ANALYSIS_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsm2_analysis(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_analysis<double>(CUSPARSE_BSRSM2_ANALYSIS_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsm2_analysis(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_analysis<c10::complex<float>>(
+    CUSPARSE_BSRSM2_ANALYSIS_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsm2_analysis(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      reinterpret_cast<const cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_analysis<c10::complex<double>>(
+    CUSPARSE_BSRSM2_ANALYSIS_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsm2_analysis(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      descrA,
+      reinterpret_cast<const cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_solve<float>(CUSPARSE_BSRSM2_SOLVE_ARGTYPES(float)) {
+  TORCH_CUDASPARSE_CHECK(cusparseSbsrsm2_solve(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      B,
+      ldb,
+      X,
+      ldx,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_solve<double>(CUSPARSE_BSRSM2_SOLVE_ARGTYPES(double)) {
+  TORCH_CUDASPARSE_CHECK(cusparseDbsrsm2_solve(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      alpha,
+      descrA,
+      bsrValA,
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      B,
+      ldb,
+      X,
+      ldx,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_solve<c10::complex<float>>(
+    CUSPARSE_BSRSM2_SOLVE_ARGTYPES(c10::complex<float>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseCbsrsm2_solve(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      reinterpret_cast<const cuComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      reinterpret_cast<const cuComplex*>(B),
+      ldb,
+      reinterpret_cast<cuComplex*>(X),
+      ldx,
+      policy,
+      pBuffer));
+}
+
+template <>
+void bsrsm2_solve<c10::complex<double>>(
+    CUSPARSE_BSRSM2_SOLVE_ARGTYPES(c10::complex<double>)) {
+  TORCH_CUDASPARSE_CHECK(cusparseZbsrsm2_solve(
+      handle,
+      dirA,
+      transA,
+      transX,
+      mb,
+      n,
+      nnzb,
+      reinterpret_cast<const cuDoubleComplex*>(alpha),
+      descrA,
+      reinterpret_cast<const cuDoubleComplex*>(bsrValA),
+      bsrRowPtrA,
+      bsrColIndA,
+      blockDim,
+      info,
+      reinterpret_cast<const cuDoubleComplex*>(B),
+      ldb,
+      reinterpret_cast<cuDoubleComplex*>(X),
+      ldx,
+      policy,
+      pBuffer));
+}
+
+#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
+
 } // namespace sparse
 } // namespace cuda
 } // namespace at
