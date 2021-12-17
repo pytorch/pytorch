@@ -42,7 +42,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(void, ComplexFloat) /* 9 */                          \
   _(void, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
-  _(void, BFloat16) /* 12 */                             \
+  _(at::BFloat16, BFloat16) /* 12 */                             \
 
   #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
@@ -52,6 +52,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(int64_t, Long)                \
   _(float, Float)                 \
   _(at::Half, Half)               \
+  _(at::BFloat16, BFloat16)       \
   _(double, Double)               \
   _(bool, Bool)
 
