@@ -14903,6 +14903,8 @@ class TestNNDeviceType(NNTestCase):
         helper(None, 3, 50, 50, ks=5)
 
     def test_upsamplingNearest1d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(mode):
             m = nn.Upsample(size=4, mode=mode)
@@ -14916,13 +14918,13 @@ class TestNNDeviceType(NNTestCase):
 
             # Checks upsampling
             input = torch.randn(1, 1, 2, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Checks downsampling
             input = torch.randn(1, 1, 20, requires_grad=True, device=device)
-            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=True)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
+            gradcheck(lambda x: F.interpolate(x, 11, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # consistency CUDA/CPU check
             if torch.device(device).type == 'cuda':
@@ -15006,6 +15008,8 @@ class TestNNDeviceType(NNTestCase):
         helper(10, 15)
 
     def test_upsamplingNearest2d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(memory_format, mode):
             in_t = torch.ones(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format)
@@ -15030,15 +15034,15 @@ class TestNNDeviceType(NNTestCase):
 
             # test backward when input's height is not same as width
             input = torch.ones(1, 2, 2, 1, requires_grad=True, device=device).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=True)
-            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=True)
+            gradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, size=(4, 2), mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             input = torch.randn(1, 2, 2, 2, requires_grad=True, device=device).contiguous(memory_format=memory_format)
             self.assertEqual(
                 F.interpolate(input, 4, mode=mode),
                 F.interpolate(input, scale_factor=2, mode=mode))
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -15123,6 +15127,8 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.channels_last, 10, 15)
 
     def test_upsamplingNearest3d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
 
         def helper(memory_format, mode):
             m = nn.Upsample(size=4, mode=mode)
@@ -15142,8 +15148,8 @@ class TestNNDeviceType(NNTestCase):
             input = torch.randn(
                 1, 2, 2, 2, 2, requires_grad=True, device=device
             ).contiguous(memory_format=memory_format)
-            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=True)
-            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=True)
+            gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_forward_ad=check_forward_ad)
+            gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [input], check_fwd_over_rev=check_forward_ad)
 
             # Assert that cpu and cuda handle channels_last memory format in the same way
             # https://github.com/pytorch/pytorch/issues/54590
@@ -15158,11 +15164,11 @@ class TestNNDeviceType(NNTestCase):
                 out_cpu = torch.nn.functional.interpolate(a.to('cpu'), scale_factor=2, mode=mode)
                 self.assertEqual(out_cpu, out_cuda.to('cpu'))
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=True)
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=True)
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a], check_fwd_over_rev=check_forward_ad)
 
-                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=True)
-                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=True)
+                gradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_forward_ad=check_forward_ad)
+                gradgradcheck(lambda x: F.interpolate(x, 4, mode=mode), [a.to('cuda')], check_fwd_over_rev=check_forward_ad)
 
         helper(torch.contiguous_format, "nearest")
         helper(torch.channels_last_3d, "nearest")
@@ -15231,6 +15237,9 @@ class TestNNDeviceType(NNTestCase):
         helper(torch.channels_last_3d, 10, 15)
 
     def test_upsamplingBilinear2d(self, device):
+        # Forward AD does not support XLA because XLA tensors don't have storage
+        check_forward_ad = torch.device(device).type != 'xla'
+
         for antialias in [True, False]:
             # temporarily disabled on CUDA:
             if antialias and torch.device(device).type == 'cuda':
@@ -15251,8 +15260,8 @@ class TestNNDeviceType(NNTestCase):
                         self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
                         input = torch.randn(1, 2, 2, 2, device=device).contiguous(memory_format=memory_format).requires_grad_()
-                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_forward_ad=True)
-                        gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=True)
+                        gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_forward_ad=check_forward_ad)
+                        gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input], check_fwd_over_rev=check_forward_ad)
 
                         # Assert that cpu and cuda give same results
                         if torch.device(device).type == 'cuda':
