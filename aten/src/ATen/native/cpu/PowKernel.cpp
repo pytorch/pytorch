@@ -11,7 +11,7 @@
 
 namespace at { namespace native {
 
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();

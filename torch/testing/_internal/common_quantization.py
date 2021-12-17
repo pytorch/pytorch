@@ -630,7 +630,7 @@ class QuantizationTestCase(TestCase):
                 str(expected_node_list))
 
     def printGraphModule(self, graph_module, print_str=True):
-        modules = dict(graph_module.named_modules())
+        modules = dict(graph_module.named_modules(remove_duplicate=False))
         node_infos = []
         for n in graph_module.graph.nodes:
             node_info = ' '.join(map(repr, [n.op, n.name, n.target, n.args, n.kwargs]))
@@ -1697,6 +1697,29 @@ class ManualEmbeddingBagLinear(nn.Module):
     def forward(self, input: torch.Tensor, offsets: Optional[torch.Tensor] = None,
                 per_sample_weights: Optional[torch.Tensor] = None):
         x = self.emb(input, offsets, per_sample_weights)
+        x = self.quant(x)
+        x = self.linear(x)
+        return self.dequant(x)
+
+class DeFusedEmbeddingBagLinear(nn.Module):
+    r"""A module to simulate QAT embedding bag with a linear layer,
+    this module uses a separate embedding and bagging op, similar
+    to that which is described in the EmbeddingBag documentation.
+
+    https://pytorch.org/docs/stable/generated/torch.nn.EmbeddingBag.html
+    """
+    def __init__(self) -> None:
+        super().__init__()
+        self.emb = nn.Embedding(num_embeddings=10, embedding_dim=12)
+        self.emb.qconfig = default_embedding_qat_qconfig
+        self.bagging_op = torch.sum
+        self.quant = QuantStub()
+        self.dequant = DeQuantStub()
+        self.linear = nn.Linear(12, 1).to(dtype=torch.float)
+        self.qconfig = get_default_qat_qconfig("qnnpack")
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        x = self.bagging_op(self.emb(input), dim=1)
         x = self.quant(x)
         x = self.linear(x)
         return self.dequant(x)

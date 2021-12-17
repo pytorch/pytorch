@@ -56,6 +56,7 @@ from jit.test_jit_utils import TestJitUtils  # noqa: F401
 from jit.test_scriptmod_ann import TestScriptModuleInstanceAttributeTypeAnnotation  # noqa: F401
 from jit.test_types import TestTypesAndAnnotation  # noqa: F401
 from jit.test_misc import TestMisc  # noqa: F401
+from jit.test_upgraders import TestUpgraders  # noqa: F401
 from jit.test_pdt import TestPDT  # noqa: F401
 from jit.test_tensor_creation_ops import TestTensorCreationOps  # noqa: F401
 from jit.test_module_apis import TestModuleAPIs  # noqa: F401
@@ -68,7 +69,9 @@ from jit.test_optimize_for_mobile_preserve_debug_info import TestOptimizeForMobi
 from jit.test_union import TestUnion  # noqa: F401
 from jit.test_models import MnistNet
 from jit.test_batch_mm import TestBatchMM  # noqa: F401
-from jit.test_dtype_analysis import TestDtypeAnalysis  # noqa: F401
+from jit.test_dtype_analysis import TestDtypeAnalysis, TestDtypeCustomRulesCPU  # noqa: F401
+from jit.test_dce import TestDCE  # noqa: F401
+from jit.test_sparse import TestSparse  # noqa: F401
 
 # Torch
 from torch import Tensor
@@ -381,6 +384,15 @@ class TestJit(JitTestCase):
 
         files = zipfile.ZipFile(buf).filelist
         self.assertTrue(any(['archive/constants.pkl' == f.filename for f in files]))
+
+    def test_script_fn_pkl(self):
+        with self.assertRaisesRegex(pickle.PickleError, "ScriptFunction cannot be pickled"):
+
+            @torch.jit.script
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x
+
+            pkl_fn = pickle.dumps(fn, protocol=0)
 
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
@@ -1649,6 +1661,30 @@ graph(%Ra, %Rb):
             m = self.createFunctionFromGraph(g)
             self.assertEqual(outputs, m(*inputs))
 
+    @unittest.skipIf(not RUN_CUDA, "test requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "skip if profiling isn't enabled")
+    def test_native_dropout_corner_case(self):
+        with disable_autodiff_subgraph_inlining():
+            def t(x, p: float, t: bool):
+                o = torch.dropout(x, p, t)
+                return o
+
+            jit_t = torch.jit.script(t)
+            x = torch.randn(5).requires_grad_()
+            FileCheck().check("prim::DifferentiableGraph").run(jit_t.graph_for(x, 1.0, True, profile_and_replay=True))
+
+            for train in [True, False]:
+                for p in [0.0, 1.0]:
+                    for device in ["cuda", "cpu"]:
+                        x = torch.randn(5).to(device=device).requires_grad_()
+                        x_ref = x.detach().requires_grad_()
+                        o = jit_t(x, p, train)
+                        o_ref = t(x_ref, p, train)
+                        o.sum().backward()
+                        o_ref.sum().backward()
+                        assert(o.equal(o_ref))
+                        assert(x.grad.equal(x_ref.grad))
+
     @slowTest
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, 'Testing differentiable graph')
     def test_dropout_module_requires_grad(self):
@@ -1689,7 +1725,7 @@ graph(%Ra, %Rb):
                 for requires_grad in (True, False):
                     X = torch.randn(M, M, requires_grad=requires_grad)
                     if requires_grad:
-                        FileCheck().check("aten::bernoulli_").run(scripted.graph_for(X, profile_and_replay=True))
+                        FileCheck().check("aten::native_dropout").run(scripted.graph_for(X, profile_and_replay=True))
                     self.assertEqual(training, 'aten::bernoulli_' in profile(scripted, X))
 
     @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, 'Testing differentiable graph')
@@ -1713,7 +1749,7 @@ graph(%Ra, %Rb):
             for requires_grad in (True, False):
                 X = torch.randn(M, M, requires_grad=requires_grad)
                 if requires_grad:
-                    FileCheck().check("aten::bernoulli_").run(scripted_training.graph_for(X, profile_and_replay=True))
+                    FileCheck().check("aten::native_dropout").run(scripted_training.graph_for(X, profile_and_replay=True))
                 self.assertIn('aten::bernoulli_', profile(scripted_training, X))
                 self.assertNotIn('aten::bernoulli_', profile(scripted_eval, X))
 
@@ -1939,7 +1975,7 @@ graph(%Ra, %Rb):
             return torch.sparse.addmm(input, input1, input2)
 
         def test_sparse_addmm_alpha_beta(input, input1, input2):
-            return torch.sparse.addmm(input, input1, input2, 1.3, 1.5)
+            return torch.sparse.addmm(input, input1, input2, alpha=1.3, beta=1.5)
 
         self.checkScript(test_sparse_addmm, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
         self.checkScript(test_sparse_addmm_alpha_beta, (torch.randn(2, 4), get_sparse(), torch.randn(3, 4)))
@@ -5288,7 +5324,7 @@ a")
                 outputs = func(x, y, profile_and_replay=True)
                 outputs_ref = torch.unbind(x, dim=y)
                 self.assertEqual(outputs, outputs_ref)
-                self.assertAutodiffNode(func.graph_for(x, y), True, ['aten::unbind'], [])
+                self.assertAutodiffNode(func.graph_for(x, y), True, [], [])
 
                 grad = torch.autograd.grad(_sum_of_list(outputs), x)
                 grad_ref = torch.autograd.grad(_sum_of_list(outputs_ref), x)
@@ -5313,7 +5349,7 @@ a")
                 self.assertEqual(outputs, outputs_ref)
 
                 if GRAPH_EXECUTOR != ProfilingMode.SIMPLE:
-                    self.assertAutodiffNode(func.graph_for(inputs), True, ['aten::meshgrid'], [])
+                    self.assertAutodiffNode(func.graph_for(inputs), True, [], [])
 
                     grads = torch.autograd.grad(_sum_of_list(outputs), inputs)
                     grads_ref = torch.autograd.grad(_sum_of_list(outputs_ref), inputs)
@@ -10770,9 +10806,8 @@ dedent """
         modelA = torch.jit.script(A())
         self.assertEqual(modelA(), 9)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "expected value of type Tensor", "self.ignored"):
-            modelB = torch.jit.script(B())
-            modelB()
+        modelB = torch.jit.script(B())
+        self.assertEqual(modelB(), 9)
 
     def test_addmm_grad(self):
         """ This test checks several things:
@@ -11195,6 +11230,12 @@ dedent """
             return x.where(x > 0.0, y)
 
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
+    def test_union_to_number(self):
+        @torch.jit.script
+        def fn(x: Union[int, complex, float], y: Union[int, complex, float]):
+            return x + y
+        FileCheck().check(": Scalar):").run(fn.graph)
 
     def test_reassign_module_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\''):
@@ -14626,7 +14667,7 @@ dedent """
         @torch.jit._overload
         def null_overload(x: int) -> int: ...  # noqa: E704
 
-        @torch.jit._overload
+        @torch.jit._overload  # noqa: F811
         def null_overload(x: str) -> str:  # noqa: F811
             pass
 
@@ -14644,7 +14685,7 @@ dedent """
             def forward(self, x: int):
                 pass
 
-            @torch.jit._overload_method
+            @torch.jit._overload_method  # noqa: F811
             def forward(self, x: Tensor):  # noqa: F811
                 pass
 

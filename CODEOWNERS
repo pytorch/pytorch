@@ -44,7 +44,7 @@
 # Github Actions
 # This list is for people wanting to be notified every time there's a change
 # related to Github Actions
-/.github/ @seemethere @janeyx99 @zhouzhuojie @driazati
+/.github/ @seemethere @janeyx99 @atalman
 
 # Parametrizations
 /torch/nn/utils/parametriz*.py @lezcano
