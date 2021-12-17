@@ -723,11 +723,9 @@ Tensor convolution_jvp(
     const Tensor& bias_p, const Tensor& bias_t,
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups) {
-  auto zeros_like_bias = bias_t.defined()
-    ? c10::optional<at::Tensor>(at::_efficientzerotensor(bias_p.sizes(), bias_p.options())) : c10::nullopt;
   auto bias_t_opt = bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
-      at::convolution(input_t, weight_p, zeros_like_bias, stride, padding, dilation, transposed, output_padding, groups)
+      at::convolution(input_t, weight_p, c10::nullopt, stride, padding, dilation, transposed, output_padding, groups)
     + at::convolution(input_p, weight_t, bias_t_opt, stride, padding, dilation, transposed, output_padding, groups));
 }
 
@@ -738,12 +736,10 @@ Tensor _convolution_jvp(
     IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
     bool transposed, IntArrayRef output_padding, int64_t groups,
     bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32) {
-  auto zeros_like_bias = bias_t.defined()
-    ? c10::optional<at::Tensor>(at::_efficientzerotensor(bias_p.sizes(), bias_p.options())) : c10::nullopt;
   auto bias_t_opt = bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
       at::_convolution(
-        input_t, weight_p, zeros_like_bias, stride, padding, dilation, transposed, output_padding,
+        input_t, weight_p, c10::nullopt, stride, padding, dilation, transposed, output_padding,
         groups, benchmark, deterministic, cudnn_enabled, allow_tf32)
     + at::_convolution(
         input_p, weight_t, bias_t_opt, stride, padding, dilation, transposed, output_padding,
