@@ -3,6 +3,7 @@
 #include <torch/library.h>
 
 
+#include <ATen/Functions.h>
 #include <ATen/RedispatchFunctions.h>
 
 // ${generated_comment}

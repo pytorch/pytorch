@@ -1,3 +1,4 @@
+#include <ATen/Functions.h>
 #include <torch/csrc/lazy/core/lazy_graph_executor.h>
 
 #include <c10/util/Logging.h>
