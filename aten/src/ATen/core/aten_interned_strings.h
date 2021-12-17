@@ -40,6 +40,7 @@ _(aten, _clamp_max) \
 _(aten, _clamp_min) \
 _(aten, _convolution) \
 _(aten, _convolution_double_backward) \
+_(aten, convolution_backward) \
 _(aten, convolution_overrideable) \
 _(aten, convolution_backward_overrideable) \
 _(aten, _copy_ignoring_overlaps) \

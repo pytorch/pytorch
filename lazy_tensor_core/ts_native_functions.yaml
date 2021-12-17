@@ -14,6 +14,8 @@ full_codegen:
   - baddbmm
   - bitwise_and.Tensor
   - bmm
+  - convolution
+  - convolution_backward
   - cos
   - clamp
   - div.Tensor
