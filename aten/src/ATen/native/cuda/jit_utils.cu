@@ -111,15 +111,45 @@ namespace at {
 struct alignas(2) BFloat16 {
   unsigned short x;
 
-  Half() = default;
-  inline __host__ __device__ BFloat16(float value){
-    asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  __device__ unsigned short __internal_float2bfloat16(
+      const float f,
+      unsigned int& sign,
+      unsigned int& remainder) {
+    unsigned int x;
+
+    x = __float_as_uint(f);
+
+    if ((x & 0x7fffffffU) > 0x7f800000U) {
+      sign = 0U;
+      remainder = 0U;
+      return static_cast<unsigned short>(0x7fffU);
+    }
+    sign = x >> 31;
+    remainder = x << 16;
+    return static_cast<unsigned short>(x >> 16);
   }
-  // inline __host__ __device__ operator float() const{
-  //     float val;
-  //     asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x));
-  //     return val;
-  // }
+
+
+  BFloat16() = default;
+  inline __host__ __device__ BFloat16(float value){
+  #if __CUDA_ARCH__ >= 800
+  asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  #else
+  unsigned int sign;
+  unsigned int remainder;
+  x = __internal_float2bfloat16(value, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((x & 0x1U) != 0U))) {
+    x++;
+  }
+  #endif
+  }
+
+  inline __host__ __device__ operator float() const{
+    float val;
+    asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x));
+    return val;
+  }
 
 };
 }
@@ -335,7 +365,6 @@ const std::string jit_code_template = R"ESCAPE(
 )ESCAPE";
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
-
 
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
@@ -556,7 +585,11 @@ std::string generate_code(
   } else {
     env.s("half_string", "");
   }
-  env.s("bfloat16_string", "");
+  if (f_inputs_type == "at::BFloat16" || result_type == "at::BFloat16" || dynamic_casting) {
+    env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+  } else {
+    env.s("bfloat16_string", "");
+  }
 
   if (!vectorized) {
     if (!dynamic_casting) {
