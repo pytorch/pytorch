@@ -1,19 +1,18 @@
 #pragma once
 
-#include <cstddef>
 #include <cstdint>
 
 namespace caffe2 {
 
 void FloatToFused8BitRowwiseQuantized(
     const float* input,
-    size_t input_rows,
+    int input_rows,
     int input_columns,
     std::uint8_t* output);
 
 void Fused8BitRowwiseQuantizedToFloat(
     const std::uint8_t* input,
-    size_t input_rows,
+    int input_rows,
     int input_columns,
     float* output);
 
@@ -25,14 +24,14 @@ void Fused8BitRowwiseQuantizedToFloat(
 void FloatToFusedNBitRowwiseQuantizedSBHalf(
     int bit_rate,
     const float* input,
-    size_t input_rows,
+    int input_rows,
     int input_columns,
     std::uint8_t* output);
 
 void FusedNBitRowwiseQuantizedSBHalfToFloat(
     int bit_rate,
     const std::uint8_t* input,
-    size_t input_rows,
+    int input_rows,
     int input_columns,
     float* output);
 

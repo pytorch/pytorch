@@ -224,12 +224,13 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
       WERROR=1 python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
+      python -mpip install dist/*.whl
     fi
-    python -mpip install dist/*.whl
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x

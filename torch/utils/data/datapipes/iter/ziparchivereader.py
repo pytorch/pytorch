@@ -12,7 +12,6 @@ import sys
 import zipfile
 import warnings
 
-
 class ZipArchiveReaderIterDataPipe(IterDataPipe[Tuple[str, BufferedIOBase]]):
     r""":class:`ZipArchiveReaderIterDataPipe`.
 

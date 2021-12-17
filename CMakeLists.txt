@@ -328,7 +328,6 @@ cmake_dependent_option(
 cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation" ON "UNIX" OFF)
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
-option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
 
 
 if(USE_CCACHE)
@@ -769,12 +768,9 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
-    string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
-  endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-noexcept-type")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX)
     # Suppress "The ABI for passing parameters with 64-byte alignment has changed in GCC 4.6"

@@ -70,6 +70,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
+    ${TORCH_ROOT}/third_party/flatbuffers/include
     ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
@@ -81,8 +82,7 @@ list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     shm
-    fmt::fmt-header-only
-    ATEN_CPU_FILES_GEN_LIB)
+    fmt::fmt-header-only)
 
 set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
@@ -105,11 +105,10 @@ else()
       -fno-strict-aliasing
       -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
+          -Wno-writable-strings)
+    endif()
 endif()
 
 if(USE_CUDA)
@@ -345,6 +344,8 @@ if(HAVE_SOVERSION)
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 add_dependencies(torch_python torch_python_stubs)
+add_dependencies(torch_python flatbuffers)
+
 
 if(USE_PRECOMPILED_HEADERS)
   target_precompile_headers(torch_python PRIVATE
@@ -374,12 +375,6 @@ endif()
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
-endif()
-
-# Preserve HIP arch flags
-if(USE_ROCM)
-  string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
 endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
