@@ -85,10 +85,13 @@ class TestUpgraders(JitTestCase):
         self.assertTrue("c" not in upgraders_dump_after_remove_test)
 
     def test_aten_div_tensor_at_3(self):
-        model_path = pytorch_test_dir + "/cpp/jit/div_at_version_3.pt"
+        model_path = pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt"
         loaded_model = torch.jit.load(model_path)
+        # there are 3 aten::div in this model
+        # And the upgrader for aten::div uses two
+        # div's because of if/else branch
         FileCheck().check("prim::If").run(loaded_model.graph)
-        FileCheck().check_count("aten::div", 2).run(loaded_model.graph)
+        FileCheck().check_count("aten::div", 6).run(loaded_model.graph)
 
         buffer = io.BytesIO()
         torch.jit.save(loaded_model, buffer)
