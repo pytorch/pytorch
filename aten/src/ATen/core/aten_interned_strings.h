@@ -254,6 +254,7 @@ _(aten, conv_tbc) \
 _(aten, conv_tbc_backward) \
 _(aten, conv_transpose1d) \
 _(aten, convolution) \
+_(aten, convolution_backward) \
 _(aten, copy_sparse_to_sparse) \
 _(aten, corrcoef) \
 _(aten, cos) \
