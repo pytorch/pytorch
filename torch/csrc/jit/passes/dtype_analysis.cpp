@@ -249,13 +249,18 @@ struct DtypePropagationPass {
         return false;
       case prim::ListConstruct:
       case prim::ListUnpack:
-        TORCH_INTERNAL_ASSERT(false, "not supported IR");
+        TORCH_INTERNAL_ASSERT(
+            false,
+            "List Construct and Unpack is not supported in Dtype Propagation");
         break;
       default:
         if (n->kind().is_aten()) {
           return processAtenOps(n);
         } else {
-          TORCH_INTERNAL_ASSERT(false, "not supported IR");
+          TORCH_INTERNAL_ASSERT(
+              false,
+              n->kind().toDisplayString(),
+              "Op is not supported in Dtype Propagation");
         }
     }
     return false;

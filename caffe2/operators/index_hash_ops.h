@@ -2,6 +2,7 @@
 #define CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 
 #include "caffe2/core/export_caffe2_op_to_c10.h"
+#include <c10/util/irange.h>
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 
@@ -42,7 +43,7 @@ class IndexHashOp : public Operator<Context> {
     auto* indices_data = indices.template data<T>();
     auto* hashed_indices_data = hashed_indices->template mutable_data<T>();
 
-    for (auto i = 0; i < N; i++) {
+    for (const auto i : c10::irange(N)) {
       hashed_indices_data[i] = hash(indices_data[i]);
     }
 

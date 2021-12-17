@@ -5,7 +5,7 @@
 
 #include <ATen/core/symbol.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace c10 {
 struct Type;
