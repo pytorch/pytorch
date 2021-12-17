@@ -64,7 +64,12 @@ std::tuple<Tensor,optional<int64_t>> _new_zeros_with_same_feature_meta_batch_rul
   return std::make_tuple(result, 0);
 }
 
+bool _has_same_storage_numel_batch_rule(const Tensor& a, const Tensor& b) {
+  return true;
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
+  m.impl("_has_same_storage_numel", _has_same_storage_numel_batch_rule);
   VMAP_SUPPORT("ones_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(ones_like)));
   VMAP_SUPPORT("zeros_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(zeros_like)));
   VMAP_SUPPORT("empty_like", BASIC_UNARY_BATCH_RULE(ATEN_FN(empty_like)));
