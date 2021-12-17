@@ -10251,6 +10251,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16),
@@ -10263,6 +10266,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16),
@@ -10275,6 +10281,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -10379,6 +10388,9 @@ op_db: List[OpInfo] = [
            skips=(
                # 69855: RuntimeError: ZeroTensors are immutable. Please use the materialized zero tensor (...)
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
+               # (ROCm) unexpected success
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.float64], active_if=TEST_WITH_ROCM),
            )),
     OpInfo('quantile',
            dtypes=floating_types(),
