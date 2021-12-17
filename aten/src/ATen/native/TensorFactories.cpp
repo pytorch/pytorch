@@ -8,6 +8,7 @@
 #include <ATen/TracerMode.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Deprecated.h>
+#include <ATen/native/DistributionTemplates.h>
 #include <ATen/native/Math.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorFactories.h>
@@ -841,6 +842,8 @@ Tensor& randn_out(IntArrayRef size, c10::optional<Generator> generator, Tensor& 
   return result.normal_(0, 1, generator);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ normal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Tensor normal(double mean, double std, IntArrayRef size,
               c10::optional<Generator> generator,
     c10::optional<ScalarType> dtype,
@@ -854,11 +857,34 @@ Tensor normal(double mean, double std, IntArrayRef size,
   return result.normal_(mean, std, generator);
 }
 
+Tensor normal_meta(double mean, double std, IntArrayRef size,
+                   c10::optional<Generator> generator,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  CHECK_NORMAL_STD(std);
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto result = at::empty(size, options);
+  return result;  // similar to normal_meta_
+}
+
 Tensor& normal_out(double mean, double std,
                    IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
   result.resize_(size);
   return result.normal_(mean, std, generator);
 }
+
+Tensor& normal_out_meta(double mean, double std,
+                        IntArrayRef size, c10::optional<Generator> generator, Tensor& result) {
+  CHECK_NORMAL_STD(std);
+  result.resize_(size);
+  return result;  // similar to normal_meta_
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn_like ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor randn_like(
     const Tensor& self,

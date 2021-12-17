@@ -7916,8 +7916,14 @@
     CPU, CUDA: normal
 
 - func: normal.float_float(float mean, float std, int[] size, *, Generator? generator=None, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  dispatch:
+    CPU, CUDA: normal
+    Meta: normal_meta
 
 - func: normal.float_float_out(float mean, float std, int[] size, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: normal_out
+    Meta: normal_out_meta
 
 - func: alias(Tensor(a) self) -> Tensor(a)
   variants: method, function
