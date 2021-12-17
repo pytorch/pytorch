@@ -1002,9 +1002,9 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
         m_loaded = _quantize_dbr.convert(m_loaded)
 
         with tempfile.NamedTemporaryFile() as f:
-          torch.save(m.state_dict(), f.name)
-          loaded_state_dict = torch.load(f.name)
-          m_loaded.load_state_dict(loaded_state_dict)
+            torch.save(m.state_dict(), f.name)
+            loaded_state_dict = torch.load(f.name)
+            m_loaded.load_state_dict(loaded_state_dict)
         expected = m(example_inputs[0])
         actual = m_loaded(example_inputs[0])
         torch.allclose(expected, actual)
