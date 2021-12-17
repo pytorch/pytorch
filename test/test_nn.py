@@ -13307,6 +13307,9 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
 
+        gradcheck(lambda x, y: F.conv3d(x, y, padding='same', dilation=2), (x, y),
+                  check_forward_ad=True)
+
         # Asymmetric padding
         y = torch.rand(1, 1, 1, 4, 4, device=device, requires_grad=True)
         z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
@@ -13318,6 +13321,9 @@ class TestNNDeviceType(NNTestCase):
         z.sum().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
+
+        gradcheck(lambda x, y: F.conv3d(x, y, padding='same'), (x, y),
+                  check_forward_ad=True)
 
     def test_conv1d_valid_padding_backward(self, device):
         # Test F.conv1d gradients work with padding='valid'
@@ -13357,6 +13363,8 @@ class TestNNDeviceType(NNTestCase):
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
+
+        gradcheck(lambda x, y: F.conv3d(x, y, padding='valid'), (x, y), check_forward_ad=True)
 
     @skipMeta
     @parametrize_test("input_shape,transposed,dilated,groups,layout,backend_expected", [
