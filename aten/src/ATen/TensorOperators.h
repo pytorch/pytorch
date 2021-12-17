@@ -1,8 +1,7 @@
 #pragma once
 
 #include <c10/core/Scalar.h>
-#include <ATen/Tensor.h>
-
+#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

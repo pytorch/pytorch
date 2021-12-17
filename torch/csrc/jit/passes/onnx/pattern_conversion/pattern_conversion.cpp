@@ -1,9 +1,12 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/erase_number_types.h>
 #include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_conversion.h>
+
+#include <ATen/ScalarOps.h>
 
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Conversion] in pattern_conversion.h

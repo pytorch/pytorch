@@ -9,7 +9,6 @@
 #include <sstream>
 #include <forward_list>
 #include <tuple>
-#include <ATen/ATen.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/Export.h>
 

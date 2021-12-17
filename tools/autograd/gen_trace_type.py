@@ -1,7 +1,7 @@
 import itertools
 from typing import List, Sequence, Union, Dict
 
-from tools.codegen.api.types import CppSignatureGroup, DispatcherSignature
+from tools.codegen.api.types import DispatcherSignature
 from tools.codegen.api import cpp
 from tools.codegen.code_template import CodeTemplate
 from tools.codegen.context import with_native_function
@@ -312,7 +312,7 @@ def get_return_value(f: NativeFunction) -> str:
         return f'std::make_tuple({moved})'
 
 TRACE_DISPATCH = CodeTemplate("""\
-${assign_return_values}at::redispatch::${api_name}(${unpacked_args});""")
+${assign_return_values}at::_ops::${unambiguous_name}::redispatch(${unpacked_args});""")
 
 def emit_trace_body(f: NativeFunction) -> List[str]:
     trace_body: List[str] = []
@@ -333,15 +333,9 @@ def emit_trace_body(f: NativeFunction) -> List[str]:
 
     # Note that this calls the slow, dispatching variants of manual_cpp_binding ops.
     # We could probably work harder to ensure that the fast variants are called instead, but the perf benefit would be minimal.
-    sig_group = CppSignatureGroup.from_native_function(f, method=False, fallback_binding=f.manual_cpp_binding)
-    if sig_group.faithful_signature is not None:
-        api_name = sig_group.faithful_signature.name()
-    else:
-        api_name = sig_group.signature.name()
-
     trace_body.append(TRACE_DISPATCH.substitute(
         assign_return_values=assign_return_values,
-        api_name=api_name,
+        unambiguous_name=f.func.name.unambiguous_name(),
         unpacked_args=redispatch_args,
     ))
 
@@ -401,6 +395,7 @@ def gen_trace_type_func(
     fn: NativeFunction
 ) -> Dict[str, List[str]]:
     return {
+        'ops_headers': [f'#include <ATen/ops/{fn.root_name}_ops.h>'],
         'trace_method_definitions': [method_definition(fn)],
         'trace_wrapper_registrations': [method_registration(fn)],
     }
@@ -412,12 +407,12 @@ def gen_trace_type(out: str, native_functions: List[NativeFunction], template_pa
     fm.write_sharded(
         'TraceType.cpp',
         [fn for fn in native_functions if cpp.name(fn.func) not in MANUAL_TRACER],
-        key_fn=lambda fn: cpp.name(fn.func),
+        key_fn=lambda fn: fn.root_name,
         base_env={
             'generated_comment':
             f'@generated from {template_path}/TraceType.cpp',
         },
         env_callable=gen_trace_type_func,
         num_shards=5,
-        sharded_keys={'trace_method_definitions', 'trace_wrapper_registrations'}
+        sharded_keys={'ops_headers', 'trace_method_definitions', 'trace_wrapper_registrations'}
     )

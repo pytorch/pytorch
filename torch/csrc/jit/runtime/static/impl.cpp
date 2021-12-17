@@ -1,3 +1,4 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/csrc/jit/runtime/static/impl.h>
 
 #include <ATen/MemoryOverlap.h>
@@ -23,6 +24,13 @@
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/clone_native.h>
+#endif
+
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
