@@ -217,6 +217,41 @@ std::tuple<Tensor,Tensor> cudnn_convolution_backward_plumbing(const Tensor & sel
   return slow_fallback<Tensor,Tensor>(op, { self, grad_output, weight, padding, stride, dilation, groups, benchmark, deterministic, allow_tf32, output_mask });
 }
 
+std::tuple<Tensor,optional<int64_t>> embedding_batch_rule(
+    const Tensor& weight, optional<int64_t> weight_bdim,
+    const Tensor& indices, optional<int64_t> indices_bdim,
+    int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
+  if (!weight_bdim && indices_bdim) {
+    // B*, ED -> B*D
+    const auto result = at::embedding(weight, indices, padding_idx, scale_grad_by_freq, sparse);
+    return std::make_tuple(result, indices_bdim);
+  } else if (weight_bdim && !indices_bdim) {
+    // *, BED -> *, E(BD) -> *(BD) -> *BD
+    const auto batch_size = weight.size(*weight_bdim);
+    const auto weight_ = reshape_dim_into(*weight_bdim, /*embedding_dim*/1, weight);
+    auto result = at::embedding(weight_, indices, padding_idx, scale_grad_by_freq, sparse);
+    result = reshape_dim_outof(-1, batch_size, result);
+    return std::make_tuple(result, result.dim() - 2);
+  }
+  TORCH_INTERNAL_ASSERT(weight_bdim && indices_bdim);
+  // B*, BED -> B*, (BE)D -> B*D
+  // We'll need to do something extra: add (0, E, 2*E, ...) to the indices.
+  const auto batch_size = weight.size(*weight_bdim);
+  const auto num_embeddings = weight.size((*weight_bdim == 0) ? 1 : 0);
+  const auto weight_ = reshape_dim_into(*weight_bdim, 0, weight);
+  auto indices_ = moveBatchDimToFront(indices, indices_bdim);
+
+  // [batch_size, 1, 1, 1, ..., 1]
+  DimVector view_shape(indices_.dim(), 1);
+  view_shape[0] = batch_size;
+
+  auto range = at::arange(0, batch_size * num_embeddings, num_embeddings, indices_.options());
+  range = range.view(view_shape);
+
+  indices_ = indices_ + range;
+  const auto result = at::embedding(weight_, indices_, padding_idx, scale_grad_by_freq, sparse);
+  return std::make_tuple(result, 0);
+}
 
 /**
  * grid sample batch rule breaks down into 3 cases:
@@ -534,6 +569,8 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
 
   EXISTING_BDIM(im2col);
   EXISTING_BDIM(im2col_backward);
+
+  VMAP_SUPPORT("embedding", embedding_batch_rule);
 
   VMAP_SUPPORT("grid_sampler_2d", GRID_SAMPLE_BATCH_RULE(grid_sampler));
   VMAP_SUPPORT("grid_sampler_2d_backward", GRID_SAMPLE_BW_BATCH_RULE(grid_sampler_2d_backward));
