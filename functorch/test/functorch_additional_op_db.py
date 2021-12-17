@@ -224,3 +224,64 @@ for reduction in ['mean', 'sum', 'none']:
                dtypes=floating_types(),
                dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                supports_out=True))
+
+# TODO: split embedding in pytorch core
+def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
+    def make_input(shape):
+        return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def make_long_input(shape, *, low, high):
+        return make_tensor(shape, device=device, dtype=torch.long, low=low, high=high)
+
+    M = 20
+    S = 5
+
+    def generator():
+        # 0-D index tensor
+        idx = make_long_input((), low=0, high=M)
+        yield SampleInput(make_input((M, S)), args=(idx,),)
+
+        # 1-D index tensor
+        idx = make_long_input((S,), low=0, high=M)
+        yield SampleInput(make_input((M, S)), args=(idx,),)
+
+        # 2-D index tensor
+        idx = make_long_input((S, S), low=0, high=M)
+        yield SampleInput(make_input((M, S)), args=(idx,),)
+
+        if not requires_grad:
+            # Following inputs return different gradient from the numerical gradient.
+            # This is expected and relevant tests are present in `test_nn.py`.
+
+            # The gradient vector at `padding_idx` is not updated.
+            idx = make_long_input((2, 2), low=0, high=S)
+            idx[0, 0] = 2
+            idx[1, 1] = 2
+            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': 2},)
+
+            idx = make_long_input((2, 2), low=0, high=S)
+            idx[0, 0] = 4
+            idx[1, 1] = 4
+            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': -1},)
+
+            # Scale the gradient based on the inverse frequency of a particular index.
+            idx = make_long_input((2, 2), low=0, high=S)
+            idx[0, 0] = 1
+            idx[0, 1] = 1
+            weights = make_input((S, S))
+            yield SampleInput(weights, args=(idx,), kwargs={'scale_grad_by_freq': True},)
+
+    return list(generator())
+
+additional_op_db.append(
+    OpInfo(
+        "nn.functional.embedding",
+        variant_test_name="functorch",
+        # We use lambda to reshuffle the positional arguments.
+        # This is because currently only the `input` field of SampleInput
+        # is tested in gradient tests.
+        op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
+        dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        sample_inputs_func=sample_inputs_embedding,
+        supports_out=False,
+    ))

@@ -3109,7 +3109,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.batch_norm'),
         xfail('lu_unpack'),
         xfail('histogramdd'),
-        xfail('nn.functional.embedding'),
+        xfail('nn.functional.embedding', ''),
         xfail('randn_like'),
         xfail('allclose'),
         xfail('bfloat16', 'channels_last'),
