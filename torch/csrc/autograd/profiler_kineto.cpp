@@ -766,6 +766,14 @@ void enableProfiler(
 }
 
 std::unique_ptr<ProfilerResult> disableProfiler() {
+  // In PyTorch Lightning, it would call disableProfiler first before enabling it
+  // In this case, it would raise c10:Error and the pytorch would Aborted
+  // As the result, we need check the instance before invoking ThreadLocalDebugInfo::_pop.
+  auto debug_info = c10::ThreadLocalDebugInfo::current();
+  if (!debug_info){
+    return std::unique_ptr<ProfilerResult>();
+  }
+
   // all the DebugInfoBase objects are scope based and supposed to use DebugInfoGuard
   auto state = c10::ThreadLocalDebugInfo::_pop(c10::DebugInfoKind::PROFILER_STATE);
 
