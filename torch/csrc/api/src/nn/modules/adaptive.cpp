@@ -68,7 +68,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Te
     "0D or 1D target tensor expected, multi-target not supported");
 
   if (targ_dim == 1) {
-    TORCH_CHECK(
+  TORCH_CHECK(
       input_.dim() == 2,
       "1D target tensor expects 2D input tensors, but found inputs with sizes ",
       input_.sizes(),
@@ -135,7 +135,7 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Te
   output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze();
   const double loss = (-output).mean().item().toDouble();
 
-  if (targ_dim == 0) {
+  if (!is_batched) {
     output = output.squeeze(0);
   }
 
