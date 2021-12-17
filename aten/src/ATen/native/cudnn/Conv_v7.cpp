@@ -201,8 +201,24 @@ size_t getMaxWorkspaceSize(
   size_t max_block_size = 0;
   size_t tmp_bytes = 0;  // Only used for filling pointer parameters that aren't used later
 
-  const auto device = c10::cuda::current_device();
-  c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  static bool using_native_allocator =
+    (std::strcmp(c10::cuda::CUDACachingAllocator::allocatorBackend(), "native") == 0);
+  if (using_native_allocator) {
+    const auto device = c10::cuda::current_device();
+    c10::cuda::CUDACachingAllocator::cacheInfo(device, &tmp_bytes, &max_block_size);
+  } else {
+    // With the native allocator, the intent of cacheInfo seems to be "return the largest free block",
+    // in other words, the largest memory block that may be used immediately and asynchronously
+    // (without triggering a cudaMalloc).
+    // This strategy is reasonable, but IIUC it introduces a strange dependence between the allocator
+    // and the cudnn calls, because it means the current state of the caching allocator, which is
+    // the result of unrelated earlier calls, can influence the choice and therefore numerics of the cudnn call.
+    //
+    // NEEDED FOR PR: If we don't mind this "strange dependence", how should we set max_block_size if
+    // the backend is cudaMallocAsync? We could either do something special right here, without calling
+    // cacheInfo, or we could customize the behavior of cacheInfo in CUDAMallocAsyncAllocator.cpp,
+    // in which case we can call "cacheInfo" here without an allocatorBackend()-based conditional.
+  }
 
   for (const auto i : c10::irange(n_algo)) {
     cudnnStatus_t err;
