@@ -165,7 +165,7 @@ class TestQuantizedTensor(TestCase):
             scale, zero_pt = _calculate_dynamic_qparams(mat2quant, dtype, reduce_flag)
             q_s = torch.quantize_per_tensor(mat2quant, scale, zero_pt, dtype)
 
-            self.assertEqual(q_d, q_s, rtol=1.3e-6, atol=1e-5)
+            self.assertEqual(q_d, q_s)
 
     def _test_qtensor(self, device):
         device = str(device)
