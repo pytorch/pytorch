@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    Callable,
     Dict,
     List,
     Optional,
@@ -26,14 +27,6 @@ from torch.distributed._sharding_spec._internals import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import (
-    kaiming_uniform_,
-    normal_,
-    sharded_embedding,
-    sharded_embedding_bag,
-    sharded_linear,
-    uniform_,
-)
 from .shard import Shard
 from .utils import (
     get_current_process_group,
@@ -48,6 +41,19 @@ from .utils import (
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
+
+# Custom sharded ops
+_SHARDED_OPS: Dict[str, Callable] = {}
+def _register_sharded_op(op, func):
+    from inspect import signature
+    if len(signature(func).parameters) != 4:
+        raise TypeError(
+            f'Custom sharded op function expects signature: '
+            f'(types, args, kwargs, process_group), but received '
+            f'signature: {signature(func)}')
+
+    global _SHARDED_OPS
+    _SHARDED_OPS[op] = func
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
@@ -545,18 +551,8 @@ class ShardedTensor(object):
         return self._sharding_spec
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        if func == torch.nn.functional.linear:
-            return sharded_linear(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding:
-            return sharded_embedding(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding_bag:
-            return sharded_embedding_bag(types, args, kwargs, self._process_group)
-        elif func == torch.nn.init.normal_:
-            return normal_(types, args, kwargs)
-        elif func == torch.nn.init.uniform_:
-            return uniform_(types, args, kwargs)
-        elif func == torch.nn.init.kaiming_uniform_:
-            return kaiming_uniform_(types, args, kwargs)
+        if func in _SHARDED_OPS:
+            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
