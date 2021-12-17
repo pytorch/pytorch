@@ -32,16 +32,14 @@ class FixedCountStat(Stat):
     ) -> None: ...
 
 class Event:
-    type: str
-    message: str
+    name: str
     timestamp: datetime.datetime
-    metadata: Dict[str, Union[int, float, bool, str]]
+    data: Dict[str, Union[int, float, bool, str]]
     def __init__(
         self,
-        type: str,
-        message: str,
+        name: str,
         timestamp: datetime.datetime,
-        metadata: Dict[str, Union[int, float, bool, str]],
+        data: Dict[str, Union[int, float, bool, str]],
     ) -> None: ...
 
 def log_event(e: Event) -> None: ...

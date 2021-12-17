@@ -236,14 +236,13 @@ TEST(MonitorTest, IntervalStatEvent) {
 
   ASSERT_EQ(guard.handler->events.size(), 1);
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 3L},
       {"a.count", 2L},
   };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }
 
 TEST(MonitorTest, IntervalStatEventDestruction) {
@@ -262,14 +261,13 @@ TEST(MonitorTest, IntervalStatEventDestruction) {
   ASSERT_EQ(guard.handler->events.size(), 1);
 
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 1L},
       {"a.count", 1L},
   };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }
 
 TEST(MonitorTest, FixedCountStatEvent) {
@@ -293,14 +291,13 @@ TEST(MonitorTest, FixedCountStatEvent) {
   ASSERT_EQ(guard.handler->events.size(), 1);
 
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 4L},
       {"a.count", 3L},
   };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }
 
 TEST(MonitorTest, FixedCountStatEventDestruction) {
@@ -320,12 +317,11 @@ TEST(MonitorTest, FixedCountStatEventDestruction) {
   ASSERT_EQ(guard.handler->events.size(), 1);
 
   Event e = guard.handler->events.at(0);
-  ASSERT_EQ(e.type, "torch.monitor.Stat");
-  ASSERT_EQ(e.message, "a");
+  ASSERT_EQ(e.name, "torch.monitor.Stat");
   ASSERT_NE(e.timestamp, std::chrono::system_clock::time_point{});
-  std::unordered_map<std::string, metadata_value_t> metadata{
+  std::unordered_map<std::string, data_value_t> data{
       {"a.sum", 1L},
       {"a.count", 1L},
   };
-  ASSERT_EQ(e.metadata, metadata);
+  ASSERT_EQ(e.data, data);
 }

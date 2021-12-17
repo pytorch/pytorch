@@ -152,18 +152,17 @@ class Stat {
     }
 
     Event e;
-    e.type = "torch.monitor.Stat";
-    e.message = name_;
+    e.name = "torch.monitor.Stat";
     e.timestamp = std::chrono::system_clock::now();
 
     auto stats = getLocked();
-    e.metadata.reserve(stats.size());
+    e.data.reserve(stats.size());
     for (auto& kv : stats) {
       std::stringstream key;
       key << name_;
       key << ".";
       key << aggregationName(kv.first);
-      e.metadata[key.str()] = kv.second;
+      e.data[key.str()] = kv.second;
     }
 
     logEvent(e);

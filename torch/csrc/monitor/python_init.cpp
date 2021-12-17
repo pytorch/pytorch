@@ -14,9 +14,9 @@
 namespace pybind11 {
 namespace detail {
 template <>
-struct type_caster<torch::monitor::metadata_value_t> {
+struct type_caster<torch::monitor::data_value_t> {
  public:
-  PYBIND11_TYPE_CASTER(torch::monitor::metadata_value_t, _("metadata_value_t"));
+  PYBIND11_TYPE_CASTER(torch::monitor::data_value_t, _("data_value_t"));
 
   // Python -> C++
   bool load(handle src, bool) {
@@ -38,7 +38,7 @@ struct type_caster<torch::monitor::metadata_value_t> {
 
   // C++ -> Python
   static handle cast(
-      torch::monitor::metadata_value_t src,
+      torch::monitor::data_value_t src,
       return_value_policy /* policy */,
       handle /* parent */) {
     if (c10::holds_alternative<double>(src)) {
@@ -55,7 +55,7 @@ struct type_caster<torch::monitor::metadata_value_t> {
       std::string str = c10::get<std::string>(src);
       return PyUnicode_FromStringAndSize(str.data(), str.size());
     }
-    throw std::runtime_error("unknown metadata_value_t type");
+    throw std::runtime_error("unknown data_value_t type");
   }
 };
 } // namespace detail
@@ -110,35 +110,30 @@ void initMonitorBindings(PyObject* module) {
 
   py::class_<Event>(m, "Event")
       .def(
-          py::init(
-              [](const std::string& type,
-                 const std::string& message,
-                 std::chrono::system_clock::time_point timestamp,
-                 std::unordered_map<std::string, metadata_value_t> metadata) {
-                Event e;
-                e.type = type;
-                e.message = message;
-                e.timestamp = timestamp;
-                e.metadata = metadata;
-                return e;
-              }),
-          py::arg("type"),
-          py::arg("message"),
+          py::init([](const std::string& name,
+                      std::chrono::system_clock::time_point timestamp,
+                      std::unordered_map<std::string, data_value_t> data) {
+            Event e;
+            e.name = name;
+            e.timestamp = timestamp;
+            e.data = data;
+            return e;
+          }),
+          py::arg("name"),
           py::arg("timestamp"),
-          py::arg("metadata"))
-      .def_readwrite("type", &Event::type)
-      .def_readwrite("message", &Event::message)
+          py::arg("data"))
+      .def_readwrite("name", &Event::name)
       .def_readwrite("timestamp", &Event::timestamp)
-      .def_readwrite("metadata", &Event::metadata);
+      .def_readwrite("data", &Event::data);
 
   m.def("log_event", &logEvent);
 
-  py::class_<metadata_value_t> metadataClass(m, "metadata_value_t");
+  py::class_<data_value_t> dataClass(m, "data_value_t");
 
-  py::implicitly_convertible<std::string, metadata_value_t>();
-  py::implicitly_convertible<double, metadata_value_t>();
-  py::implicitly_convertible<int64_t, metadata_value_t>();
-  py::implicitly_convertible<bool, metadata_value_t>();
+  py::implicitly_convertible<std::string, data_value_t>();
+  py::implicitly_convertible<double, data_value_t>();
+  py::implicitly_convertible<int64_t, data_value_t>();
+  py::implicitly_convertible<bool, data_value_t>();
 
   py::class_<PythonEventHandler, std::shared_ptr<PythonEventHandler>>
       eventHandlerClass(m, "PythonEventHandler");

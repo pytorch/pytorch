@@ -52,19 +52,17 @@ class TestMonitor(TestCase):
 
     def test_log_event(self) -> None:
         e = Event(
-            type="torch.monitor.TestEvent",
-            message="a test event",
+            name="torch.monitor.TestEvent",
             timestamp=datetime.now(),
-            metadata={
+            data={
                 "str": "a string",
                 "float": 1234.0,
                 "int": 1234,
             },
         )
-        self.assertEqual(e.type, "torch.monitor.TestEvent")
-        self.assertEqual(e.message, "a test event")
+        self.assertEqual(e.name, "torch.monitor.TestEvent")
         self.assertIsNotNone(e.timestamp)
-        self.assertIsNotNone(e.metadata)
+        self.assertIsNotNone(e.data)
         log_event(e)
 
     def test_event_handler(self) -> None:
@@ -75,10 +73,9 @@ class TestMonitor(TestCase):
 
         handle = register_event_handler(handler)
         e = Event(
-            type="torch.monitor.TestEvent",
-            message="a test event",
+            name="torch.monitor.TestEvent",
             timestamp=datetime.now(),
-            metadata={},
+            data={},
         )
         log_event(e)
         self.assertEqual(len(events), 1)
