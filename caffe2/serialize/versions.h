@@ -48,9 +48,18 @@ constexpr uint64_t kMaxSupportedFileFormatVersion = 0x7L;
 //      when given bool or integer fill values.
 // 6. Write version string to `./data/version` instead of `version`.
 
-// TODO: this needs to be more descriptive, but for now we know that the global
-// operator version number is at 7.
+// This is set to 7 from 3 due to a different interpretation of what
+// file format version is. Whenever there is new upgrader introduced,
+// this number should be bumped.
+//     1. aten::div is changed at version 4
+//     2. aten::full is changed at version 5
+//     3. torch.package uses version 6
 constexpr uint64_t kProducedFileFormatVersion = 0x7L;
+
+// Absolute minimum version we will write packages. This
+// means that every package from now on will always be
+// greater than this number.
+constexpr uint64_t kMinProducedFileFormatVersion = 0x3L;
 
 // The version we write when the archive contains bytecode.
 // It must be higher or eq to kProducedFileFormatVersion.
