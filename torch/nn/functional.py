@@ -566,8 +566,8 @@ def fractional_max_pool3d_with_indices(
         ]
 
     if _random_samples is None:
-        n_batch = 1 if input.dim() == 3 else input.size(0)
-        _random_samples = torch.rand(n_batch, input.size(-3), 3, dtype=input.dtype, device=input.device)
+        n_batch = 1 if input.dim() == 4 else input.size(0)
+        _random_samples = torch.rand(n_batch, input.size(-4), 3, dtype=input.dtype, device=input.device)
     return torch._C._nn.fractional_max_pool3d(input, kernel_size, output_size, _random_samples)
 
 
