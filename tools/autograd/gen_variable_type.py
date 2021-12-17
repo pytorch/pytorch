@@ -907,9 +907,9 @@ def emit_body(fn: NativeFunctionWithDifferentiabilityInfo) -> List[str]:
 
             assert derivative.required_inputs_fw_grad is not None
 
-            zeros_fn = "zeros" if inplace else "_efficientzerotensor"
             unpacked_arguments = ""
             for inp in differentiable_inputs:
+                zeros_fn = "zeros" if inplace and inp.name == "self" else "_efficientzerotensor"
                 if inp.name in derivative.required_inputs_fw_grad:
                     unpacked_arguments += FW_DERIVATIVE_DEFINED_GRAD_TEMPLATE.substitute(inp=inp.name, zeros_fn=zeros_fn)
                 if inp.name in (derivative.required_inputs_primal or []):
