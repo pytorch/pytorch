@@ -303,7 +303,7 @@ static PyObject * THPStorage_(fromFile)(PyObject *_unused, PyObject *args, PyObj
     shared = at::ALLOCATOR_MAPPED_SHARED;
 
 #ifdef THC_GENERIC_FILE
-  TORCH_CHECK(false, "not available yet for CUDA");
+  THError("not available yet for CUDA");
   return nullptr;
 #else
   size_t actual_nbytes = -1;

@@ -24,8 +24,7 @@ void initONNXBindings(PyObject* module) {
       .value("UINT32", ::ONNX_NAMESPACE::TensorProto_DataType_UINT32)
       .value("UINT64", ::ONNX_NAMESPACE::TensorProto_DataType_UINT64)
       .value("COMPLEX64", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX64)
-      .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128)
-      .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16);
+      .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
       .value("ONNX", OperatorExportTypes::ONNX)

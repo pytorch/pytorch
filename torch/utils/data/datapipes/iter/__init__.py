@@ -23,7 +23,6 @@ from torch.utils.data.datapipes.iter.grouping import (
     BatcherIterDataPipe as Batcher,
     BucketBatcherIterDataPipe as BucketBatcher,
     GrouperIterDataPipe as Grouper,
-    ShardingFilterIterDataPipe as ShardingFilter,
     UnBatcherIterDataPipe as UnBatcher,
 )
 from torch.utils.data.datapipes.iter.httpreader import (
@@ -69,7 +68,6 @@ __all__ = ['Batcher',
            'Multiplexer',
            'RoutedDecoder',
            'Sampler',
-           'ShardingFilter',
            'Shuffler',
            'StreamReader',
            'TarArchiveReader',

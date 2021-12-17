@@ -689,7 +689,10 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 sharded_optimizer.load_state_dict(sharded_optim_state_dict)
                 check_step()
 
-            for opt in [torch.optim.Adam, torch.optim.SGD]:
+            for opt in [torch.optim.Adam]:
+                check_optimizer_equivalence(opt, maximize=False)
+
+            for opt in [torch.optim.SGD]:
                 for maximize in (True, False):
                     check_optimizer_equivalence(opt, maximize=maximize)
 

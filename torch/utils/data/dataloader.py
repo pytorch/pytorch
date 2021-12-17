@@ -18,10 +18,8 @@ import torch.multiprocessing as multiprocessing
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
 from . import _utils
-
-import torch.utils.data.graph_settings
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -33,16 +31,14 @@ _worker_init_fn_t = Callable[[int], None]
 _collate_fn_t = Callable[[List[T]], Any]
 
 
-# These functions used to be defined in this file. However, it was moved to
+# This function used to be defined in this file. However, it was moved to
 # _utils/collate.py. Although it is rather hard to access this from user land
 # (one has to explicitly directly `import torch.utils.data.dataloader`), there
 # probably is user code out there using it. This aliasing maintains BC in this
 # aspect.
 default_collate: _collate_fn_t = _utils.collate.default_collate
-default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
-
 
 class _DatasetKind(object):
     Map = 0
@@ -228,14 +224,11 @@ class DataLoader(Generic[T_co]):
             # option. If this turns out to be useful in future, we can re-enable
             # this, and support custom samplers that specify the assignments to
             # specific workers.
-            if isinstance(dataset, IterDataPipe):
-                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not False:
+            if shuffle is not False:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
-
-            if sampler is not None:
+            elif sampler is not None:
                 # See NOTE [ Custom Samplers and IterableDataset ]
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
@@ -247,8 +240,6 @@ class DataLoader(Generic[T_co]):
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
             self._dataset_kind = _DatasetKind.Map
-
-
 
         if sampler is not None and shuffle:
             raise ValueError('sampler option is mutually exclusive with '

@@ -220,18 +220,16 @@ def gen_dispatcher_registrations(
         backend_dispatch_key: DispatchKey,
         dispatch_key: DispatchKey,
         selector: 'SelectiveBuilder') -> None:
-    backend_index = backend_indices[dispatch_key]
     fm.write_with_template(f'Register{dispatch_key}.cpp', 'RegisterDispatchKey.cpp', lambda: {
         'extra_cuda_headers': '',
         'external_backend_headers': f'#include "{output_dir}/{backend_dispatch_key}NativeFunctions.h"',
-        'ops_headers': '#include <ATen/Functions.h>',
+        'namespaced_headers': '',
         'DispatchKey': dispatch_key,
         'dispatch_namespace': dispatch_key.lower(),
-        'dispatch_headers': dest.gen_registration_headers(backend_index, per_operator_headers=False),
-        'dispatch_helpers': dest.gen_registration_helpers(backend_index),
+        'dispatch_helpers': dest.gen_registration_helpers(backend_indices[dispatch_key]),
         'dispatch_namespaced_definitions': list(concatMap(
             dest.RegisterDispatchKey(
-                backend_index,
+                backend_indices[dispatch_key],
                 Target.NAMESPACED_DEFINITION,
                 selector,
                 rocm=False,
@@ -241,7 +239,7 @@ def gen_dispatcher_registrations(
         )),
         'dispatch_anonymous_definitions': list(concatMap(
             dest.RegisterDispatchKey(
-                backend_index,
+                backend_indices[dispatch_key],
                 Target.ANONYMOUS_DEFINITION,
                 selector,
                 rocm=False,
@@ -251,7 +249,7 @@ def gen_dispatcher_registrations(
         )),
         'dispatch_registrations': list(concatMap(
             dest.RegisterDispatchKey(
-                backend_index,
+                backend_indices[dispatch_key],
                 Target.REGISTRATION,
                 selector,
                 rocm=False,

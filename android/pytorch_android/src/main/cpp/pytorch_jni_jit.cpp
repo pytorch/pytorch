@@ -19,6 +19,8 @@
 #include <android/log.h>
 #endif
 
+using namespace torch::autograd::profiler;
+
 namespace pytorch_jni {
 
 namespace {

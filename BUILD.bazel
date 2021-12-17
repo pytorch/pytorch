@@ -6,7 +6,8 @@ load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/build_variables.bzl", "torch_cpp_srcs", "libtorch_python_core_sources", "libtorch_core_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "jit_core_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
+load("//:aten.bzl", "intern_build_aten_ops")
+load("@com_github_google_flatbuffers//:build_defs.bzl", "flatbuffer_cc_library")
 
 COMMON_COPTS = [
     "-DHAVE_MALLOC_USABLE_SIZE=1",
@@ -19,7 +20,6 @@ COMMON_COPTS = [
     "-DTH_HAVE_THREAD",
     "-DUSE_FBGEMM",
     "-DUSE_DISTRIBUTED",
-    "-DAT_PER_OPERATOR_HEADERS",
     "-DATEN_THREADING=NATIVE",
     "-DNO_CUDNN_DESTROY_HANDLE",
 ] + if_cuda([
@@ -119,7 +119,7 @@ py_binary(
     ],
 )
 
-generate_aten(
+genrule(
     name = "generated_cpp",
     srcs = [
         "aten/src/ATen/native/native_functions.yaml",
@@ -163,12 +163,13 @@ generate_aten(
         "aten/src/ATen/NativeFunctions.h",
         "aten/src/ATen/MetaFunctions.h",
         "aten/src/ATen/MetaFunctions_inl.h",
-        "aten/src/ATen/MethodOperators.h",
+        "aten/src/ATen/NativeMetaFunctions.h",
         "aten/src/ATen/core/TensorBody.h",
         "aten/src/ATen/core/TensorMethods.cpp",
         "aten/src/ATen/core/ATenOpList.cpp",
     ],
-    generator=":gen",
+    cmd = "$(location :gen) --source-path aten/src/ATen --install_dir `dirname $(location aten/src/ATen/Declarations.yaml)`",
+    tools = [":gen"],
 )
 
 py_library(
@@ -348,6 +349,13 @@ filegroup(
 )
 
 filegroup(
+    name = "th_srcs",
+    srcs = [
+        "aten/src/TH/THGeneral.cpp",
+    ],
+)
+
+filegroup(
     name = "aten_cuda_srcs",
     srcs = [
         "aten/src/ATen/cuda/CUDABlas.cpp",
@@ -503,6 +511,14 @@ header_template_rule(
     },
 )
 
+header_template_rule(
+    name = "aten_src_TH_THGeneral",
+    src = "aten/src/TH/THGeneral.h.in",
+    out = "aten/src/TH/THGeneral.h",
+    substitutions = {
+    },
+)
+
 cc_library(
     name = "aten_headers",
     hdrs = [
@@ -526,6 +542,7 @@ cc_library(
     ],
     deps = [
         ":c10_headers",
+        ":aten_src_TH_THGeneral",
     ],
 )
 
@@ -545,6 +562,20 @@ intern_build_aten_ops(
     deps = [
         ":aten_headers",
         "@sleef",
+        "@fbgemm",
+    ],
+)
+
+cc_library(
+    name = "th",
+    srcs = [
+        ":th_srcs",
+    ],
+    copts = ATEN_COPTS + [
+        "-mavx",
+    ],
+    deps = [
+        ":aten_headers",
         "@fbgemm",
     ],
 )
@@ -576,6 +607,7 @@ cc_library(
         ":ATen_CPU",
         ":aten_headers",
         ":caffe2_for_aten_headers",
+        ":th",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
@@ -1778,6 +1810,14 @@ genrule(
     tools = [':gen_version_header']
 )
 
+flatbuffer_cc_library(
+    name = "mobile_bytecode_header",
+    srcs = ["torch/csrc/jit/serialization/mobile_bytecode.fbs"],
+    out_prefix = "torch/csrc/jit/serialization/",
+    flatc_args=["--gen-mutable", "--scoped-enums",],
+)
+
+
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
 cc_library(
     name = "torch_headers",
@@ -1809,6 +1849,7 @@ cc_library(
         ":aten_headers",
         ":c10_headers",
         ":caffe2_headers",
+        ":mobile_bytecode_header",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1849,6 +1890,32 @@ cc_library(
         ":torch_headers",
     ],
     alwayslink = True,
+)
+
+cc_library(
+    name = "flatbuffer_loader",
+    srcs = [
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+    ],
+    hdrs = [
+        "torch/csrc/jit/mobile/flatbuffer_loader.h"
+    ],
+    deps = [
+        ":torch"
+    ]
+)
+
+cc_library(
+    name = "flatbuffer_serializer",
+    srcs = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.cpp"
+    ],
+    hdrs = [
+        "torch/csrc/jit/serialization/flatbuffer_serializer.h"
+    ],
+    deps = [
+        ":torch"
+    ]
 )
 
 cc_library(
@@ -2001,6 +2068,8 @@ cc_test(
     ],
     deps = [
         ":torch",
+        ":flatbuffer_serializer",
+        ":flatbuffer_loader",
         "@com_google_googletest//:gtest_main",
     ],
 )
