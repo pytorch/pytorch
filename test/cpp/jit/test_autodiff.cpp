@@ -19,6 +19,8 @@
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include "torch/torch.h"
+
 namespace torch {
 namespace jit {
 
@@ -85,6 +87,49 @@ variable_list grad(
       false,
       false,
       fmap(inputs, get_edge));
+}
+
+at::Tensor get_csr_tensor() {
+  /*
+   * | 1.0 2.0         |
+   * |         3.0     |
+   * |     4.0     5.0 |
+   */
+  std::vector<float> vec_val = {1.0, 2.0, 3.0, 4.0, 5.0};
+  std::vector<int64_t> vec_col = {0, 1, 2, 1, 3};
+  std::vector<int64_t> vec_row = {0, 2, 3, 5};
+  std::vector<int64_t> sizes = {3, 4};
+  auto col_idx = torch::from_blob(
+      vec_col.data(),
+      {5},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  auto row_idx = torch::from_blob(
+      vec_row.data(),
+      {4},
+      torch::TensorOptions().dtype(torch::kInt64).device(torch::kCPU));
+  auto values = torch::from_blob(
+      vec_val.data(),
+      {5},
+      torch::TensorOptions().dtype(torch::kFloat).device(torch::kCPU));
+  auto sparse = at::_sparse_csr_tensor_unsafe(
+      row_idx,
+      col_idx,
+      values,
+      sizes,
+      torch::TensorOptions().dtype(torch::kFloat).device(torch::kCPU).layout(at::Layout::SparseCsr));
+  return sparse;
+}
+
+TEST(AutodiffTest, SparseCSRFails) {
+  auto sparse = get_csr_tensor();
+  auto var = autograd::make_variable(sparse, true);
+  auto dense = var.to_dense();
+}
+
+TEST(AutodiffTest, SparseCSRSucceeds) {
+  auto sparse = get_csr_tensor();
+  auto var = autograd::make_variable(std::move(sparse), true);
+  auto dense = var.to_dense();
 }
 
 TEST(AutodiffTest, ADFormulas) {
