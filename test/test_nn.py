@@ -5283,6 +5283,64 @@ class TestNN(NNTestCase):
         self.assertIsNone(mha.in_proj_bias)
         self.assertIsNone(mha.out_proj.bias)
 
+    def test_multihead_attn_invalid_shape(self):
+        mha = torch.nn.MultiheadAttention(3, 3)
+
+        # Batched (3D) query cases
+        query = torch.randn(3, 3, 3)
+        key = torch.randn(3, 3, 3)
+        value = torch.randn(3, 3, 3)
+
+        msg = "expected `key` and `value` to be 3-D but found 2-D and 3-D tensors respectively"
+        # 3D query, 2D key and 3D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, torch.randn(3, 3), value)
+
+        msg = "expected `key` and `value` to be 3-D but found 3-D and 2-D tensors respectively"
+        # 3D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, torch.randn(3, 3))
+
+        msg = "expected `key_padding_mask` to be `None` or 2-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 3D query, 3D key, 3D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        # Unbatched (2D) query cases
+        query = torch.randn(3, 3)
+        key = torch.randn(3, 3)
+        value = torch.randn(3, 3)
+
+        msg = "expected `key` and `value` to be 2-D but found 3-D and 2-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, torch.randn(3, 3, 3), value)
+
+        msg = "expected `key` and `value` to be 2-D but found 2-D and 3-D tensors respectively"
+        # 2D query, 3D key and 2D value
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, torch.randn(3, 3, 3))
+
+        msg = "expected `key_padding_mask` to be `None` or 1-D but found 2-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D key_padding_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, key_padding_mask=torch.tensor([[False, True, True] * 2], dtype=torch.bool))
+
+        msg = "expected `attn_mask` to be `None`, 2-D or 3-D but found 1-D tensor instead"
+        # 2D query, 2D key, 2D value and 1D attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.tensor([False, True, True], dtype=torch.bool))
+
+        msg = r"Expected `attn_mask` shape to be \(3, 3, 3\)"
+        # 2D query, 2D key, 2D value and 3D incorrect attn_mask
+        with self.assertRaisesRegex(AssertionError, msg):
+            mha(query, key, value, attn_mask=torch.randn(4, 3, 3).bernoulli_().to(torch.bool))
+
     def test_normalize(self):
         inputs = torch.randn(1, 3, 4, 4, requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
@@ -13301,47 +13359,50 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("input_shape,transposed,dilated,groups,layout,backend_expected", [
         # === slow ===
         subtest(((2, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Slow2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow1d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow1d'),
         subtest(((2, 6, 7), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow1d_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow1d_transposed'),
         subtest(((2, 6, 7), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow1d_dilated'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow1d_dilated'),
         subtest(((2, 6, 7), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow1d_dilated_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow1d_dilated_transposed'),
         subtest(((2, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Slow2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow2d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow2d'),
         subtest(((2, 6, 7, 8), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow2d_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow2d_transposed'),
         subtest(((2, 6, 7, 8), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow2d_dilated'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow2d_dilated'),
         subtest(((2, 6, 7, 8), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose2d),
-                decorators=[onlyCPU, disableMkldnn], name='slow2d_dilated_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow2d_dilated_transposed'),
         subtest(((2, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Slow3d),
-                decorators=[onlyCPU, disableMkldnn], name='slow3d'),
+                decorators=[onlyCPU, disableMkldnn], name='slow3d_cpu'),
+        # CUDA doesn't have a slow 3D implementation, so it goes to the dilated 3D implementation instead
+        subtest(((2, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.SlowDilated3d),
+                decorators=[onlyCUDA, disablecuDNN], name='slow3d_cuda'),
         subtest(((2, 6, 7, 8, 9), True, False, 3, torch.strided, torch._C._ConvBackend.SlowTranspose3d),
-                decorators=[onlyCPU, disableMkldnn], name='slow3d_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow3d_transposed'),
         subtest(((2, 6, 7, 8, 9), False, True, 3, torch.strided, torch._C._ConvBackend.SlowDilated3d),
-                decorators=[onlyCPU, disableMkldnn], name='slow3d_dilated'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow3d_dilated'),
         subtest(((2, 6, 7, 8, 9), True, True, 3, torch.strided, torch._C._ConvBackend.SlowTranspose3d),
-                decorators=[onlyCPU, disableMkldnn], name='slow3d_dilated_transposed'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn, disablecuDNN], name='slow3d_dilated_transposed'),
         subtest(((0, 6, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch1d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch1d'),
         subtest(((2, 0, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_channel1d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_channel1d'),
         subtest(((0, 0, 7), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel1d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch_channel1d'),
         subtest(((0, 6, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch2d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch2d'),
         subtest(((2, 0, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_channel2d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_channel2d'),
         subtest(((0, 0, 7, 8), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel2d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch_channel2d'),
         subtest(((0, 6, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch3d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch3d'),
         subtest(((2, 0, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_channel3d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_channel3d'),
         subtest(((0, 0, 7, 8, 9), False, False, 3, torch.strided, torch._C._ConvBackend.Empty),
-                decorators=[onlyCPU, disableMkldnn], name='empty_batch_channel3d'),
+                decorators=[onlyNativeDeviceTypes, disableMkldnn], name='empty_batch_channel3d'),
         # === cuda ===
         # Note that disablecuDNN disables miopen as well.
         subtest(((2, 6, 7), False, False, 6, torch.strided, torch._C._ConvBackend.CudaDepthwise2d),
@@ -13385,28 +13446,29 @@ class TestNNDeviceType(NNTestCase):
         # === mkldnn ===
         subtest(((2, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d'),
-        subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_transposed'),
-        subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch1d'),
-        subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel1d'),
-        subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel1d'),
         subtest(((2, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d'),
-        subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_transposed'),
         subtest(((2, 6, 7, 8, 9), False, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d'),
+        # Transposed convolution is broken for mkldnn. See https://github.com/pytorch/pytorch/issues/68775.
+        subtest(((2, 6, 7), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn1d_transposed'),
+        subtest(((2, 6, 7, 8), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn2d_transposed'),
         subtest(((2, 6, 7, 8, 9), True, False, 3, torch._mkldnn, torch._C._ConvBackend.Mkldnn),
-                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_transposed'),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn, unittest.expectedFailure], name='mkldnn3d_transposed'),
         subtest(((2, 6, 7), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn1d_cpu_input'),
         subtest(((2, 6, 7, 8), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn2d_cpu_input'),
         subtest(((2, 6, 7, 8, 9), False, True, 3, torch.strided, torch._C._ConvBackend.Mkldnn),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn3d_cpu_input'),
+        subtest(((0, 6, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch1d'),
+        subtest(((2, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_channel1d'),
+        subtest(((0, 0, 7), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
+                decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch_channel1d'),
         subtest(((0, 6, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
                 decorators=[onlyCPU, skipCPUIfNoMkldnn], name='mkldnn_empty_batch2d'),
         subtest(((2, 0, 7, 8), False, False, 3, torch._mkldnn, torch._C._ConvBackend.MkldnnEmpty),
@@ -13423,18 +13485,41 @@ class TestNNDeviceType(NNTestCase):
         # NnpackSpatial, Winograd3x3Depthwise, and Xnnpack2d backends. Testing these
         # requires the ability to gate tests by whether PyTorch is built with USE_MOBILE=1.
     ])
+    # Test with both bias and no bias.
+    @parametrize_test("has_bias", [False, True])
+    # Test with both stride=1 and stride>1 cases.
     @parametrize_test("strided", [False, True])
-    def test_conv_backend_selection(
-            self, device, input_shape, strided, transposed, dilated, groups, layout, backend_expected):
+    # Test with both contiguous and non-contiguous inputs.
+    @parametrize_test("contiguous", [False, True])
+    def test_conv_backend(
+            self, device, input_shape, has_bias, strided, contiguous, transposed, dilated, groups,
+            layout, backend_expected):
         # Build up inputs.
         dtype = torch.float32
-        C_in, C_out, dim, kernel_size = input_shape[1], 6, len(input_shape) - 2, 3
-        x = torch.empty(*input_shape, device=device, dtype=dtype, layout=layout, requires_grad=True)
-        weight = torch.empty(C_in if transposed else C_out,
+        C_in, C_out, dim, kernel_size = input_shape[1], 12, len(input_shape) - 2, 3
+        x = torch.randn(*input_shape, device=device, dtype=dtype, requires_grad=True)
+        weight = torch.randn(C_in if transposed else C_out,
                              C_out // groups if transposed else C_in // groups,
                              *[kernel_size for _ in range(dim)],
-                             device=device, dtype=dtype, layout=layout, requires_grad=True)
-        bias = torch.empty(C_out, device=device, dtype=dtype, layout=layout, requires_grad=True)
+                             device=device, dtype=dtype, requires_grad=True)
+        bias = torch.randn(C_out, device=device, dtype=dtype, requires_grad=True) if has_bias else None
+
+        def _make_noncontiguous(inp):
+            if inp is None:
+                return None
+            old_requires_grad = inp.requires_grad
+            inp = torch.repeat_interleave(inp, 2, dim=-1)
+            inp = inp[..., ::2].detach().requires_grad_(old_requires_grad)
+            return inp
+
+        if not contiguous:
+            x = _make_noncontiguous(x)
+            weight = _make_noncontiguous(weight)
+            bias = _make_noncontiguous(bias)
+
+        if layout is torch._mkldnn:
+            x = x.to_mkldnn()
+            # Note that weight and bias are not supported as mkldnn tensors during training.
 
         stride = (2,) * dim if strided else (1,) * dim
         padding = (0,) * dim
@@ -13445,6 +13530,40 @@ class TestNNDeviceType(NNTestCase):
         # Ensure correct backend is selected.
         backend_actual = torch._C._select_conv_backend(*inputs)
         self.assertEqual(backend_actual, backend_expected)
+
+        # Ensure backward call succeeds.
+        convolution = torch.ops.aten.convolution
+        output = convolution(*inputs)
+        grad_output = torch.randn(output.shape, device=device, dtype=dtype)
+        if not contiguous:
+            grad_output = _make_noncontiguous(grad_output)
+        if layout is torch._mkldnn:
+            grad_output = grad_output.to_mkldnn()
+        output.backward(grad_output)
+
+        # mkldnn doesn't support gradcheck :(
+        if layout is torch._mkldnn:
+            return
+
+        # Convert to float64 for gradcheck.
+        x = x.to(torch.float64).detach().requires_grad_(True)
+        weight = weight.to(torch.float64).detach().requires_grad_(True)
+        if bias is not None:
+            bias = bias.to(torch.float64).detach().requires_grad_(True)
+        inputs = [x, weight, bias, stride, padding, dilation, transposed, output_padding, groups]
+
+        # Set some backend-specific validation settings.
+        gradcheck_nondet_tol = 0.0
+        if torch.backends.cudnn.is_available():
+            # cuDNN introduces non-determinism
+            gradcheck_nondet_tol = GRADCHECK_NONDET_TOL
+
+        self.assertTrue(gradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
+
+        # double backward doesn't support bias gradients
+        if bias is not None:
+            bias.requires_grad_(False)
+        self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
 
     def test_Dropout(self, device):
         input = torch.empty(1000)
@@ -15559,6 +15678,49 @@ class TestNNDeviceType(NNTestCase):
                     atol = None
                     rtol = None
                 self.assertEqual(grad, grad_check, msg=msg, atol=atol, rtol=rtol)
+
+    def test_masked_softmax(self, device):
+        sizes = [(1, 1, 32), (3, 16, 310), (12, 4, 1024), (4, 2, 1200)]
+        for (B, num_heads, L) in sizes:
+            input = torch.randn((B, num_heads, L, L))
+            mask = torch.randint(0, 2, (B, L))
+            if (self.device_type == "cuda"):
+                input = input.cuda()
+                mask = mask.cuda()
+            mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L).bool()
+            native_res = torch._masked_softmax(input, mask)
+            mask = mask.float()
+
+            def slow_masked_softmax(input, mask):
+                exp = torch.exp(input)
+                exp = exp * mask
+                s = exp.sum(dim=3, keepdim=True).expand(exp.size())
+                return exp / s
+            pt_res = slow_masked_softmax(input, mask)
+            self.assertEqual(pt_res, native_res, exact_dtype=True)
+
+    @onlyCUDA
+    def test_masked_softmax_transformer_layout(self, device):
+        B = 211
+        num_heads = 16
+        L = 42
+        input = torch.randn((B, num_heads, L, L))
+        mask = torch.randint(0, 2, (B, L))
+        if (self.device_type == "cuda"):
+            input = input.cuda()
+            mask = mask.cuda()
+        mask = mask.bool()
+        native_res = torch._masked_softmax(input, mask)
+        mask = mask.reshape(B, 1, 1, L).expand(B, num_heads, L, L)
+        mask = mask.float()
+
+        def slow_masked_softmax(input, mask):
+            exp = torch.exp(input)
+            exp = exp * mask
+            s = exp.sum(dim=3, keepdim=True).expand(exp.size())
+            return exp / s
+        pt_res = slow_masked_softmax(input, mask)
+        self.assertEqual(pt_res, native_res, exact_dtype=True)
 
     # Test fails on Vg20
     @skipCUDAIfRocm

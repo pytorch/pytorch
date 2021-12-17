@@ -295,6 +295,19 @@ WINDOWS_WORKFLOWS = [
     ),
     CIWorkflow(
         arch="windows",
+        build_environment="periodic-win-vs2019-cuda11.5-py3",
+        cuda_version="11.5",
+        test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
+        num_test_shards=2,
+        enable_force_on_cpu_test=1,
+        is_scheduled="45 4,10,16,22 * * *",
+        ciflow_config=CIFlowConfig(
+            run_on_canary=True,
+            labels={LABEL_CIFLOW_SCHEDULED, LABEL_CIFLOW_CUDA, LABEL_CIFLOW_WIN}
+        ),
+    ),
+    CIWorkflow(
+        arch="windows",
         build_environment="periodic-win-vs2019-cuda11.1-py3",
         cuda_version="11.1",
         test_runner_type=WINDOWS_CUDA_TEST_RUNNER,
@@ -414,7 +427,7 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
+        num_test_shards=3,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},

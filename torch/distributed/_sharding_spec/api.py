@@ -42,6 +42,34 @@ class ShardingSpec(PlacementSpec):
 
 
 @dataclass
+class ReshardingSpec(object):
+    """
+    This is a wrapper of PlacementSpec that defines the new placement as being
+    resharded across multiple devices or aggregate into a local tensor.
+
+    The semantics of how a tensor is partitioned is inline with
+    :meth:`torch.chunk`, where ``dim`` in torch.chunk corresponds to the
+    specified ``dim`` and ``chunks`` in torch.chunk is the number of elements
+    in the placement specified.
+
+    Args:
+        spec (ShardingSpec):
+            The spec contains the new dimension to reshard on and placement.
+        output_local_tensors(bool):
+            Whether or not to output the local shards of the ShardedTensor as
+            a tensor.
+    """
+    spec: ShardingSpec
+    output_local_tensors: bool = False
+
+    def __post_init__(self):
+        if not isinstance(self.spec, ShardingSpec):
+            raise ValueError('spec needs to be a ShardingSpec')
+        if not isinstance(self.output_local_tensors, bool):
+            raise ValueError('output_local_tensors needs to be a bool')
+
+
+@dataclass
 class ChunkShardingSpec(ShardingSpec):
     """
     This is a type of PlacementSpec that defines the placement as being sharded

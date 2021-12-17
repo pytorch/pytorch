@@ -1,19 +1,29 @@
 from typing import List, cast
 
+import copy
 import torch
 import torch.distributed as dist
+from torch.autograd import Function
+from torch.distributed._sharded_tensor.ops._common import (
+    _result_distribute_with_col_rearrange,
+)
 from torch.distributed._sharding_spec import ChunkShardingSpec
 from torch.distributed._sharding_spec._internals import (
     get_split_size,
     get_chunked_dim_size,
-    get_chuck_sharding_params,
+    get_chunk_sharding_params,
 )
 from torch.distributed.nn.functional import (
     all_gather,
     all_to_all_single,
 )
 
+from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
+    ShardedTensor
+)
 
+@sharded_op_impl(torch.nn.functional.linear)
 def sharded_linear(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
@@ -82,9 +92,8 @@ def sharded_linear(types, args, kwargs, pg):
     5. If placements are not in order any appropriate rearrangement of rows
        are done for the (13 x 16) matrix and finally the bias term is added.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
     # Validate input params
-    _validate_embedding_param(args, kwargs)
+    _validate_linear_param(args, kwargs)
     input = args[0]
     weight = args[1]
     bias = kwargs["bias"]
@@ -101,7 +110,7 @@ def sharded_linear(types, args, kwargs, pg):
         )
     elif sharding_dim == 1 and isinstance(input, ShardedTensor):
         return _handle_row_wise_sharding_sharded_tensor(
-            input, world_size, local_shard_t, bias
+            input, world_size, weight, local_shard_t, bias
         )
     elif sharding_dim == 0:
         return _handle_col_wise_sharding(
@@ -113,7 +122,7 @@ def sharded_linear(types, args, kwargs, pg):
         )
 
 
-def _validate_embedding_param(args, kwargs):
+def _validate_linear_param(args, kwargs):
     """
     Validate input params of sharded embedding op.
 
@@ -172,15 +181,14 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
 
     Returns: Intermediate result stored as a sharded tensor.
     """
-    from torch.distributed._sharded_tensor import init_sharded_tensor_from_local_result
     # allgather the inputs first.
     gathered_inputs = all_gather(input, group=pg)
-    (start_pos, chunk_size) = get_chuck_sharding_params(bias.size(0), world_size, weight._sharding_spec, rank)
-    local_bias = torch.narrow(bias, 0, start_pos, chunk_size)
+    (start_pos, chunk_size) = get_chunk_sharding_params(bias.size(0), world_size, weight._sharding_spec, rank)
+    local_bias = _BiasTensorNarrow.apply(world_size, start_pos, chunk_size, weight, pg, bias)
     results = []
     for i, inp in enumerate(gathered_inputs):
         results.append(inp.matmul(local_shard_t) + local_bias)
-    return init_sharded_tensor_from_local_result(
+    return _init_sharded_tensor_from_local_result(
         weight, torch.stack(results), 0, 2, world_size, pg)
 
 
@@ -203,6 +211,7 @@ def _handle_row_wise_sharding_tensor(
 
     Returns: final result of linear operation.
     """
+    from torch.distributed._sharded_tensor import PartialTensor
     # alltoall to gather all the appropriate inputs.
     input_t = input.t().contiguous()
     input_t_size = input_t.size()
@@ -252,17 +261,99 @@ def _handle_row_wise_sharding_tensor(
     shard_size = local_shard_t.size()[0]
     for r in range(world_size):
         inp = torch.narrow(gathered_input, 1, r * shard_size, shard_size)
-        results.append(inp.matmul(local_shard_t) + bias / world_size)
+        results.append(inp.matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias))
 
     # Return the partial local result.
-    return results
+    return PartialTensor(results)
 
 
-def _handle_row_wise_sharding_sharded_tensor(input, world_size, local_shard_t, bias):
+def _handle_row_wise_sharding_sharded_tensor(input, world_size, weight, local_shard_t, bias):
+    from torch.distributed._sharded_tensor import PartialTensor
     results = []
     local_shard = input.local_shards()[0].tensor
     for i in range(local_shard.size(0)):
-        results.append(local_shard[i].matmul(local_shard_t) + bias / world_size)
+        results.append(local_shard[i].matmul(local_shard_t) + _BiasTensorPartial.apply(world_size, bias))
 
     # Return the partial local result.
-    return results
+    return PartialTensor(results)
+
+
+def _init_sharded_tensor_from_local_result(
+    sharded_tensor,
+    local_result,
+    tensor_shard_dim,
+    result_shard_dim,
+    world_size,
+    pg,
+):
+    """
+    Given a sharded tensor and local_result from an op on top of it. We want
+    to create a new sharded tensor from the local_result so that the the next
+    op can be performed on the basis of the new sharded tensor. This can seen
+    as the last step of the first phase of the Megatron-LM style model(tensor)
+    parallelism.
+
+    Args:
+        sharded_tensor: Sharded tensor which the op was performed on.
+        local_result: A tensor which is from the op performed on the local_shard of
+            the sharded_tensor.
+        tensor_shard_dim: Dim which the tensor is sharded on.
+        result_shard_dim: Dim which the new sharded tensor will be sharded on.
+        world_size: number of ranks.
+        pg (ProcessGroup, optional): The process group to work on. If None,
+            the default process group will be used.
+
+    Return: new sharded tensor from the local_result.
+    """
+    from torch.distributed._sharded_tensor import (
+        Shard,
+        ShardMetadata,
+        ShardedTensor,
+    )
+    sharded_weight_metadata = sharded_tensor.local_shards()[0].metadata
+    current_offsets = [0] * len(local_result.size())
+    current_offsets[result_shard_dim] = sharded_weight_metadata.shard_offsets[tensor_shard_dim]
+    local_shard_metadata = ShardMetadata(
+        shard_offsets=current_offsets,
+        shard_sizes=list(local_result.size()),
+        placement=sharded_weight_metadata.placement,
+    )
+    local_shards = [Shard(local_result, local_shard_metadata)]
+    global_size = list(local_result.size())
+    global_size[result_shard_dim] = sharded_tensor.size(tensor_shard_dim)
+
+    new_st = ShardedTensor._init_from_local_shards(local_shards, tuple(global_size), process_group=pg)
+
+    # Manually set sharding_spec
+    new_st._sharding_spec = copy.deepcopy(sharded_tensor._sharding_spec)
+    new_st._sharding_spec.dim = result_shard_dim
+    return new_st
+
+
+class _BiasTensorNarrow(Function):
+    @staticmethod
+    def forward(ctx, world_size, start_pos, chunk_size, weight, pg, bias):
+        ctx.weight = weight
+        ctx.pg = pg
+        ctx.world_size = world_size
+        return torch.narrow(bias, 0, start_pos, chunk_size)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        results = []
+        for idx in range(ctx.world_size):
+            results.append(grad_output.clone())
+        return (None, None, None, None, None) + (
+            _result_distribute_with_col_rearrange(results, grad_output, ctx.world_size, ctx.weight, ctx.pg),
+        )
+
+
+class _BiasTensorPartial(Function):
+    @staticmethod
+    def forward(ctx, world_size, bias):
+        ctx.world_size = world_size
+        return torch.div(bias, world_size)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return (None, grad_output)

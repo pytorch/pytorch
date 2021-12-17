@@ -21,6 +21,7 @@ from torch.testing._internal.distributed._sharded_tensor import (
     with_comms,
 )
 from torch.testing._internal.distributed._sharded_tensor._test_ops_common import (
+    clone_module_parameter,
     generate_chunk_sharding_specs_for_test,
     generate_local_weight_sharding_params_for_test,
 )
@@ -64,8 +65,8 @@ class TestShardedEmbedding(ShardedTensorTestBase):
         )
 
         # Copy the weights from local embedding
-        sharded_embedding.weight = torch.nn.Parameter(
-            local_embedding.weight.detach().clone()
+        sharded_embedding.weight = clone_module_parameter(
+            local_embedding, "weight"
         )
 
         # Shard the parameter.
@@ -152,25 +153,23 @@ class TestShardedEmbedding(ShardedTensorTestBase):
             self._run_sharded_embedding(spec, [5, 12], 16, 22)
             self._run_sharded_embedding(spec, [5, 4], 32, 12)
             self._run_sharded_embedding(spec, [6, 7, 6], 64, 11)
+            self._run_sharded_embedding(
+                spec, [5, 12], 16, 22, max_norm=2.5, sharded_dim=0
+            )
             self._run_sharded_embedding(spec, [6, 7, 6], 64, 11, padding_idx=30)
-            with torch.no_grad():
-                self._run_sharded_embedding(
-                    spec, [5, 12], 16, 22, max_norm=2.5, sharded_dim=0
-                )
-                self._run_sharded_embedding(
-                    spec, [6, 5, 3], 26, 11, max_norm=2.0, sharded_dim=0
-                )
+            self._run_sharded_embedding(
+                spec, [6, 5, 3], 26, 11, max_norm=2.0, sharded_dim=0
+            )
 
             # Test uneven split.
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 19, 11)
             self._run_sharded_embedding(spec, [6, 7, 6], 21, 11)
             self._run_sharded_embedding(spec, [4], 21, 11)
             self._run_sharded_embedding(spec, [8, 6, 5, 4], 21, 11, padding_idx=10)
-            with torch.no_grad():
-                self._run_sharded_embedding(
-                    spec, [12, 16, 8], 27, 11, max_norm=2.0, sharded_dim=0
-                )
-                self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5, sharded_dim=0)
+            self._run_sharded_embedding(
+                spec, [12, 16, 8], 27, 11, max_norm=2.0, sharded_dim=0
+            )
+            self._run_sharded_embedding(spec, [4], 14, 11, max_norm=2.5, sharded_dim=0)
 
 
 if __name__ == "__main__":

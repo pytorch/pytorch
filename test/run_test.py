@@ -4,6 +4,7 @@ import argparse
 import copy
 from datetime import datetime
 from distutils.util import strtobool
+from distutils.version import LooseVersion
 import functools
 import os
 import pathlib
@@ -204,6 +205,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -217,6 +219,7 @@ ROCM_BLOCKLIST = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
     "test_determination",
     "test_multiprocessing",
     "test_jit_legacy",
@@ -355,6 +358,7 @@ DISTRIBUTED_TESTS = [
     "distributed/_sharded_tensor/ops/test_embedding_bag",
     "distributed/_sharded_tensor/ops/test_init",
     "distributed/_sharded_tensor/ops/test_linear",
+    "distributed/_sharded_optim/test_sharded_optim",
 ] + [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
@@ -910,6 +914,13 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("cpp_extensions_jit")
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
+
+        # This is exception thats caused by this issue https://github.com/pytorch/pytorch/issues/69460
+        # This below code should be removed once this issue is solved
+        if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.5":
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
+            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
 
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 

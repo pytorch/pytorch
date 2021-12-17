@@ -152,10 +152,10 @@ def get_chunked_dim_size(dim_size, split_size, idx):
     return max(min(dim_size, split_size * (idx + 1)) - split_size * idx, 0)
 
 
-def get_chuck_sharding_params(sharding_dim_size, world_size, spec, rank):
+def get_chunk_sharding_params(sharding_dim_size, world_size, spec, rank):
     """
     Generate the start pos and offset length for the current rank for
-    chuck sharding.
+    chunk sharding.
 
     Args:
         sharding_dim_size: The dimension length which we shard on.
