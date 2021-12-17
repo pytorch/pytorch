@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/mobile/interpreter.h>
 
+#include <ATen/core/dynamic_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/operator_name.h>
@@ -32,7 +33,7 @@ void createObject(Stack& stack, const at::ClassTypePtr& type) {
 }
 
 void isinstance(Stack& stack, at::ArrayRef<at::TypePtr> types) {
-  at::TypePtr ty = pop(stack).type();
+  at::TypePtr ty = pop(stack).type<c10::DynamicType>();
   for (const at::TypePtr& candidate : types) {
     if (ty->isSubtypeOf(*candidate)) {
       push(stack, true);

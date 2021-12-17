@@ -2,7 +2,6 @@
 
 #include <ATen/core/custom_class.h>
 #include <ATen/core/jit_type_base.h>
-#include <ATen/core/dynamic_type.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
 #include <ATen/core/interned_strings.h>

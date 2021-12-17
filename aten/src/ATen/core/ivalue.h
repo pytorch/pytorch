@@ -878,7 +878,8 @@ public:
     }
   }
 
-  TypePtr type() const;
+  template <typename T = c10::Type>
+  typename T::Ptr type() const;
 
   // Detect aliased tensors.
   struct HashAliasedIValue {
@@ -1031,6 +1032,9 @@ public:
       payload.u = p.u;
     }
   }
+
+  template <typename T>
+  struct TagType {};
 
   friend MaybeOwnedTraits<IValue>;
 
