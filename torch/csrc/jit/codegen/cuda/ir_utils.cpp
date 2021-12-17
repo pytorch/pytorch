@@ -223,6 +223,20 @@ struct SubstituteInExpr : public OptInDispatch {
         out, in, gather_expr->windowShape(), gather_expr->padWidth());
   }
 
+  void handle(ViewOp* view_expr) final {
+    TORCH_INTERNAL_ASSERT(
+        substitute_->isA<TensorView>(),
+        "All args to view must be TensorView, but received a non-TensorView for replacement: ",
+        substitute_);
+    auto in = reference_->sameAs(view_expr->in())
+        ? substitute_->as<TensorView>()
+        : view_expr->in();
+    auto out = reference_->sameAs(view_expr->out())
+        ? substitute_->as<TensorView>()
+        : view_expr->out();
+    expr_ = new ViewOp(out, in);
+  }
+
   void handle(WelfordOp* welford_expr) final {
     auto out_avg = reference_->sameAs(welford_expr->outAvg())
         ? substitute_->as<TensorView>()

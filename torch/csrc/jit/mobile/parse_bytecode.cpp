@@ -69,16 +69,16 @@ class OpCodeCache {
 } // namespace
 
 void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
-  std::shared_ptr<Code> code = function->get_code();
+  const Code& code = function->get_code();
   auto& operator_version_map = getOperatorVersionMapForMobile();
-  for (size_t i = 0; i < function->get_code()->instructions_.size(); i++) {
-    Instruction& inst = function->get_code()->instructions_[i];
+  for (size_t i = 0; i < function->get_code().instructions_.size(); i++) {
+    Instruction& inst = function->get_code().instructions_[i];
     if (inst.op == OpCode::OP) {
-      std::string op_name = function->get_code()->op_names_[inst.X].name;
-      std::string operator_name = function->get_code()->op_names_[inst.X].name +
-          (function->get_code()->op_names_[inst.X].overload_name.empty()
+      std::string op_name = function->get_code().op_names_[inst.X].name;
+      std::string operator_name = function->get_code().op_names_[inst.X].name +
+          (function->get_code().op_names_[inst.X].overload_name.empty()
                ? ""
-               : "." + function->get_code()->op_names_[inst.X].overload_name);
+               : "." + function->get_code().op_names_[inst.X].overload_name);
 
       auto it = operator_version_map.find(operator_name);
       // Find out if there is an upgrader for this operator
@@ -92,13 +92,13 @@ void applyUpgrader(mobile::Function* function, uint64_t operator_version) {
           if (operator_version <= upgrader.max_version &&
               operator_version >= upgrader.min_version) {
             auto func_name = function->get_code()
-                                 ->functions_[upgrader.index]
+                                 .functions_[upgrader.index]
                                  ->qualname()
                                  .qualifiedName();
             // If there exists a valid upgrader, change the instruction OP to
             // CALL, and the index will point to the according upgrader
             // function. All upgrader function are available in
-            // function->get_code()->functions_. It's a vector of function
+            // function->get_code().functions_. It's a vector of function
             // pointer and they are initialized in the same order as the global
             // vector kUpgraderBytecode.
             // Instruction new_inst = inst;
