@@ -445,6 +445,54 @@ std::tuple<Tensor, optional<int64_t>> diagonal_scatter_batch_rule(
   return std::make_tuple(at::diagonal_scatter(self_, src_, offset, dim1, dim2), 0);
 }
 
+std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
+    const Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
+    const Scalar& alpha) {
+  if (!index_bdim) {
+    // Handle scalar tensors... self, other can be scalar tensors
+    const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
+    const auto other_logical_rank = rankWithoutBatchDim(other, other_bdim);
+    auto self_ = moveBatchDimToFront(self, self_bdim);
+    if (self_logical_rank == 0) {
+      self_ = self_.unsqueeze(-1);
+    }
+    auto other_ = moveBatchDimToFront(other, other_bdim);
+    if (other_logical_rank == 0) {
+      other_ = other_.unsqueeze(-1);
+    }
+    dim = maybe_wrap_dim(dim, self_logical_rank);
+
+    const auto batch_size = get_bdim_size2(self, self_bdim, other, other_bdim);
+    self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
+    other_ = ensure_has_bdim(other_, other_bdim.has_value(), batch_size);
+
+    auto result = self_.index_add(dim + 1, index, other_, alpha);
+    if (self_logical_rank == 0) {
+      result = result.squeeze(-1);
+    }
+    return std::make_tuple(result, 0);
+  }
+
+  // Index is batched. For-loop and stack is the best thing I can come up with
+  // right now. We really want generalized index_add kernel in PyTorch
+  auto batch_size = get_bdim_size3(self, self_bdim, other, other_bdim, index, index_bdim);
+  std::vector<Tensor> results;
+  results.reserve(batch_size);
+  for (const auto i : c10::irange(0, batch_size)) {
+    const auto& self_slice = self_bdim.has_value() ?
+      self.select(*self_bdim, i) : self;
+    const auto& other_slice = other_bdim.has_value() ?
+      other.select(*other_bdim, i) : other;
+    const auto& index_slice = index_bdim.has_value() ?
+      index.select(*index_bdim, i) : index;
+    results.push_back(at::index_add(self_slice, dim, index_slice, other_slice, alpha));
+  }
+  return std::make_tuple(at::stack(results), 0);
+}
+
 TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("index.Tensor", index_plumbing);
   m.impl("index_put_", index_put__plumbing);
@@ -452,6 +500,7 @@ TORCH_LIBRARY_IMPL(aten, FT_BATCHED_KEY, m) {
   m.impl("select_scatter", select_scatter_decomp);
   m.impl("index_copy", index_copy_decomp);
   m.impl("index_select", index_select_decomp);
+  VMAP_SUPPORT("index_add", index_add_batch_rule);
   VMAP_SUPPORT("diagonal_scatter", diagonal_scatter_batch_rule);
   VMAP_SUPPORT("gather", gather_batch_rule);
   VMAP_SUPPORT("gather_backward", gather_backward_batch_rule);
