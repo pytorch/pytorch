@@ -21,7 +21,7 @@ if __name__ == "__main__":
         "instead."
     )
 
-class TestSaveLoad(JitTestCase):
+class TestSaveLoadForOpVersion(JitTestCase):
     def test_versioned_symbols(self):
         """
         Tests Torchscript symbol versioning. See note [Versioned Symbols].
@@ -129,7 +129,7 @@ class TestSaveLoad(JitTestCase):
 
         # Loads historic module
         try:
-            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.ptl")
+            v3_module = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_tensor_v3.pt")
             v3_mobile_module = _load_for_lite_interpreter(
                 pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_tensor_v2.ptl")
         except Exception as e:
@@ -154,22 +154,13 @@ class TestSaveLoad(JitTestCase):
                 if isinstance(m_results, Exception):
                     self.assertTrue(isinstance(fn_result, Exception))
                 else:
-                    if(isinstance(fn_result, tuple)):
-                        if(len(fn_result) != len(m_results)):
-                            for result in fn_result:
-                                self.assertEqual(result, fn_result)
-                    elif(isinstance(m_results, tuple)):
-                        if(len(fn_result) != len(m_results)):
-                            for result in m_results:
-                                self.assertEqual(result, fn_result)
-                    else:
-                        self.assertEqual(m_results, fn_result)
+                    for result in m_results:
+                        self.assertEqual(result, fn_result)
 
             _helper(v3_module, historic_div)
-            _helper(v3_mobile_module, current_mobile_module)
-            _helper(v3_mobile_module, current_module)
-            _helper(v3_mobile_module, torch.div)
+            _helper(v3_mobile_module, historic_div)
             _helper(current_module, torch.div)
+            _helper(current_mobile_module, torch.div)
 
     def test_versioned_div_tensor_inplace(self):
         def historic_div_(self, other):
@@ -270,7 +261,8 @@ class TestSaveLoad(JitTestCase):
 
                 _helper(v3_module, historic_div_out)
                 _helper(current_module, torch.div)
-                _helper(v3_mobile_module, current_mobile_module)
+                _helper(v3_mobile_module, historic_div_out)
+                _helper(current_mobile_module, torch.div)
 
     def test_versioned_div_scalar(self):
         def historic_div_scalar_float(self, other: float):
@@ -297,9 +289,9 @@ class TestSaveLoad(JitTestCase):
 
         try:
             v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v3.pt")
+            v3_module_int = torch.jit.load(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v3.pt")
             v3_mobile_module_float = _load_for_lite_interpreter(
                 pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_float_v2.ptl")
-            v3_module_int = torch.jit.load(pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v3.pt")
             v3_mobile_module_int = _load_for_lite_interpreter(
                 pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_int_v2.ptl")
         except Exception as e:
@@ -335,10 +327,12 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_float, historic_div_scalar_float)
                 _helper(current_module_float, torch.div)
                 _helper(v3_mobile_module_float, current_mobile_module_float)
+                _helper(current_mobile_module_float, torch.div)
             else:
                 _helper(v3_module_int, historic_div_scalar_int)
                 _helper(current_module_int, torch.div)
-                _helper(v3_mobile_module_int, current_mobile_module_int)
+                _helper(v3_mobile_module_int, historic_div_scalar_int)
+                _helper(current_mobile_module_int, torch.div)
 
     def test_versioned_div_scalar_reciprocal(self):
         def historic_div_scalar_float_reciprocal(self, other: float):
@@ -414,10 +408,12 @@ class TestSaveLoad(JitTestCase):
                 _helper(v3_module_float, historic_div_scalar_float_reciprocal)
                 _helper(current_module_float, torch.div)
                 _helper(v3_mobile_module_float, current_mobile_module_float)
+                _helper(current_mobile_module_float, torch.div)
             else:
                 _helper(v3_module_int, historic_div_scalar_int_reciprocal)
                 _helper(current_module_int, torch.div)
                 _helper(v3_mobile_module_int, current_mobile_module_int)
+                _helper(current_mobile_module_int, torch.div)
 
     def test_versioned_div_scalar_inplace(self):
         def historic_div_scalar_float_inplace(self, other: float):
@@ -450,9 +446,9 @@ class TestSaveLoad(JitTestCase):
             v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_int_v3.pt")
 
             v3_module_mobile_float = _load_for_lite_interpreter(
-                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v3.pt")
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl")
             v3_module_mobile_int = _load_for_lite_interpreter(
-                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v3.pt")
+                pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
 
@@ -489,13 +485,13 @@ class TestSaveLoad(JitTestCase):
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_inplace)
                 _helper(current_module_float, torch.Tensor.div_)
-                _helper(v3_module_mobile_float, current_mobile_module_float)
-                _helper(current_module_float, current_mobile_module_float)
+                _helper(v3_module_mobile_float, historic_div_scalar_float_inplace)
+                _helper(current_module_float, torch.Tensor.div_)
             else:
                 _helper(v3_module_int, historic_div_scalar_int_inplace)
                 _helper(current_module_int, torch.Tensor.div_)
-                _helper(v3_module_mobile_int, current_mobile_module_int)
-                _helper(current_module_int, current_mobile_module_int)
+                _helper(v3_module_mobile_int, historic_div_scalar_int_inplace)
+                _helper(current_module_int, torch.Tensor.div_)
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
