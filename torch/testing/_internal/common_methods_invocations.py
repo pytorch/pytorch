@@ -12624,6 +12624,9 @@ op_db: List[OpInfo] = [
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
+               # CUDA runs out of memory
+               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_fwgrad_bwgrad',
+                            device_type='cuda', dtypes=[torch.cdouble]),
            )),
     OpInfo('linalg.pinv',
            aten_name='linalg_pinv',
