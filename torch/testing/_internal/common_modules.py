@@ -417,9 +417,13 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_Linear),
     ModuleInfo(torch.nn.Bilinear,
                module_inputs_func=module_inputs_torch_nn_Bilinear,
-               decorators=(
-                    DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-3)})),
-               )),
+               decorators=[
+                    DecorateInfo(
+                        toleranceOverride({
+                            torch.float32: tol(atol=1e-1, rtol=1e-4),
+                            torch.float64: tol(atol=1e-1, rtol=1e-4)}),
+                        'TestModule', 'test_forward', device_type='cpu')
+                    ]),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss),
     ModuleInfo(torch.nn.Hardswish,
