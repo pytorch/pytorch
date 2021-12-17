@@ -13,6 +13,7 @@ constexpr int num_threads() { return C10_WARP_SIZE * 4; }
 constexpr int thread_work_size() { return 4; }
 constexpr int block_work_size() { return thread_work_size() * num_threads(); }
 
+
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 namespace at { namespace native {
@@ -79,11 +80,13 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 
 #if !defined(USE_ROCM)
 #include <ATen/native/cuda/CUDALoops.cuh>
+#define USE_JITERATOR
 #else
 #include <ATen/native/cuda/ROCmLoops.cuh>
 #endif
 
 namespace at { namespace native {
+#ifdef USE_JITERATOR
 
 /* Note [Jiterator]
 The "jiterator" simply just-in-time compiles the same kernels that
@@ -105,8 +108,10 @@ operations instead of the typical CUDA functors.
 // Only handles elementwise unary and binary kernels with a
 //   common dtype and a single output.
 // NOTE: this assumes the op's iterator has a common_dtype.
-template <char const *name, typename return_type, typename compute_type, int arity>
-void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
+template <char const *name, typename return_type, typename f_inputs_type, int arity>
+void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f,
+                       at::cuda::jit::BinaryFuncVariant scalar_pos=at::cuda::jit::BinaryFuncVariant::NoScalar,
+at::opmath_type<f_inputs_type> scalar_val=0) {
   // TODO: much of preamble is common to both jitted_gpu_kernel and gpu_kernel
   //   Maybe it could be refactored?
   for (int arg = 0; arg < iter.ntensors(); arg++) {
@@ -121,7 +126,7 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
-      jitted_gpu_kernel<name, return_type, compute_type, arity>(sub_iter, f);
+      jitted_gpu_kernel<name, return_type, f_inputs_type, arity>(sub_iter, f, scalar_pos, scalar_val);
     }
 
     return;
@@ -147,10 +152,10 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
                 "Encountered an unsupported dtype ", dtype0, "!");
 
   // Checks input(s)
-  const ScalarType compute_scalar_type = c10::CppTypeToScalarType<compute_type>::value;
+  const ScalarType inputs_scalar_type = c10::CppTypeToScalarType<f_inputs_type>::value;
   for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
     const auto dtypei = iter.dtype(i);
-    if (dtypei != compute_scalar_type) {
+    if (dtypei != inputs_scalar_type) {
       needs_dynamic_casting = true;
       // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
@@ -158,12 +163,50 @@ void jitted_gpu_kernel(TensorIteratorBase& iter, const std::string& f) {
                 dtypei != kBFloat16 && dtypei != at::kHalf,
                 "Encountered an unsupported dtype ", dtypei, "!");
   }
+  if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {
+    jitted_gpu_kernel_impl</*name*/ name,
+                    /*return_type=*/ return_type,
+                    /*f_inputs_type=*/ f_inputs_type,
+                    arity, at::cuda::jit::BinaryFuncVariant::NoScalar>(iter, f, needs_dynamic_casting);
+  } else if (scalar_pos == at::cuda::jit::BinaryFuncVariant::RhsScalar) {
+    jitted_gpu_kernel_impl</*name*/ name,
+                    /*return_type=*/ return_type,
+                    /*f_inputs_type=*/ f_inputs_type,
+                    arity, at::cuda::jit::BinaryFuncVariant::RhsScalar>(iter, f, needs_dynamic_casting, scalar_val);
 
-  jitted_gpu_kernel_impl</*name*/ name,
-                  /*return_type=*/ return_type,
-                  /*compute_type=*/ compute_type,
-                  arity>(iter, f, needs_dynamic_casting);
+  } else {
+    jitted_gpu_kernel_impl</*name*/ name,
+                    /*return_type=*/ return_type,
+                    /*f_inputs_type=*/ f_inputs_type,
+                    arity, at::cuda::jit::BinaryFuncVariant::LhsScalar>(iter, f, needs_dynamic_casting, scalar_val);
+
+  }
 }
+
+template <char const *name, typename return_type, typename f_inputs_type>
+void opmath_jitted_gpu_kernel_with_scalars(TensorIteratorBase& iter, const std::string& f) {
+  TORCH_INTERNAL_ASSERT(iter.ntensors() == 3);
+  //currently jiterator only handles binary functions where both inputs are of the same type (f_inputs_type)
+  using opmath_t = at::opmath_type<f_inputs_type>;
+  if (iter.is_cpu_scalar(1)) {
+    auto scalar_val = iter.scalar_value<opmath_t>(1);
+    iter.remove_operand(1);
+    // TODO: When all kernels that use gpu_kernel_with_scalars are
+    // ported to structured, this device guard can be deleted.  This
+    // works around incorrect device guard generation for pre-structured
+    // kernels device guards, but structured kernels do it right and
+    // we can assume the device is already set correctly
+    const OptionalDeviceGuard device_guard(iter.device(1));
+    jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(iter, f, at::cuda::jit::BinaryFuncVariant::LhsScalar, scalar_val);
+  } else if (iter.is_cpu_scalar(2)) {
+    auto scalar_val = iter.scalar_value<opmath_t>(2);
+    iter.remove_operand(2);
+    jitted_gpu_kernel<name, return_type, f_inputs_type, 1>(iter, f, at::cuda::jit::BinaryFuncVariant::RhsScalar, scalar_val);
+  } else {
+    jitted_gpu_kernel<name, return_type, f_inputs_type, 2>(iter, f);
+  }
+}
+#endif //USE_JITERATOR
 
 template <typename func_t>
 void gpu_kernel(TensorIteratorBase& iter, const func_t& f) {
