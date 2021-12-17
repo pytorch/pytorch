@@ -125,7 +125,7 @@ for dir in include_dir:
 def check_file(
     filename: str,
     binary: str,
-    build_dir: str,
+    build_dir: Path,
 ) -> List[LintMessage]:
     try:
         proc = run_command(
@@ -233,6 +233,8 @@ def main() -> None:
         print(json.dumps(err_msg._asdict()), flush=True)
         exit(0)
 
+    abs_build_dir = Path(args.build_dir).resolve()
+
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),
         thread_name_prefix="Thread",
@@ -242,7 +244,7 @@ def main() -> None:
                 check_file,
                 filename,
                 args.binary,
-                args.build_dir,
+                abs_build_dir,
             ): filename
             for filename in args.filenames
         }

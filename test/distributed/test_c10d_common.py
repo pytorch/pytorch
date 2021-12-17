@@ -792,13 +792,13 @@ class DummyProcessGroup(dist.ProcessGroup):
         return DummyWork()
 
 
-class PythonProcessGroupTest(MultiProcessTestCase):
+class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupTest, self).setUp()
+        super(PythonProcessGroupExtensionTest, self).setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupTest, self).tearDown()
+        super(PythonProcessGroupExtensionTest, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -811,12 +811,12 @@ class PythonProcessGroupTest(MultiProcessTestCase):
     def test_backend_class_attr(self):
         dist.Backend.register_backend(
             "dummy",
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
         self.assertEqual(dist.Backend.DUMMY, "DUMMY")
         self.assertEqual(
             dist.Backend._plugins["DUMMY"],
-            PythonProcessGroupTest.create_dummy
+            PythonProcessGroupExtensionTest.create_dummy
         )
 
     @staticmethod
@@ -824,7 +824,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         return DummyProcessGroup(rank, size)
 
     def test_collectives(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'
@@ -858,7 +858,7 @@ class PythonProcessGroupTest(MultiProcessTestCase):
         dist.destroy_process_group()
 
     def test_send_recv(self):
-        dist.Backend.register_backend("dummy", PythonProcessGroupTest.create_dummy)
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
 
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '6789'

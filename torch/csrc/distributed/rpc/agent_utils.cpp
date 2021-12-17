@@ -71,9 +71,6 @@ int syncCallCount(
   int totalCallCount = store.add(activeCallCountKey, activeCalls);
   int totalProcessCount = store.add(processCountKey, 1);
 
-  VLOG(1) << processCountKey << " " << totalCallCount << " "
-          << totalProcessCount;
-
   // The last worker will need to set the ready key
   if (totalProcessCount == worldSize) {
     store.set(readyKey, std::vector<uint8_t>());
