@@ -55,6 +55,11 @@ SKIP_TRAIN_ONLY = {
     "resnet50_quantized_qat",
     "Background_Matting",
     "hf_Bart",
+    "timm_efficientnet", # slow
+    "Super_SloMo", # slow
+    "dcgan", # slow
+    "BERT_pytorch" # slow
+    "demucs", # . slow
 }
 
 current_name = ""
