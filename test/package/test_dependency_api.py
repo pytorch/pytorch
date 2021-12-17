@@ -188,6 +188,22 @@ class TestDependencyAPI(PackageTestCase):
                 he.intern("**")
                 he.save_pickle("obj", "obj.pkl", obj2)
 
+    @skipIf(version_info < (3, 7), "mock uses __getattr__ a 3.7 feature")
+    def test_pickle_mocked_all(self):
+        import package_a.subpackage
+        import package_b
+        obj = package_a.subpackage.PackageASubpackageObject()
+        obj2 = package_a.PackageAObject(obj)
+        obj3 = package_b.PackageBObject(obj2)
+
+        buffer = BytesIO()
+        with PackageExporter(buffer) as he:
+            he.intern(include="package_a.**")
+            he.mock("**")
+            he.save_pickle("obj", "obj.pkl", obj2)
+            with self.assertRaises(NotImplementedError):
+                he.save_pickle("obj2", "obj2.pkl", obj3)
+
     def test_allow_empty_with_error(self):
         """If an error occurs during packaging, it should not be shadowed by the allow_empty error."""
         buffer = BytesIO()
@@ -333,7 +349,6 @@ class TestDependencyAPI(PackageTestCase):
         # "package_a" should still be mocked out.
         with self.assertRaises(NotImplementedError):
             foo2.package_a.get_something()
-
 
 if __name__ == "__main__":
     run_tests()
