@@ -20,8 +20,6 @@
 #include "lazy_tensor_core/csrc/lazy_graph_executor.h"
 #include "lazy_tensor_core/csrc/ops/bernoulli.h"
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
-#include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/index_ops.h"
 #include "lazy_tensor_core/csrc/ops/nms.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
@@ -163,52 +161,6 @@ LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
   complete_pad.resize(2 * input.shape().Get().dim());
   return LazyTensor::Create(torch::lazy::MakeNode<ir::ops::ConstantPadNd>(
       input.GetIrValue(), complete_pad, value), input.GetDevice());
-}
-
-LazyTensor convolution_overrideable(
-    const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
-    std::vector<int64_t> stride, std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups) {
-  torch::lazy::NodePtr ir_value =
-      torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
-          input.GetIrValue(), weight.GetIrValue(), bias.GetIrValue(),
-          std::move(stride), std::move(padding), std::move(dilation),
-          transposed, std::move(output_padding), groups);
-  return LazyTensor::Create(ir_value, input.GetDevice());
-}
-
-LazyTensor convolution_overrideable(
-    const LazyTensor& input, const LazyTensor& weight,
-    std::vector<int64_t> stride, std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups) {
-  torch::lazy::NodePtr ir_value =
-      torch::lazy::MakeNode<ir::ops::ConvolutionOverrideable>(
-          input.GetIrValue(), weight.GetIrValue(), std::move(stride),
-          std::move(padding), std::move(dilation), transposed,
-          std::move(output_padding), groups);
-  return LazyTensor::Create(ir_value, input.GetDevice());
-}
-
-std::tuple<LazyTensor, LazyTensor, LazyTensor>
-convolution_backward_overrideable(
-    const LazyTensor& out_backprop, const LazyTensor& input,
-    const LazyTensor& weight, std::vector<int64_t> stride,
-    std::vector<int64_t> padding, std::vector<int64_t> dilation,
-    bool transposed, std::vector<int64_t> output_padding, int64_t groups,
-    std::array<bool, 3> output_mask) {
-  torch::lazy::NodePtr node =
-      torch::lazy::MakeNode<ir::ops::ConvolutionBackwardOverrideable>(
-          out_backprop.GetIrValue(), input.GetIrValue(), weight.GetIrValue(),
-          std::move(stride), std::move(padding), std::move(dilation),
-          transposed, std::move(output_padding), groups,
-          std::move(output_mask));
-  LazyTensor grad_input = LazyTensor::Create(torch::lazy::Value(node, 0), out_backprop.GetDevice());
-  LazyTensor grad_weight = LazyTensor::Create(torch::lazy::Value(node, 1), out_backprop.GetDevice());
-  LazyTensor grad_bias = LazyTensor::Create(torch::lazy::Value(node, 2), out_backprop.GetDevice());
-  return std::make_tuple(std::move(grad_input), std::move(grad_weight),
-                         std::move(grad_bias));
 }
 
 LazyTensor expand(const LazyTensor& input, std::vector<int64_t> size) {

@@ -13,8 +13,6 @@
 #include <torch/jit.h>
 
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
-#include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -24,39 +22,6 @@
 
 namespace torch_lazy_tensors {
 namespace compiler {
-
-torch::lazy::Shape InferConvolutionOverrideable(
-    const ir::ops::ConvolutionOverrideable* conv) {
-  const auto& operands = conv->operands();
-  CHECK(!operands.empty());
-
-  // TODO: Shape::sizes() returns a Span and converting it to
-  // a vector of int is awkard. Clean up this after we switch to a
-  // PyTorch shape.
-  const auto input_shape = torch::lazy::GetShapeFromTsOutput(operands[0]);
-  const auto& input_size = std::vector<int64_t>(
-      input_shape.sizes().begin(), input_shape.sizes().end());
-  const auto weight_shape = torch::lazy::GetShapeFromTsOutput(operands[1]);
-  const auto& weight_size = std::vector<int64_t>(
-      weight_shape.sizes().begin(), weight_shape.sizes().end());
-  const auto& dilation = conv->dilation();
-  const auto& padding = conv->padding();
-  const auto& stride = conv->stride();
-  const auto& output_padding = conv->output_padding();
-  const auto& groups = conv->groups();
-
-  if (!conv->transposed()) {
-    return torch::lazy::Shape(
-        input_shape.scalar_type(),
-        at::native::conv_output_size(input_size, weight_size, padding, stride,
-                                     dilation));
-  } else {
-    return torch::lazy::Shape(
-        input_shape.scalar_type(),
-        at::native::conv_input_size(input_size, weight_size, padding,
-                                    output_padding, stride, dilation, groups));
-  }
-}
 
 torch::lazy::Shape InferRepeat(const ir::ops::Repeat* repeat) {
   const torch::lazy::Output& input = repeat->operand(0);
@@ -95,11 +60,6 @@ torch::lazy::Shape InferStack(const ir::ops::Stack* stack) {
 }
 torch::lazy::Shape InferShape(const torch::lazy::Node* node) {
   switch (node->op().op) {
-    case at::aten::convolution_overrideable: {
-      return InferConvolutionOverrideable(
-          torch::lazy::NodeCast<ir::ops::ConvolutionOverrideable>(
-              node, torch::lazy::OpKind(at::aten::convolution_overrideable)));
-    }
     // activation and unary op do not change shape
     case at::aten::repeat: {
       return InferRepeat(torch::lazy::NodeCast<ir::ops::Repeat>(
