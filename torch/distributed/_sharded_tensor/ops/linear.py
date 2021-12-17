@@ -20,7 +20,10 @@ from torch.distributed.nn.functional import (
 
 from torch.distributed._sharded_tensor import (
     sharded_op_impl,
-    ShardedTensor
+    PartialTensor,
+    Shard,
+    ShardMetadata,
+    ShardedTensor,
 )
 
 @sharded_op_impl(torch.nn.functional.linear)
@@ -133,7 +136,6 @@ def _validate_linear_param(args, kwargs):
 
     Return: None.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
     input = args[0]
     weight = args[1]
     bias = kwargs["bias"]
@@ -211,7 +213,6 @@ def _handle_row_wise_sharding_tensor(
 
     Returns: final result of linear operation.
     """
-    from torch.distributed._sharded_tensor import PartialTensor
     # alltoall to gather all the appropriate inputs.
     input_t = input.t().contiguous()
     input_t_size = input_t.size()
@@ -268,7 +269,6 @@ def _handle_row_wise_sharding_tensor(
 
 
 def _handle_row_wise_sharding_sharded_tensor(input, world_size, weight, local_shard_t, bias):
-    from torch.distributed._sharded_tensor import PartialTensor
     results = []
     local_shard = input.local_shards()[0].tensor
     for i in range(local_shard.size(0)):
@@ -305,11 +305,6 @@ def _init_sharded_tensor_from_local_result(
 
     Return: new sharded tensor from the local_result.
     """
-    from torch.distributed._sharded_tensor import (
-        Shard,
-        ShardMetadata,
-        ShardedTensor,
-    )
     sharded_weight_metadata = sharded_tensor.local_shards()[0].metadata
     current_offsets = [0] * len(local_result.size())
     current_offsets[result_shard_dim] = sharded_weight_metadata.shard_offsets[tensor_shard_dim]

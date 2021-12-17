@@ -1,15 +1,18 @@
 import torch
+from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
+    ShardedTensor,
+)
 
-
-def elementwise_ops(types, args, kwargs):
+@sharded_op_impl(torch.nn.functional.gelu)
+def gelu(types, args=(), kwargs=None, pg=None):
     """
-    Handles ``__torch_function__`` dispatch for elementwise ops like
+    Handles ``__torch_function__`` dispatch for the elementwise op
     ``torch.nn.functional.gelu``.
     This method computes on either a normal tensor or a sharded tensor.
     """
     input = args[0]
-    op = kwargs['op']
-    from torch.distributed._sharded_tensor import ShardedTensor
+    op = torch.nn.functional.gelu
     # Validate types
     if not isinstance(input, torch.Tensor) and not isinstance(input, ShardedTensor):
         raise TypeError("input needs to be either torch.Tensor or ShardedTensor")

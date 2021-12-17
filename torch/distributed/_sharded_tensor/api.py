@@ -33,9 +33,6 @@ from torch.distributed.nn.functional import (
 )
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
-from .ops import (
-    elementwise_ops,
-)
 from .shard import Shard
 from .utils import (
     get_current_process_group,
@@ -596,9 +593,6 @@ class ShardedTensor(object):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         if func in _SHARDED_OPS:
             return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
-        elif func == torch.nn.functional.gelu:
-            kwargs['op'] = torch.nn.functional.gelu
-            return elementwise_ops(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
