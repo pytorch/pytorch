@@ -15,7 +15,12 @@ from torch.distributed.nn.functional import (
     reduce_scatter,
 )
 
+from torch.distributed._sharded_tensor import (
+    sharded_op_impl,
+    ShardedTensor
+)
 
+@sharded_op_impl(torch.nn.functional.linear)
 def sharded_linear(types, args, kwargs, pg):
     """
     Handles ``__torch_function__`` dispatch for ``torch.nn.functional.linear``.
@@ -76,8 +81,6 @@ def sharded_linear(types, args, kwargs, pg):
     5. If placements are not in order any appropriate rearrangement of rows
        are done for the (13 x 16) matrix and finally the bias term is added.
     """
-    from torch.distributed._sharded_tensor import ShardedTensor
-
     input = args[0]
     weight = args[1]
     bias = kwargs["bias"]
