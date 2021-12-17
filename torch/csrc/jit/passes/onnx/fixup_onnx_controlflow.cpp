@@ -233,16 +233,45 @@ void FixupONNXSubblockOutputs(Node* n) {
   }
 }
 
+void FixupONNXLoopBlockInputs(Node* n) {
+  for (Block* block : n->blocks()) {
+    // std::cerr << "FixupONNXLoopBlockInputs:" << std::endl;
+    // std::cerr << "block->owningGraph " << *(block->owningGraph()) <<
+    // std::endl; input 0 is loop counter i, never Optional.
+    for (const auto i : c10::irange(1, block->inputs().size())) {
+      Value* input_i = block->inputs().at(i);
+      if (input_i->type()->cast<OptionalType>() &&
+          !block->outputs().at(i)->type()->cast<OptionalType>()) {
+        // std::cerr << "handling input = " << i << ", " << input_i->debugName()
+        //           << std::endl;
+        // std::cerr << "merging "
+        //           <<
+        //           *(input_i->type()->cast<OptionalType>()->getElementType())
+        //           << ", " << *(block->outputs().at(i)->type()) << std::endl;
+        TypePtr merged_type;
+        bool inferred;
+        std::tie(merged_type, inferred) = MergeInferredType(
+            input_i->type()->cast<OptionalType>()->getElementType(),
+            block->outputs().at(i)->type());
+        // std::cerr << "inferred = " << inferred
+        //           << ", merged_type = " << *merged_type << std::endl;
+        if (inferred) {
+          input_i->setType(OptionalType::create(merged_type));
+        }
+      }
+    }
+  }
+}
+
 void FixupONNXLoopBlockOutputs(Node* n) {
-  bool printed = false;
   for (Block* block : n->blocks()) {
     // output 0 is continue_condition, never None.
     for (const auto i : c10::irange(1, block->outputs().size())) {
       if (block->outputs().at(i)->type()->cast<NoneType>()) {
         ReplaceBlockOutputWithOptional(
-            // input i+1 corresponds to output i b/c inputs 0 and 1
-            // are max_trip_count, start_condition and output 0 is
-            // continue_condition.
+            // Output 0 is continue_condition.
+            // Inputs (0, 1) are (i, cond). So input i + 1 corresponds to output
+            // i.
             block->inputs().at(i + 1)->type()->cast<OptionalType>(),
             block,
             i);
@@ -251,8 +280,6 @@ void FixupONNXLoopBlockOutputs(Node* n) {
   }
   FixupONNXSubblockOutputs(n);
 }
-
-} // anonymous namespace
 
 void FixupONNXLoopNodeInputs(Node* node) {
   if (node->kind() != ::c10::onnx::Loop) {
@@ -287,7 +314,7 @@ void FixupONNXLoopNodeInputs(Node* node) {
 
   // If loop input is None, infer optional type from sub block input.
   // Happens when the loop takes in None and outputs not-None.
-  // Inputs 0 and 1 are max_trip_count, start_condition. Skip them
+  // Inputs (0, 1) are (max_trip_count, start_condition). Skip them
   // since compiler should ensure they're never None.
   for (const auto i : c10::irange(2, node->inputs().size())) {
     Value* input = node->inputs().at(i);
@@ -308,17 +335,25 @@ void FixupONNXLoopNodeInputs(Node* node) {
     }
   }
 }
+} // anonymous namespace
 
 std::vector<Value*> FixupONNXLoopNode(Node* node, int opset_version) {
   auto output_size = node->outputs().size();
+  GRAPH_DEBUG("before FixupONNXLoopBlockInputs: ", *node->owningGraph());
+  FixupONNXLoopBlockInputs(node);
+  GRAPH_DEBUG("after FixupONNXLoopBlockInputs: ", *node->owningGraph());
   FixupONNXLoopNodeInputs(node);
+  GRAPH_DEBUG("after FixupONNXLoopNodeInputs: ", *node->owningGraph());
   FixupONNXLoopBlockOutputs(node);
+  GRAPH_DEBUG("after FixupONNXLoopBlockOutputs: ", *node->owningGraph());
+
   // NOTE: the output order is deliberately changed to match expected order
   //       since onnx loop requires scan outputs to be the last outputs.
   auto new_outputs = ConvertSequenceDependencies(node, opset_version);
 
   // Copy type of block output to node output.
   FixupONNXControlflowNodeOutputs(node);
+  GRAPH_DEBUG("after FixupONNXControlflowNodeOutputs: ", *node->owningGraph());
   TORCH_INTERNAL_ASSERT(output_size == new_outputs.size());
   return new_outputs;
 }
@@ -642,9 +677,14 @@ std::vector<Value*> FixupONNXControlflowNode(Node* n, int opset_version) {
 void FixupONNXControlflowNodeOutputs(Node* n) {
   switch (n->kind()) {
     case ::c10::onnx::Loop: {
+      // inputs (0, 1) are (i, cond).
       auto loop_carried_output_size = n->blocks().at(0)->inputs().size() - 2;
       for (auto i : c10::irange(n->outputs().size())) {
-        auto type = n->blocks().at(0)->outputs().at(i + 1)->type();
+        // Get the type from the input rather than the output
+        // to handle the case where a block input is Optional but the
+        // output is not (i.e. if the loop executes > 0 times, the
+        // output will not be None).
+        auto type = n->blocks().at(0)->inputs().at(i + 2)->type();
         if (i < loop_carried_output_size) {
           // TODO: Figure out if this is needed.
           // Find a test that fails without it, then re-enable it.

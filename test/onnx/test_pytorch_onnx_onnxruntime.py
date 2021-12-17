@@ -40,6 +40,7 @@ from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
+from torch.onnx import symbolic_helper
 from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import unpack_quantized_tensor
 
@@ -1125,31 +1126,19 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(15)  # Needs Loop to take optional input
     def test_loop_none_output(self):
         class Model(torch.nn.Module):
-            def forward(self, z, x, y: Optional[Tensor] = torch.zeros(2, 3)) -> Optional[Tensor]:
-                for i in range(z.size(0)):
-                    x = x + 1
+            def forward(self, x) -> Optional[Tensor]:
+                y: Optional[Tensor] = torch.zeros(2, 3)
+                for i in range(x.size(0)):
                     y = None
                 return y
 
         # Need scripting to preserve control flow for this test to be meaningful.
-        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3), None))
+        model = torch.jit.script(Model())
+        # TODO: export and assert on the exported model.
+        self.run_test(model, (torch.ones(3, 3),))
 
-    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Loop to take optional input
+    @skipIfUnsupportedMinOpsetVersion(15)
     def test_loop_none_input(self):
-        # TODO: I think this is wrong right now.
-        # Produces ONNX:
-        # graph(%y.1 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
-        #     %2 : Bool(device=cpu) = onnx::Constant[value={1}]()
-        #     %3 : Long(requires_grad=0, device=cpu) = onnx::Constant[value={3}]() # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:31
-        #     %4 : Tensor? = onnx::Optional[type=Tensor]() # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:16
-        #     %z : Float(*, *, strides=[3, 1], device=cpu), %y.4 : Float(*, *, strides=[3, 1], device=cpu) = onnx::Loop(%3, %2, %4, %y.1) # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1092:16
-        #         block0(%i : Long(requires_grad=0, device=cpu), %cond : Bool(device=cpu), %z.7 : Tensor?, %y.11 : Float(2, 3, strides=[3, 1], requires_grad=0, device=cpu)):
-        #         %11 : Float(requires_grad=0, device=cpu) = onnx::Constant[value={1}]()
-        #         %y : Float(*, *, strides=[3, 1], device=cpu) = onnx::Add(%y.11, %11) # /home/azureuser/src/pytorch/pytorch/test/onnx/test_pytorch_onnx_onnxruntime.py:1093:24
-        #         %13 : Bool(device=cpu) = onnx::Identity(%2)
-        #         -> (%13, %y, %y)
-        #     return (%z)
-        # I think the type of %z should be optional, but does not appear to be.
         class Model(torch.nn.Module):
             def forward(self, x, y) -> Optional[Tensor]:
                 z: Optional[Tensor] = None
@@ -1158,10 +1147,24 @@ class TestONNXRuntime(unittest.TestCase):
                     z = y
                 return z
 
+        f = io.BytesIO()
+        y = torch.randn(2, 3)
         # Need scripting to preserve control flow for this test to be meaningful.
-        self.run_test(torch.jit.script(Model()), (torch.ones(3, 3), torch.randn(2, 3)))
+        model = torch.jit.script(Model())
+        # TODO: switch to run_test once ORT supports opset 16. Needs Loop to take optional input.
+        torch.onnx.export(model, (torch.ones(3, 3), y), f, opset_version=self.opset_version)
+        exported = onnx.load_from_string(f.getvalue())
+        output_0_type = exported.graph.output[0].type
+        self.assertTrue(output_0_type.HasField("optional_type"))
+        output_0_optional_type = output_0_type.optional_type
+        self.assertTrue(output_0_optional_type.elem_type.HasField("tensor_type"))
+        output_0_tensor_type = output_0_optional_type.elem_type.tensor_type
+        self.assertEqual(
+            output_0_tensor_type.elem_type,
+            symbolic_helper.scalar_type_to_onnx[symbolic_helper.scalar_type_to_pytorch_type.index(y.dtype)])
+        self.assertEqual(len(output_0_tensor_type.shape.dim), len(y.shape))
 
-    @skipIfUnsupportedMinOpsetVersion(16)  # Needs Identity to take optional input
+    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Identity to take optional input
     def test_if_optional_output(self):
         class Model(torch.nn.Module):
             def forward(

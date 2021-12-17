@@ -17,6 +17,7 @@
 #include <cmath>
 #include <limits>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -25,22 +26,6 @@ inline bool PyNone_Check(PyObject* o) {
   return o == Py_None;
 }
 
-// Return a new TypePtr, merging ONNX inferred type with existing type.
-// The inferred type will take higher precedence, since it is produced by ONNX
-// shape inference, and is more compatible with ONNX. In cases where ONNX shape
-// inference fails to produce an inferred type, or produces inferred type that
-// is incomplete, refer to existing type and fill in the gap that is missing.
-// Currently the following cases are supported.
-//  1. existing type: Tensor[], inferred type: Tensor[]
-//    For list of tensors, existing type does not store datatype nor shape for
-//    inner tensor. Thus inferred type always contain more information, and is
-//    returned.
-//  2. existing type: Tensor, inferred type: Tensor
-//    Fill in missing info (shape, data type) for inferred type from existing
-//    type.
-//  3. existing type: Scalar[], inferred type: Tensor
-//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
-//    it is more compatible with ONNX.
 std::pair<TypePtr, bool> MergeInferredType(
     TypePtr existing_type,
     TypePtr inferred_type) {
@@ -2151,7 +2136,7 @@ void ONNXShapeTypeInference(
   }
   UpdateReliable(n);
 
-  // For the node type that does nott have ComputeConstant logic, it may have
+  // For the node type that does not have ComputeConstant logic, it may have
   // reliable shape but its shape is not in ConstantValueMap. So we need this
   // logic to update ConstantValueMap.
   for (auto node_output : n->outputs()) {
