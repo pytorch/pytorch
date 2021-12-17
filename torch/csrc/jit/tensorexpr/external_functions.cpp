@@ -171,7 +171,12 @@ at::Tensor quantized_cat(
                           int64_t,
                           c10::optional<double>,
                           c10::optional<int64_t>)>();
-  return op.call(qxs, dim, scale, zero);
+  return op.redispatch(
+      c10::DispatchKeySet({c10::DispatchKey::QuantizedCPU}),
+      qxs,
+      dim,
+      scale,
+      zero);
 }
 
 at::Tensor quantized_relu(const at::Tensor& qx) {
@@ -575,7 +580,8 @@ void nnc_aten_quantized_cat(
   std::vector<at::Tensor> tensors = constructTensors(
       bufs_num, buf_data, buf_ranks, buf_dims, buf_strides, buf_dtypes);
   c10::List<at::Tensor> qxs;
-  for (int i = 0; i < bufs_num - 1; ++i) {
+  const auto in_bufs_num = bufs_num - 1;
+  for (int i = 0; i < in_bufs_num; ++i) {
     const double qscale = ((double*)extra_args)[3 * i + 0];
     const int64_t qzero = extra_args[3 * i + 1];
     const c10::ScalarType qdtype =
@@ -591,9 +597,9 @@ void nnc_aten_quantized_cat(
         toQIntType(qdtype));
     qxs.push_back(qx);
   }
-  const int64_t dim = extra_args[3 * bufs_num + 0];
-  const double out_qscale = ((double*)extra_args)[3 * bufs_num + 1];
-  const int64_t out_qzero = extra_args[3 * bufs_num + 2];
+  const int64_t dim = extra_args[3 * in_bufs_num + 0];
+  const double out_qscale = ((double*)extra_args)[3 * in_bufs_num + 1];
+  const int64_t out_qzero = extra_args[3 * in_bufs_num + 2];
 
   auto r = quantized_cat(qxs, dim, out_qscale, out_qzero);
   memcpy(buf_data[0], r.data_ptr(), r.element_size() * r.numel());

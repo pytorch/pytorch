@@ -1,6 +1,9 @@
+from __future__ import annotations
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import (
+    Callable,
     Dict,
     List,
     Optional,
@@ -17,6 +20,7 @@ from torch.distributed._sharding_spec import (
     EnumerableShardingSpec,
     ShardMetadata,
     ShardingSpec,
+    ReshardingSpec,
 )
 from torch.distributed._sharding_spec._internals import (
     check_tensor,
@@ -24,15 +28,13 @@ from torch.distributed._sharding_spec._internals import (
     get_chunked_dim_size,
     validate_non_overlapping_shards_metadata,
 )
+from torch.distributed.nn.functional import (
+    reduce_scatter,
+)
 from torch.types import Number
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .ops import (
-    kaiming_uniform_,
-    normal_,
-    sharded_embedding,
-    sharded_embedding_bag,
-    sharded_linear,
-    uniform_,
+    elementwise_ops,
 )
 from .shard import Shard
 from .utils import (
@@ -48,6 +50,19 @@ from .utils import (
 _sharded_tensor_lock = threading.Lock()
 _sharded_tensor_current_id = 0
 _sharded_tensor_map: Dict[int, 'ShardedTensor'] = {}
+
+# Custom sharded ops
+_SHARDED_OPS: Dict[str, Callable] = {}
+def _register_sharded_op(op, func):
+    from inspect import signature
+    if len(signature(func).parameters) != 4:
+        raise TypeError(
+            f'Custom sharded op function expects signature: '
+            f'(types, args, kwargs, process_group), but received '
+            f'signature: {signature(func)}')
+
+    global _SHARDED_OPS
+    _SHARDED_OPS[op] = func
 
 def _register_remote_shards(sharded_tensor_id: int, rrefs: List[rpc.RRef[Shard]], rpc_rank: int):
     with _sharded_tensor_lock:
@@ -208,7 +223,6 @@ class ShardedTensor(object):
         self._remote_shards = {}
 
         # Gather all the sharded tensor ids.
-        world_size = dist.get_world_size(self._process_group)
         worker_infos = rpc._get_current_rpc_agent().get_worker_infos()
         rank_to_name = {}
         name_to_rank = {}
@@ -319,11 +333,10 @@ class ShardedTensor(object):
         world_size = dist.get_world_size(process_group)
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
-        local_shards_device = torch.device("cpu")
         global_tensor_size = _flatten_tensor_size(global_size)
 
         if len(local_shards) > 0:
-            local_sharded_tensor_metadata, local_shards_device = \
+            local_sharded_tensor_metadata = \
                 build_metadata_from_local_shards(local_shards, global_tensor_size, current_rank, process_group)
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
@@ -332,11 +345,11 @@ class ShardedTensor(object):
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
-            if local_shards_device.type == "cuda":
+            if isinstance(process_group, dist.ProcessGroupNCCL):
                 # with GPU/NCCL, we need to set a device for all_gather_object
                 # to use as we need to know which device we should put the
                 # serialized tensor on before the NCCL collective.
-                with torch.cuda.device(local_shards_device):
+                with torch.cuda.device(current_rank):
                     dist.all_gather_object(
                         gathered_metadatas,
                         local_sharded_tensor_metadata,
@@ -440,10 +453,10 @@ class ShardedTensor(object):
             assert shard_meta in local_shard_metadatas, \
                 "local shard metadata not in sharded_tensor_metadata!"
 
+            _raise_if_mismatch(tensor_properties.layout, local_shard_tensor.layout, "layout", current_rank, True)
             if not local_shard_tensor.is_contiguous():
                 raise ValueError('Only torch.contiguous_format memory_format is currently supported')
 
-            _raise_if_mismatch(tensor_properties.layout, local_shard_tensor.layout, "layout", current_rank, True)
             _raise_if_mismatch(shard_meta.shard_sizes, list(local_shard_tensor.size()), "size", current_rank)
             _raise_if_mismatch(tensor_properties.pin_memory, local_shard_tensor.is_pinned(), "pin_memory", current_rank, True)
             _raise_if_mismatch(local_device, local_shard_tensor.device, "device", current_rank)
@@ -546,19 +559,46 @@ class ShardedTensor(object):
         """
         return self._sharding_spec
 
+    def reshard(self, resharding_spec: ReshardingSpec) -> Union[ShardedTensor, torch.Tensor]:
+        """
+        Reshards a tensor given the resharding_spec, if output_local_tensors is
+        True in resharding_spec.
+
+        It would output the local shard on each rank instead of ShardedTensor
+        (only works for a single local shard).
+        """
+        # TODO: implement the reshard for ShardedTensor to ShardedTensor.
+        output_local_tensors = resharding_spec.output_local_tensors
+        if not output_local_tensors:
+            raise RuntimeError(
+                "Reshard not supported for ShardedTensor output yet."
+            )
+        from torch.distributed._sharded_tensor.ops._common import (
+            _result_distribute_with_col_rearrange,
+        )
+        local_shard = self.local_shards()[0].tensor
+        local_results = []
+        for i in range(local_shard.size(0)):
+            local_results.append(local_shard[i].t().contiguous())
+
+        # Distribute results to each rank with col rearrangement.
+        output = _result_distribute_with_col_rearrange(
+            local_results,
+            local_shard,
+            len(self._metadata.shards_metadata),
+            self,
+            self._process_group,
+        )
+
+        # transpose the output and return result.
+        return output.t().contiguous()
+
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        if func == torch.nn.functional.linear:
-            return sharded_linear(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding:
-            return sharded_embedding(types, args, kwargs, self._process_group)
-        if func == torch.nn.functional.embedding_bag:
-            return sharded_embedding_bag(types, args, kwargs, self._process_group)
-        elif func == torch.nn.init.normal_:
-            return normal_(types, args, kwargs)
-        elif func == torch.nn.init.uniform_:
-            return uniform_(types, args, kwargs)
-        elif func == torch.nn.init.kaiming_uniform_:
-            return kaiming_uniform_(types, args, kwargs)
+        if func in _SHARDED_OPS:
+            return _SHARDED_OPS[func](types, args, kwargs, self._process_group)
+        elif func == torch.nn.functional.gelu:
+            kwargs['op'] = torch.nn.functional.gelu
+            return elementwise_ops(types, args, kwargs)
         raise RuntimeError(
             f"torch function '{func.__name__}', with args: {args} and "
             f"kwargs: {kwargs} not supported for ShardedTensor!")
@@ -647,6 +687,9 @@ class ShardedTensor(object):
                 'ShardedTensor created with init_rrefs=False, no RRefs to remote shards available'
             )
         return self._remote_shards
+
+    def __hash__(self):
+        return id(self)
 
     def __repr__(self):
         return f'ShardedTensor({self._metadata})'
@@ -753,3 +796,61 @@ def _create_tensor_from_params(*size, local_device, tensor_init_params: TensorIn
                           device=local_device, )
     else:
         raise ValueError(f'Unsupported create_op: {tensor_init_params.create_op}')
+
+
+class PartialTensor(object):
+    """
+    PartialTensor is an abstraction to represent Tensors that need
+    aggregation across multiple devices and multiple processes.
+
+    PartialTensor is initialized in an SPMD like fashion where each rank
+    initializes the PartialTensor. The PartialTensor object on each rank
+    then only stores the local partial shard and provides global metadata
+    for all the shards.
+
+    PartialTensor doesn't provide any Tensor like operations but is a
+    wrapper providing the Tensor representing the local partial shard
+    and the global metadata.
+
+    Using these, users can apply custom distributed sharded computations
+    on top of this primitive. The local shards are all initialized using
+    the create_op specified by tensor_init_params.create_op, e.g.,
+    torch.ones, or torch.empty.
+
+    Args:
+        local_partial_results (List(Tensor)):
+            Partial results are stored across ranks and in a form of a list.
+    """
+
+    def __init__(self, local_partial_results):
+        self.local_partial_results = local_partial_results
+
+    def __post_init__(self):
+        if not isinstance(self.local_partial_results, Iterable):
+            raise ValueError('local_partial_results needs to be a Iterable.')
+        for tensor in self.local_partial_results:
+            if not isinstance(tensor, torch.Tensor):
+                raise ValueError('Element in local_partial_results needs to be a Tensor.')
+
+    def reshard(self, _resharding_spec: ReshardingSpec) -> torch.Tensor:
+        """
+        Consolidate all partial tensors across multiple ranks based on resharding
+        spec.
+        """
+        local_result = torch.empty_like(self.local_partial_results[0])
+        return reduce_scatter(local_result, self.local_partial_results)
+
+
+class ModuleResharder(torch.nn.Module):
+    """
+    A module that will reshard its output based on the resharding_spec.
+    """
+
+    def __init__(self, original_module, resharding_spec):
+        super().__init__()
+        self.original_module = original_module
+        self.resharding_spec = resharding_spec
+
+    def forward(self, *args, **kwargs):
+        output = self.original_module(*args, **kwargs)
+        return output.reshard(self.resharding_spec, **kwargs)

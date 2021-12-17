@@ -182,6 +182,29 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum")
         self._run_sharded_embedding_bag(spec, [5, 4], 17, 12, "mean")
         self._run_sharded_embedding_bag(spec, [6, 7], 21, 11, "max")
+        self._run_sharded_embedding_bag(
+            spec, [5, 5], 17, 14, "sum", max_norm=2.5, sharded_dim=sharded_dim
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [5, 4],
+            17,
+            12,
+            "mean",
+            max_norm=2.0,
+            norm_type=1.0,
+            sharded_dim=sharded_dim,
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [6, 7],
+            21,
+            11,
+            "max",
+            max_norm=1.5,
+            norm_type=1.0,
+            sharded_dim=sharded_dim,
+        )
         self._run_sharded_embedding_bag(spec, [5, 5], 17, 14, "sum", padding_idx=6)
         self._run_sharded_embedding_bag(spec, [8, 6], 24, 13, "sum")
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "max")
@@ -194,96 +217,72 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self._run_sharded_embedding_bag(
             spec, [12], 16, 12, "max", offset_size=4, include_last_offset=True
         )
+        self._run_sharded_embedding_bag(
+            spec,
+            [12],
+            17,
+            12,
+            "sum",
+            offset_size=3,
+            max_norm=1.25,
+            sharded_dim=sharded_dim,
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [5],
+            17,
+            12,
+            "mean",
+            offset_size=2,
+            max_norm=1.25,
+            sharded_dim=sharded_dim,
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [5],
+            17,
+            12,
+            "max",
+            offset_size=2,
+            max_norm=1.15,
+            sharded_dim=sharded_dim,
+        )
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "sum", padding_idx=12)
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "mean", padding_idx=12)
         self._run_sharded_embedding_bag(spec, [4, 3], 16, 14, "max", padding_idx=12)
-        with torch.no_grad():
-            self._run_sharded_embedding_bag(
-                spec, [5, 5], 17, 14, "sum", max_norm=2.5, sharded_dim=sharded_dim
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [5, 4],
-                17,
-                12,
-                "mean",
-                max_norm=2.0,
-                norm_type=1.0,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [6, 7],
-                21,
-                11,
-                "max",
-                max_norm=1.5,
-                norm_type=1.0,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [12],
-                17,
-                12,
-                "sum",
-                offset_size=3,
-                max_norm=1.25,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [5],
-                17,
-                12,
-                "mean",
-                offset_size=2,
-                max_norm=1.25,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [5],
-                17,
-                12,
-                "max",
-                offset_size=2,
-                max_norm=1.15,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [12],
-                17,
-                12,
-                "sum",
-                offset_size=3,
-                max_norm=1.25,
-                padding_idx=10,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [5],
-                17,
-                12,
-                "mean",
-                offset_size=2,
-                max_norm=1.25,
-                padding_idx=10,
-                sharded_dim=sharded_dim,
-            )
-            self._run_sharded_embedding_bag(
-                spec,
-                [5],
-                17,
-                12,
-                "max",
-                offset_size=2,
-                max_norm=1.15,
-                padding_idx=10,
-                sharded_dim=sharded_dim,
-            )
+        self._run_sharded_embedding_bag(
+            spec,
+            [12],
+            17,
+            12,
+            "sum",
+            offset_size=3,
+            max_norm=1.25,
+            padding_idx=10,
+            sharded_dim=sharded_dim,
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [5],
+            17,
+            12,
+            "mean",
+            offset_size=2,
+            max_norm=1.25,
+            padding_idx=10,
+            sharded_dim=sharded_dim,
+        )
+        self._run_sharded_embedding_bag(
+            spec,
+            [5],
+            17,
+            12,
+            "max",
+            offset_size=2,
+            max_norm=1.15,
+            padding_idx=10,
+            sharded_dim=sharded_dim,
+        )
 
 
 if __name__ == "__main__":
