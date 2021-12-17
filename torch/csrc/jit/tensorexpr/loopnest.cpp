@@ -1189,8 +1189,7 @@ void LoopNest::eliminateDeadStores() {
   root_stmt_ = root_stmt_->accept_mutator(&deleter);
 }
 
-void LoopNest::prepareForCodegen(
-    const c10::optional<std::vector<BufPtr>>& interm_bufs /*= c10::nullopt*/) {
+void LoopNest::prepareForCodegen() {
   // Expand reduction ops.
   ReductionExpander reduceExpander;
   root_stmt_ = reduceExpander.expand(root_stmt_);
