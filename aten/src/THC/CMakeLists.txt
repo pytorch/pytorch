@@ -5,5 +5,4 @@ PARENT_SCOPE)
 install(FILES
           THCAtomics.cuh
           THCDeviceUtils.cuh
-          THCGenerateByteType.h
           DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THC")
