@@ -4,12 +4,11 @@ from typing import Any, Dict, Callable, Union
 
 from .utils import (
     get_combined_dict,
+    _parent_name,
 )
 from .quantization_mappings import (
     get_default_qat_module_mappings,
 )
-# TODO(future PR): move this out of the torch.ao.quantization.fx folder
-from torch.ao.quantization.fx.utils import _parent_name
 from torch.ao.quantization.qconfig import QConfigAny
 
 

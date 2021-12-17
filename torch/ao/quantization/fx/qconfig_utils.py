@@ -12,7 +12,7 @@ from torch.fx.graph import (
     Graph,
 )
 
-from .utils import _parent_name
+from ..utils import _parent_name
 from ..fuser_method_mappings import DEFAULT_OP_LIST_TO_FUSER_METHOD
 from ..qconfig_dict_utils import (
     get_object_type_qconfig,
