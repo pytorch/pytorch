@@ -58,7 +58,14 @@ def from_dlpack(ext_tensor: Any) -> torch.Tensor:
             stream = torch.cuda.current_stream('cuda:{}'.format(device[1]))
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
-            dlpack = ext_tensor.__dlpack__(stream=stream.cuda_stream)
+            # The array API specify that the default legacy stream must be passed
+            # with a value of 1 for CUDA
+            # https://data-apis.org/array-api/latest/API_specification/array_object.html?dlpack-self-stream-none#dlpack-self-stream-none  # NOQA
+            is_cuda = device[0] == DLDeviceType.kDLGPU
+            # Since pytorch is not using PTDS by default, lets directly pass
+            # the legacy stream
+            stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
+            dlpack = ext_tensor.__dlpack__(stream=stream_ptr)
         else:
             dlpack = ext_tensor.__dlpack__()
     else:

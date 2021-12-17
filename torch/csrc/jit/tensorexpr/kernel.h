@@ -137,6 +137,7 @@ class TORCH_API TensorExprKernel {
   void fallback(Stack& stack) {
     InterpreterState(code_).run(stack);
   }
+  void recompile();
 
   StmtPtr getCodeGenStmt();
 
@@ -227,7 +228,8 @@ class TORCH_API TensorExprKernel {
   // Specifically, we pre-allocate memory for intermediate buffers with static
   // size and manage these buffers in the way we manage JIT constant tensors:
   // push the buf args into the stack so NNC IR can access them at runtime.
-  void preAllocIntermediateBufs(std::unordered_set<BufPtr>& interm_bufs);
+  std::vector<BufPtr> preAllocIntermediateBufs(
+      const std::vector<BufPtr>& interm_bufs);
 
  private:
   struct UnpackedTensorOptions {
@@ -284,8 +286,9 @@ class TORCH_API TensorExprKernel {
   std::vector<ConstantDescr> constants_;
 
   std::unordered_map<c10::Symbol, NNCLoweringFunction> custom_lowerings_;
+  StmtPtr stmt_ = nullptr;
   bool pre_alloc_{false};
-  const std::string& kernel_func_name_;
+  std::string kernel_func_name_;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();
