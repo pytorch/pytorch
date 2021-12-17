@@ -5,7 +5,7 @@
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 
 namespace torch {
 namespace jit {
@@ -388,6 +388,10 @@ class TORCH_CUDA_CU_API ComputeAtRootDomainMapBuilder
   }
 
   void handle(ShiftOp* op) override {
+    mapPointwiseOrReductionOp(op);
+  }
+
+  void handle(ViewOp* op) override {
     mapPointwiseOrReductionOp(op);
   }
 
