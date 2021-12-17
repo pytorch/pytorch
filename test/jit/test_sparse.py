@@ -2,6 +2,8 @@
 
 import io
 import torch
+import unittest
+from torch.testing._internal.common_utils import IS_WINDOWS, TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -60,6 +62,7 @@ class TestSparse(JitTestCase):
 
         self.assertEqual(expected_result, loaded_result)
 
+    @unittest.skipIf(IS_WINDOWS or not TEST_MKL, "Need MKL to run CSR matmul")
     def test_freeze_sparse_csr(self):
         class SparseTensorModule(torch.nn.Module):
             def __init__(self):
@@ -93,6 +96,7 @@ class TestSparse(JitTestCase):
 
         self.assertEqual(unfrozen_result.to_dense(), loaded_result.to_dense())
 
+    @unittest.skipIf(IS_WINDOWS or not TEST_MKL, "Need MKL to run CSR matmul")
     def test_serialize_sparse_csr(self):
         class SparseTensorModule(torch.nn.Module):
             def __init__(self):
