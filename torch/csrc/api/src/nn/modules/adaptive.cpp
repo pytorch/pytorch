@@ -81,8 +81,8 @@ ASMoutput AdaptiveLogSoftmaxWithLossImpl::forward(const Tensor& input_, const Te
       ".");
   }
 
-  bool is_batched = (targ_dim > 0); 
-  Tensor input = is_batched ? input_ : input_.unsqueeze(0); 
+  bool is_batched = (targ_dim > 0);
+  Tensor input = is_batched ? input_ : input_.unsqueeze(0);
   Tensor target = is_batched ? target_ : target_.unsqueeze(0);
 
   int64_t used_rows = 0;

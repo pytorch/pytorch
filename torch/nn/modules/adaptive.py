@@ -174,14 +174,14 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 raise RuntimeError('Input and target should have the same size '
                                    'in the batch dimension.')
             if input_.dim() != 2:
-                raise RuntimeError('1D target tensor expects 2D input tensors, ' 
+                raise RuntimeError('1D target tensor expects 2D input tensors, '
                                    'but found inputs with size', input_.size())
         elif targ_dim == 0:
             if input_.dim() != 1:
-                raise RuntimeError('0D target tensor expects 1D input tensors, ' 
+                raise RuntimeError('0D target tensor expects 1D input tensors, '
                                    'but found inputs with size', input_.size())
         else:
-            raise RuntimeError('0D or 1D target tensor expected, ' 
+            raise RuntimeError('0D or 1D target tensor expected, '
                                'multi-target not supported')
 
         is_batched = targ_dim > 0
