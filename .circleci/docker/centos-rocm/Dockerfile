@@ -4,6 +4,10 @@ FROM centos:${CENTOS_VERSION}
 
 ARG CENTOS_VERSION
 
+# Set AMD gpu targets to build for
+ARG PYTORCH_ROCM_ARCH
+ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
+
 # Install required packages to build Caffe2
 
 # Install common dependencies (so that this step can be cached separately)
