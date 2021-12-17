@@ -61,6 +61,7 @@ ALLOW_LIST = [
     ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
+    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
     ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
