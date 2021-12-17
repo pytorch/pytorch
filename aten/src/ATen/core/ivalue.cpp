@@ -1,6 +1,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
+#include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
@@ -959,19 +960,6 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
         cu_.getStrongRefOrThrow();
     return WeakTypePtr(weak_cu, type_);
   }
-}
-
-
-ska::flat_hash_map<std::type_index, c10::ClassTypePtr>& getCustomClassTypeMap() {
-    static ska::flat_hash_map<std::type_index, c10::ClassTypePtr> tmap;
-    return tmap;
-}
-
-std::unordered_map<std::string, std::function<PyObject*(void*)>>&
-getClassConverter() {
-  static std::unordered_map<std::string, std::function<PyObject*(void*)>>
-      classConverter;
-  return classConverter;
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder

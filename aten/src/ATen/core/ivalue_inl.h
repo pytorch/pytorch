@@ -8,6 +8,7 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/List.h>
 #include <ATen/core/functional.h>
+#include <ATen/core/jit_type.h>
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/rref_interface.h>
@@ -1875,6 +1876,28 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
       "called toTupleRef on null intrusive_ptr IValue");
   return *static_cast<c10::ivalue::Tuple*>(
       payload.u.as_intrusive_ptr);
+}
+
+inline bool IValue::isDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == FloatType::Kind;
+}
+
+inline bool IValue::isComplexDoubleList() const {
+  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == ComplexType::Kind;
+}
+
+inline bool IValue::isTensorList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == TensorType::Kind;
+}
+
+inline bool IValue::isIntList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == IntType::Kind;
+}
+
+inline bool IValue::isBoolList() const {
+  return isList() && static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType->kind() == BoolType::Kind;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
