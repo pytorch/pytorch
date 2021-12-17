@@ -13,11 +13,8 @@ from ..utils import (
     weight_is_statically_quantized,
     get_qparam_dict,
 )
-from .backend_config_dict.utils import get_quantized_reference_module_mapping
+from .backend_config.utils import get_quantized_reference_module_mapping
 
-from .match_utils import (
-    find_matches,
-)
 from .graph_module import (
     QuantizedGraphModule,
 )
@@ -103,10 +100,6 @@ def _convert_do_not_use(
     custom_module_classes = get_custom_module_class_keys(
         convert_custom_config_dict,
         "observed_to_quantized_custom_module_class")
-    matches = find_matches(
-        model.graph, modules, patterns,
-        qconfig_map,
-        custom_module_classes=custom_module_classes)
 
     if model._equalization_qconfig_map is not None:
         # If we want to do equalization then do the following:
