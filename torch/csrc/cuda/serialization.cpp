@@ -8,4 +8,4 @@
 #include <memory>
 
 #define THC_GENERIC_FILE "torch/csrc/generic/serialization.cpp"
-#include <torch/csrc/THCGenerateByteType.h>
+#include <THC/THCGenerateByteType.h>
