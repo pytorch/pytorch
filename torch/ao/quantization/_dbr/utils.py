@@ -15,9 +15,15 @@ from .mappings import (
     add_and_mul_ops,
 )
 
+from ..qconfig import QConfigAny
+
 from torch.quantization import (
     ObserverBase,
     FakeQuantizeBase,
+)
+
+from ..qconfig_dict_utils import (
+    maybe_adjust_qconfig_for_module_type_or_name,
 )
 
 def _raise_obs_not_found_error(func):
@@ -113,6 +119,7 @@ class ObserverWrapper(torch.nn.Identity):
     def __init__(self, child):
         super().__init__()
         self.child = child
+        self.dtype = child.dtype
 
 def wrap_observers_in_placeholders(module: torch.nn.Module) -> None:
     """
@@ -623,3 +630,24 @@ def get_input_args_quant_dequant_info(
             quant_infos.append(None)
             dequant_infos.append(False)
     return quant_infos, dequant_infos, any_arg_quant_or_dequant_needed
+
+def get_cur_qconfig(
+    qconfig_dict: Dict[str, Any],
+    cur_fqn: str,
+    cur_op: Callable,
+) -> Optional[QConfigAny]:
+    # precedence: global -> object_type -> module_name_regex -> module_name
+    #   -> module_name_object_type_order
+    # (module_name_regex, module_name_object_type_order not implemented yet)
+
+    # global
+    global_qconfig = qconfig_dict['']
+
+    # object_type
+    is_module = isinstance(cur_op, type(torch.nn.Module))
+    cur_op_type = type(cur_op) if is_module else cur_op
+
+    qconfig = maybe_adjust_qconfig_for_module_type_or_name(
+        qconfig_dict, cur_op_type, cur_fqn, global_qconfig)
+
+    return qconfig
