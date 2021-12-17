@@ -85,6 +85,12 @@ using PtrInfo = std::unordered_map<void*, PtrUsage>;
 PtrInfo ptr_info;
 std::vector<void*> ungraphed_ptrs_defer_free_until_no_capture;
 
+// These two help setMemoryFraction limit the amount of memory
+// used by Pytorch in particular (as opposed to other libraries
+// in the same process that might be sharing the same cudaMemPool_t).
+std::vector<uint64_t> pytorch_used_bytes;
+std::vector<uint64_t> pytorch_memory_limits;
+
 // Graph-specific helpers
 
 /**
@@ -164,6 +170,9 @@ inline void lazy_init_device(int device) {
     // for allocations that end up used on multiple streams.
     const auto dufs = getStreamFromPool();
     dummy_unifying_free_streams[device] = UsageStream(dufs.stream(), dufs.device_index());
+
+    pytorch_used_bytes[device] = 0;
+    pytorch_memory_limits[device] = UINT64_MAX;
   }
 }
 
@@ -239,6 +248,8 @@ inline void free_impl(PtrInfo::iterator& it) {
     }
   }
 
+  pytorch_used_bytes[usage_streams[0].device] -= it->second.size;
+
   ptr_info.erase(it);
 }
 
@@ -288,11 +299,20 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
   // so we need to set the right ambient context.
   CUDAGuard g(device);
 
-  C10_CUDA_CHECK(cudaMallocAsync(devPtr, size, stream));
-
   std::lock_guard<std::mutex> lk(general_mutex);
 
   lazy_init_device(device);
+
+  TORCH_CHECK(pytorch_used_bytes[device] + size < pytorch_memory_limits[device],
+              "Allocation on device ", device, " would exceed allowed memory fraction.\n",
+              "Currently allocated: ", pytorch_used_bytes[device], " bytes\n",
+              "Requested          : ", size, " bytes\n",
+              "Limit              : ", pytorch_memory_limits[device], " bytes\n");
+
+  // TODO: Could we avoid calling cudaMallocAsync while holding general_mutex,
+  // perhaps by letting lazy_init_device use separate once_flags or an internal
+  // static initializer?
+  C10_CUDA_CHECK(cudaMallocAsync(devPtr, size, stream));
 
   auto inserted = ptr_info.emplace(*devPtr, PtrUsage(size, capture_underway));
   TORCH_INTERNAL_ASSERT(inserted.second,
@@ -300,6 +320,8 @@ void malloc(void** devPtr, int device, size_t size, cudaStream_t stream) {
                         "in usage_streams_each_ptr");
 
   inserted.first->second.usage_streams.emplace_back(stream, device);
+
+  pytorch_used_bytes[device] += size;
 }
 
 } // anonymous namespace
@@ -345,17 +367,43 @@ void init(int dev_count) {
   device_count = dev_count;
   devs_initialized_flags.resize(dev_count, 0);
   dummy_unifying_free_streams.resize(dev_count);
+  pytorch_used_bytes.resize(dev_count);
+  pytorch_memory_limits.resize(dev_count);
+}
+
+static inline void assertValidDevice(int device) {
+  TORCH_CHECK(
+      0 <= device && device < device_count,
+      "Invalid device argument.");
 }
 
 void setMemoryFraction(double fraction, int device) {
-  // NEEDED FOR PR
-  // How do we want this to behave?
-  // Do we want it to be a soft hint for the driver to keep the pool's cached memory
-  // trimmed to a certain threshold, via
+  TORCH_INTERNAL_ASSERT(
+      0 <= fraction && fraction <= 1,
+      "invalid fraction:",
+      fraction,
+      ". Please set within (0, 1).");
+
+  std::lock_guard<std::mutex> lk(general_mutex);
+  assertValidDevice(device);
+  CUDAGuard g(device);
+  // Should setMemoryFraction be allowed to trigger a full device context and
+  // pool-creating lazy_init_device, or should we simply assert this device is
+  // already initialized, ie
+  // TORCH_CHECK(devs_initialized_flags[device], ...)?
+  lazy_init_device(device);
+
+  size_t device_free;
+  size_t device_total;
+  C10_CUDA_CHECK(cudaMemGetInfo(&device_free, &device_total));
+  pytorch_memory_limits[device] = static_cast<uint64_t>(fraction * device_total);
+
+  // Alternative: Instead of a manual hard limit, we could use
   // cudaMemPoolSetAttribute(mempool, cudaMemPoolAttrReleaseThreshold, &threshold);
-  // Or do we want to hard error if the total amount of live memory exceeds fraction?
-  // If we want the hard error, we need manual tracking of how much memory
-  // is currently live per device.
+  // This is a soft hint: The driver allows the pool's reserved memory to spike
+  // above threshold in regions of high cudaMallocAsync demand, but opportunistically
+  // trims reserved memory back to threshold when the memory in use is < threshold.
+  // I don't like this because it introduces performance nondeterminism.
 }
 
 void emptyCache(void) {
@@ -374,7 +422,15 @@ void emptyCache(void) {
 }
 
 void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
-  // NEEDED FOR PR
+  TORCH_CHECK(false,
+              "Calling cacheInfo with backend:cudaMallocAsync is not meaningful. "
+              "(For backend:native, cacheInfo returns the total and largest sizes "
+              "of all currently-unallocated blocks held by the allocator, but "
+              "the cudaMallocAsync backend does not track individual blocks.");
+  // Alternative 1: TORCH_WARN that the call is not meaningful,
+  //                and set cachedAndFree and largestBlock to 0.
+  // Alternative 2: Set cachedAndFree to a "best guess analogue", ie
+  //                the pool's current reserved mem - the pool's current used mem.
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
@@ -409,12 +465,6 @@ std::mutex* getFreeMutex() {
   return &general_mutex;
 }
 
-static inline void assertValidDevice(int device) {
-  TORCH_CHECK(
-      0 <= device && device < device_count,
-      "Invalid device argument.");
-}
-
 // Collects stats for device.
 // If device hasn't been used yet, returns 0s without creating a context.
 DeviceStats getDeviceStats(int device) {
@@ -423,11 +473,11 @@ DeviceStats getDeviceStats(int device) {
   // Memory currently reserved by the mempool
   uint64_t reserved_mem_current = 0;
   // High-water mark of memory reserved by the mempool since last reset
-  uint64_t reserved_mem_high = 0;
+  uint64_t reserved_mem_peak = 0;
   // Memory currently in use by the mempool
   uint64_t used_mem_current;
   // High-water mark of memory
-  uint64_t used_mem_high = 0;
+  uint64_t used_mem_peak = 0;
 
   std::lock_guard<std::mutex> lk(general_mutex);
 
@@ -442,7 +492,7 @@ DeviceStats getDeviceStats(int device) {
 
     C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
                                            cudaMemPoolAttrReservedMemHigh,
-                                           &reserved_mem_high));
+                                           &reserved_mem_peak));
 
     C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
                                            cudaMemPoolAttrUsedMemCurrent,
@@ -450,17 +500,36 @@ DeviceStats getDeviceStats(int device) {
 
     C10_CUDA_CHECK(cudaMemPoolGetAttribute(mempool,
                                            cudaMemPoolAttrUsedMemHigh,
-                                           &used_mem_high));
+                                           &used_mem_peak));
   }
 
-  // just to get it to compile
-  // NEEDED FOR PR
-  return {};
+  // Many stat types are specific to the native allocator. We leave these untouched.
+  // Their "struct Stat"s will contain zeroed values.
+  DeviceStats stats;
+
+  // In the native allocator,
+  // allocated_bytes is the total bytes of blocks that have been malloc()ed
+  // and not yet free()d.
+  // active_bytes is the total bytes of blocks that have been malloc()ed but not yet
+  // released back into a free pool. In other words, it includes all allocated_bytes,
+  // as well as the bytes of "limbo state" blocks had have already been free()ed but
+  // not yet free_block()ed back into a pool due to outstanding stream_uses.
+  //
+  // Here, we simply ask the driver's opinion about active memory,
+  // and don't bother distinguishing between allocated_bytes and active_bytes.
+  stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current = used_mem_current;
+  stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak = used_mem_peak;
+  stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].current = used_mem_current;
+  stats.active_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak = used_mem_peak;
+  stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current = reserved_mem_current;
+  stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].peak = reserved_mem_peak;
+
+  return stats;
 }
 
 void resetAccumulatedStats(int device) {
   assertValidDevice(device);
-  // NEEDED FOR PR
+  TORCH_WARN("For backend:cudaMallocAsync, resetAccumulatedStats has no effect.");
 }
 
 void resetPeakStats(int device) {
@@ -484,6 +553,12 @@ void resetPeakStats(int device) {
 }
 
 std::vector<SegmentInfo> snapshot() {
+  TORCH_CHECK(false,
+              "Calling snapshot with backend:cudaMallocAsync is not meaningful. "
+              "(For backend:native, snapshot returns a detailed summary of all "
+              "blocks tracked by the allocator, but the cudaMallocAsync backend "
+              "does not track individual blocks.");
+  // Alternative: TORCH_WARN
   return {};
 }
 
@@ -506,7 +581,7 @@ void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
 
   TORCH_CHECK(capture_underway,
               "CudaMallocAsync::notifyCaptureAboutToEnd called, "
-              "but CudaMallocAsync::capture_underway is false");
+              "but CudaMallocAsync::capture_underway is false.");
 
   auto capture_stream = cuda::getCurrentCUDAStream(device);
 
@@ -533,11 +608,11 @@ void notifyCaptureEnded(int device, CaptureId_t graph_id) {
 
   TORCH_CHECK(capture_underway,
               "CudaMallocAsync::notifyCaptureEnded called, "
-              "but CudaMallocAsync::capture_underway is false");
+              "but CudaMallocAsync::capture_underway is false.");
   capture_underway = false;
 
   // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
-  for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture ) {
+  for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
     auto it = ptr_info.find(ptr);
     TORCH_INTERNAL_ASSERT(it != ptr_info.end(),
                           "ptr not found in ptr_info");
