@@ -148,7 +148,7 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
   }
   // TODO: FIXME: support these datatypes!
   TORCH_CHECK(dtype0 != kComplexDouble && dtype0 != kComplexFloat &&
-              dtype0 != kBFloat16 && dtype0 != at::kHalf,
+              dtype0 != kBFloat16,
                 "Encountered an unsupported dtype ", dtype0, "!");
 
   // Checks input(s)
@@ -160,7 +160,7 @@ at::opmath_type<f_inputs_type> scalar_val=0) {
       // NOTE: can't short-circuit here yet because the dtype check below needs to run on every arg
     }
     TORCH_CHECK(dtypei != kComplexDouble && dtypei != kComplexFloat &&
-                dtypei != kBFloat16 && dtypei != at::kHalf,
+                dtypei != kBFloat16,
                 "Encountered an unsupported dtype ", dtypei, "!");
   }
   if (scalar_pos == at::cuda::jit::BinaryFuncVariant::NoScalar) {

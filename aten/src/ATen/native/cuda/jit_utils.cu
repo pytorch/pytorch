@@ -6,6 +6,7 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace at { namespace cuda { namespace jit {
 
@@ -34,7 +35,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(int16_t, Short) /* 2 */                              \
   _(int, Int) /* 3 */                                    \
   _(int64_t, Long) /* 4 */                               \
-  _(void, Half) /* 5 */                                  \
+  _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
   _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
@@ -50,6 +51,7 @@ const std::string jit_common_types = R"ESCAPE(
   _(int, Int)                     \
   _(int64_t, Long)                \
   _(float, Float)                 \
+  _(at::Half, Half)               \
   _(double, Double)               \
   _(bool, Bool)
 
@@ -76,8 +78,54 @@ const std::string jit_common_types = R"ESCAPE(
   Array& operator=(const Array&) = default;
   };
 
+  ${half_string}
+  ${bfloat16_string}
+
 
 )ESCAPE";
+
+//we need to include half and bfloat16 strings to all kernels with half arguments and to all kernels with type casting
+//regardless of whether they have half arguments (because fetch_and_cast and cast_and_store loop over all types)
+const std::string jiterator_half_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) Half {
+  unsigned short x;
+
+  Half() = default;
+  inline __host__ __device__ Half(float value){
+    asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  }
+  inline __host__ __device__ operator float() const{
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x));
+      //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
+      return val;
+  }
+
+};
+}
+)ESCAPE";
+
+const std::string jiterator_bfloat16_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) BFloat16 {
+  unsigned short x;
+
+  Half() = default;
+  inline __host__ __device__ BFloat16(float value){
+    asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  }
+  // inline __host__ __device__ operator float() const{
+  //     float val;
+  //     asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x));
+  //     return val;
+  // }
+
+};
+}
+)ESCAPE";
+
+
 
 const std::string jit_code_template = R"ESCAPE(
 
@@ -503,6 +551,12 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+    env.s("half_string", jiterator_half_support_literal);
+  } else {
+    env.s("half_string", "");
+  }
+  env.s("bfloat16_string", "");
 
   if (!vectorized) {
     if (!dynamic_casting) {
@@ -532,7 +586,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-      static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
     return cuda_template.format(env);
   }
 

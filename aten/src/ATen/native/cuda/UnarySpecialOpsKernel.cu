@@ -30,15 +30,32 @@ void exp2_kernel_cuda(TensorIteratorBase& iter) {
       });
 }
 
+#define stringify(...) std::string(#__VA_ARGS__);
+const auto fake_i0_string = stringify(
+  template <typename scalar_t>
+  scalar_t i0(scalar_t x) {
+    return x + 1;
+  }
+);
+const char i0_name[] = "i0";
 void i0_kernel_cuda(TensorIteratorBase& iter) {
+  #ifdef USE_JITERATOR
   AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0_cuda", [&]() {
-    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-      using opmath_t = at::opmath_type<scalar_t>;
-      // implicit conversion of a to opmath_t will happen here,
-      //   but as far as TI is concerned, it's still a no-dynamic-cast kernel because lambda input is scalar_t
-      return calc_i0<opmath_t>(a);
+    jitted_gpu_kernel</*name=*/i0_name,
+                      /*return_dtype=*/ scalar_t,
+                      /*common_dtype=*/ scalar_t,
+                      /*arity=*/ 1>(iter, fake_i0_string);
     });
-  });
+  #else
+    AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::Half, ScalarType::BFloat16, iter.common_dtype(), "i0_cuda", [&]() {
+      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        // implicit conversion of a to opmath_t will happen here,
+        //   but as far as TI is concerned, it's still a no-dynamic-cast kernel because lambda input is scalar_t
+        return calc_i0<opmath_t>(a);
+      });
+    });
+  #endif
 }
 
 void i0e_kernel_cuda(TensorIteratorBase& iter) {
