@@ -16,14 +16,15 @@ from ..quantize import (
 from ..observer import (
     ObserverBase,
 )
-from ..qconfig import QConfigAny
-from ..qconfig import is_reuse_input_qconfig
-from .qconfig_utils import (
-    convert_dict_to_ordered_dict,
-    generate_qconfig_map,
+from ..qconfig import QConfigAny, is_reuse_input_qconfig
+from ..qconfig_dict_utils import (
     get_flattened_qconfig_dict,
-    update_qconfig_for_fusion,
+    convert_dict_to_ordered_dict,
     update_qconfig_for_qat,
+)
+from .qconfig_utils import (
+    generate_qconfig_map,
+    update_qconfig_for_fusion,
 )
 
 from .quantization_patterns import (
