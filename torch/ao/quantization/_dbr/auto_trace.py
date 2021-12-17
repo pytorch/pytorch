@@ -395,8 +395,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                 qstate.mark_cur_op_complete(func)
 
             elif hook_type is HookType.ARG_DEQUANTS:
-                # disabling torch function to prevent infinite recursion on
-                # getset
                 # TODO(future PR): handle more dtypes
                 new_args = []
                 for arg in args:
@@ -541,8 +539,6 @@ def add_auto_convert(module : torch.nn.Module) -> torch.nn.Module:
                         cur_qstate.validate_is_at_last_seen_idx()
 
                     elif hook_type is HookType.ARG_DEQUANTS:
-                        # disabling torch function to prevent infinite recursion on
-                        # getset
                         # TODO(future PR): handle more dtypes
                         new_args = []
                         for arg in args:
