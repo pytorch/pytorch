@@ -1285,7 +1285,7 @@ void initJITBindings(PyObject* module) {
                         << "' with schema:\n";
               docstring << "  " << op->schema() << "\n";
               auto func = py::cpp_function(
-              [op, symbol](py::args args, py::kwargs kwargs) {
+              [op](py::args args, py::kwargs kwargs) {
                 return invokeOperatorFromPython({op}, args, kwargs);
               },
               py::name(symbol.toUnqualString()),

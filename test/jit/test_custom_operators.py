@@ -50,10 +50,6 @@ class TestCustomOperators(JitTestCase):
         output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
-    def test_only_kwargs(self):
-        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
-        self.assertEqual(output, torch.tensor(-0.01))
-
     def test_passing_too_many_args(self):
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,
