@@ -290,8 +290,19 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
     ni->setType(ni->type());
     td.old_to_new_[inp] = ni;
   }
+
+  // Set type of the graph inputs using the inputs from the stack.
+  // This needs to be done before running the interpreter because the stack
+  // will only have the outputs after the run.
+  for (auto i : c10::irange(stack.size())) {
+    if (stack[i].isTensor()) {
+      td.traced_graph_->inputs().at(i)->setType(
+          tensorTypeInCurrentExecutionContext(stack[i].toTensor()));
+    }
+  }
+
   ProfilingRecord::removeProfileCounter(pr->profiled_graph_->block());
-  RemoveProfilingNodes(pr->profiled_graph_);
+  ProfilingRecord::removeProfilingNodes(pr->profiled_graph_->block());
   insertTracingNodes(pr->profiled_graph_->block(), pr.get(), td);
   GRAPH_DUMP("Profiling Graph:", pr->profiled_graph_);
   Code cd(pr->profiled_graph_, "");
@@ -299,14 +310,6 @@ std::shared_ptr<Graph> TraceGraph(std::shared_ptr<Graph> graph, Stack& stack) {
   is.run(stack);
   for (auto out : pr->profiled_graph_->outputs()) {
     td.traced_graph_->block()->registerOutput(td.old_to_new_.at(out));
-  }
-
-  // type inputs
-  for (auto i : c10::irange(stack.size())) {
-    if (stack[i].isTensor()) {
-      td.traced_graph_->inputs().at(i)->setType(
-          tensorTypeInCurrentExecutionContext(stack[i].toTensor()));
-    }
   }
 
   GRAPH_DUMP("Traced graph:", td.traced_graph_);
