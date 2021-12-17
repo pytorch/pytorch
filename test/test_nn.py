@@ -11348,7 +11348,6 @@ class TestNN(NNTestCase):
         self.assertEqual(asfm.tail[0][1].weight.size(), (5, 8))  # 5 targets in this cluster, dimensionality 8
         self.assertEqual(asfm.tail[1][1].weight.size(), (5, 4))
         self.assertEqual(asfm.tail[2][1].weight.size(), (5, 2))
-        print("boutta")
         self.assertEqual(asfm(x, y).output.size(), (2, ))
 
         # test no_batch_dim support
