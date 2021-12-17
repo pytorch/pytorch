@@ -1,3 +1,4 @@
+
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 
 #include <torch/csrc/jit/codegen/cuda/codegen.h>
@@ -49,6 +50,7 @@ static const char* defineIntegerTypes() {
 typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int int16_t;
+typedef int int32_t;
 typedef unsigned int uint32_t;
 typedef long long int int64_t;
 typedef unsigned long long int uint64_t;
@@ -60,9 +62,10 @@ typedef unsigned long long int uint64_t;
 std::string FusionExecutor::getStructuredCode(const std::string& kernel) {
   // generating cuda code;
   std::string code = "";
-#if defined(USE_ROCM)
+#ifdef __HIP_PLATFORM_HCC__
 #if ROCM_VERSION < 40200
   code += std::string("#include <hip/hip_runtime.h>\n") +
+      std::string("#include <hip/hip_bf16.h>\n") +
       std::string("#include <hip/hip_fp16.h>\n");
 #endif
 #endif
@@ -172,8 +175,9 @@ void FusionExecutor::compileFusion(
 
   TORCH_INTERNAL_ASSERT(
       options.device.is_cuda(), "Provided device to CUDA fuser is the CPU.");
-  max_device_smem =
-      at::cuda::getDeviceProperties(options.device.index())->sharedMemPerBlock;
+  auto properties = at::cuda::getDeviceProperties(options.device.index());
+  max_device_smem = properties->sharedMemPerBlock;
+  warp_size_ = properties->warpSize;
 
   setUsedTVs();
 
@@ -210,15 +214,12 @@ void FusionExecutor::compileFusion(
     TORCH_INTERNAL_ASSERT(false, ss.str());
   }
 
-  TORCH_CHECK(
-      !kernel_summary.has_grid_reduction_in_loop,
-      "Grid reduction must not be placed inside a loop.");
-
   // TODO: pass block_size here;
   c10::optional<int> block_size = c10::nullopt;
   if (!inputs.empty()) {
     auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
-    auto launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    auto launch_params =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
     block_size = launch_params.nThreads();
     TORCH_INTERNAL_ASSERT(
         block_size > 0, "launch param inferred block size < 0");
@@ -285,7 +286,7 @@ at::Tensor inferAndAllocOutput(
   std::vector<kir::Val*> sizes;
 
   for (const auto id : maybe_rfactor_domain) {
-    if (id->isReduction() ||
+    if (id->isReduction() || id->isStride() ||
         id->iterType() == IterType::BroadcastWithoutStride) {
       continue;
     }
@@ -330,28 +331,65 @@ uint64_t FusionExecutor::computeSharedMemory(
 
 LaunchParams FusionExecutor::computeLaunchParams(
     const LaunchParams& launch_constraints,
-    kir::ExpressionEvaluator& expr_eval) {
+    kir::ExpressionEvaluator& expr_eval,
+    const int warp_size) {
   FUSER_PERF_SCOPE("FusionExecutor::ComputeLaunchParams");
+  TORCH_INTERNAL_ASSERT(warp_size > 0, "WARP_SIZE should be larger than 0");
 
   LaunchParams launch_params;
 
-  // Lets collect all IterDomains that are bound to a thread binding
-  std::unordered_map<ParallelType, std::vector<const kir::Val*>, TypeHash>
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      parallel_iter_extents;
-  for (auto tv : getUsedTVs()) {
-    for (auto id : tv->domain()->domain()) {
-      if (id->isThread() && !id->isBroadcast()) {
-        // TODO(kir): we should rewrite this logic based on the Kernel object
-        auto kir_extent = lowered_.lowerValue(id->extent());
-        const auto it = parallel_iter_extents.find(id->getParallelType());
-        if (it != parallel_iter_extents.end()) {
-          it->second.push_back(kir_extent);
-        } else {
-          parallel_iter_extents[id->getParallelType()] = {kir_extent};
-        }
-      }
-    }
+  auto data_cache = compileTimeDataCache();
+
+  auto& lower = lowered_;
+
+  auto& used_tvs = getUsedTVs();
+  auto parallel_binding_ids_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelBindingIterDomains>(
+          data_cache, [&used_tvs, &lower]() {
+            return std::make_unique<std::vector<IterDomain*>>(
+                executor_utils::getParallelBindingsIterDomains(
+                    lower, used_tvs));
+          });
+  auto& parallel_binding_ids = parallel_binding_ids_entry.get();
+
+  auto parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::ParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getParallelIterExtents(
+                lower, parallel_binding_ids);
+          });
+  auto& parallel_iter_extents = parallel_iter_extent_entry.get();
+
+  auto simplified_parallel_iter_extent_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::SimplifiedParallelIterExtentMap>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getSimplifiedParallelIterExtents(
+                lower, parallel_binding_ids);
+          });
+  auto& simplified_parallel_iter_extents =
+      simplified_parallel_iter_extent_entry.get();
+
+  auto warp_padded_parallel_entry =
+      executor_utils::caching::ExecutorCompileTimeEntry<
+          executor_utils::caching::WarpPaddedParallelExtents>(
+          data_cache, [&parallel_binding_ids, &lower]() {
+            return executor_utils::getWarpPaddedExtentsInfo(
+                lower, parallel_binding_ids);
+          });
+  auto& warp_padded_extent_set =
+      warp_padded_parallel_entry.get().warp_padded_extent_set;
+  auto& warp_padded_constant =
+      warp_padded_parallel_entry.get().warp_padded_constant;
+
+  // TODO: Need to redesign this part a bit to
+  //   find the right place to trigger evaluate
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->bindParallelExtents(
+        parallel_iter_extents, launch_constraints);
+    expr_eval.precomputedIntegers()->evaluate();
   }
 
   // If any dimension was set in launch constraints we need to run through
@@ -373,31 +411,66 @@ LaunchParams FusionExecutor::computeLaunchParams(
                 "Cannot validate parallelization scheme, "
                 "this may be due to mixed broadcast axes that are parallelized.");
           }
-        } else {
-          // Bind the launch constraint into our evaluation context
+        } else if (!expr_eval.precomputedIntegers()) {
           expr_eval.bind(extent, launch_constraints.getDim(p_type));
+        }
+        if (!launch_params.hasDim(p_type)) {
+          // Bind the launch constraint into our evaluation context
           launch_params.bind(launch_constraints.getDim(p_type), p_type);
+          // Makes sure the p-types bound to evaluators are the
+          //  final values that will become the actual launch
+          //  param size to ensure accurate smem buffer size
+          //  computation.
+          expr_eval.bind(p_type, launch_constraints.getDim(p_type));
         }
       }
     }
   }
 
   // Run through the rest of the parallel IterDomains and infer their size
-  for (auto& entry : parallel_iter_extents) {
+  for (auto& entry : simplified_parallel_iter_extents) {
+    FUSER_PERF_SCOPE("FusionExecutor::ParallelBindingResolution");
     auto p_type = entry.first;
     auto parallel_extents = entry.second;
     // Select the maxmimum value out of all the parallel extents
     int64_t maximum_value = std::numeric_limits<int64_t>::min();
     for (auto extent : parallel_extents) {
-      const auto val = expr_eval.evaluate(extent);
+      auto val = expr_eval.evaluate(extent);
       TORCH_INTERNAL_ASSERT(
           val.has_value(),
           "Tried to evaluate the extent of ",
           p_type,
           " to set launch bounds but could not.");
+
+      // apply padding to the extent if needed
+      if (warp_padded_extent_set.count(extent)) {
+        // Check if the extent has const value
+        auto padded_constant_it = warp_padded_constant.find(extent);
+
+        if (padded_constant_it != warp_padded_constant.end()) {
+          // If already specified padded to constant, need to check
+          //  runtime value not over the constant bound
+          TORCH_INTERNAL_ASSERT(*val <= padded_constant_it->second);
+          *val = padded_constant_it->second;
+        } else {
+          // If no specified constant, pad to the smallest multiple of warp
+          //  above the value.
+          auto padded_number_of_warps = (*val + warp_size - 1) / warp_size;
+          *val = warp_size * padded_number_of_warps;
+        }
+        TORCH_INTERNAL_ASSERT(
+            *val <= 1024, "padded dimension larger than max block size");
+      }
       maximum_value = std::max(maximum_value, *val);
     }
+    expr_eval.bind(p_type, maximum_value);
     launch_params.bind(maximum_value, p_type);
+  }
+
+  // Re-run the integer machine with all
+  //  the thread sizes now determined.
+  if (expr_eval.precomputedIntegers()) {
+    expr_eval.precomputedIntegers()->evaluate();
   }
 
   const auto kernel = lowered_.kernel();
@@ -407,8 +480,7 @@ LaunchParams FusionExecutor::computeLaunchParams(
   // Add workspace for reduction and broadcast
   uint64_t reduction_broadcast_workspace = 0;
   const bool has_workspace = kernel_summary.has_block_reductions ||
-      kernel_summary.number_of_grid_reductions > 0 ||
-      kernel_summary.has_block_broadcasts;
+      kernel_summary.has_grid_reductions || kernel_summary.has_block_broadcasts;
   if (has_workspace &&
       kernel_summary.largest_smem_data_type != DataType::Null) {
     // Not using nThreads here since it does not handle uninitialized value
@@ -437,7 +509,13 @@ LaunchParams FusionExecutor::computeLaunchParams(
 
   TORCH_INTERNAL_ASSERT(
       (dynamic_smem_size + static_smem_size) < max_device_smem,
-      "The total shared memory allocation is larger than available memory.");
+      "The total shared memory allocation is larger than available memory.",
+      " Dynamic size: ",
+      dynamic_smem_size,
+      ". Static size: ",
+      static_smem_size,
+      ". Available size: ",
+      max_device_smem);
   launch_params.setSmem(dynamic_smem_size);
 
   return launch_params;
@@ -478,7 +556,7 @@ std::vector<at::Tensor> FusionExecutor::allocOutputs(
   const auto kernel = lowered_.kernel();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> outputs;
-  for (size_t i = 0; i < kernel->outputs().size(); ++i) {
+  for (const auto i : c10::irange(kernel->outputs().size())) {
     TORCH_INTERNAL_ASSERT(
         kernel->outputs()[i]->isA<kir::TensorView>(),
         "Cannot allocate outputs that are not tensors.");
@@ -532,7 +610,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   GlobalBuffers global_buffers;
   uint64_t rand_offset = 0;
 
-  if (executor_entry && executor_entry->init) {
+  if (executor_entry && executor_entry->init && !disable_parameter_cache_) {
     {
       // context manager to disable auto grad for `empty_cuda` calls later
       at::AutoDispatchBelowADInplaceOrView non_variable_type_mode;
@@ -588,22 +666,76 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
     //   2. `executor_entry` is not initialized
     executor_utils::validateKernelInputs(&fusion_, inputs, options_.device);
 
-    const auto kernel = lowered_.kernel();
+    if (!evaluator_precomputed_integers_) {
+      evaluator_precomputed_integers_ =
+          std::make_unique<KernelPrecomputedIntegers>(&fusion_, lowered_);
+    }
 
-    auto expr_eval = executor_utils::bindKernelInputs(inputs, kernel);
+    kir::ExpressionEvaluator expr_eval;
+    evaluator_precomputed_integers_->bindKernelInputs(inputs);
+    expr_eval.precomputedIntegers() = evaluator_precomputed_integers_.get();
 
-    launch_params = computeLaunchParams(launch_constraints, expr_eval);
+    launch_params =
+        computeLaunchParams(launch_constraints, expr_eval, warp_size_);
+
+    if (kernel()->summary().has_cooperative_grid_reduction) {
+#ifndef __HIP_PLATFORM_HCC__
+      int num_blocks_per_SM = -1;
+      at::globalContext().getNVRTC().cuOccupancyMaxActiveBlocksPerMultiprocessor(
+          &num_blocks_per_SM,
+          compiled_kernel_.function,
+          (int)(launch_params.bdimx() * launch_params.bdimy() * launch_params.bdimz()),
+          (size_t)launch_params.smem());
+
+      TORCH_INTERNAL_ASSERT(
+          (int64_t)(
+              num_blocks_per_SM *
+              at::cuda::getDeviceProperties(options_.device.index())
+                  ->multiProcessorCount) >= launch_params.gdimx() *
+                  launch_params.gdimy() * launch_params.gdimz(),
+          "Wanted to launch a cooperative kernel, however the number of blocks is greater than ",
+          "what can be resident on the GPU at once. Need: ",
+          launch_params.gdimx() * launch_params.gdimy() * launch_params.gdimz(),
+          " but limited to ",
+          num_blocks_per_SM,
+          " * ",
+          at::cuda::getDeviceProperties(options_.device.index())
+              ->multiProcessorCount);
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
 
     executor_utils::validateVectorizedTensors(
-        &fusion_, inputs, outputs, lowered_, expr_eval);
+        &fusion_, inputs, outputs, lowered_, compileTimeDataCache(), expr_eval);
 
-    auto alias_indices = fusion_.getInputAliasIndices();
+    auto& fusion = fusion_;
+
+    auto alias_indices_entry =
+        executor_utils::caching::ExecutorCompileTimeEntry<
+            executor_utils::caching::InputAliasIndices>(
+            compileTimeDataCache(), [&fusion]() {
+              return std::make_unique<std::vector<std::pair<int, int>>>(
+                  fusion.getInputAliasIndices());
+            });
+
+    auto& alias_indices = alias_indices_entry.get();
 
     // ditch pre-allocated outputs if the number doesn't match.
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (outputs.empty()) {
-      allocated_outputs =
-          allocOutputs(expr_eval, fusion_.getOutputAliasIndices());
+      auto output_alias_indices_entry =
+          executor_utils::caching::ExecutorCompileTimeEntry<
+              executor_utils::caching::OutputAliasIndices>(
+              compileTimeDataCache(), [&fusion]() {
+                return std::make_unique<std::unordered_set<int>>(
+                    fusion.getOutputAliasIndices());
+              });
+
+      auto& output_alias_indices = output_alias_indices_entry.get();
+
+      allocated_outputs = allocOutputs(expr_eval, output_alias_indices);
 
       for (const auto& entry : alias_indices) {
         TORCH_INTERNAL_ASSERT(
@@ -618,7 +750,7 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
 
     global_buffers = allocGlobalVals(expr_eval);
 
-    if (kernel->summary().is_stochastic) {
+    if (kernel()->summary().is_stochastic) {
       // NOTE: this is how we map offset to PW kernels in order to have
       // identical random number generator to match native PyTorch results.
       // But it doesn't really work as it takes assumption how threads are
@@ -703,19 +835,40 @@ std::vector<at::Tensor> FusionExecutor::runFusion(
   }
 
   if (execute_kernel_) {
-    FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
-    AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
-        compiled_kernel_.function,
-        launch_params.gdimx(),
-        launch_params.gdimy(),
-        launch_params.gdimz(),
-        launch_params.bdimx(),
-        launch_params.bdimy(),
-        launch_params.bdimz(),
-        launch_params.smem(),
-        stream,
-        kernel_arguments.getBuffer(),
-        nullptr));
+    if (!kernel()->summary().has_cooperative_grid_reduction) {
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchKernel");
+      AT_CUDA_DRIVER_CHECK(at::globalContext().getNVRTC().cuLaunchKernel(
+          compiled_kernel_.function,
+          launch_params.gdimx(),
+          launch_params.gdimy(),
+          launch_params.gdimz(),
+          launch_params.bdimx(),
+          launch_params.bdimy(),
+          launch_params.bdimz(),
+          launch_params.smem(),
+          stream,
+          kernel_arguments.getBuffer(),
+          nullptr));
+    } else {
+#ifndef __HIP_PLATFORM_HCC__
+      FUSER_PERF_SCOPE("ExecutorRunFusion::cuLaunchCooperativeKernel");
+      AT_CUDA_DRIVER_CHECK(
+          at::globalContext().getNVRTC().cuLaunchCooperativeKernel(
+              compiled_kernel_.function,
+              launch_params.gdimx(),
+              launch_params.gdimy(),
+              launch_params.gdimz(),
+              launch_params.bdimx(),
+              launch_params.bdimy(),
+              launch_params.bdimz(),
+              launch_params.smem(),
+              stream,
+              kernel_arguments.getBuffer()));
+#else
+      TORCH_INTERNAL_ASSERT(
+          false, "Cross grid communication not supported with HIP.");
+#endif
+    }
   }
 
   if (measure_kernel_time_ ||

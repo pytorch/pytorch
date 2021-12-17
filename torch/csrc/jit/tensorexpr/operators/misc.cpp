@@ -423,7 +423,15 @@ Tensor computeReshape(
           dims.push_back(outputShape[idx].node());
           indices.push_back(axes[idx].node());
         }
-        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices));
+
+        auto ndim = dims.size();
+        std::vector<ExprPtr> strides(ndim);
+        strides[ndim - 1] = immLike(dims[ndim - 1], 1);
+        for (size_t i = 1; i < ndim; i++) {
+          strides[ndim - 1 - i] = alloc<Mul>(strides[ndim - i], dims[ndim - i]);
+        }
+
+        ExprHandle flat_idx = ExprHandle(flatten_index(dims, indices, strides));
         std::vector<ExprHandle> orig_buf_indexes(A.ndim(), ExprHandle(0));
         ExprHandle stride = ExprHandle(immLike(flat_idx, 1));
         for (size_t idx = 0; idx < A.ndim(); idx++) {
@@ -443,6 +451,21 @@ Tensor computeReshape(
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         return A.load(orig_buf_indexes);
       });
+}
+
+Tensor computeFlatten(
+    const std::vector<ArgValue>& inputs,
+    const std::vector<ExprHandle>& outputShape,
+    const c10::optional<ScalarType>& outputType,
+    at::Device device) {
+  std::vector<int64_t> outputShapeVec;
+  for (const auto dim : c10::irange(outputShape.size())) {
+    outputShapeVec.push_back(outputShape[dim].AsNode<LongImm>()->value());
+  }
+  std::vector<ArgValue> reshapeInputs;
+  reshapeInputs.push_back(inputs[0]);
+  reshapeInputs.emplace_back(outputShapeVec);
+  return computeReshape(reshapeInputs, outputShape, outputType, device);
 }
 
 static std::pair<ScalarType, std::vector<BufHandle>> processCatList(
