@@ -19,8 +19,6 @@
 #include <torch/csrc/lazy/ts_backend/ts_node_lowering.h>
 
 #include "lazy_tensor_core/csrc/ops/constant_pad_nd.h"
-#include "lazy_tensor_core/csrc/ops/convolution_backward_overrideable.h"
-#include "lazy_tensor_core/csrc/ops/convolution_overrideable.h"
 #include "lazy_tensor_core/csrc/ops/repeat.h"
 #include "lazy_tensor_core/csrc/ops/squeeze.h"
 #include "lazy_tensor_core/csrc/ops/stack.h"
@@ -99,19 +97,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
       std::vector<torch::jit::NamedValue> arguments;
       arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
       return LowerBuiltin(node, arguments);
-    }
-    if (node->op().op == at::aten::convolution_backward_overrideable) {
-      return LowerConvolutionBackwardOverrideable(
-          torch::lazy::NodeCast<
-              torch_lazy_tensors::ir::ops::ConvolutionBackwardOverrideable>(
-              node, torch::lazy::OpKind(
-                        at::aten::convolution_backward_overrideable)));
-    }
-    if (node->op().op == at::aten::convolution_overrideable) {
-      return LowerConvolutionOverrideable(
-          torch::lazy::NodeCast<
-              torch_lazy_tensors::ir::ops::ConvolutionOverrideable>(
-              node, torch::lazy::OpKind(at::aten::convolution_overrideable)));
     }
     if (node->op().op == at::aten::native_batch_norm) {
       return LowerBatchNorm(
@@ -267,95 +252,6 @@ class TSNodeLowering : public TSNodeLoweringInterface {
     arguments.emplace_back(loctx()->GetOutputOp(node->operand(0)));
     arguments.emplace_back(node->dtype());
     return LowerBuiltin(at::aten::to, arguments);
-  }
-
-  TSOpVector LowerConvolutionBackwardOverrideable(
-      const torch_lazy_tensors::ir::ops::ConvolutionBackwardOverrideable*
-          conv) {
-    const auto& operands = conv->operands();
-    CHECK(!operands.empty());
-
-    std::vector<torch::jit::NamedValue> arguments;
-
-    // TODO: Clean up after convolution unification is done.
-    auto& ctx = at::globalContext();
-    CHECK(ctx.userEnabledCuDNN() &&
-          torch::lazy::getBackend()->EagerFallbackDeviceType() == at::kCUDA);
-
-    // See cudnn_convolution_backward/cudnn_convolution_transpose_backward in
-    // native_functions.yaml
-    arguments.emplace_back(loctx()->GetOutputOp(operands[1]));
-    arguments.emplace_back(loctx()->GetOutputOp(operands[0]));
-    arguments.emplace_back(loctx()->GetOutputOp(operands[2]));
-
-    arguments.emplace_back(conv->padding());
-    if (conv->transposed()) {
-      arguments.emplace_back(conv->output_padding());
-    }
-    arguments.emplace_back(conv->stride());
-    arguments.emplace_back(conv->dilation());
-    arguments.emplace_back(conv->groups());
-    arguments.emplace_back(ctx.benchmarkCuDNN());  // benchmark
-    arguments.emplace_back(ctx.deterministicCuDNN() ||
-                           ctx.deterministicAlgorithms());  // deterministic
-    arguments.emplace_back(ctx.allowTF32CuDNN());           // allow_tf3
-    std::array<bool, 2> output_mask = {conv->output_mask()[0],
-                                       conv->output_mask()[1]};
-    arguments.emplace_back(output_mask);
-
-    auto result =
-        conv->transposed()
-            ? LowerBuiltin(at::aten::cudnn_convolution_transpose_backward,
-                           arguments)
-            : LowerBuiltin(at::aten::cudnn_convolution_backward, arguments);
-
-    // N.B. rank is specialized even with dynamic shapes
-    // all axes but channel to reduce to the bias size
-    auto grad_rank = dynamic_cast<const torch::lazy::TsNode*>(operands[0].node)->shape(operands[0].index).dim();
-    std::vector<int64_t> axes(grad_rank);
-    std::iota(axes.begin(), axes.end(), 0);
-    TORCH_INTERNAL_ASSERT(grad_rank >= 3, "Convolution outputs should have 3+ dimensions");
-    axes.erase(axes.begin() + 1);
-    auto axes_val = loctx()->graph()->insertConstant(axes);
-    auto bias_grad = loctx()->graph()->insert(at::aten::sum, {loctx()->GetOutputOp(operands[0]), axes_val});
-    result.push_back(bias_grad);
-    return result;
-  }
-
-  TSOpVector LowerConvolutionOverrideable(
-      const torch_lazy_tensors::ir::ops::ConvolutionOverrideable* conv) {
-    constexpr size_t kBiasOperandsOffset = 2;
-    const auto& operands = conv->operands();
-    CHECK(!operands.empty());
-
-    std::vector<torch::jit::NamedValue> arguments;
-    arguments.emplace_back(loctx()->GetOutputOp(operands[0]));
-    arguments.emplace_back(loctx()->GetOutputOp(operands[1]));
-    // bias is optional
-    c10::optional<at::Tensor> nullArg;
-    if (operands.size() <= kBiasOperandsOffset) {
-      arguments.emplace_back(nullArg);
-    } else {
-      arguments.emplace_back(
-          loctx()->GetOutputOp(operands[kBiasOperandsOffset]));
-    }
-    arguments.emplace_back(conv->stride());
-    arguments.emplace_back(conv->padding());
-    arguments.emplace_back(conv->dilation());
-    arguments.emplace_back(conv->transposed());
-    arguments.emplace_back(conv->output_padding());
-    arguments.emplace_back(conv->groups());
-    // TODO: backend information is exposed too early here.
-    // Clean up after convolution unification is done.
-    auto& ctx = at::globalContext();
-    arguments.emplace_back(ctx.benchmarkCuDNN());  // benchmark
-    arguments.emplace_back(ctx.deterministicCuDNN() ||
-                           ctx.deterministicAlgorithms());  // deterministic
-    arguments.emplace_back(ctx.userEnabledCuDNN());         // cudnn_enabled
-    arguments.emplace_back(ctx.allowTF32CuDNN());           // allow_tf32
-
-    // Invoke aten::_convolution instead of aten::convolution_overrideable
-    return LowerBuiltin(at::aten::_convolution, arguments);
   }
 
   TSOpVector LowerConstantPad(const torch_lazy_tensors::ir::ops::ConstantPadNd* node) {

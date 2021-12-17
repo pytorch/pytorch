@@ -29,26 +29,6 @@ void bernoulli_(LazyTensor& input, const LazyTensor& probability);
 LazyTensor constant_pad_nd(const LazyTensor& input, c10::ArrayRef<int64_t> pad,
                            const at::Scalar& value);
 
-LazyTensor convolution_overrideable(
-    const LazyTensor& input, const LazyTensor& weight, const LazyTensor& bias,
-    std::vector<int64_t> stride, std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups);
-
-LazyTensor convolution_overrideable(
-    const LazyTensor& input, const LazyTensor& weight,
-    std::vector<int64_t> stride, std::vector<int64_t> padding,
-    std::vector<int64_t> dilation, bool transposed,
-    std::vector<int64_t> output_padding, int64_t groups);
-
-std::tuple<LazyTensor, LazyTensor, LazyTensor>
-convolution_backward_overrideable(
-    const LazyTensor& out_backprop, const LazyTensor& input,
-    const LazyTensor& weight, std::vector<int64_t> stride,
-    std::vector<int64_t> padding, std::vector<int64_t> dilation,
-    bool transposed, std::vector<int64_t> output_padding, int64_t groups,
-    std::array<bool, 3> output_mask);
-
 LazyTensor expand(const LazyTensor& input,
                   std::vector<int64_t> size);
 

@@ -18,11 +18,11 @@ class TORCH_API Cast : public TsNode {
 
   at::ScalarType dtype() const {
     return dtype_;
-  };
+  }
 
   const c10::optional<at::ScalarType>& stype() const {
     return stype_;
-  };
+  }
 
  private:
   at::ScalarType dtype_;

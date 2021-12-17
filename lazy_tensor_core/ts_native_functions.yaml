@@ -14,6 +14,8 @@ full_codegen:
   - baddbmm
   - bitwise_and.Tensor
   - bmm
+  - convolution
+  - convolution_backward
   - cos
   - clamp
   - div.Tensor
@@ -95,8 +97,6 @@ supported:
   - cat
   - clone
   - constant_pad_nd
-  - convolution_overrideable
-  - convolution_backward_overrideable
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
