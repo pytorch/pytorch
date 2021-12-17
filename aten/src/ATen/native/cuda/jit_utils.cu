@@ -97,7 +97,7 @@ struct alignas(2) Half {
   }
   inline __host__ __device__ operator float() const{
       float val;
-      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x));
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
       //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
       return val;
   }
@@ -147,7 +147,7 @@ struct alignas(2) BFloat16 {
 
   inline __host__ __device__ operator float() const{
     float val;
-    asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x));
+    asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x)); //do we need const cast here?
     return val;
   }
 
