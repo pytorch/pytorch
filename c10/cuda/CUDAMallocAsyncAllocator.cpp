@@ -431,6 +431,9 @@ void cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
   //                and set cachedAndFree and largestBlock to 0.
   // Alternative 2: Set cachedAndFree to a "best guess analogue", ie
   //                the pool's current reserved mem - the pool's current used mem.
+
+  // The only consumer of cacheInfo is getMaxWorkspaceSize in Conv_v7.cpp.
+  // See that function for further discussion about what this PR must enable.
 }
 
 void* getBaseAllocation(void* ptr, size_t* size) {
