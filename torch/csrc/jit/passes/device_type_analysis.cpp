@@ -122,7 +122,6 @@ bool defaultDeviceProp(Node* n) {
 struct DeviceTypePropagationPass {
   explicit DeviceTypePropagationPass(std::shared_ptr<Graph> graph)
       : graph_(std::move(graph)) {
-    buildRuleRegistry();
   }
 
   // returns true if at least one node has its scalar type set on a tensor node
@@ -248,7 +247,8 @@ struct DeviceTypePropagationPass {
 
 // This analysis propagates input device types (if any) throughout the
 // graph.
-bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
+
+bool deviceTypeRunner(std::shared_ptr<Graph> graph){
   auto tp = std::make_unique<DeviceTypePropagationPass>((graph));
   bool changed = tp->run();
   /*
@@ -257,6 +257,11 @@ bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
   }
   */
   return changed;
+}
+
+
+bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
+  return deviceTypeRunner(graph);
 }
 
 } // namespace jit
