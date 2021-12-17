@@ -72,6 +72,7 @@ LABEL_CIFLOW_SLOW_GRADCHECK = "ciflow/slow-gradcheck"
 LABEL_CIFLOW_DOCKER = "ciflow/docker"
 LABEL_CIFLOW_IOS = "ciflow/ios"
 LABEL_CIFLOW_MACOS = "ciflow/macos"
+LABEL_CIFLOW_TRUNK = "ciflow/trunk"
 
 
 @dataclass
@@ -114,6 +115,8 @@ class CIFlowConfig:
 
     def __post_init__(self) -> None:
         self.labels.add(LABEL_CIFLOW_ALL)
+        if LABEL_CIFLOW_SCHEDULED not in self.labels:
+            self.labels.add(LABEL_CIFLOW_TRUNK)
         assert all(label.startswith(LABEL_CIFLOW_PREFIX) for label in self.labels)
         self.gen_root_job_condition()
 
@@ -224,6 +227,7 @@ class CIWorkflow:
             assert LABEL_CIFLOW_CPU in self.ciflow_config.labels
         if self.is_scheduled:
             assert LABEL_CIFLOW_DEFAULT not in self.ciflow_config.labels
+            assert LABEL_CIFLOW_TRUNK not in self.ciflow_config.labels
             assert LABEL_CIFLOW_SCHEDULED in self.ciflow_config.labels
         if self.build_with_debug:
             assert self.build_environment.endswith("-debug")
@@ -427,7 +431,7 @@ LINUX_WORKFLOWS = [
         build_environment="linux-xenial-py3.6-clang7-asan",
         docker_image_base=f"{DOCKER_REGISTRY}/pytorch/pytorch-linux-xenial-py3-clang7-asan",
         test_runner_type=LINUX_CPU_TEST_RUNNER,
-        num_test_shards=2,
+        num_test_shards=3,
         distributed_test=False,
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_DEFAULT, LABEL_CIFLOW_LINUX, LABEL_CIFLOW_SANITIZERS, LABEL_CIFLOW_CPU},
