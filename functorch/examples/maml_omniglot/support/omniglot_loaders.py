@@ -17,15 +17,15 @@
 #     https://github.com/dragen1860/MAML-Pytorch/blob/master/omniglot.py
 #     https://github.com/dragen1860/MAML-Pytorch/blob/master/omniglotNShot.py
 
-import  torchvision.transforms as transforms
-from    PIL import Image
-import  numpy as np
+import torchvision.transforms as transforms
+from PIL import Image
+import numpy as np
 
 import torch
-import  torch.utils.data as data
-import  os
-import  os.path
-import  errno
+import torch.utils.data as data
+import os
+import os.path
+import errno
 
 
 class Omniglot(data.Dataset):
@@ -79,7 +79,7 @@ class Omniglot(data.Dataset):
 
     def _check_exists(self):
         return os.path.exists(os.path.join(self.root, self.processed_folder, "images_evaluation")) and \
-               os.path.exists(os.path.join(self.root, self.processed_folder, "images_background"))
+            os.path.exists(os.path.join(self.root, self.processed_folder, "images_background"))
 
     def download(self):
         from six.moves import urllib
@@ -158,7 +158,7 @@ class OmniglotNShot:
                      lambda x: x.resize((imgsz, imgsz)),
                      lambda x: np.reshape(x, (imgsz, imgsz, 1)),
                      lambda x: np.transpose(x, [2, 0, 1]),
-                     lambda x: x/255.]),
+                     lambda x: x / 255.]),
             )
 
             temp = dict()  # {label:img1, img2..., 20 imgs, label2: img1, img2,... in total, 1623 label}
@@ -196,7 +196,7 @@ class OmniglotNShot:
         self.n_way = n_way  # n way
         self.k_shot = k_shot  # k shot
         self.k_query = k_query  # k query
-        assert (k_shot + k_query) <=20
+        assert (k_shot + k_query) <= 20
 
         # save pointer of current read batch in total cache
         self.indexes = {"train": 0, "test": 0}
@@ -268,7 +268,6 @@ class OmniglotNShot:
                 y_spts.append(y_spt)
                 x_qrys.append(x_qry)
                 y_qrys.append(y_qry)
-
 
             # [b, setsz, 1, 84, 84]
             x_spts = np.array(x_spts).astype(np.float32).reshape(self.batchsz, setsz, 1, self.resize, self.resize)

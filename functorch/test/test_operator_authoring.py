@@ -1,20 +1,16 @@
 import torch
 import unittest
 
-import numpy as np
-
-import torch
 from torch import fx
 from functorch.compile import pointwise_operator
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.jit_utils import JitTestCase
-import unittest
 
 LLVM_ENABLED = torch._C._llvm_enabled()
 HAS_CUDA = torch.cuda.is_available()
 HAS_SYMPY = False
 try:
-    import sympy
+    import sympy  # noqa: F401
 
     HAS_SYMPY = True
 except ImportError:
@@ -186,7 +182,7 @@ class TestOperatorAuthoring(JitTestCase):
         ]
 
         for unary_op in unary_operators:
-            fn = lambda x: unary_op(x)
+            def fn(x): return unary_op(x)
             pointwise_fn = pointwise_operator(fn)
             a = torch.rand(2, 3)
             ref = fn(a)
@@ -218,7 +214,7 @@ class TestOperatorAuthoring(JitTestCase):
             torch.ops.aten.atan2,
         ]
         for binary_op in binary_operators:
-            fn = lambda x, y: binary_op(x, y)
+            def fn(x, y): return binary_op(x, y)
             pointwise_fn = pointwise_operator(fn)
             a = torch.rand(2, 3)
             b = torch.rand(2, 3)

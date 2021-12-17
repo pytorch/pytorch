@@ -1,9 +1,7 @@
 import torch
-from torch.nn import functional as F
 from functorch.compile import minimizer
 from functorch import make_fx
 from torch.testing._internal.common_utils import TestCase, run_tests
-from typing import Callable
 
 
 class TestMinifier(TestCase):
@@ -21,7 +19,7 @@ class TestMinifier(TestCase):
 
         min_f, inps = minimizer(failing_f, inps, pass_checker)
         assert len(min_f.graph.nodes) == 4
-        assert len(inps) == 2 
+        assert len(inps) == 2
 
     def test_has_add_mul(self):
         def failing_f(x):
@@ -45,7 +43,7 @@ class TestMinifier(TestCase):
 
         min_f, inps = minimizer(failing_f, inps, pass_checker)
         assert len(min_f.graph.nodes) == 3
-        assert len(inps) == 1 
+        assert len(inps) == 1
 
 
 if __name__ == "__main__":

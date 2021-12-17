@@ -1,45 +1,13 @@
-from functools import wraps, partial
-from itertools import product, chain
+from functools import partial
 import itertools
-import collections
-import copy
-import operator
-import random
-import numbers
-import unittest
 
 import torch
-import numpy as np
-from torch._six import inf
-import collections.abc
-
-from typing import Any, List, Sequence, Tuple, Union
 
 from torch.testing import \
-    (make_non_contiguous, floating_types, floating_types_and, complex_types,
-     floating_and_complex_types, floating_and_complex_types_and,
-     all_types_and_complex_and, all_types_and, all_types_and_complex,
-     integral_types_and, all_types)
-# from .._core import _dispatch_dtypes
-from torch.testing._internal.common_device_type import \
-    (skipIf, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfNoCusolver,
-     skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIfRocm, precisionOverride, toleranceOverride, tol)
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater, SM60OrLater
-from torch.testing._internal.common_utils import \
-    (is_iterable_of_tensors,
-     random_symmetric_matrix, random_symmetric_psd_matrix,
-     make_fullrank_matrices_with_distinct_singular_values,
-     random_symmetric_pd_matrix, make_symmetric_matrices,
-     make_symmetric_pd_matrices,
-     random_fullrank_matrix_distinct_singular_value,
-     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, make_tensor, TEST_SCIPY,
-     torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
-     GRADCHECK_NONDET_TOL,)
-import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.common_methods_invocations import (
-    OpInfo, DecorateInfo, SampleInput, sample_inputs_softshrink_hardshrink_hardtanh,
-    sample_inputs_softmax_variant, S
-)
+    (floating_types, floating_types_and, floating_and_complex_types_and,
+     all_types_and_complex_and)
+from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_methods_invocations import OpInfo, SampleInput
 
 # List of OpInfos that aren't in PyTorch Core yet.
 # They are here because we wanted a fast way of writing OpInfos and may not be
@@ -49,10 +17,12 @@ from torch.testing._internal.common_methods_invocations import (
 additional_op_db = []
 
 # https://github.com/pytorch/pytorch/pull/61971
+
+
 def sample_inputs_linear(has_bias, self, device, dtype, requires_grad):
     features_options = [[3, 4], [128, 128]]
     batch_options = [
-        [], # no batch
+        [],  # no batch
         [64],
         [5, 7],
     ]
@@ -75,6 +45,7 @@ def sample_inputs_linear(has_bias, self, device, dtype, requires_grad):
         sample_inputs.append(SampleInput(input_tensor, args=(weight, bias)))
     return sample_inputs
 
+
 additional_op_db.extend([
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -96,6 +67,7 @@ additional_op_db.extend([
 
 # https://github.com/pytorch/pytorch/pull/61068
 
+
 def sample_inputs_conv2d(has_bias, self, device, dtype, requires_grad, extra_args=(), groups=1):
     in_ch, out_ch = 6, 4
     inp = make_tensor((2, in_ch * groups, 7, 5), device=device, dtype=dtype,
@@ -107,6 +79,7 @@ def sample_inputs_conv2d(has_bias, self, device, dtype, requires_grad, extra_arg
         bias = make_tensor((out_ch * groups,), device=device, dtype=dtype,
                            requires_grad=requires_grad, low=-1, high=1)
     return [SampleInput(inp, args=((weight, bias) + extra_args))]
+
 
 additional_op_db.extend([
     OpInfo('nn.functional.conv2d',
@@ -191,6 +164,7 @@ additional_op_db.extend([
            supports_out=False),
 ])
 
+
 def sample_inputs_cross_entropy(self, device, dtype, requires_grad, reduction):
     N = 2
     C = 10
@@ -214,6 +188,7 @@ def sample_inputs_cross_entropy(self, device, dtype, requires_grad, reduction):
     ])
     return sample_inputs
 
+
 for reduction in ['mean', 'sum', 'none']:
     additional_op_db.append(
         OpInfo('nn.functional.cross_entropy',
@@ -224,6 +199,7 @@ for reduction in ['mean', 'sum', 'none']:
                dtypes=floating_types(),
                dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
                supports_out=True))
+
 
 # TODO: split embedding in pytorch core
 def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
@@ -272,6 +248,7 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
             yield SampleInput(weights, args=(idx,), kwargs={'scale_grad_by_freq': True},)
 
     return list(generator())
+
 
 additional_op_db.append(
     OpInfo(

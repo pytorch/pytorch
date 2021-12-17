@@ -1,19 +1,10 @@
 import torch
-import unittest
 
-import numpy as np
-
-import torch
-from torch import fx
 import functorch
-from torch.testing._internal.common_utils import run_tests
-from torch.testing._internal.jit_utils import JitTestCase
-import unittest
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 from functorch.compile import memory_efficient_pointwise_fusion
 from functorch.compile import compiled_function
-
-from torch.testing._internal.common_utils import TestCase, run_tests
 
 
 class TestCompileCache(TestCase):

@@ -19,6 +19,8 @@ from functorch import make_functional, grad_and_value, vmap, combine_state_for_e
 DEVICE = 'cpu'
 
 # Step 1: Make some spirals
+
+
 def make_spirals(n_samples, noise_std=0., rotations=1.):
     ts = torch.linspace(0, 1, n_samples, device=DEVICE)
     rs = ts ** 0.5
@@ -30,6 +32,7 @@ def make_spirals(n_samples, noise_std=0., rotations=1.):
     ys = rs * signs * torch.sin(thetas) + torch.randn(n_samples, device=DEVICE) * noise_std
     points = torch.stack([xs, ys], dim=1)
     return points, labels
+
 
 points, labels = make_spirals(100, noise_std=0.05)
 
@@ -51,12 +54,14 @@ class MLPClassifier(nn.Module):
         x = F.log_softmax(x, -1)
         return x
 
+
 loss_fn = nn.NLLLoss()
 
 # Step 3: Make the model functional(!!) and define a training function.
 # NB: this mechanism doesn't exist in PyTorch today, but we want it to:
 # https://github.com/pytorch/pytorch/issues/49171
 func_model, weights = make_functional(MLPClassifier().to(DEVICE))
+
 
 def train_step_fn(weights, batch, targets, lr=0.2):
     def compute_loss(weights, batch, targets):
@@ -85,10 +90,13 @@ def step4():
         if i % 100 == 0:
             print(loss)
 
+
 step4()
 
 # Step 5: We're ready for multiple models. Let's define an init_fn
 # that, given a number of models, returns to us all of the weights.
+
+
 def init_fn(num_models):
     models = [MLPClassifier() for _ in range(num_models)]
     _, params, _ = combine_state_for_ensemble(models)
@@ -97,6 +105,8 @@ def init_fn(num_models):
 # Step 6: Now, can we try multiple models at the same time?
 # The answer is: yes! `loss` is a 2-tuple, and we can see that the value keeps
 # on decreasing
+
+
 def step6():
     parallel_train_step_fn = vmap(train_step_fn, in_dims=(0, None, None))
     batched_weights = init_fn(num_models=2)
@@ -104,6 +114,7 @@ def step6():
         loss, batched_weights = parallel_train_step_fn(batched_weights, points, labels)
         if i % 200 == 0:
             print(loss)
+
 
 step6()
 

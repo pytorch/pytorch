@@ -9,11 +9,12 @@ import torch.nn as nn
 from torch import Tensor
 from typing import List, Tuple
 import copy
-import warnings
 
 # Utilities to make nn.Module "functional"
 # In particular the goal is to be able to provide a function that takes as input
 # the parameters and evaluate the nn.Module using fixed inputs.
+
+
 def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
     """
     Deletes the attribute specified by the given list of names.
@@ -24,6 +25,7 @@ def _del_nested_attr(obj: nn.Module, names: List[str]) -> None:
         delattr(obj, names[0])
     else:
         _del_nested_attr(getattr(obj, names[0]), names[1:])
+
 
 def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     """
@@ -36,11 +38,13 @@ def _set_nested_attr(obj: nn.Module, names: List[str], value: Tensor) -> None:
     else:
         _set_nested_attr(getattr(obj, names[0]), names[1:], value)
 
+
 def _get_nested_attr(obj: nn.Module, names: List[str]) -> None:
     if len(names) == 1:
         return getattr(obj, names[0])
     else:
         _get_nested_attr(getattr(obj, names[0]), names[1:])
+
 
 def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     """
@@ -63,6 +67,7 @@ def extract_weights(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     params = tuple(p for p in orig_params)
     return params, names
 
+
 def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], as_params=False) -> None:
     """
     Reload a set of weights so that `mod` can be used again to perform a forward pass.
@@ -75,6 +80,7 @@ def load_weights(mod: nn.Module, names: List[str], params: Tuple[Tensor, ...], a
         _del_nested_attr(mod, name.split("."))
         _set_nested_attr(mod, name.split("."), p)
 
+
 def _swap_state(mod: nn.Module, split_names: List[str], elems):
     result = []
     for split_name, elem in zip(split_names, elems):
@@ -82,6 +88,7 @@ def _swap_state(mod: nn.Module, split_names: List[str], elems):
         _del_nested_attr(mod, split_name)
         _set_nested_attr(mod, split_name, elem)
     return result
+
 
 def extract_buffers(mod: nn.Module) -> Tuple[Tuple[Tensor, ...], List[str]]:
     orig_params = tuple(mod.buffers())
@@ -195,13 +202,16 @@ def make_functional_with_buffers_deprecated_v1(model: nn.Module):
 
     return weights, buffers, fun, weight_descriptors, buf_descriptors
 
+
 def make_split_names(lst):
     return [name.split('.') for name in lst]
+
 
 class FunctionalModuleWithBuffers(nn.Module):
     """
     This is the callable object returned by :func:`make_functional_with_buffers`.
     """
+
     def __init__(self, stateless_model, param_names, buffer_names):
         super(FunctionalModuleWithBuffers, self).__init__()
         self.stateless_model = stateless_model
@@ -233,10 +243,12 @@ class FunctionalModuleWithBuffers(nn.Module):
             # Remove the loaded state on self.stateless_model
             _swap_state(self.stateless_model, self.split_names, old_state)
 
+
 class FunctionalModule(nn.Module):
     """
     This is the callable object returned by :func:`make_functional`.
     """
+
     def __init__(self, stateless_model, param_names):
         super(FunctionalModule, self).__init__()
         self.stateless_model = stateless_model
@@ -258,6 +270,7 @@ class FunctionalModule(nn.Module):
         finally:
             # Remove the loaded state on self.stateless_model
             _swap_state(self.stateless_model, self.split_names, old_state)
+
 
 def make_functional(model: nn.Module):
     """make_functional(model) -> func, params

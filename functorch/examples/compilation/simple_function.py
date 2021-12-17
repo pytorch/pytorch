@@ -8,8 +8,10 @@ from functorch import grad, nnc_jit, make_fx, make_nnc
 import torch
 import time
 
+
 def f(x):
     return torch.sin(x).sum()
+
 
 inp = torch.randn(100)
 grad_pt = grad(f)
@@ -18,6 +20,7 @@ grad_nnc = nnc_jit(grad_pt, skip_specialization=True)
 loopnest = make_nnc(grad_pt)(inp)
 print(loopnest)
 
+
 def bench(name, f, iters=10000, warmup=3):
     for _ in range(warmup):
         f()
@@ -25,6 +28,7 @@ def bench(name, f, iters=10000, warmup=3):
     for _ in range(iters):
         f()
     print(f"{name}: ", time.time() - begin)
+
 
 bench("Pytorch: ", lambda: grad_pt(inp))
 bench("FX: ", lambda: grad_fx(inp))
