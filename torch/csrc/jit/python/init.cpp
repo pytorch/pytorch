@@ -1278,7 +1278,7 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          for (auto op: operations) {
+          for (const auto& op: operations) {
             if (op->schema().overload_name() == overload_name) {
               std::ostringstream docstring;
               docstring << "Automatically bound operator '" << op_name
