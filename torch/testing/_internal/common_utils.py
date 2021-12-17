@@ -1487,22 +1487,6 @@ class TensorOrArrayPair(TensorLikePair):
             self._check_supported(tensor, id=id)
         return actual, expected
 
-    @contextlib.contextmanager
-    def _handle_meta_tensor_data_access(self):
-        try:
-            with super()._handle_meta_tensor_data_access():
-                yield
-        except ErrorMeta as error:
-            # Performing any operation on a meta tensor that would require data, will raise a `NotImplementedError`.
-            # `TensorLikePair._handle_meta_tensor_data_access()` will turn that into an expressive `ErrorMeta` wrapping
-            # a more fitting `ValueError`.
-            # Setting `TestCase._ignore_not_implemented_error = True` has special handling for `NotImplementedError`'s
-            # by turning them into `unittest.SkipTest`'s. Thus, if we encounter an meta data access error, we keep the
-            # expressive `ErrorMeta` but change its wrapped error type to `NotImplementedError`.
-            if "meta" in error.msg:
-                error.type = NotImplementedError
-            raise error
-
 
 class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.

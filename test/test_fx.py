@@ -3165,7 +3165,6 @@ class TestOperatorSignatures(JitTestCase):
                 raise RuntimeError(f'Did not match any schemas for op {op.name}!')
 
 
-
 class TestFXAPIBackwardCompatibility(JitTestCase):
     def setUp(self):
         self.maxDiff = None
