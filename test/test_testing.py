@@ -770,7 +770,7 @@ class TestAssertClose(TestCase):
         expected = actual.clone()
 
         for fn in assert_close_with_inputs(actual, expected):
-            with self.assertRaisesRegex(ValueError, "meta"):
+            with self.assertRaisesRegex(NotImplementedError, "meta"):
                 fn()
 
     def test_mismatching_layout(self):
