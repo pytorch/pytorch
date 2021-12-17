@@ -27,88 +27,6 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-# c10
-header_template_rule(
-    name = "cmake_macros_h",
-    src = "c10/macros/cmake_macros.h.in",
-    out = "c10/macros/cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-        "#define C10_USE_NUMA": "/* #undef C10_USE_NUMA */",
-    },
-)
-
-header_template_rule(
-    name = "cuda_cmake_macros_h",
-    src = "c10/cuda/impl/cuda_cmake_macros.h.in",
-    out = "c10/cuda/impl/cuda_cmake_macros.h",
-    substitutions = {
-        "cmakedefine": "define",
-    },
-)
-
-cc_library(
-    name = "c10_headers",
-    hdrs = glob([
-        "c10/core/*.h",
-        "c10/core/impl/*.h",
-        "c10/cuda/*.h",
-        "c10/cuda/impl/*.h",
-        "c10/macros/*.h",
-        "c10/mobile/*.h",
-        "c10/util/*.h",
-        "c10/util/*.hpp",
-    ]),
-    deps = [
-        "@com_github_gflags_gflags//:gflags",
-        "@com_github_glog//:glog",
-        ":cmake_macros_h",
-        ":cuda_cmake_macros_h",
-    ],
-)
-
-cc_library(
-    name = "c10",
-    srcs = glob([
-        "c10/core/*.cpp",
-        "c10/core/impl/*.cpp",
-        "c10/mobile/*.cpp",
-        "c10/util/*.cpp",
-    ]) + if_cuda(
-        glob([
-            "c10/cuda/*.cpp",
-            "c10/cuda/impl/*.cpp",
-        ]),
-        [],
-    ),
-    copts = ["-DCAFFE2_BUILD_MAIN_LIB"],
-    deps = [
-        ":c10_headers",
-        "@fmt",
-    ] + if_cuda(
-        ["@cuda"],
-        [],
-    ),
-    alwayslink = True,
-)
-
-cc_test(
-    name = "c10_tests",
-    size = "small",
-    srcs = glob([
-        "c10/test/util/*.cpp",
-        "c10/test/util/*.h",
-        "c10/test/core/*.cpp",
-        "c10/test/core/impl/*.cpp",
-    ]),
-    copts = ["-Wno-deprecated-declarations"],
-    deps = [
-        ":c10",
-        ":c10_headers",
-        "@com_google_googletest//:gtest_main",
-    ],
-)
-
 # TODO: refactor this into its own library (but how to make
 # a binary based off of a module in a library?)
 py_binary(
@@ -525,7 +443,7 @@ cc_library(
         "aten/src/TH",
     ],
     deps = [
-        ":c10_headers",
+        "//c10:headers",
     ],
 )
 
@@ -593,10 +511,10 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        ":c10_headers",
         "@cuda",
         "@cuda//:cuda_driver",
         "@cuda//:nvrtc",
+        "//c10:headers",
     ],
     alwayslink = True,
 )
@@ -1508,9 +1426,9 @@ cc_library(
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
-        ":c10_headers",
         ":caffe2_protos",
         ":caffe2_core_macros_h",
+        "//c10:headers",
     ],
 )
 
@@ -1718,7 +1636,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1737,7 +1655,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1759,7 +1677,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_headers",
-        ":c10",
+        "//c10",
     ],
     alwayslink = True,
 )
@@ -1807,8 +1725,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        ":c10_headers",
         ":caffe2_headers",
+        "//c10:headers",
         "@local_config_python//:python_headers",
         "@onnx",
     ],
@@ -1877,8 +1795,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
-        ":c10_headers",
         ":caffe2_headers",
+        "//c10:headers",
     ],
 )
 
@@ -2027,8 +1945,8 @@ test_suite(
     name = "all_tests",
     tests = [
         "api_tests",
-        "c10_tests",
         "jit_tests",
         "torch_dist_autograd_test",
+        "//c10:tests",
     ],
 )

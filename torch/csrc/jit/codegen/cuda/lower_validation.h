@@ -30,11 +30,6 @@ void validateParallelize(Fusion* fusion);
 //! calculated that are necessary for output values.
 void validatePartialSplit(Fusion* fusion);
 
-//! If a tensor depends on multiple grid reduction outputs, it may not
-//! be computed at all unless a single thread block happens hold the
-//! valid outputs of all producer tensors.
-void validateThreadPredicates(Fusion* fusion);
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
