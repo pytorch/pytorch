@@ -17,6 +17,9 @@ from torch.ao.quantization.quantize_fx import (
 from torch.ao.quantization._quantize_fx_do_not_use import (
     _convert_fx_do_not_use,
 )
+from torch.ao.quantization.fx.match_utils import (
+    MatchAllNode,
+)
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
 )
@@ -27,6 +30,8 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_quantization import NodeSpec as ns
 import unittest
 import itertools
+import copy
+import operator
 
 def lower_to_trt(model, inputs, shape_ranges):
     """ Lower a quantized model to TensorRT
@@ -374,6 +379,52 @@ class TestQuantizeFxTRTOps(QuantizationTestCase):
             ns.call_method("dequantize"): 3,
         }
         self.checkGraphModuleNodes(quantized, expected_node_occurrence=node_occurrence)
+
+    def test_conv_add(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x, y):
+                return self.conv(x) + y
+
+        from torch.ao.quantization.fx.backend_config_dict.observation_type import ObservationType
+        weighted_op_qint8_dtype_config = {
+            # optional, input activation dtype
+            "input_dtype": torch.qint8,
+            # optional, weight dtype
+            "weight_dtype": torch.qint8,
+            # optional, bias dtype
+            "bias_dtype": torch.float,
+            # optional, output activation dtype
+            "output_dtype": torch.qint8
+        }
+
+        conv_add_config = {
+            "pattern": (operator.add, torch.nn.Conv2d, MatchAllNode),
+            "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,
+            "dtype_configs": [
+                weighted_op_qint8_dtype_config,
+            ],
+            "root_module": torch.nn.Conv2d,
+            "reference_quantized_module_for_root": torch.nn.quantized._reference.Conv2d,
+        }
+
+        m = M().eval()
+        modified_backend_config_dict = copy.deepcopy(self.trt_backend_config_dict)
+        modified_backend_config_dict["configs"].insert(0, conv_add_config)
+        m = prepare_fx(m, {"": self.qconfig}, backend_config_dict=modified_backend_config_dict)
+        node_occurrence = {
+            ns.call_module(torch.ao.quantization.HistogramObserver): 3,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+        m = _convert_fx_do_not_use(m, is_reference=True, backend_config_dict=modified_backend_config_dict)
+        node_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 3,
+            ns.call_method("dequantize"): 3,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
 if __name__ == "__main__":
     run_tests()
