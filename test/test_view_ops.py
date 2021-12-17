@@ -681,7 +681,7 @@ class TestViewOps(TestCase):
                     x = prepro_fn(x)
                 return x.as_strided(size, strides, offset)
 
-            gradcheck(closure, [x])
+            gradcheck(closure, [x], check_forward_ad=True)
             gradgradcheck(closure, [x])
 
         # test
