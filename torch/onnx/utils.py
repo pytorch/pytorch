@@ -109,7 +109,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
            input_names=None, output_names=None, operator_export_type=None,
            opset_version=None, do_constant_folding=True, dynamic_axes=None,
            keep_initializers_as_inputs=None, custom_opsets=None,
-           export_modules_as_functions=False, use_readable_names=False):
+           export_modules_as_functions=False):
     if operator_export_type is None:
         if torch.onnx.PYTORCH_ONNX_CAFFE2_BUNDLE:
             operator_export_type = OperatorExportTypes.ONNX_ATEN_FALLBACK
@@ -120,8 +120,7 @@ def export(model, args, f, export_params=True, verbose=False, training=None,
             operator_export_type=operator_export_type, opset_version=opset_version,
             do_constant_folding=do_constant_folding, dynamic_axes=dynamic_axes,
             keep_initializers_as_inputs=keep_initializers_as_inputs,
-            custom_opsets=custom_opsets, export_modules_as_functions=export_modules_as_functions,
-            use_readable_names=use_readable_names)
+            custom_opsets=custom_opsets, export_modules_as_functions=export_modules_as_functions)
 
 
 def _is_constant_tensor_list(node):
@@ -481,7 +480,7 @@ def _model_to_graph(model, args, verbose=False,
                     operator_export_type=OperatorExportTypes.ONNX,
                     do_constant_folding=True,
                     _disable_torch_constant_prop=False, fixed_batch_size=False,
-                    training=None, dynamic_axes=None, use_readable_names=False):
+                    training=None, dynamic_axes=None):
     r"""Converts model into an ONNX graph.
 
     Returns:
@@ -556,9 +555,8 @@ def _model_to_graph(model, args, verbose=False,
     torch._C._jit_decay_packed_param_input_types(graph)
 
     # If output names lack a proper name and are identified only by their unique
-    # if, give them a legible name for debugging purposes
-    if use_readable_names:
-        _replace_unique_output_ids(graph, params_dict)
+    # give them a legible name for debugging purposes
+    _replace_unique_output_ids(graph, params_dict)
 
     return graph, params_dict, torch_out
 
@@ -812,16 +810,14 @@ def _export(model, args, f, export_params=True, verbose=False, training=None,
 
 def _replace_unique_output_ids(graph, params):
     for n in graph.nodes():
-        for v in itertools.chain(n.inputs(), n.outputs()):
-            if v.debugName() != f"{v.unique()}":
+        for v in itertools.chain(n.inputs()):
+            if v.debugName() != str(v.unique()):
                 continue
             old_name = v.debugName()
-            new_name = 'v{}_{}'.format(old_name, n.kind().split('::')[-1])
+            new_name = f"{n.kind()}_{v.unique()}"
             v.setDebugName(new_name)
             if old_name in params:
-                i = params[old_name]
-                del params[old_name]
-                params[new_name] = i
+                params[new_name] = params.pop(old_name)
 
 
 def _set_input_and_output_names(graph, input_names, output_names):
