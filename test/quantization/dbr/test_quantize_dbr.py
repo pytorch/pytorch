@@ -1,6 +1,7 @@
 import collections
 import copy
 import math
+import tempfile
 import unittest
 
 import torch
@@ -974,6 +975,39 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 v['node_output']['mq'][0]['fqn'],
                 v['node_output']['mq'][0]['ref_node_target_type'],
                 v['node_output']['mq'][0]['sqnr']])
+
+    def test_serialization(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 1)
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                x1 = self.conv(x)
+                x2 = self.linear(x1)
+                return x2
+
+        qconfig = torch.quantization.default_qconfig
+        example_inputs = (torch.randn(1, 1, 1, 1),)
+
+        m = M().eval()
+        m.qconfig = torch.quantization.default_qconfig
+        m = _quantize_dbr.prepare(m, example_inputs)
+        m = _quantize_dbr.convert(m)
+
+        m_loaded = M().eval()
+        m_loaded.qconfig = torch.quantization.default_qconfig
+        m_loaded = _quantize_dbr.prepare(m_loaded, example_inputs)
+        m_loaded = _quantize_dbr.convert(m_loaded)
+
+        with tempfile.NamedTemporaryFile() as f:
+          torch.save(m.state_dict(), f.name)
+          loaded_state_dict = torch.load(f.name)
+          m_loaded.load_state_dict(loaded_state_dict)
+        expected = m(example_inputs[0])
+        actual = m_loaded(example_inputs[0])
+        torch.allclose(expected, actual)
 
 @skipIfNoFBGEMM
 class TestQuantizeDBRModels(QuantizeDBRTestCase):
