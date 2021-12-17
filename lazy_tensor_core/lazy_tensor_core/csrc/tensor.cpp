@@ -222,6 +222,14 @@ void LazyTensor::SetInPlaceIrValue(torch::lazy::Value ir_value) {
 }
 
 void LazyTensor::AssignIrValue(torch::lazy::Value ir_value) const {
+  static const auto VERBOSE_IR = std::getenv("LTC_VERBOSE_IR");
+  if (VERBOSE_IR && !ir_value) {
+    std::cerr << "Resetting IR value on " << GetUniqueId() << std::endl;
+    static const auto tid = std::getenv("LTC_DUMP_RESET_IR");
+    if (tid) {
+      TORCH_CHECK(false, "triggering LTC_DUMP_RESET_IR");
+    }
+  }
   data()->ir_value = std::move(ir_value);
   data()->generation += 1;
 }
