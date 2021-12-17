@@ -146,7 +146,7 @@ class NLLLoss(_WeightedLoss):
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch. Ignored
-            when :attr:`reduce` is ``False``. Default: ``True``
+            when :attr:`reduce` is ``False``. Default: ``None``
         ignore_index (int, optional): Specifies a target value that is ignored
             and does not contribute to the input gradient. When
             :attr:`size_average` is ``True``, the loss is averaged over
@@ -154,7 +154,7 @@ class NLLLoss(_WeightedLoss):
         reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
             losses are averaged or summed over observations for each minibatch depending
             on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
-            batch element instead and ignores :attr:`size_average`. Default: ``True``
+            batch element instead and ignores :attr:`size_average`. Default: ``None``
         reduction (string, optional): Specifies the reduction to apply to the output:
             ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will
             be applied, ``'mean'``: the weighted mean of the output is taken,

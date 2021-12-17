@@ -1,10 +1,10 @@
-torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable, ...] = (,), enable_cpatching: bool = False, param_shapes_constant: bool = False) -> None
+torch.fx._symbolic_trace.Tracer.__init__(self, autowrap_modules: Tuple[Callable] = (<module math>,), autowrap_functions: Tuple[Callable, ...] = (,), param_shapes_constant: bool = False) -> None
 torch.fx._symbolic_trace.Tracer.call_module(self, m: torch.nn.modules.module.Module, forward: Callable[..., Any], args: Tuple[Any, ...], kwargs: Dict[str, Any]) -> Any
 torch.fx._symbolic_trace.Tracer.create_arg(self, a: Any) -> 'Argument'
 torch.fx._symbolic_trace.Tracer.is_leaf_module(self, m: torch.nn.modules.module.Module, module_qualified_name: str) -> bool
 torch.fx._symbolic_trace.Tracer.path_of_module(self, mod: torch.nn.modules.module.Module) -> str
 torch.fx._symbolic_trace.Tracer.trace(self, root: Union[torch.nn.modules.module.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.graph.Graph
-torch.fx._symbolic_trace.symbolic_trace(root: Union[torch.nn.modules.module.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None, enable_cpatching: bool = False) -> torch.fx.graph_module.GraphModule
+torch.fx._symbolic_trace.symbolic_trace(root: Union[torch.nn.modules.module.Module, Callable[..., Any]], concrete_args: Optional[Dict[str, Any]] = None) -> torch.fx.graph_module.GraphModule
 torch.fx._symbolic_trace.wrap(fn_or_name: Union[str, Callable])
 torch.fx.graph.Graph.__init__(self, owning_module: Optional[GraphModule] = None, tracer_cls: Optional[Type[Tracer]] = None)
 torch.fx.graph.Graph.call_function(self, the_function: Callable[..., Any], args: Optional[Tuple[Argument, ...]] = None, kwargs: Optional[Dict[str, Argument]] = None, type_expr: Optional[Any] = None) -> torch.fx.node.Node
@@ -51,7 +51,7 @@ torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
 torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
 torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.format_node(self, placeholder_names: List[str] = None, maybe_return_typename: List[str] = None) -> Optional[str]
+torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None) -> Optional[str]
 torch.fx.node.Node.prepend(self, x: 'Node') -> None
 torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node') -> List[Node]
 torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node')

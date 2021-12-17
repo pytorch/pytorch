@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
                     QConfigAny]
 
+# TODO: maybe rename this to MatchInputNode
 class MatchAllNode:
     """ A node pattern that matches all nodes
     """
