@@ -17,8 +17,8 @@ bool THPException_init(PyObject *module)
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
-  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewException("torch.LinAlgError", nullptr, nullptr));
-  ASSERT_TRUE(PyModule_AddObject(module, "LinAlgError", THPException_LinAlgError) == 0);
+  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewException("torch._C._LinAlgError", nullptr, nullptr));
+  ASSERT_TRUE(PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) == 0);
 
   return true;
 }
