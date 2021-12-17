@@ -521,27 +521,6 @@ if __name__ == "__main__" :
                 exit(0)
 
             with pick_grad(args, name):
-
-                try:
-                    if args.test == 'eval':
-                        # Correctness Check
-                        torch.manual_seed(1337)
-                        model, example_inputs = benchmark.get_module()
-                        model.eval()
-                        correct_result = call_model_with(model, example_inputs)
-                        torch.manual_seed(1337)
-                        lazy_model, lazy_inputs = lazy_benchmark.get_module()
-                        lazy_model.eval()
-                        lazy_result = call_model_with(lazy_model, lazy_inputs)
-                        if not check_results(name, correct_result, lazy_result, device):
-                            print(f"INCORRECT ({name})")
-                            continue
-                except Exception:
-                    logging.exception("unhandled error")
-                    print(f"ERROR ({name})")
-                    continue
-                lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
-
                 with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
                     if args.fuser == 'noopt':
                         # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
@@ -550,8 +529,26 @@ if __name__ == "__main__" :
                         torch._C._jit_override_can_fuse_on_gpu(False)
                         torch._C._jit_set_texpr_fuser_enabled(False)
                         torch._C._jit_set_nvfuser_enabled(False)
-
-                    # using LazySync
+                    try:
+                        if args.test == 'eval':
+                            # Correctness Check
+                            torch.manual_seed(1337)
+                            model, example_inputs = benchmark.get_module()
+                            model.eval()
+                            correct_result = call_model_with(model, example_inputs)
+                            torch.manual_seed(1337)
+                            lazy_model, lazy_inputs = lazy_benchmark.get_module()
+                            lazy_model.eval()
+                            lazy_result = call_model_with(lazy_model, lazy_inputs)
+                            if not check_results(name, correct_result, lazy_result, device):
+                                print(f"INCORRECT ({name})")
+                                continue
+                    except Exception:
+                        logging.exception("unhandled error")
+                        print(f"ERROR ({name})")
+                        continue
+                    
+                    lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
             
