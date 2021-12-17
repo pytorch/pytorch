@@ -420,8 +420,8 @@ module_db: List[ModuleInfo] = [
                decorators=[
                     DecorateInfo(
                         toleranceOverride({
-                            torch.float32: tol(atol=1e-1, rtol=1e-4),
-                            torch.float64: tol(atol=1e-1, rtol=1e-4)}),
+                            torch.float32: tol(atol=1e-4, rtol=1e-4),
+                            torch.float64: tol(atol=1e-4, rtol=1e-4)}),
                         'TestModule', 'test_forward', device_type='cpu')
                     ]),
     ModuleInfo(torch.nn.NLLLoss,
