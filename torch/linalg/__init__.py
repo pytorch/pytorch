@@ -4,7 +4,7 @@ import sys
 import torch
 from torch._C import _add_docstr, _linalg  # type: ignore[attr-defined]
 
-LinAlgError = torch.LinAlgError # type: ignore[attr-defined]
+LinAlgError = torch._C._LinAlgError  # type: ignore[attr-defined]
 
 Tensor = torch.Tensor
 
