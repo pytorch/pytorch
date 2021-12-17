@@ -13,6 +13,8 @@ from typing import List, Any
 # I can't figure out how to do that, so we are turning all of them
 # into normal Tuples for now (this is what vmap used to do anyways).
 # We probably want some special behavior for named tuples?
+
+
 def tree_flatten_hack(pytree):
     if _pytree._is_leaf(pytree) and not isinstance(pytree, tuple):
         return [pytree], _pytree.LeafSpec()
@@ -35,17 +37,19 @@ def tree_flatten_hack(pytree):
 
     return result, _pytree.TreeSpec(typ, context, children_specs)
 
+
 def tree_map_(fn_, pytree):
     flat_args, _ = tree_flatten(pytree)
     [fn_(arg) for arg in flat_args]
     return pytree
 
+
 class PlaceHolder():
     def __repr__(self):
         return '*'
+
 
 def treespec_pprint(spec):
     leafs = [PlaceHolder() for _ in range(spec.num_leaves)]
     result = tree_unflatten(leafs, spec)
     return repr(result)
-

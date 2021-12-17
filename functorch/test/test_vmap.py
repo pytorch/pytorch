@@ -52,7 +52,7 @@ class EnableVmapFallbackWarnings:
 class TestVmapAPI(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'> as a return"):
-            output = vmap(lambda x: 3.14)(torch.ones(3))
+            vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
             return x, 3
@@ -471,7 +471,6 @@ class TestVmapAPI(TestCase):
             vmap(f)(torch.randn(3))
 
     def test_accepts_nested_inputs(self):
-        B0 = 2
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
 
@@ -541,7 +540,6 @@ class TestVmapAPI(TestCase):
             return x * yz[0] * yz[1]
 
         x = torch.randn(2, 3)
-        y = torch.randn(2, 3)
 
         # the following are errors in jax (and will always be errors)
         msg = 'Got in_dim=0 for an input but the input is of type'
@@ -584,7 +582,7 @@ class TestVmapAPI(TestCase):
         x = torch.randn(11)
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
-            result = vmap(op)(x, y)
+            vmap(op)(x, y)
             # The single warning here is the "vmap is experimental"
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
@@ -599,17 +597,17 @@ class TestVmapAPI(TestCase):
         y = torch.randn(11)
         with warnings.catch_warnings(record=True) as wa:
             with EnableVmapFallbackWarnings():
-                result = vmap(op)(x, y)
+                vmap(op)(x, y)
             self.assertEqual(len(wa), 2)
             self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
     def _assert_uses_vmap_fallback(self, vmap_args, inputs):
         return
-        with warnings.catch_warnings(record=True) as wa:
-            with EnableVmapFallbackWarnings():
-                result = vmap(*vmap_args)(*inputs)
-            self.assertEqual(len(wa), 2)
-            self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
+        # with warnings.catch_warnings(record=True) as wa:
+        #     with EnableVmapFallbackWarnings():
+        #         result = vmap(*vmap_args)(*inputs)
+        #     self.assertEqual(len(wa), 2)
+        #     self.assertRegex(str(wa[-1].message), FALLBACK_REGEX)
 
     def test_fallback_zero_dim(self):
         # NB: One day we will implement a batching rule for torch.atan2.
@@ -790,7 +788,7 @@ class TestVmapAPI(TestCase):
         x_orig = torch.randn(B0, B1, B2, 5)
         x = x_orig.clone()
         y = torch.randn(B0, B1, B2)
-        result = vmap(vmap(vmap(op)))(x, y)
+        vmap(vmap(vmap(op)))(x, y)
         self.assertEqual(x, outplace_op(x_orig, y.view(B0, B1, B2, 1)))
 
     # ("Fallback isInplaceVmapCompatible check is broken")
@@ -801,7 +799,7 @@ class TestVmapAPI(TestCase):
         # path on another operator to avoid bitrot.
         op = Tensor.atan2_
         outplace_op = torch.atan2
-        B0, B1, B2 = 2, 3, 5
+        B0, B1 = 2, 3
 
         x = torch.rand(B0, 7)
         y = torch.rand(7)
@@ -1115,6 +1113,8 @@ class TensorFactory:
 #
 # check_view: Test if the first returned output is a view of the first input
 # check_propagates_grad: Test if the operation propagates gradients.
+
+
 def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
                check_view=False, check_propagates_grad=True):
     result = vmap(op, in_dims, out_dims)(*inputs)
@@ -1143,8 +1143,10 @@ def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
     result_as_tuple = (result,) if op_has_single_return else result
     self.assertTrue(result[0].requires_grad)
 
+
 def should_allow_vmap_fallback_usage(fn):
     return getattr(fn, '_allow_vmap_fallback_usage', False)
+
 
 def allowVmapFallbackUsage(fn):
     fn._allow_vmap_fallback_usage = True
@@ -1160,6 +1162,8 @@ def allowVmapFallbackUsage(fn):
 #
 # NB: TestVmapBase is a nested class. This prevents test runners from picking
 # it up and running it.
+
+
 class Namespace:
     class TestVmapBase(TestCase):
         def __init__(self, method_name='runTest'):
@@ -1174,18 +1178,18 @@ class Namespace:
                         self._wrap_method_with_vmap_fallback_check(test_method))
 
         def _wrap_method_with_vmap_fallback_check(self, method):
-            msg = (
-                'Expected the test to not invoke the vmap fallback path, i.e., '
-                'all of the operators being tested in this test should have batching '
-                'rules implemented. If you are intentionally testing something to '
-                'do with the fallback path, use allowVmapFallbackUsage. Otherwise, '
-                'please make sure that batching rules are implemented for the '
-                'operator(s) being tested.'
-            )
+            # msg = (
+            #     'Expected the test to not invoke the vmap fallback path, i.e., '
+            #     'all of the operators being tested in this test should have batching '
+            #     'rules implemented. If you are intentionally testing something to '
+            #     'do with the fallback path, use allowVmapFallbackUsage. Otherwise, '
+            #     'please make sure that batching rules are implemented for the '
+            #     'operator(s) being tested.'
+            # )
 
             @functools.wraps(method)
             def wrapper(self, *args, **kwargs):
-                with warnings.catch_warnings(record=True) as wa:
+                with warnings.catch_warnings(record=True):
                     warnings.simplefilter('always')
                     with EnableVmapFallbackWarnings():
                         method(*args, **kwargs)
@@ -1220,6 +1224,7 @@ class Namespace:
 
             with self.assertRaises(AssertionError):
                 uses_fallback(self)
+
 
 def _make_case(op, input_getter=TensorFactory.randn):
     return (op, input_getter)
@@ -1309,7 +1314,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         y = vmap(vmap(clone_contiguous, in_dims=2), in_dims=1)(x)
         self.assertTrue(y.is_contiguous())
         self.assertTrue(y[0][0].is_contiguous())
-
 
         msg = r'only supported with memory_format torch.preserve_format or torch.contiguous_format'
         with self.assertRaisesRegex(RuntimeError, msg):
@@ -2032,7 +2036,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_unsqueeze(self):
         op = torch.unsqueeze
         test = self._vmap_view_test
-        B0, B1, B2 = 7, 11, 13
+        B0, B1 = 7, 11
 
         # unsqueeze dim 0
         test(op, (torch.rand(B0, 2, 5), 0), in_dims=(0, None))
@@ -2259,7 +2263,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
              (torch.rand(B1, 2), torch.rand(B0, 2)), in_dims=(None, 0))
         test(vmap(get_op(0), in_dims=(0, 0)),
              (torch.rand(B1, 2), torch.rand(B0, B1, 2)), in_dims=(None, 0))
-
 
     def test_slice(self):
         test = self._vmap_view_test
@@ -2698,12 +2701,13 @@ class TestVmapOperators(Namespace.TestVmapBase):
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
-            mod2 = torch.nn.Conv2d(4, 8, kernel_size=3, groups=2, stride=3, padding=1, dilation = 2)
-            arg_values = [torch.randn(inp_shape), mod.weight, mod.bias]
+            mod2 = conv_mod(4, 8, kernel_size=3, groups=2, stride=3, padding=1, dilation=2)
+            arg_values = [torch.randn(inp_shape), mod2.weight, mod2.bias]
+            kwarg_values = dict(groups=2, stride=3, padding=1, dilation=2)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
-            arg_values = [torch.randn(inp_shape), mod.weight, None]
+            arg_values = [torch.randn(inp_shape), mod2.weight, None]
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(conv_fn, arg_values, kwarg_values):
                 self.assertEqual(loop_out, batched_out)
 
@@ -2718,6 +2722,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     def test_conj_bit(self):
         x = torch.tensor([1+1j, 2+1j])
+
         def foo(x):
             assert not x.is_conj()
             y = x.conj()
@@ -2758,12 +2763,14 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def test_parametrize_multiple(self, op1, op2):
         pass
 
+
 instantiate_parametrized_tests(TestVmapOperators)
 
 
 def construct_v(output, batch_size):
     return torch.randn(batch_size, *output.shape,
                        dtype=output.dtype, device=output.device)
+
 
 def as_tuple(x):
     if isinstance(x, tuple):
@@ -2773,9 +2780,11 @@ def as_tuple(x):
     else:
         return x,
 
+
 def differentiable(args):
     return tuple(arg for arg in as_tuple(args)
                  if isinstance(arg, torch.Tensor) and arg.requires_grad)
+
 
 def _get_rand_no_zeros(*args, **kwargs):
     requires_grad = kwargs.get('requires_grad', False)
@@ -2783,6 +2792,7 @@ def _get_rand_no_zeros(*args, **kwargs):
     kwargs_without_requires_grad['requires_grad'] = False
     result = torch.rand(*args, **kwargs_without_requires_grad)
     return result.clamp_min_(0.1).requires_grad_(requires_grad)
+
 
 class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def _vmap_test(self, *args, **kwargs):
@@ -3048,7 +3058,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = torch.randn(3, 4, 5, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: x.diagonal(0, -1, -2), (x,))
 
-
     @allowVmapFallbackUsage
     def test_unrelated_output(self, device):
         B0 = 3
@@ -3077,6 +3086,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         _ = vjp(gy[0])
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
 
 class TestVmapOperatorsOpInfo(TestCase):
     vmap_fail = {
@@ -3133,6 +3143,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.glu'),
         xfail('cartesian_prod'),
     }
+
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestVmapOperatorsOpInfo', 'test_vmap_exhaustive', vmap_fail)
     def test_vmap_exhaustive(self, device, dtype, op):
@@ -3321,7 +3332,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         test(self, op, (x,), in_dims=(0))
 
     def test_foo_like(self, device):
-        test = functools.partial(_vmap_test, check_propagates_grad=False)
+        # vfdev-5: Probably, we can remove this line. Flake8 reported as unused
+        # test = functools.partial(_vmap_test, check_propagates_grad=False)
 
         B, N, C, H, W = 2, 3, 24, 5, 7
         for op in [torch.ones_like, torch.zeros_like, torch.randn_like, torch.rand_like]:
@@ -3355,20 +3367,23 @@ class TestVmapOperatorsOpInfo(TestCase):
         test(self, op, (x, 4, weight, bias), in_dims=(0, None, 0, 0))
 
     def test_index_put(self, device):
-        test = functools.partial(_vmap_test, check_propagates_grad=False)
+        # vfdev-5: Probably, we can remove this line. Flake8 reported as unused
+        # test = functools.partial(_vmap_test, check_propagates_grad=False)
 
-        x = torch.arange(3*4*5).reshape(3,4,5)
+        x = torch.arange(3 * 4 * 5).reshape(3, 4, 5)
+
         def f(x, y, z):
             x[y] = z
             return x
+
         x = torch.randn(3, 4, 5)
         y = torch.zeros((3, 2)).long()
         z = torch.randn(3, 2, 5)
         base = f(x[0], y[0], z[0])
-        self.assertEqual(vmap(f, in_dims=(0,0,0))(x, y, z)[0], base)
-        self.assertEqual(vmap(f, in_dims=(0,None,None))(x, y[0], z[0])[0], base)
-        self.assertEqual(vmap(f, in_dims=(0,None,0))(x, y[0], z)[0], base)
-        self.assertEqual(vmap(f, in_dims=(0,0,None))(x, y, z[0])[0], base)
+        self.assertEqual(vmap(f, in_dims=(0, 0, 0))(x, y, z)[0], base)
+        self.assertEqual(vmap(f, in_dims=(0, None, None))(x, y[0], z[0])[0], base)
+        self.assertEqual(vmap(f, in_dims=(0, None, 0))(x, y[0], z)[0], base)
+        self.assertEqual(vmap(f, in_dims=(0, 0, None))(x, y, z[0])[0], base)
 
     @parametrize('training', [True, False])
     @parametrize('track_running_stats', [True, False])

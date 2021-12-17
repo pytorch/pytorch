@@ -6,11 +6,12 @@
 
 import argparse
 from typing import Tuple, List
-from collections import defaultdict
 import re
+
 
 def num_leading_spaces(line: str) -> int:
     return len(line) - len(line.lstrip())
+
 
 def min_leading_spaces(lines):
     num_spaces = [num_leading_spaces(line) for line in lines if len(line) > 0]
@@ -18,17 +19,20 @@ def min_leading_spaces(lines):
         return None
     return min(num_spaces)
 
+
 def deindent(code: str) -> str:
     lines = code.split('\n')
     mls = min_leading_spaces(lines)
     lines = [line[mls:] for line in lines]
     return '\n'.join(lines)
 
+
 def indent(code: str, num) -> str:
     lines = code.split('\n')
     indented_lines = [' ' * num + line for line in lines]
     indented_lines[0] = lines[0]
     return '\n'.join(indented_lines)
+
 
 def is_tensor(typ: str) -> bool:
     if typ == 'Tensor':
@@ -37,6 +41,7 @@ def is_tensor(typ: str) -> bool:
         return True
     return False
 
+
 def is_optional_tensor(typ: str) -> bool:
     if typ == 'c10::optional<Tensor>':
         return True
@@ -44,9 +49,11 @@ def is_optional_tensor(typ: str) -> bool:
         return True
     return False
 
+
 def is_vector_tensor(typ: str) -> bool:
     # (chilli): I don't really understand why there's 2 dots in front?
     return (typ == '::std::vector<Tensor>')
+
 
 def add_bdim_after_tensor(types: Tuple[str]) -> Tuple[str]:
     result = []
@@ -55,6 +62,7 @@ def add_bdim_after_tensor(types: Tuple[str]) -> Tuple[str]:
         if is_tensor(typ) or is_optional_tensor(typ) or is_vector_tensor(typ):
             result.append('c10::optional<int64_t>')
     return tuple(result)
+
 
 def batch_rule_type(
         op_returns: Tuple[str],
@@ -67,12 +75,14 @@ def batch_rule_type(
     result = f"typedef std::tuple<{','.join(returns)}> (*{br_t})({', '.join(args)});"
     return result, br_t
 
+
 def unwrap_tensor(name: str) -> List[str]:
     result = f"""\
     Tensor {name}_value;
     optional<int64_t> {name}_bdim;
     std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}, cur_level);"""
     return deindent(result).split('\n')
+
 
 def unwrap_optional_tensor(name: str) -> List[str]:
     result = f"""\
@@ -82,6 +92,7 @@ def unwrap_optional_tensor(name: str) -> List[str]:
         std::tie({name}_value, {name}_bdim) = unwrapTensorAtLevel({name}.value(), cur_level);
     }}"""
     return deindent(result).split('\n')
+
 
 def gen_unwraps(arg_types, arg_names):
     tensors = [name for typ, name in zip(arg_types, arg_names) if is_tensor(typ)]
@@ -103,6 +114,7 @@ def gen_unwraps(arg_types, arg_names):
             unwrapped_arg_list.append(arg)
     return unwraps, unwrapped_arg_list
 
+
 def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, ops) -> str:
     arg_types, arg_names = zip(*args)
     batch_rule_typedef, batch_rule_t = batch_rule_type(returns, arg_types, unique_count)
@@ -120,7 +132,9 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, o
             wrapped_returns.append(f'makeBatched(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)')
             idx += 2
         elif is_vector_tensor(ret):
-            wrapped_returns.append(f'makeBatchedVector(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)')
+            wrapped_returns.append(
+                f'makeBatchedVector(std::get<{idx}>(results), std::get<{idx + 1}>(results), cur_level)'
+            )
             idx += 2
         else:
             wrapped_returns.append(f'std::get<{idx}>(results)')
@@ -148,6 +162,7 @@ def lower(returns: Tuple[str], args: List[Tuple[str, str]], unique_count: int, o
     }}"""
     return deindent(result)
 
+
 def parse_return(return_t):
     if 'std::tuple' not in return_t:
         return (return_t,)
@@ -155,6 +170,7 @@ def parse_return(return_t):
     if m is None:
         m = re.match(r'::std::tuple<(.*)>', return_t)
     return tuple([x.strip() for x in m.group(1).split(',')])
+
 
 def parse_args(args_t):
     # There is an assumption made that args are separated with comma-space
@@ -165,6 +181,7 @@ def parse_args(args_t):
         split_idx = arg.rfind(' ')
         result.append((arg[:split_idx].strip(), arg[split_idx:].strip()))
     return tuple(result)
+
 
 def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h', include_op=False):
     with open(path, 'r') as f:
@@ -188,6 +205,7 @@ def get_signatures(path='build/aten/src/ATen/RegistrationDeclarations.h', includ
         schemas.append(result)
     return tuple(schemas)
 
+
 def is_schema_outplace(schema):
     _, returns, args = schema
     for arg in args:
@@ -207,15 +225,18 @@ def is_schema_outplace(schema):
             return False
     return True
 
+
 def get_hash(schema):
     ret_t, args = schema
     args_t, _ = tuple(zip(*args))
     return (ret_t, args_t)
 
+
 class Container:
     def __init__(self, schema, ops):
         self.schema = schema
         self.ops = ops
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

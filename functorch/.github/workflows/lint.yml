@@ -1,0 +1,31 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  flake8-py3:
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.x
+          architecture: x64
+      - name: Install dependencies
+        run: |
+          set -eux
+          pip3 install flake8 --user
+          flake8 --version
+      - name: Run flake8
+        run: |
+          set -eux
+          flake8 .
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

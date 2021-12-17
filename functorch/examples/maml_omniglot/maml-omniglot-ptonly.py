@@ -27,26 +27,21 @@ Our MAML++ fork and experiments are available at:
 https://github.com/bamos/HowToTrainYourMAMLPytorch
 """
 
+from support.omniglot_loaders import OmniglotNShot
+from functorch import make_functional_with_buffers
+import torch.optim as optim
+import torch.nn.functional as F
+from torch import nn
+import torch
+import matplotlib.pyplot as plt
 import argparse
 import time
-import typing
 
 import pandas as pd
 import numpy as np
 import matplotlib as mpl
 mpl.use('Agg')
-import matplotlib.pyplot as plt
 plt.style.use('bmh')
-
-import torch
-from torch import nn
-import torch.nn.functional as F
-import torch.optim as optim
-from functorch import make_functional_with_buffers, vmap, grad
-
-import higher
-
-from support.omniglot_loaders import OmniglotNShot
 
 
 def main():
@@ -234,8 +229,6 @@ def test(db, net, device, epoch, log):
         'mode': 'test',
         'time': time.time(),
     })
-
-
 
 
 def plot(log):
