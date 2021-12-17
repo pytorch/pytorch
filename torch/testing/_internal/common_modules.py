@@ -3,11 +3,12 @@ import unittest
 from copy import deepcopy
 from functools import wraps, partial
 from itertools import chain
+import itertools
 import torch.nn.functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf, skipCUDAIfCudnnVersionLessThan)
+    _TestParametrizer, _update_param_kwargs, skipIf, skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride)
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, GRADCHECK_NONDET_TOL)
@@ -240,7 +241,6 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     with freeze_rng_state():
         return m(*single_batch_input_args).squeeze(0)
 
-
 def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
     """Reference function for criterion supporting no batch dimensions."""
     output = no_batch_dim_reference_fn(m, *args, **kwargs)
@@ -249,6 +249,23 @@ def no_batch_dim_reference_criterion_fn(m, *args, **kwargs):
         return output.squeeze(0)
     # reduction is 'sum' or 'mean' which results in a 0D tensor
     return output
+
+
+def no_batch_dim_reference_mha(m, p, *args, **kwargs):
+    """Reference function for MultiheadAttention supporting no batch dimensions.
+
+    The module is passed the input and target in batched form with a single item.
+    The output is squeezed to compare with the no-batch input.
+    """
+    batch_dim = 0 if kwargs.get('batch_first', True) else 1
+    if 'batch_first' in kwargs:
+        kwargs.pop('batch_first')
+    if 'key_padding_mask' in kwargs and kwargs['key_padding_mask'] is not None:
+        kwargs['key_padding_mask'] = kwargs['key_padding_mask'].unsqueeze(0)
+    single_batch_input_args = [input.unsqueeze(batch_dim) for input in args]
+    with freeze_rng_state():
+        output = m(*single_batch_input_args, **kwargs)
+        return (output[0].squeeze(batch_dim), output[1].squeeze(0))
 
 
 def generate_regression_criterion_inputs(make_input):
@@ -475,6 +492,37 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     ]
 
 
+def module_inputs_torch_nn_MultiheadAttention(module_info, device, dtype, requires_grad, **kwargs):
+    # Currently all samples below are for validating the no-batch-dim support.
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    samples = []
+    bool_vals = (True, False)
+    key_padding_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool))
+    attn_masks = (None, torch.tensor([False, False, True], device=device, dtype=torch.bool).expand((3, 3, 3)))
+    products = itertools.product(bool_vals, bool_vals, bool_vals, key_padding_masks, attn_masks)
+    for bias, add_bias_kv, add_zero_attn, key_padding_mask, attn_mask in products:
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=True,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
+                reference_fn=no_batch_dim_reference_mha,
+            )
+        )
+        samples.append(
+            ModuleInput(
+                constructor_input=FunctionInput(embed_dim=3, num_heads=3, batch_first=False,
+                                                bias=bias, add_bias_kv=add_bias_kv, add_zero_attn=add_zero_attn),
+                forward_input=FunctionInput(make_input((3, 3)), make_input((3, 3)), make_input((3, 3)),
+                                            key_padding_mask=key_padding_mask, attn_mask=attn_mask),
+                reference_fn=partial(no_batch_dim_reference_mha, batch_first=False),
+            )
+        )
+
+    return samples
+
+
 # Database of ModuleInfo entries in alphabetical order.
 module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.AdaptiveAvgPool2d,
@@ -484,12 +532,20 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_AvgPool1d,
                skips=(
                    # No channels_last support for AvgPool1d as it does not take 4D inputs
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-               )),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
     ModuleInfo(torch.nn.BatchNorm2d,
-               module_inputs_func=module_inputs_torch_nn_BatchNorm2d),
+               module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
+               decorators=(
+                   # Failure on ROCM for BatchNorm2d float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
+               ),
     ModuleInfo(torch.nn.BatchNorm3d,
-               module_inputs_func=module_inputs_torch_nn_BatchNorm3d),
+               module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
+               decorators=(
+                   # Failure on ROCM for BatchNorm3d float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),)
+               ),
     ModuleInfo(torch.nn.Conv2d,
                module_inputs_func=module_inputs_torch_nn_Conv2d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -499,7 +555,11 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for Conv2d on cpu currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
                decorators=(
-                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),)
+                   # Conv2d channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for Conv2d float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
+                   DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'))
                ),
     ModuleInfo(torch.nn.Conv3d,
                module_inputs_func=module_inputs_torch_nn_Conv3d,
@@ -512,7 +572,10 @@ module_db: List[ModuleInfo] = [
                    # Greatest difference was 0.05072784423828125  > atol of 0.05
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),),
                decorators=(
-                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),)
+                   # Conv3d channels_last support on cuda requires cudnn >= 8005
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=8005), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for Conv3d float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]))
                ),
     ModuleInfo(torch.nn.ConvTranspose2d,
                module_inputs_func=module_inputs_torch_nn_ConvTranspose2d,
@@ -523,10 +586,19 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for ConvTranspose2d on cpu currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cpu'),),
                decorators=(
-                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),)
+                   # ConvTranspose2d channels_last support on cuda requires cudnn >= 7603
+                   DecorateInfo(skipCUDAIfCudnnVersionLessThan(version=7603), 'TestModule', 'test_memory_format'),
+                   # Failure on ROCM for ConvTranspose2d float32 issue #70125
+                   DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]))
                ),
     ModuleInfo(torch.nn.ELU,
                module_inputs_func=module_inputs_torch_nn_ELU),
+    ModuleInfo(torch.nn.Embedding,
+               module_inputs_func=module_inputs_torch_nn_Embedding,
+               skips=(
+                   # No channels_last support for Embedding.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
     ModuleInfo(torch.nn.Hardswish,
                module_inputs_func=module_inputs_torch_nn_Hardswish,
                supports_gradgrad=False),
@@ -551,12 +623,20 @@ module_db: List[ModuleInfo] = [
                    # TODO: test_cpu_gpu_parity doesn't handle case where output is not a singleton, submit fix
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_cpu_gpu_parity'),)
                ),
+    ModuleInfo(torch.nn.MultiheadAttention,
+               module_inputs_func=module_inputs_torch_nn_MultiheadAttention,
+               skips=(
+                   # No channels_last support for MultiheadAttention currently.
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
     ModuleInfo(torch.nn.NLLLoss,
                module_inputs_func=module_inputs_torch_nn_NLLLoss,
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
+    ModuleInfo(torch.nn.ReLU,
+               module_inputs_func=module_inputs_torch_nn_ReLU),
     ModuleInfo(torch.nn.Sigmoid,
                module_inputs_func=module_inputs_torch_nn_Sigmoid),
     ModuleInfo(torch.nn.TransformerEncoderLayer,
@@ -566,12 +646,4 @@ module_db: List[ModuleInfo] = [
                    # No channels_last support for TransformerEncoderLayer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
                ),
-    ModuleInfo(torch.nn.Embedding,
-               module_inputs_func=module_inputs_torch_nn_Embedding,
-               skips=(
-                   # No channels_last support for Embedding.
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
-               ),
-    ModuleInfo(torch.nn.ReLU,
-               module_inputs_func=module_inputs_torch_nn_ReLU),
 ]
