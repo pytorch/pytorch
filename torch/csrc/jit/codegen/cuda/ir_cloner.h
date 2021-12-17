@@ -74,6 +74,7 @@ class TORCH_CUDA_CU_API IrCloner : private OptInConstDispatch {
   void handle(const TransposeOp*) override;
   void handle(const ShiftOp*) override;
   void handle(const GatherOp*) override;
+  void handle(const ViewOp*) override;
 
   void handle(const Split*) override;
   void handle(const Merge*) override;

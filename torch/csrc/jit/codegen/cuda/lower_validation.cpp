@@ -793,39 +793,6 @@ void validatePartialSplit(Fusion* fusion) {
   }
 }
 
-void validateThreadPredicates(Fusion* fusion) {
-  for (auto tv : ir_utils::allTvs(fusion)) {
-    if (tv->definition() == nullptr) {
-      continue;
-    }
-    const auto src_info =
-        GpuLower::current()->threadPredMap().getPredicateInfo(tv).source_map;
-    const TensorView* known_src_tensor = nullptr;
-    for (const auto& kv : src_info) {
-      ParallelType pt = kv.first;
-      if (!isParallelTypeBlockDim(pt)) {
-        continue;
-      }
-      for (auto src_tv : kv.second) {
-        if (known_src_tensor == nullptr) {
-          known_src_tensor = src_tv;
-        } else {
-          TORCH_INTERNAL_ASSERT(
-              known_src_tensor == src_tv,
-              "Tensor t",
-              tv->name(),
-              " is invalid as it is predicated by ",
-              "t",
-              known_src_tensor->name(),
-              " and t",
-              src_tv->name(),
-              ".");
-        }
-      }
-    }
-  }
-}
-
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
