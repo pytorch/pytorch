@@ -1,14 +1,10 @@
 import torch
-from torch.distributed._sharded_tensor import (
-    sharded_op_impl,
-)
 
 def validate_param(param, param_name):
     if param is None:
         raise ValueError(f"param: {param_name} shouldn't be None!")
 
-@sharded_op_impl(torch.nn.init.uniform_)
-def uniform_(types, args=(), kwargs=None, pg=None):
+def uniform_(types, args=(), kwargs=None):
     r"""
     Fills the Tensor in sharded_tensor.local_shards with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
@@ -29,8 +25,7 @@ def uniform_(types, args=(), kwargs=None, pg=None):
         torch.nn.init.uniform_(shard.tensor, a=a, b=b)
     return sharded_tensor
 
-@sharded_op_impl(torch.nn.init.normal_)
-def normal_(types, args=(), kwargs=None, pg=None):
+def normal_(types, args=(), kwargs=None):
     r"""
     Fills the Tensors in sharded_tensor.local_shards with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`.
@@ -51,8 +46,7 @@ def normal_(types, args=(), kwargs=None, pg=None):
         torch.nn.init.normal_(shard.tensor, mean=mean, std=std)
     return sharded_tensor
 
-@sharded_op_impl(torch.nn.init.kaiming_uniform_)
-def kaiming_uniform_(types, args=(), kwargs=None, pg=None):
+def kaiming_uniform_(types, args=(), kwargs=None):
     r"""
     Fills the Tensors in sharded_tensor.local_shards with values according to the method
     described in `Delving deep into rectifiers: Surpassing human-level

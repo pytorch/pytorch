@@ -17,7 +17,7 @@
 
 // NOLINTNEXTLINE(bugprone-suspicious-include)
 #include <torch/csrc/generic/Storage.cpp>
-#include <torch/csrc/THGenerateByteType.h>
+#include <TH/THGenerateByteType.h>
 
 #include <c10/util/intrusive_ptr.h>
 
