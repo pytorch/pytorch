@@ -24,6 +24,15 @@ bool force_eager_fallback(c10::Symbol op) {
   return false;
 }
 
+bool fallback_main_thread() {
+  static char* env_str = std::getenv("LTC_FALLBACK_MAIN_THREAD");
+  if (env_str != nullptr) {
+    static bool use_main_thread = atoi(env_str);
+    return use_main_thread;
+  }
+  return false;
+}
+
 void ltc_eager_fallback(const c10::OperatorHandle& op,
                         torch::jit::Stack* stack) {
   LTC_FN_TRACK(3);
@@ -55,7 +64,7 @@ void ltc_eager_fallback(const c10::OperatorHandle& op,
 
   // Call the actual boxed CPU fallback.
   eager_fallback(op, stack,
-                 torch::lazy::getBackend()->EagerFallbackDeviceType());
+                 torch::lazy::getBackend()->EagerFallbackDeviceType(), fallback_main_thread());
 }
 
 TORCH_LIBRARY_IMPL(_, Lazy, m) {

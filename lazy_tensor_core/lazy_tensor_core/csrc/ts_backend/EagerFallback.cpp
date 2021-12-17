@@ -11,7 +11,7 @@ namespace torch_lazy_tensors {
 namespace {
 
 std::vector<at::Tensor> to_eager(const at::TensorList& tensors,
-                                 c10::DeviceType eager_device_type) {
+                                 c10::DeviceType eager_device_type, bool use_main_thread) {
   // Tensors may originate on different devices, or be undefined.
   // We identify the true 'lazy tensors' and transfer them as a group,
   // and we avoid copying tensors already on the correct eager device.
@@ -39,7 +39,7 @@ std::vector<at::Tensor> to_eager(const at::TensorList& tensors,
   }
 
   // Transfer all the lazy tensors as one computation rather than calling .to on each one
-  auto eager_valid_tensors = LazyGraphExecutor::Get()->GetTensors(&lazy_tensors);
+  auto eager_valid_tensors = LazyGraphExecutor::Get()->GetTensors(&lazy_tensors, use_main_thread);
 
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
     if (to_translate[i]) {
@@ -82,7 +82,7 @@ c10::optional<c10::Device> compute_target_device(std::vector<at::Tensor>& t_args
 }  // namespace
 
 void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
-                    c10::DeviceType device_type) {
+                    c10::DeviceType device_type, bool use_main_thread) {
   auto& schema_args = op.schema().arguments();
   const auto num_arguments = schema_args.size();
   auto arguments = torch::jit::last(stack, num_arguments);
@@ -106,13 +106,13 @@ void eager_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack,
       // TensorList args onto the CPU at the same time. We can improve this if
       // we need better perf for XLA's CPU fallbacks.
       auto eager_ivalue = c10::IValue(c10::List<at::Tensor>(
-          to_eager(ivalue.toTensorList().vec(), device_type)));
+          to_eager(ivalue.toTensorList().vec(), device_type, use_main_thread)));
       (*stack)[arguments_begin + idx] = std::move(eager_ivalue);
       tensorlist_args.push_back(ivalue.toTensorList());
     }
   }
 
-  auto eager_tensors = to_eager(tensor_args, device_type);
+  auto eager_tensors = to_eager(tensor_args, device_type,  use_main_thread);
 
   for (auto i = 0; i < tensor_args_indices.size(); ++i) {
     auto idx = tensor_args_indices[i];

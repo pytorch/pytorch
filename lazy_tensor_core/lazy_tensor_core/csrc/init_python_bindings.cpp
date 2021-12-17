@@ -397,7 +397,7 @@ std::vector<at::Tensor> LtcCreateTensorList(const at::TensorList& tensors) {
     }
   }
   auto defined_aten_ltc_tensors =
-      torch::lazy::LazyGraphExecutor::Get()->GetTensors(&ltc_tensors);
+      torch::lazy::LazyGraphExecutor::Get()->GetTensors(&ltc_tensors, /*use_current_thread=*/false);
   // Insert undefined tensors into the result, back into the original undefined
   // positions.
   for (size_t i = 0, defined_pos = 0; i < tensors.size(); ++i) {
