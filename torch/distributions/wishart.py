@@ -50,7 +50,7 @@ class Wishart(ExponentialFamily):
         'df': constraints.greater_than(0),
     }
     support = constraints.positive_definite
-    has_rsample = True
+    has_rsample = False
 
     def __init__(self,
                  df: torch.Tensor,
