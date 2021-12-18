@@ -6,7 +6,6 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
-#include <iostream>
 
 namespace at { namespace cuda { namespace jit {
 
@@ -92,7 +91,7 @@ const std::string jit_common_types = R"ESCAPE(
 
 )ESCAPE";
 
-//we need to include half and bfloat16 strings to all kernels with half arguments and to all kernels with type casting
+//we need to include half, bfloat16 and complex strings to all kernels with half arguments and to all kernels with type casting
 //regardless of whether they have half arguments (because fetch_and_cast and cast_and_store loop over all types)
 const std::string jiterator_half_support_literal = R"ESCAPE(
 namespace at {
@@ -163,6 +162,7 @@ struct alignas(2) BFloat16 {
 }
 )ESCAPE";
 
+//copy-pasted from util/complex.h
 const std::string jiterator_complex_support_literal = R"ESCAPE(
 //a very limited complex class, the only thing it currently allows is implicit conversion
 //to complex, and complex -> real that is unused
