@@ -80,7 +80,7 @@ SKIP_TRAIN_ONLY = {
     "timm_efficientnet", # slow
     "Super_SloMo", # slow
     "dcgan", # slow
-    "BERT_pytorch" # slow
+    "BERT_pytorch", # slow
     "demucs", # . slow
 }
 
@@ -434,10 +434,10 @@ def check_fuser(args):
         args.fuser = 'fuser1' if args.device == 'cpu' else 'fuser2'
     if args.device == 'cpu':
         assert args.fuser in ['fuser0', 'fuser1']
+        if args.fuser == 'fuser1':
+            assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) for CPU without building torch with llvm."
     if args.device == 'cuda':
-        assert args.fuser in ['fuser0', 'fuser2']
-    if args.fuser == 'fuser1':
-        assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) without building torch with llvm."
+        assert args.fuser in ['fuser0', 'fuser1', 'fuser2']
 
 def run_tracing_execute_noops(test, lazy_benchmark):
     ltm.set_noop_execution_mode(True)
@@ -460,10 +460,8 @@ def run_tracing_execute_noops(test, lazy_benchmark):
 def merge_with_prefix(prefix, tmp_dir, out_dir):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
-    print(f"OUTER: rfnames = {rfnames}")
     for rfname in rfnames:
         results.extend(open(rfname).readlines()[1:]) #skip headr
-    print(f"OUTER: results = {results}")
     with open(os.path.join(out_dir, prefix + "acc.csv"), "w") as acc_csv:
         acc_csv.write(",".join(("dev", "name", "overhead", "pvalue")) + "\n")
         for l in results:
@@ -507,7 +505,7 @@ if __name__ == "__main__" :
             lazy_benchmark = benchmark_cls(device='lazy', jit=False)
             # TODO: might be redundant
             gc.collect()
-        
+
             current_name = name
             current_device = device
 
@@ -521,27 +519,6 @@ if __name__ == "__main__" :
                 exit(0)
 
             with pick_grad(args, name):
-
-                try:
-                    if args.test == 'eval':
-                        # Correctness Check
-                        torch.manual_seed(1337)
-                        model, example_inputs = benchmark.get_module()
-                        model.eval()
-                        correct_result = call_model_with(model, example_inputs)
-                        torch.manual_seed(1337)
-                        lazy_model, lazy_inputs = lazy_benchmark.get_module()
-                        lazy_model.eval()
-                        lazy_result = call_model_with(lazy_model, lazy_inputs)
-                        if not check_results(name, correct_result, lazy_result, device):
-                            print(f"INCORRECT ({name})")
-                            continue
-                except Exception:
-                    logging.exception("unhandled error")
-                    print(f"ERROR ({name})")
-                    continue
-                lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
-
                 with fuser(args.fuser) if args.fuser != 'noopt' else optimized_execution(False):
                     if args.fuser == 'noopt':
                         # TODO(whc) cleaner way to configure the fusers; seems i have to set both optimized_execution(False)
@@ -550,11 +527,29 @@ if __name__ == "__main__" :
                         torch._C._jit_override_can_fuse_on_gpu(False)
                         torch._C._jit_set_texpr_fuser_enabled(False)
                         torch._C._jit_set_nvfuser_enabled(False)
+                    try:
+                        if args.test == 'eval':
+                            # Correctness Check
+                            torch.manual_seed(1337)
+                            model, example_inputs = benchmark.get_module()
+                            model.eval()
+                            correct_result = call_model_with(model, example_inputs)
+                            torch.manual_seed(1337)
+                            lazy_model, lazy_inputs = lazy_benchmark.get_module()
+                            lazy_model.eval()
+                            lazy_result = call_model_with(lazy_model, lazy_inputs)
+                            if not check_results(name, correct_result, lazy_result, device):
+                                print(f"INCORRECT ({name})")
+                                continue
+                    except Exception:
+                        logging.exception("unhandled error")
+                        print(f"ERROR ({name})")
+                        continue
 
-                    # using LazySync
+                    lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
-            
+
         exit(0)
 
     import subprocess
@@ -566,9 +561,6 @@ if __name__ == "__main__" :
         # note, the latest output_dir will override the original one and this is exactly what we want
         # for child processes
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
-
-        print (f"OUTER: Launching {launch_command}")
-
         env = os.environ
         env["LTC_TS_CUDA"] = "1"
 
