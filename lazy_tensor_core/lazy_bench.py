@@ -434,10 +434,10 @@ def check_fuser(args):
         args.fuser = 'fuser1' if args.device == 'cpu' else 'fuser2'
     if args.device == 'cpu':
         assert args.fuser in ['fuser0', 'fuser1']
+        if args.fuser == 'fuser1':
+            assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) for CPU without building torch with llvm."
     if args.device == 'cuda':
-        assert args.fuser in ['fuser0', 'fuser2']
-    if args.fuser == 'fuser1':
-        assert torch._C._llvm_enabled(), "Can't use fuser1 (nnc) without building torch with llvm."
+        assert args.fuser in ['fuser0', 'fuser1', 'fuser2']
 
 def run_tracing_execute_noops(test, lazy_benchmark):
     ltm.set_noop_execution_mode(True)
@@ -460,10 +460,8 @@ def run_tracing_execute_noops(test, lazy_benchmark):
 def merge_with_prefix(prefix, tmp_dir, out_dir):
     results = []
     rfnames = glob.glob(os.path.join(tmp_dir, prefix + "*"))
-    print(f"OUTER: rfnames = {rfnames}")
     for rfname in rfnames:
         results.extend(open(rfname).readlines()[1:]) #skip headr
-    print(f"OUTER: results = {results}")
     with open(os.path.join(out_dir, prefix + "acc.csv"), "w") as acc_csv:
         acc_csv.write(",".join(("dev", "name", "overhead", "pvalue")) + "\n")
         for l in results:
@@ -563,9 +561,6 @@ if __name__ == "__main__" :
         # note, the latest output_dir will override the original one and this is exactly what we want
         # for child processes
         launch_command = f"python {' '.join(copy_argv)} --run_in_subprocess '{model_name}' --output_dir={dirpath}"
-
-        print (f"OUTER: Launching {launch_command}")
-
         env = os.environ
         env["LTC_TS_CUDA"] = "1"
 
