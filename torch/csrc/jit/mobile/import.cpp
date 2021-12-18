@@ -307,7 +307,7 @@ void BytecodeDeserializer::init_upgrader(mobile::Function* function) {
     // registerer size and etc), except operator. The operator function is also
     // static initialized and is available later. The oprator for the upgrader
     // function will be initialized when the first module is loaded.
-    if (byteCodeFunctionWithOperator.function.get_code()->operators_.empty()) {
+    if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
             op.name,
@@ -669,12 +669,12 @@ std::set<std::string> _export_operator_list(
   std::set<std::string> operator_list;
   for (Method func : module.get_methods()) {
     const Function& function = func.function();
-    const std::shared_ptr<Code> cptr = function.get_code();
+    const auto& code = function.get_code();
     // op_names below isn't a list of unique operator names. In fact
     // it can contain the same operator name many many times, so we need
     // to de-dup the list by adding all the operator names into
     // an std::set<std::string>.
-    std::vector<c10::OperatorName> const& op_names = cptr->op_names_;
+    std::vector<c10::OperatorName> const& op_names = code.op_names_;
     for (auto& op_name : op_names) {
       operator_list.insert(toString(op_name));
     }
