@@ -13,15 +13,15 @@ class AdamW(Optimizer):
                 \text{(betas)}, \: \theta_0 \text{(params)}, \: f(\theta) \text{(objective)},
                 \: \epsilon \text{ (epsilon)}                                                    \\
             &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},\:          \\
-            \textit{maximize}    
+            \textit{maximize}
             &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
                 \text{ ( second moment)}, \: \widehat{v_0}^{max}\leftarrow 0              \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
 
-            &\hspace{5mm} /textbf{if} \: \textit{maximize}:   
+            &\hspace{5mm} /textbf{if} \: \textit{maximize}:
             &\hspace{5mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm} /textbf{else}  
+            &\hspace{5mm} /textbf{else}
             &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
             &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
@@ -65,7 +65,7 @@ class AdamW(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=1e-2, amsgrad=False, *, maximize: bool=False):
+                 weight_decay=1e-2, amsgrad=False, *, maximize: bool = False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
