@@ -32,7 +32,7 @@ class ObservedGraphModule(GraphModule):
             '_equalization_qconfig_map',
             '_node_name_to_scope',
             '_qconfig_dict',
-            '_is_training',
+            '_is_qat',
             '_observed_node_names']).union(preserved_attr_names)
         preserved_attrs = {attr: getattr(root, attr) for attr in self.preserved_attr_names if hasattr(root, attr)}
         super().__init__(root, graph)
