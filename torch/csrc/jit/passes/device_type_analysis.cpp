@@ -9,7 +9,6 @@
 #include <torch/library.h>
 #include <memory>
 #include <utility>
-#include "c10/core/DeviceType.h"
 
 namespace torch {
 namespace jit {
@@ -132,10 +131,7 @@ struct DeviceTypePropagationPass {
 
   // returns true if at least one node has its scalar type set on a tensor node
   bool run() {
-    at::ArrayRef<Block*> blocks = graph_->block();
-    for (auto block : blocks) {
-      processBlock(block);
-    }
+    processBlock(graph_->block());
     return changed_;
   }
 
@@ -272,21 +268,13 @@ struct DeviceTypePropagationPass {
 
 // This analysis propagates input device types (if any) throughout the
 // graph.
-
-bool deviceTypeRunner(std::shared_ptr<Graph> graph){
+bool DeviceTypePropagation(std::shared_ptr<Graph>& graph) {
   auto tp = std::make_unique<DeviceTypePropagationPass>((graph));
   bool changed = tp->run();
-  /*
   if (changed) {
     GRAPH_DUMP("After TensorPropertyPropagation pass:", graph);
   }
-  */
   return changed;
-}
-
-
-bool DeviceTypePropagation(std::shared_ptr<Graph> graph) {
-  return deviceTypeRunner(graph);
 }
 
 } // namespace jit
