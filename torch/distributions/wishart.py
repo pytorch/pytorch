@@ -191,7 +191,7 @@ class Wishart(ExponentialFamily):
         sample = self._bartlett_sampling(sample_shape)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
-        is_singular = self.support.check(sample).logical_not()
+        is_singular = ~self.support.check(sample)
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
 
@@ -201,14 +201,14 @@ class Wishart(ExponentialFamily):
             for _ in range(max_try):
                 if sample_shape or not is_singular.all():
                     new_sample = self._bartlett_sampling(is_singular[is_singular].shape)
-                    sample = sample[is_singular.logical_not()]
+                    sample = sample[~is_singular]
 
-                    is_singular = self.support.check(new_sample).logical_not()
+                    is_singular = ~self.support.check(new_sample)
                     if self._batch_shape:
                         is_singular = is_singular.amax(self._batch_dims)
 
                     sample = torch.cat(
-                        (sample, new_sample[is_singular.logical_not()]),
+                        (sample, new_sample[~is_singular]),
                         dim=-(len(self._batch_shape) + 3)
                     )
 
@@ -216,7 +216,7 @@ class Wishart(ExponentialFamily):
                     new_sample = self._bartlett_sampling(sample_shape)
                     sample = new_sample
 
-                    is_singular = self.support.check(new_sample).logical_not()
+                    is_singular = ~self.support.check(new_sample)
                     if self._batch_shape:
                         is_singular = is_singular.amax(self._batch_dims)
 
