@@ -12,6 +12,7 @@ from ..utils import (
     activation_is_int8_quantized,
     weight_is_statically_quantized,
     get_qparam_dict,
+    _parent_name,
 )
 from .backend_config.utils import get_quantized_reference_module_mapping
 
@@ -24,7 +25,6 @@ from .utils import (
     get_custom_module_class_keys,
     get_quantize_node_info,
     create_getattr_from_value,
-    _parent_name,
 )
 
 from torch.ao.quantization.quantize import (
@@ -214,7 +214,10 @@ def _convert_do_not_use(
                 # We know that observed standalone module is a GraphModule since
                 # it's produced by us
                 observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
-                sm_input_quantized_idxs = observed_standalone_module._standalone_module_input_quantized_idxs.tolist()  # type: ignore[operator]
+                sm_input_quantized_idxs = \
+                    observed_standalone_module \
+                    ._standalone_module_input_quantized_idxs\
+                    .tolist()  # type: ignore[operator]
                 # remove the dequantize nodes for inputs
                 args = list(node.args)
                 for idx in range(len(args)):
@@ -227,7 +230,10 @@ def _convert_do_not_use(
                             arg.replace_all_uses_with(arg.args[0])
                             model.graph.erase_node(arg)
                 # add dequantize node for output
-                sm_output_quantized_idxs = observed_standalone_module._standalone_module_output_quantized_idxs.tolist()  # type: ignore[operator]
+                sm_output_quantized_idxs = \
+                    observed_standalone_module \
+                    ._standalone_module_output_quantized_idxs \
+                    .tolist()  # type: ignore[operator]
                 if len(sm_output_quantized_idxs) > 0:
                     assert sm_output_quantized_idxs[0] == 0, "Currently only quantized"
                     "output idxs = [0] is supported"
