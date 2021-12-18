@@ -1136,11 +1136,11 @@ class TestQuantizeDBR(QuantizeDBRTestCase):
                 return x2
 
         input_shape = (1, 1, 1, 1)
+        qconfig_dict = {'': torch.quantization.default_qconfig}
         example_inputs = (torch.randn(*input_shape),)
 
         m = M().eval()
-        m.qconfig = torch.quantization.default_qconfig
-        m = _quantize_dbr.prepare(m, example_inputs)
+        m = _quantize_dbr.prepare(m, qconfig_dict, example_inputs)
         m = _quantize_dbr.convert(m)
         m_copy = copy.deepcopy(m)
 

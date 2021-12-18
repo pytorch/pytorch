@@ -842,34 +842,19 @@ def acc_ops_sum(
     args: Tuple[Argument, ...],
     kwargs: Dict[str, Argument],
     name: str,
-) -> Union[TRTTensor, Sequence[TRTTensor]]:
-    input_val = kwargs["input"]
-    if not isinstance(input_val, TRTTensor):
-        raise RuntimeError(
-            f"sum received input {input_val} that is not part "
-            "of the TensorRT region!"
-        )
+) -> TRTTensor:
+    return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.SUM, name)
 
-    # If dim is specified, then we are computing reduced sum over certain dimensions.
-    # Otherwise, we are dong summation over all elements, which is only supported in
-    # explicit batch dimension.
-    if "dim" not in kwargs:
-        assert (
-            not network.has_implicit_batch_dimension
-        ), "Do not support sum all the elements for implicit batch."
-        dim = range(0, len(input_val.shape))
-    else:
-        dim = kwargs["dim"]  # type: ignore[assignment]
 
-    keepdim = False if "keepdim" not in kwargs else kwargs["keepdim"]
-    layer = network.add_reduce(
-        input_val,
-        trt.ReduceOperation.SUM,
-        get_axes_for_reduce_op(dim, network.has_implicit_batch_dimension),
-        keepdim,
-    )
-    set_layer_name(layer, target, name)
-    return layer.get_output(0)
+@tensorrt_converter(acc_ops.mean)
+def acc_ops_mean(
+    network: TRTNetwork,
+    target: Target,
+    args: Tuple[Argument, ...],
+    kwargs: Dict[str, Argument],
+    name: str,
+) -> TRTTensor:
+    return add_reduce_layer(network, target, args, kwargs, trt.ReduceOperation.AVG, name)
 
 
 def add_acc_ops_full_reduce(network, target, args, kwargs, name, reduce_op):
