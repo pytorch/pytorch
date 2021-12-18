@@ -71,12 +71,14 @@ namespace at { namespace cuda { namespace solver {
 C10_EXPORT const char* cusolverGetErrorMessage(cusolverStatus_t status);
 }}} // namespace at::cuda::solver
 
+// When cuda < 11.5, cusolver raises CUSOLVER_STATUS_EXECUTION_FAILED when input contains nan.
+// When cuda >= 11.5, cusolver normally finishes execution and sets info array indicating convergence issue.
 #define TORCH_CUSOLVER_CHECK(EXPR)                                      \
   do {                                                                  \
     cusolverStatus_t __err = EXPR;                                      \
-    if ((CUSOLVER_VERSION < 11500 &&                                    \
+    if ((CUDA_VERSION < 11500 &&                                        \
          __err == CUSOLVER_STATUS_EXECUTION_FAILED) ||                  \
-        (CUSOLVER_VERSION >= 11500 &&                                   \
+        (CUDA_VERSION >= 11500 &&                                       \
          __err == CUSOLVER_STATUS_INVALID_VALUE)) {                     \
       TORCH_CHECK_LINALG(                                               \
           false,                                                        \

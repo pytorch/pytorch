@@ -152,7 +152,6 @@ class TestPublicBindings(TestCase):
             "LockingLogger",
             "LoggerBase",
             "LongStorageBase",
-            "_LinAlgError",
             "memory_format",
             "merge_type_from_type_comment",
             "MobileOptimizerType",
