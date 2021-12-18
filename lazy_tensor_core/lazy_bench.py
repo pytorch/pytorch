@@ -54,6 +54,7 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
+    # out of memory test
     "fastNLP_Bert",
     "vision_maskrcnn",
     "speech_trasformer",
@@ -64,10 +65,13 @@ SKIP = {
     "vision_maskrcnn",
     "drq",
     "moco",
+    # slow tests
+    "maml",
 }
 SKIP_TRAIN_ONLY = {
+    # out of memory test
     "squeezenet1_1",
-    "mobilenet_v2_quantized_qat"
+    "mobilenet_v2_quantized_qat",
     "hf_Reformer",
     "hf_GPT2",
     "hf_BigBird",
@@ -77,11 +81,16 @@ SKIP_TRAIN_ONLY = {
     "resnet50_quantized_qat",
     "Background_Matting",
     "hf_Bart",
-    "timm_efficientnet", # slow
-    "Super_SloMo", # slow
-    "dcgan", # slow
-    "BERT_pytorch", # slow
-    "demucs", # . slow
+    "hf_Longformer",
+    # slow tests
+    "timm_efficientnet",
+    "Super_SloMo",
+    "dcgan",
+    "BERT_pytorch",
+    "demucs",
+    "opacus_cifar10",
+    # others
+    "hf_DistilBert",
 }
 
 current_name = ""
