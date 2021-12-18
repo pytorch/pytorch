@@ -3445,7 +3445,7 @@
 - func: pinverse(Tensor self, float rcond=1e-15) -> Tensor
   variants: function, method
 
-- func: poisson_nll_loss(Tensor input, Tensor target, bool log_input, bool full, float eps, int reduction) -> Tensor
+- func: poisson_nll_loss(Tensor input, Tensor target, bool log_input=False, bool full=False, float eps=1e-8, int reduction=Mean) -> Tensor
   variants: function
 
 - func: rad2deg(Tensor self) -> Tensor
