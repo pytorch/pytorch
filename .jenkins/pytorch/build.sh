@@ -20,11 +20,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-code-analysis* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile-code-analysis.sh" "$@"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *linux-xenial-cuda11.3* || "$BUILD_ENVIRONMENT" == *linux-bionic-cuda11.5* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
@@ -196,14 +192,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CXX=clang++
 fi
 
-# Patch required to build xla
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  clone_pytorch_xla
-  # shellcheck disable=SC1091
-  source "xla/.circleci/common.sh"
-  apply_patches
-fi
-
 if [[ "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc7-build* || "${BUILD_ENVIRONMENT}" == *linux-xenial-py3.6-gcc5.4-build* ]]; then
   export USE_GLOO_WITH_OPENSSL=ON
 fi
@@ -219,11 +207,10 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
 
   get_bazel
 
-  # first build the whole torch for CPU-only
+  # first build torch for CPU-only
   tools/bazel build --config=no-tty :torch
-  # then build selected set of targets with GPU-support.
-  # TODO: eventually this should converge to building the whole :torch with GPU-support
-  tools/bazel build --config=no-tty --config=gpu :c10
+  # then build everything with CUDA
+  tools/bazel build --config=no-tty --config=gpu :all
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -236,13 +223,12 @@ else
     # ppc64le build fails when WERROR=1
     # set only when building other architectures
     # only use for "python setup.py install" line
-    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* && "$BUILD_ENVIRONMENT" != *clang* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]]; then
       WERROR=1 python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     else
       python setup.py bdist_wheel
-      python -mpip install dist/*.whl
     fi
+    python -mpip install dist/*.whl
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -309,15 +295,6 @@ else
     WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
     popd
   fi
-fi
-
-# Test XLA build
-if [[ "${BUILD_ENVIRONMENT}" == *xla* ]]; then
-  XLA_DIR=xla
-  # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR
-  build_torch_xla $XLA_DIR
-  assert_git_not_dirty
 fi
 
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then

@@ -1,4 +1,5 @@
 #include <pybind11/detail/common.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
@@ -8,12 +9,16 @@
 #include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/frontend/sugared_value.h>
 #include <torch/csrc/jit/mobile/backport.h>
+#include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/model_compatibility.h>
 #include <torch/csrc/jit/mobile/module.h>
+#include <torch/csrc/jit/operator_upgraders/upgraders.h>
+#include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_sugared_value.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/testing/file_check.h>
 
@@ -29,6 +34,8 @@
 #include <torch/csrc/jit/python/python_list.h>
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
+#include <torch/csrc/jit/runtime/instruction.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_source.h>
@@ -39,6 +46,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/qualified_name.h>
 
 #include <pybind11/functional.h>
@@ -1008,6 +1016,18 @@ void initJitScriptBindings(PyObject* module) {
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<DeepCopyMemoTable>(m, "DeepCopyMemoTable");
 
+  py::class_<UpgraderEntry>(m, "_UpgraderEntry")
+      .def(py::init<int, std::string, std::string>())
+      .def_property_readonly(
+          "bumped_at_version",
+          [](const UpgraderEntry& self) { return self.bumped_at_version; })
+      .def_property_readonly(
+          "upgrader_name",
+          [](const UpgraderEntry& self) { return self.upgrader_name; })
+      .def_property_readonly("old_schema", [](const UpgraderEntry& self) {
+        return self.old_schema;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1594,6 +1614,15 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("argument_names") = std::vector<std::string>());
 
   m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
+
+  m.def(
       "_jit_script_class_compile",
       [](const std::string& qualifiedName,
          const ClassDef& classDef,
@@ -1701,7 +1730,17 @@ void initJitScriptBindings(PyObject* module) {
     return Decl(p.parseTypeComment());
   });
 
+  m.def("_populate_upgraders_map", &populate_upgraders_map);
+  m.def("_get_upgraders_map_size", &get_upgraders_map_size);
+  m.def("_dump_upgraders_map", &dump_upgraders_map);
+
+  m.def("_test_only_populate_upgraders", &test_only_populate_upgraders);
+  m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
+
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
+  m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
+  m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
       "import_ir_module",
       [](std::shared_ptr<CompilationUnit> cu,

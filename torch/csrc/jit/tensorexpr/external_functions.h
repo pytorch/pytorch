@@ -2,7 +2,7 @@
 
 #include <ATen/Functions.h>
 #include <c10/macros/Macros.h>
-#include <torch/csrc/WindowsTorchApiMacro.h>
+#include <torch/csrc/Export.h>
 #include <cstdint>
 #include <vector>
 
@@ -14,9 +14,17 @@
   _(nnc_aten_adaptive_avg_pool2d)     \
   _(nnc_aten_mean)                    \
   _(nnc_aten_addmm)                   \
+  _(nnc_aten_quantized_conv1d)        \
   _(nnc_aten_quantized_conv2d)        \
   _(nnc_aten_quantized_conv2d_relu)   \
+  _(nnc_aten_quantized_linear)        \
+  _(nnc_aten_quantized_linear_relu)   \
   _(nnc_aten_quantized_add)           \
+  _(nnc_aten_quantized_cat)           \
+  _(nnc_aten_quantized_mul)           \
+  _(nnc_aten_quantized_mul_scalar)    \
+  _(nnc_aten_quantized_relu)          \
+  _(nnc_aten_quantized_sigmoid)       \
   _(nnc_aten_quantize_per_tensor)     \
   _(nnc_aten_dequantize)              \
   _(nnc_aten_upsample_nearest2d)
@@ -27,6 +35,7 @@
       void** buf_data,                  \
       int64_t* buf_ranks,               \
       int64_t* buf_dims,                \
+      int64_t* buf_strides,             \
       int8_t* buf_dtypes,               \
       int64_t args_num,                 \
       int64_t* extra_args);
@@ -40,6 +49,7 @@ std::vector<at::Tensor> constructTensors(
     void** buf_data,
     int64_t* buf_ranks,
     int64_t* buf_dims,
+    int64_t* buf_strides,
     int8_t* buf_dtypes);
 
 #ifdef C10_MOBILE
