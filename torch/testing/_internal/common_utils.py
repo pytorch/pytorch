@@ -1275,6 +1275,10 @@ class CudaMemoryLeakCheck():
         # Validates the discrepancy persists after garbage collection and
         #   is confirmed by the driver API
 
+        # NOTE: driver API iscrepancies alone are ignored because with the jiterator
+        #   some tests may permanently increase the CUDA context size and
+        #   that will appear as a driver memory leak but is the expected behavior.
+
         # GCs and clears the cache
         gc.collect()
         torch.cuda.empty_cache()
@@ -1296,7 +1300,9 @@ class CudaMemoryLeakCheck():
             if caching_allocator_discrepancy and not driver_discrepancy:
                 # Just raises a warning if the leak is not validated by the
                 #   driver API
-                # NOTE: this suggests a problem with the caching allocator
+                # NOTE: this may be a problem with how the caching allocator collects its
+                #   statistics or a leak too small to trigger the allocation of an
+                #   additional block of memory by the CUDA driver
                 msg = ("CUDA caching allocator reports a memory leak not "
                        "verified by the driver API in {}! "
                        "Caching allocator allocated memory was {} and is now reported as {} "
