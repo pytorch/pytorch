@@ -80,7 +80,7 @@ SKIP_TRAIN_ONLY = {
     "timm_efficientnet", # slow
     "Super_SloMo", # slow
     "dcgan", # slow
-    "BERT_pytorch" # slow
+    "BERT_pytorch", # slow
     "demucs", # . slow
 }
 
