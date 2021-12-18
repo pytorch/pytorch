@@ -1635,6 +1635,20 @@ except RuntimeError as e:
         a = torch.ones(65536).cuda().half()
         self.assertEqual(a.norm(p=0, dtype=torch.float32), 65536)
 
+    # Verifies that mem_get_info works, including when called for a different device
+    def test_mem_get_info(self):
+        def _test(idx):
+            before_free_bytes, before_available_bytes = torch.cuda.mem_get_info(idx)
+            t = torch.randn(1024 * 1024, device='cuda:' + str(idx))
+            after_free_bytes, after_available_bytes = torch.cuda.mem_get_info(idx)
+
+            self.assertTrue(after_free_bytes < before_free_bytes)
+            self.assertEqual(before_available_bytes, after_available_bytes)
+
+        _test(0)
+        if TEST_MULTIGPU:
+            _test(1)
+
     # Test that wrap_with_cuda_memory_check successfully detects leak
     # skip for ROCM. Look into #62533.
     @skipIfRocm

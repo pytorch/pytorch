@@ -5,7 +5,7 @@
 namespace torch {
 namespace lazy {
 
-class SelectViewUpdate : public TsNode {
+class TORCH_API SelectViewUpdate : public TsNode {
  public:
   SelectViewUpdate(
       const Value& target,
