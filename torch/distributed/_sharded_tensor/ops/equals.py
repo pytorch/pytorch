@@ -1,5 +1,6 @@
 import torch
 import torch.distributed as dist
+import torch.distributed.distributed_c10d as distributed_c10d
 from torch.distributed._sharded_tensor import (
     sharded_op_impl,
     ShardedTensor,
@@ -32,6 +33,9 @@ def equal(types, args=(), kwargs=None, process_group=None):
     # Verify same PG
     if st1._process_group != st2._process_group:
         return False
+
+    if distributed_c10d._rank_not_in_group(st1._process_group) or distributed_c10d._rank_not_in_group(st2._process_group):
+        return distributed_c10d._rank_not_in_group(st1._process_group) == distributed_c10d._rank_not_in_group(st2._process_group)
 
     # Verify metadata
     if st1.metadata() != st2.metadata():

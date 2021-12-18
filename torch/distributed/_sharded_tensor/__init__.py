@@ -367,7 +367,7 @@ def pre_load_state_dict_hook(module, state_dict, prefix, local_metadata, strict,
             key = prefix + submodule_name + '.' + attr_name
             if key in state_dict:
                 if isinstance(state_dict[key], ShardedTensor):
-                    setattr(module, attr_name, state_dict[key])
+                    setattr(submodule, attr_name, state_dict[key])
 
 def shard_parameter(
         module: torch.nn.Module,
