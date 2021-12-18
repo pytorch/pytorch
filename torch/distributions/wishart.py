@@ -191,18 +191,22 @@ class Wishart(ExponentialFamily):
         sample = self._bartlett_sampling(sample_shape)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
-        if not self.support.check(sample).all():
+        is_singular = self.support.check(sample)
+        if self._batch_shape:
+            is_singular = is_singular.amax(self._batch_dims)
+
+        if is_singular.any():
             warnings.warn("Singular sample detected.")
 
             for _ in range(max_try):
-              new_sample = self._bartlett_sampling(is_singular[is_singular].shape)
-              sample[is_singular] = new_sample
-              is_singular = ~self.support.check(sample)
-              if self._batch_shape:
-                is_singular = is_singular.amax(self._batch_dims)
+                new_sample = self._bartlett_sampling(is_singular[is_singular].shape)
+                sample[is_singular] = new_sample
+                is_singular = ~self.support.check(sample)
+                if self._batch_shape:
+                    is_singular = is_singular.amax(self._batch_dims)
 
-              if not is_singular.any():
-                break
+                if not is_singular.any():
+                    break
 
         return sample
 
