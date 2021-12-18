@@ -86,7 +86,7 @@ class Wishart(ExponentialFamily):
             warnings.warn("Low df values detected. Singular samples are highly likely occured for ndim - 1 < df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
-        self._reduced_batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
+        self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
         if scale_tril is not None:
             self._unbroadcasted_scale_tril = scale_tril
@@ -115,7 +115,7 @@ class Wishart(ExponentialFamily):
         new._unbroadcasted_scale_tril = self._unbroadcasted_scale_tril.expand(cov_shape)
         new.df = self.df.expand(df_shape)
 
-        new._reduced_batch_dims = [-(x + 1) for x in range(len(batch_shape))]
+        new._batch_dims = [-(x + 1) for x in range(len(batch_shape))]
 
         if 'covariance_matrix' in self.__dict__:
             new.covariance_matrix = self.covariance_matrix.expand(cov_shape)
@@ -193,7 +193,7 @@ class Wishart(ExponentialFamily):
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample).logical_not()
         if self._batch_shape:
-            is_singular = is_singular.amax(self._reduced_batch_dims)
+            is_singular = is_singular.amax(self._batch_dims)
 
         if is_singular.any():
             warnings.warn("Singular sample detected.")
@@ -205,7 +205,7 @@ class Wishart(ExponentialFamily):
 
                     is_singular = self.support.check(new_sample).logical_not()
                     if self._batch_shape:
-                        is_singular = is_singular.amax(self._reduced_batch_dims)
+                        is_singular = is_singular.amax(self._batch_dims)
 
                     sample = torch.cat(
                         (sample, new_sample[is_singular.logical_not()]),
@@ -218,7 +218,7 @@ class Wishart(ExponentialFamily):
 
                     is_singular = self.support.check(new_sample).logical_not()
                     if self._batch_shape:
-                        is_singular = is_singular.amax(self._reduced_batch_dims)
+                        is_singular = is_singular.amax(self._batch_dims)
 
                 if not is_singular.any():
                     break
