@@ -632,6 +632,22 @@ def convert_fx(
                  }
               },
 
+              # optional: specify the path for standalone modules
+              # These modules are symbolically traced and quantized as one unit
+              "standalone_module_name": [
+                 # module_name, qconfig_dict, prepare_custom_config_dict
+                 ("submodule.standalone",
+                  None,  # qconfig_dict for the prepare function called in the submodule,
+                         # None means use qconfig from parent qconfig_dict
+                  {"input_quantized_idxs": [], "output_quantized_idxs": []})  # prepare_custom_config_dict
+              ],
+              # Note: standalone_module_class is not supported for now since symbolic
+              # tracing changed the type of the standalone module, we may be able to
+              # support it later by attaching type or type name of origianl
+              # standalone moulde
+              # torch.fx symbolic tracing will need to support preserving the
+              # type/type names of the traced module in order to support this feature
+
               # Attributes that are not used in forward function will
               # be removed when constructing GraphModule, this is a list of attributes
               # to preserve as an attribute of the GraphModule even when they are
