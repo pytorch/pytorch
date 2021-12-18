@@ -792,7 +792,8 @@ class TestGradients(TestCase):
     @_gradcheck_ops(op_db)
     def test_fn_grad(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
-        self._grad_test_helper(device, dtype, op, op.get_op())
+        for _ in range(2000):
+            self._grad_test_helper(device, dtype, op, op.get_op())
 
     # Method grad (and gradgrad, see below) tests are disabled since they're
     #   costly and redundant with function grad (and gradgad) tests
