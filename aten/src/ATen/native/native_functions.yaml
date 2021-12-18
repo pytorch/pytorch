@@ -3446,6 +3446,7 @@
   variants: function, method
 
 - func: poisson_nll_loss(Tensor input, Tensor target, bool log_input=False, bool full=False, float eps=1e-08, int reduction=Mean) -> Tensor
+  python_module: nn
   variants: function
 
 - func: rad2deg(Tensor self) -> Tensor
