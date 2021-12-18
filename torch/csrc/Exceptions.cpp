@@ -17,7 +17,25 @@ bool THPException_init(PyObject *module)
   ASSERT_TRUE(THPException_FatalError = PyErr_NewException("torch.FatalError", nullptr, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "FatalError", THPException_FatalError) == 0);
 
-  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewException("torch._C._LinAlgError", nullptr, nullptr));
+  // Set the doc string here since _add_docstr throws malloc errors if tp_doc is modified
+  // for an error class.
+  ASSERT_TRUE(THPException_LinAlgError = PyErr_NewExceptionWithDoc("torch._C._LinAlgError",
+    "Error raised by torch.linalg function when the cause of error is a numerical inconsistency in the data.\n \
+For example, you can the torch.linalg.inv function will raise torch.linalg.LinAlgError when it finds that \
+a matrix is not invertible.\n \
+\n\
+Example:\n \
+>>> matrix = torch.eye(3, 3)\n \
+>>> matrix[-1, -1] = 0\n \
+>>> matrix\n \
+    tensor([[1., 0., 0.],\n \
+            [0., 1., 0.],\n \
+            [0., 0., 0.]])\n \
+>>> torch.linalg.inv(matrix)\n \
+Traceback (most recent call last):\n \
+File \"<stdin>\", line 1, in <module>\n \
+torch._C._LinAlgError: torch.linalg.inv: The diagonal element 3 is zero, the inversion\n \
+could not be completed because the input matrix is singular.", PyExc_RuntimeError, nullptr));
   ASSERT_TRUE(PyModule_AddObject(module, "_LinAlgError", THPException_LinAlgError) == 0);
 
   return true;
