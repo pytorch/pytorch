@@ -1008,9 +1008,9 @@ TEST(StaticRuntime, to) {
 
   auto test_to = [&](at::ScalarType b, bool c, bool d, c10::MemoryFormat e) {
     auto a = at::randn({4, 3, 1, 2});
-    auto other = at::randn({4, 3, 1, 2}, b);
+    auto other = at::randn({4, 3, 1, 2}).to(b);
     auto a2 = at::randn({3, 2, 2, 4});
-    auto a2_other = at::randn({3, 2, 2, 4}, b);
+    auto a2_other = at::randn({3, 2, 2, 4}).to(b);
 
     std::vector<IValue> args0{a, b, c, d, e};
     std::vector<IValue> args1{a, b, c, d};
@@ -1055,6 +1055,11 @@ TEST(StaticRuntime, to) {
       // float->float
       test_to(
           at::ScalarType::Float,
+          non_blocking,
+          copy,
+          c10::MemoryFormat::Contiguous);
+      test_to(
+          at::ScalarType::Bool,
           non_blocking,
           copy,
           c10::MemoryFormat::Contiguous);
