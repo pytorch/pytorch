@@ -186,7 +186,7 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try=10):
+    def sample(self, sample_shape=torch.Size(), max_try=10):
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)
 
