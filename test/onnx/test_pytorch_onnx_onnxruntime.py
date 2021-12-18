@@ -1101,8 +1101,8 @@ class TestONNXRuntime(unittest.TestCase):
                 return x
 
         x = torch.randn(2, 3)
-        y_1 = torch.randn(2, 3)
-        self.run_test(Model(), (x, (None, y_1)))
+        y1 = torch.randn(2, 3)
+        self.run_test(Model(), (x, (None, y1)))
 
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional_default_tensor(self):
@@ -2842,7 +2842,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModel(), (x, y), input_names=["x", "y"], dynamic_axes={"x": [0, 1, 2, 3], "y": [0, 1]})
         self.run_test(MyModel(), (x, y), remained_onnx_input_idx=[0])
 
-    @skipScriptTest()  # scripting will throw the OnnxRuntimeError
+    @skipScriptTest()  # scripting raises OnnxRuntimeError
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
         with self.assertRaises(RuntimeError) as cm:

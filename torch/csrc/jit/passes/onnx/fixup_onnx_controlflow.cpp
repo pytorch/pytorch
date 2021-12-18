@@ -404,10 +404,10 @@ void InferShapeTypeForUninitializedOutput(
       const_node->output()->setType(other_output->type());
     }
   } else if (auto output_type = other_output->type()->cast<NoneType>()) {
+    // TODO: Not clear why this is valid or needed. Try removing and seeing what
+    // fails.
     const TypePtr& t = TensorType::createContiguous(at::kLong, at::kCPU, {0});
-    const_node = graph->create(::c10::onnx::Optional, 1);
-    const_node->ty_(Symbol::attr("type"), t);
-    const_node->output()->setType(OptionalType::create(t));
+    ONNXOptionalNode(OptionalType::create(t), graph);
   } else if (auto output_type = other_output->type()->cast<OptionalType>()) {
     ONNXOptionalNode(output_type, graph);
   } else {
