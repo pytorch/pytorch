@@ -27,7 +27,7 @@ from test_pytorch_common import (skipIfUnsupportedMinOpsetVersion, skipIfUnsuppo
                                  skipIfUnsupportedMaxOpsetVersion, skipForAllOpsetVersions)
 from test_pytorch_common import BATCH_SIZE
 from test_pytorch_common import RNN_BATCH_SIZE, RNN_SEQUENCE_LENGTH, RNN_INPUT_SIZE, RNN_HIDDEN_SIZE
-from typing import List, Tuple, Optional, Dict
+from typing import Dict, List, Optional, Tuple
 from torch import Tensor
 
 from torchvision import ops
@@ -40,7 +40,6 @@ from collections import OrderedDict
 
 from torch.nn.utils.rnn import PackedSequence
 from torch.onnx import CheckerError, register_custom_op_symbolic, unregister_custom_op_symbolic
-from torch.onnx import symbolic_helper
 from torch.onnx.symbolic_helper import _unimplemented
 from torch.onnx.utils import unpack_quantized_tensor
 
@@ -58,7 +57,7 @@ def flatten_tuples(elem):
 
 
 def to_numpy(elem):
-    if isinstance(elem, torch.Tensor):
+    if isinstance(elem, Tensor):
         if elem.requires_grad:
             return elem.detach().cpu().numpy()
         else:
@@ -168,7 +167,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
     if input is None:
         input = torch.randn(batch_size, 3, 224, 224, requires_grad=True)
     with torch.no_grad():
-        if isinstance(input, (torch.Tensor, dict)):
+        if isinstance(input, (Tensor, dict)):
             input = (input,)
         # In-place operators will update input tensor data as well.
         # Thus inputs are replicated before every forward call.
@@ -182,7 +181,7 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
             output = model_copy(*input_args, **input_kwargs)
         except Exception:
             output = model(*input_args, **input_kwargs)
-        if isinstance(output, torch.Tensor):
+        if isinstance(output, Tensor):
             output = (output,)
 
         if not dict_check and isinstance(input[-1], dict):
@@ -215,11 +214,11 @@ def run_model_test(self, model, batch_size=2, state_dict=None,
         # model with these inputs and check the outputs
         if test_with_inputs is not None:
             for test_input in test_with_inputs:
-                if isinstance(test_input, torch.Tensor):
+                if isinstance(test_input, Tensor):
                     test_input = (test_input,)
                 test_input_copy = copy.deepcopy(test_input)
                 output = model(*test_input_copy)
-                if isinstance(output, torch.Tensor):
+                if isinstance(output, Tensor):
                     output = (output,)
                 if remained_onnx_input_idx is not None:
                     test_input_onnx = []
@@ -367,13 +366,13 @@ class TestONNXRuntime(unittest.TestCase):
         elif training is None or training == torch.onnx.TrainingMode.EVAL:
             model.eval()
         with torch.no_grad():
-            if isinstance(input, torch.Tensor):
+            if isinstance(input, Tensor):
                 input = (input,)
             # In-place operators will update input tensor data as well.
             # Thus inputs are replicated before every forward call.
             input_copy = copy.deepcopy(input)
             output = model(*input_copy)
-            if isinstance(output, torch.Tensor):
+            if isinstance(output, Tensor):
                 output = (output,)
 
             # export the model to ONNX
@@ -558,9 +557,9 @@ class TestONNXRuntime(unittest.TestCase):
                 self.padding = _single(padding)
 
                 self.weight = torch.nn.Parameter(
-                    torch.Tensor(self.kernel_size[0], in_channels, out_channels)
+                    Tensor(self.kernel_size[0], in_channels, out_channels)
                 )
-                self.bias = torch.nn.Parameter(torch.Tensor(out_channels))
+                self.bias = torch.nn.Parameter(Tensor(out_channels))
                 self.reset_parameters()
 
             def reset_parameters(self):
@@ -619,7 +618,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Only support CPU version, since tracer is not working in GPU RNN.
         self.run_test(model, (x, model.hidden))
 
-    def get_image(self, rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
+    def get_image(self, rel_path: str, size: Tuple[int, int]) -> Tensor:
         import os
         from PIL import Image
         from torchvision import transforms
@@ -630,7 +629,7 @@ class TestONNXRuntime(unittest.TestCase):
 
         return transforms.ToTensor()(image)
 
-    def get_test_images(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    def get_test_images(self) -> Tuple[List[Tensor], List[Tensor]]:
         return ([self.get_image("grace_hopper_517x606.jpg", (100, 320))],
                 [self.get_image("rgb_pytorch.png", (250, 380))])
 
@@ -903,9 +902,9 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()   # User-defined class not supported
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
-            tensor_out: torch.Tensor
-            tuple_out: Optional[Tuple[torch.Tensor]] = None
-            list_out: Optional[List[torch.Tensor]] = None
+            tensor_out: Tensor
+            tuple_out: Optional[Tuple[Tensor]] = None
+            list_out: Optional[List[Tensor]] = None
 
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -945,7 +944,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_tuple_input(self):
         class TupleModel(torch.nn.Module):
-            def forward(self, a: Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, a: Tuple[Tensor, Tensor]):
                 return a
 
         x = (torch.randn(3, 4), torch.randn(4, 3))
@@ -953,7 +952,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_tuple_primitive_input(self):
         class TupleModel(torch.nn.Module):
-            def forward(self, a: Tuple[int, torch.Tensor], b):
+            def forward(self, a: Tuple[int, Tensor], b):
                 return a[0], a[1] + b
 
         x = (3, torch.randn(4, 3))
@@ -962,7 +961,7 @@ class TestONNXRuntime(unittest.TestCase):
 
     def test_nested_tuple_input(self):
         class NestedTupleModel(torch.nn.Module):
-            def forward(self, a, b: Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]):
+            def forward(self, a, b: Tuple[Tensor, Tuple[Tensor, Tensor]]):
                 return a + b[0] + b[1][0] + b[1][1]
 
         x = torch.randn(4, 5)
@@ -1022,6 +1021,7 @@ class TestONNXRuntime(unittest.TestCase):
         # Requires input_names to be set so that we can feed the inputs properly into ORT.
 
         # TODO: Export default values as ONNX initializers, then this should not raise.
+        # https://msdata.visualstudio.com/Vienna/_workitems/edit/969268
         # Default values are accessible via FunctionSchema.
         with self.assertRaisesRegex(ValueError, "Model requires 3 inputs. Input Feed contains 2"):
             self.run_test(model, (x, {"y": y}), input_names=("x", "y"))
@@ -1123,72 +1123,14 @@ class TestONNXRuntime(unittest.TestCase):
         y1 = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y1)))
 
-    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Loop to take optional input
-    def test_loop_none_output(self):
-        class Model(torch.nn.Module):
-            def forward(self, x) -> Optional[Tensor]:
-                y: Optional[Tensor] = torch.zeros(2, 3)
-                for i in range(x.size(0)):
-                    y = None
-                return y
-
-        # Need scripting to preserve control flow for this test to be meaningful.
-        model = torch.jit.script(Model())
-        # TODO: export and assert on the exported model.
-        self.run_test(model, (torch.ones(3, 3),))
-
-    @skipIfUnsupportedMinOpsetVersion(15)
-    def test_loop_none_input(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, y) -> Optional[Tensor]:
-                z: Optional[Tensor] = None
-                for i in range(x.size(0)):
-                    y = y + 1
-                    z = y
-                return z
-
-        f = io.BytesIO()
-        y = torch.randn(2, 3)
-        # Need scripting to preserve control flow for this test to be meaningful.
-        model = torch.jit.script(Model())
-        # TODO: switch to run_test once ORT supports opset 16. Needs Loop to take optional input.
-        torch.onnx.export(model, (torch.ones(3, 3), y), f, opset_version=self.opset_version)
-        exported = onnx.load_from_string(f.getvalue())
-        output_0_type = exported.graph.output[0].type
-        self.assertTrue(output_0_type.HasField("optional_type"))
-        output_0_optional_type = output_0_type.optional_type
-        self.assertTrue(output_0_optional_type.elem_type.HasField("tensor_type"))
-        output_0_tensor_type = output_0_optional_type.elem_type.tensor_type
-        self.assertEqual(
-            output_0_tensor_type.elem_type,
-            symbolic_helper.scalar_type_to_onnx[symbolic_helper.scalar_type_to_pytorch_type.index(y.dtype)])
-        self.assertEqual(len(output_0_tensor_type.shape.dim), len(y.shape))
-
-    @skipIfUnsupportedMinOpsetVersion(15)  # Needs Identity to take optional input
-    def test_if_optional_output(self):
-        class Model(torch.nn.Module):
-            def forward(
-                self,
-                x: Optional[Tensor] = torch.zeros(2, 3),
-                y: Optional[Tensor] = torch.zeros(2, 3)
-            ) -> Tuple[Optional[Tensor], Optional[Tensor]]:
-                if x is None:
-                    return y, y
-                else:
-                    return x, x
-
-        self.run_test(Model(), (torch.randn(2, 3), None))
 
     def test_primitive_input_integer(self):
         class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x: int, y):
                 return x + y
 
         x = 3
-        y = torch.randint(10, (2, 3, 4))
+        y = torch.ones(2, 3, 4)
         self.run_test(Model(), (x, y))
 
     def test_primitive_input_floating(self):
@@ -1758,7 +1700,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_prim_min(self):
         @torch.jit.script
-        def list_append(boxes: List[torch.Tensor]):
+        def list_append(boxes: List[Tensor]):
             temp = []
             for i, b in enumerate(boxes):  # enumerate is creating a prim::min op in torch graph
                 temp.append(torch.full_like(b[:, 1], i))
@@ -3774,7 +3716,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(ScatterModel(), input=(input, indices, values))
 
         @torch.jit.script
-        def scatter_sum(src: torch.Tensor, index: torch.Tensor):
+        def scatter_sum(src: Tensor, index: Tensor):
             size = src.size()
             out = torch.zeros(size, dtype=src.dtype)
             return out.scatter_add_(1, index, src)
@@ -4207,7 +4149,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, input, initial_state: Tuple[Tensor, Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(input_size, hidden_size, num_layers, batch_size,
@@ -4234,7 +4176,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(LstmNet, self).__init__()
                 self.lstm = torch.nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, num_layers, bias=False, bidirectional=bidirectional)
 
-            def forward(self, input, initial_state: Tuple[torch.Tensor, torch.Tensor]):
+            def forward(self, input, initial_state: Tuple[Tensor, Tensor]):
                 return self.lstm(input, initial_state)
 
         def get_LstmNet_model_and_inputs(num_layers, bidirectional):
@@ -5109,7 +5051,7 @@ class TestONNXRuntime(unittest.TestCase):
         class SplitModel(torch.nn.Module):
             def forward(self, input, split_sizes: List[int]):
                 out = []
-                split_list: List[torch.Tensor] = input.split(split_sizes)
+                split_list: List[Tensor] = input.split(split_sizes)
 
                 for ob in split_list:
                     out.append(ob)
@@ -5861,7 +5803,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::Identity of sequence in opset 14
     def test_inplace_sequence_with_loop(self):
         class M(torch.nn.Module):
-            def process(self, beam_hyps: List[torch.Tensor], done: torch.Tensor, x):
+            def process(self, beam_hyps: List[Tensor], done: Tensor, x):
                 batch_size = x.shape[0]
                 for i in range(batch_size):
                     if done[i]:
@@ -5880,7 +5822,7 @@ class TestONNXRuntime(unittest.TestCase):
                 return beam_hyps, done
 
             def forward(self, x):
-                beam_hyps: List[torch.Tensor] = []
+                beam_hyps: List[Tensor] = []
                 batch_size = x.shape[0]
                 cur_len = 0
                 max_len = x.shape[1]
@@ -6067,9 +6009,9 @@ class TestONNXRuntime(unittest.TestCase):
         class CatModel(torch.nn.Module):
             def forward(self, fp16, fp32):
                 return torch.cat([fp16, fp32])
-        fp16 = torch.Tensor([0.5])
+        fp16 = Tensor([0.5])
         fp16 = fp16.half()
-        fp32 = torch.Tensor([1.5])
+        fp32 = Tensor([1.5])
         self.run_test(CatModel(), (fp16, fp32))
 
     @skipIfUnsupportedMinOpsetVersion(9)
@@ -6726,7 +6668,6 @@ class TestONNXRuntime(unittest.TestCase):
 
     # Dynamic padding is added in opset 11
     @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()  # TODO(https://msdata.visualstudio.com/Vienna/_workitems/edit/1532305)
     def test_pad_types(self):
         # Test for different pad integer types
         class Pad(torch.nn.Module):
@@ -8019,7 +7960,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_derive_index_scripting(self):
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(len(x) - 1, -len(x), -2):
                     y = x[idx]
@@ -8030,7 +7971,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(-len(x), len(x) - 1, 2):
                     y = x[idx]
@@ -8041,7 +7982,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(len(x) - 1, -len(x), -3):
                     y = x[idx]
@@ -8051,7 +7992,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(-len(x), len(x) - 1, 3):
                     y = x[idx]
@@ -8063,7 +8004,7 @@ class TestONNXRuntime(unittest.TestCase):
     @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Chek test_derive_index_scripting
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(len(x) - 1, -len(x), -2):
                     y = x[idx]
@@ -8074,7 +8015,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(-len(x), len(x) - 1, 2):
                     y = x[idx]
@@ -8085,7 +8026,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(len(x) - 1, -len(x), -3):
                     y = x[idx]
@@ -8095,7 +8036,7 @@ class TestONNXRuntime(unittest.TestCase):
         self.run_test(MyModule(), x)
 
         class MyModule(torch.nn.Module):
-            def forward(self, x: torch.Tensor):
+            def forward(self, x: Tensor):
                 j = []
                 for idx in range(-len(x), len(x) - 1, 3):
                     y = x[idx]
@@ -8475,7 +8416,7 @@ class TestONNXRuntime(unittest.TestCase):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input, batch_size=RNN_BATCH_SIZE + 1)
 
-    @skipScriptTest()  # TODO: RuntimeError: Unsupported: ONNX export of transpose for tensor of unknown rank
+    @skipScriptTest()  # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1253950
     def test_transformer_encoder(self):
         from torch.nn import TransformerEncoderLayer, TransformerEncoder
 
@@ -8817,7 +8758,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(MyModule, self).__init__()
                 self.box_coder = BoxCoder(1.4)
 
-            def forward(self, box_regression: torch.Tensor, proposals: List[torch.Tensor]):
+            def forward(self, box_regression: Tensor, proposals: List[Tensor]):
                 return self.box_coder.decode(box_regression, proposals)
 
         model = torch.jit.script(MyModule())
@@ -9017,7 +8958,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(TransformModule, self).__init__()
                 self.transform = _init_test_generalized_rcnn_transform()
 
-            def forward(self, images: List[torch.Tensor]):
+            def forward(self, images: List[Tensor]):
                 return self.transform(images)[0].tensors
 
         input = torch.rand(3, 100, 200), torch.rand(3, 200, 200)
@@ -9046,7 +8987,7 @@ class TestONNXRuntime(unittest.TestCase):
                 super(RPNModule, self).__init__()
                 self.rpn = _init_test_rpn()
 
-            def forward(self, images, features: Dict[str, torch.Tensor]):
+            def forward(self, images, features: Dict[str, Tensor]):
                 images_m = ImageList(images, [(i.shape[-1], i.shape[-2]) for i in images])
                 return self.rpn(images_m, features)
 
@@ -9076,7 +9017,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.image_sizes = [(512, 512)]
 
             def forward(self, input, boxes):
-                # type: (Dict[str, torch.Tensor], List[torch.Tensor]) -> torch.Tensor
+                # type: (Dict[str, Tensor], List[Tensor]) -> Tensor
                 return self.model(input, boxes, self.image_sizes)
 
         i = OrderedDict()
@@ -9103,7 +9044,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.rpn = _init_test_rpn()
                 self.roi_heads = _init_test_roi_heads_faster_rcnn()
 
-            def forward(self, images, features: Dict[str, torch.Tensor]):
+            def forward(self, images, features: Dict[str, Tensor]):
                 original_image_sizes = [(img.shape[-1], img.shape[-2]) for img in images]
 
                 images_m = ImageList(images, [(i.shape[-1], i.shape[-2]) for i in images])
@@ -9160,7 +9101,7 @@ class TestONNXRuntime(unittest.TestCase):
                 emb = torch.exp(torch.arange((embedding_dim // 2), dtype=torch.float) * -emb)
                 return emb
 
-            def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
+            def forward(self, input, incremental_state: Optional[Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 3
                 if self.weights is None:
@@ -9217,7 +9158,7 @@ class TestONNXRuntime(unittest.TestCase):
                 emb = torch.exp(torch.arange((embedding_dim // 2), dtype=torch.float) * -emb)
                 return emb
 
-            def forward(self, input, incremental_state: Optional[torch.Tensor] = None):
+            def forward(self, input, incremental_state: Optional[Tensor] = None):
                 bsz, seq_len = input.shape[0], input.shape[1]
                 self.const = 1.5
                 self.weights = InnerModule.get_embedding(self.embedding_dim)
@@ -9276,7 +9217,7 @@ class TestONNXRuntime(unittest.TestCase):
                     self.conv.weight = torch.randn(3, 10)
                     self.conv.bias = self.conv.weight[:]
 
-            def forward(self, anchors) -> Optional[torch.Tensor]:
+            def forward(self, anchors) -> Optional[Tensor]:
                 self.set_cell_anchors(anchors)
                 return self.conv.bias
 
@@ -9300,7 +9241,7 @@ class TestONNXRuntime(unittest.TestCase):
                     self.conv.weight = anchors + self.conv.weight
                     boxes[:] = torch.zeros(2, 3)
 
-            def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, anchors) -> Tuple[Tensor, Tensor]:
                 boxes = torch.ones(2, 2, 3)
                 self.set_cell_anchors(anchors, boxes)
                 if self.conv.bias is not None:
@@ -9328,7 +9269,7 @@ class TestONNXRuntime(unittest.TestCase):
                 else:
                     self.conv.bias = torch.ones(3, 10, 3)
 
-            def forward(self, feature_maps, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, feature_maps, anchors) -> Tuple[Tensor, Tensor]:
                 self.set_cell_anchors(anchors)
                 result = []
                 if self.conv.bias is not None:
@@ -9391,7 +9332,7 @@ class TestONNXRuntime(unittest.TestCase):
                         self.conv.weight = anchors * i
                         boxes[j] += torch.ones(3, 3)
 
-            def forward(self, anchors) -> Tuple[torch.Tensor, torch.Tensor]:
+            def forward(self, anchors) -> Tuple[Tensor, Tensor]:
                 boxes = torch.ones(10, 3, 3)
                 self.set_cell_anchors(anchors, boxes)
                 if self.conv.bias is not None:
@@ -9410,7 +9351,7 @@ class TestONNXRuntime(unittest.TestCase):
                 self.conv = torch.nn.Conv1d(10, 3, 3)
                 self.conv.weight = torch.nn.Parameter(torch.zeros(3, 10))
                 self.conv.bias = torch.nn.Parameter(torch.zeros(3, 10, 3))
-                self.boxes : List[torch.Tensor] = [torch.ones(1)]  # Workaround placeholder for TorchScript
+                self.boxes : List[Tensor] = [torch.ones(1)]  # Workaround placeholder for TorchScript
 
             def set_cell_anchors(self, anchors):
                 self.conv.weight = torch.randn(3, 10)
@@ -9420,7 +9361,7 @@ class TestONNXRuntime(unittest.TestCase):
                         self.conv.weight = anchors * i
                         self.boxes.append(torch.ones(3, 3))
 
-            def forward(self, anchors) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+            def forward(self, anchors) -> Tuple[Tensor, List[Tensor]]:
                 self.boxes = []
                 self.set_cell_anchors(anchors)
                 if self.conv.bias is not None:
@@ -9435,7 +9376,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+            # type: (Tensor, int, Tensor) -> Tuple[Tensor, Tensor]
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9472,7 +9413,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if_2(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+            # type: (Tensor, int, Tensor) -> Tuple[Tensor, Tensor]
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9519,7 +9460,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if_3(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            # type: (Tensor, int, Tensor) -> Tensor
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9556,7 +9497,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if_4(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> torch.Tensor
+            # type: (Tensor, int, Tensor) -> Tensor
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9594,7 +9535,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_if_5(self):
         @torch.jit.script
         def check_init(input_data, hidden_size, prev_state):
-            # type: (torch.Tensor, int, torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]
+            # type: (Tensor, int, Tensor) -> Tuple[Tensor, Tensor]
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)
@@ -9717,7 +9658,7 @@ class TestONNXRuntime(unittest.TestCase):
     def test_index_put_inplace_ops(self):
         @torch.jit.script
         def check_init(input_data, hidden_size):
-            # type: (torch.Tensor, int) -> torch.Tensor
+            # type: (Tensor, int) -> Tensor
             batch_size = input_data.size(0)
             spatial_size_0 = input_data.size(2)
             spatial_size_1 = input_data.size(3)

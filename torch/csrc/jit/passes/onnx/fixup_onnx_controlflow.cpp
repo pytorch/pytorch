@@ -204,12 +204,6 @@ void ReplaceBlockOutputWithOptional(
     OptionalTypePtr opt_type,
     Block* block,
     size_t i) {
-  if (!opt_type) { // TODO: Remove debug output
-    std::cerr << "ReplaceBlockOutputWithOptional:" << std::endl;
-    std::cerr << "block->owningGraph = " << *(block->owningGraph())
-              << std::endl;
-    std::cerr << "i = " << i << std::endl;
-  }
   Node* opt_node = ONNXOptionalNode(opt_type, block->owningGraph());
   opt_node->insertBefore(block->return_node());
   block->outputs().at(i)->replaceAllUsesWith(opt_node->output());
@@ -235,26 +229,15 @@ void FixupONNXSubblockOutputs(Node* n) {
 
 void FixupONNXLoopBlockInputs(Node* n) {
   for (Block* block : n->blocks()) {
-    // std::cerr << "FixupONNXLoopBlockInputs:" << std::endl;
-    // std::cerr << "block->owningGraph " << *(block->owningGraph()) <<
-    // std::endl; input 0 is loop counter i, never Optional.
     for (const auto i : c10::irange(1, block->inputs().size())) {
       Value* input_i = block->inputs().at(i);
       if (input_i->type()->cast<OptionalType>() &&
           !block->outputs().at(i)->type()->cast<OptionalType>()) {
-        // std::cerr << "handling input = " << i << ", " << input_i->debugName()
-        //           << std::endl;
-        // std::cerr << "merging "
-        //           <<
-        //           *(input_i->type()->cast<OptionalType>()->getElementType())
-        //           << ", " << *(block->outputs().at(i)->type()) << std::endl;
         TypePtr merged_type;
-        bool inferred;
+        bool inferred = false;
         std::tie(merged_type, inferred) = MergeInferredType(
             input_i->type()->cast<OptionalType>()->getElementType(),
             block->outputs().at(i)->type());
-        // std::cerr << "inferred = " << inferred
-        //           << ", merged_type = " << *merged_type << std::endl;
         if (inferred) {
           input_i->setType(OptionalType::create(merged_type));
         }
@@ -312,24 +295,30 @@ void FixupONNXLoopNodeInputs(Node* node) {
     cast_node->copyMetadata(node);
   }
 
-  // If loop input is None, infer optional type from sub block input.
-  // Happens when the loop takes in None and outputs not-None.
   // Inputs (0, 1) are (max_trip_count, start_condition). Skip them
-  // since compiler should ensure they're never None.
+  // since they're never None or Optional.
   for (const auto i : c10::irange(2, node->inputs().size())) {
     Value* input = node->inputs().at(i);
-    if (auto none_input = input->type()->cast<NoneType>()) {
-      if (!sub_block->inputs()
-               .at(i)
-               ->type()
-               ->cast<OptionalType>()) { // TODO: Remove debug output
-        std::cerr << "FixupONNXLoopNodeInputs:" << std::endl;
-        std::cerr << "sub_block->owningGraph " << *(sub_block->owningGraph())
-                  << std::endl;
-        std::cerr << "i = " << i << std::endl;
+    OptionalTypePtr sub_block_input_optional =
+        sub_block->inputs().at(i)->type()->cast<OptionalType>();
+    // If loop input is not optional but block input is, wrap loop input with
+    // Optional. Happens when the loop takes in None and outputs not-None, or
+    // vice-versa.
+    if (!input->type()->cast<OptionalType>() && sub_block_input_optional) {
+      if (!input->type()->cast<NoneType>()) {
+        TypePtr merged_type;
+        bool inferred = false;
+        std::tie(merged_type, inferred) = MergeInferredType(
+            sub_block_input_optional->getElementType(), input->type());
+        if (inferred) {
+          sub_block_input_optional = OptionalType::create(merged_type);
+          sub_block->inputs().at(i)->setType(sub_block_input_optional);
+        }
       }
-      Node* opt_node = ONNXOptionalNode(
-          sub_block->inputs().at(i)->type()->cast<OptionalType>(), graph);
+      Node* opt_node = ONNXOptionalNode(sub_block_input_optional, graph);
+      if (!input->type()->cast<NoneType>()) {
+        opt_node->addInput(input);
+      }
       opt_node->insertBefore(node);
       node->replaceInputWith(input, opt_node->output());
     }
@@ -608,6 +597,7 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
   };
 
   for (const auto i : c10::irange(else_block->outputs().size())) {
+    Value* output_i = node->output(i);
     auto then_type = then_block->outputs().at(i)->type();
     auto else_type = else_block->outputs().at(i)->type();
     auto then_tensor_type = then_type->cast<TensorType>();
@@ -619,31 +609,39 @@ void ONNXMergeIfBlockOutputShapes(Node* node) {
     auto then_none_type = then_type->cast<NoneType>();
     auto else_none_type = else_type->cast<NoneType>();
     if (then_tensor_type || else_tensor_type) {
-      if (auto tensor_type =
+      if (TypePtr merged_type =
               mergeTensorType(then_tensor_type, else_tensor_type)) {
-        node->output(i)->setType(tensor_type);
+        if (else_optional_type || else_none_type || then_optional_type ||
+            then_none_type) {
+          merged_type = OptionalType::create(merged_type);
+        }
+        output_i->setType(merged_type);
       }
     } else if (then_list_type || else_list_type) {
-      if (auto list_type = mergeListType(then_list_type, else_list_type)) {
-        node->output(i)->setType(list_type);
+      if (TypePtr merged_type = mergeListType(then_list_type, else_list_type)) {
+        if (else_optional_type || else_none_type || then_optional_type ||
+            then_none_type) {
+          merged_type = OptionalType::create(merged_type);
+        }
+        output_i->setType(merged_type);
       }
     }
 
     if (then_optional_type || else_optional_type) {
       if (auto optional_type =
               mergeOptionalType(then_optional_type, else_optional_type)) {
-        node->output(i)->setType(optional_type);
+        output_i->setType(optional_type);
       }
     }
 
     if (then_none_type) {
       ReplaceBlockOutputWithOptional(
-          node->output(i)->type()->cast<OptionalType>(), then_block, i);
+          output_i->type()->cast<OptionalType>(), then_block, i);
     }
 
     if (else_none_type) {
       ReplaceBlockOutputWithOptional(
-          node->output(i)->type()->cast<OptionalType>(), else_block, i);
+          output_i->type()->cast<OptionalType>(), else_block, i);
     }
   }
 }
@@ -686,14 +684,6 @@ void FixupONNXControlflowNodeOutputs(Node* n) {
         // output will not be None).
         auto type = n->blocks().at(0)->inputs().at(i + 2)->type();
         if (i < loop_carried_output_size) {
-          // TODO: Figure out if this is needed.
-          // Find a test that fails without it, then re-enable it.
-          // if (auto none_type = n->output(i)->type()->cast<NoneType>()) {
-          //   n->output(i)->setType(
-          //       n->blocks().at(0)->inputs().at(i + 2)->type());
-          //   n->blocks().at(0)->outputs().at(i + 1)->setType(
-          //       n->blocks().at(0)->inputs().at(i + 2)->type());
-          // } else
           n->output(i)->setType(type);
         } else {
           if (auto t_type = type->cast<TensorType>()) {
