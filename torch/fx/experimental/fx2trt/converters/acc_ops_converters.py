@@ -1233,8 +1233,8 @@ def acc_ops_adaptive_avg_pool2d(
     assert (
         input_val.shape[-1] != -1 and input_val.shape[-1] != -1
     ), "AdaptiveAvgPool2d currently doesn't support dynamic shapes for last two dims."
-    output_size = cast(Sequence[int], kwargs["output_size"])
 
+    output_size = cast(Sequence[int], extend_attr_to_tuple(kwargs["output_size"], 2))
     for input_dim, output_dim in zip(input_val.shape[-2:], output_size):
         if input_dim % output_dim != 0:
             raise RuntimeError(
