@@ -84,6 +84,7 @@ blocklist = [
     'hinge_embedding_loss',
     'kl_div',
     'margin_ranking_loss',
+    'poisson_nll_loss',
     'triplet_margin_loss',
     # Somehow, these are defined in both _C and in functional. Ick!
     'broadcast_tensors',
@@ -355,6 +356,9 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
         'cosine_embedding_loss': ['def cosine_embedding_loss(input1: Tensor, input2: Tensor, '
                                   'target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., '
                                   'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+        'poisson_nll_loss': ['def poisson_nll_loss(input1: Tensor, target: Tensor, '
+                                  'log_input: bool = ..., full: bool = ..., size_average: Optional[bool] = ..., '
+                                  'eps: float = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
         'ctc_loss': ['def ctc_loss(log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor,'
                      ' blank: int = ..., reduction: str = ..., zero_infinity: bool = ...) -> Tensor: ...'],
         'hinge_embedding_loss': ['def hinge_embedding_loss(input: Tensor, target: Tensor, margin: float = ...,'
