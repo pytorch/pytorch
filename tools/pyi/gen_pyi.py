@@ -357,8 +357,8 @@ def gen_pyi(native_yaml_path: str, deprecated_yaml_path: str, fm: FileManager) -
                                   'target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., '
                                   'reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
         'poisson_nll_loss': ['def poisson_nll_loss(input: Tensor, target: Tensor, '
-                                  'log_input: bool = ..., full: bool = ..., size_average: Optional[bool] = ..., '
-                                  'eps: float = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
+                             'log_input: bool = ..., full: bool = ..., size_average: Optional[bool] = ..., '
+                             'eps: float = ..., reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ...'],
         'ctc_loss': ['def ctc_loss(log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor,'
                      ' blank: int = ..., reduction: str = ..., zero_infinity: bool = ...) -> Tensor: ...'],
         'hinge_embedding_loss': ['def hinge_embedding_loss(input: Tensor, target: Tensor, margin: float = ...,'
