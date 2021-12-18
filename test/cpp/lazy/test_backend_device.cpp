@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include <c10/core/Device.h>
 #include <torch/csrc/lazy/backend/backend_device.h>
 
 namespace torch {
@@ -66,6 +67,22 @@ TEST(BackendDeviceTest, Ostream) {
   ss << device;
 
   EXPECT_EQ(device.toString(), ss.str());
+}
+
+TEST(BackendDeviceTest, FromAten) {
+  auto device = c10::Device(c10::kCPU);
+  EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
+
+  // TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
+  device = c10::Device(c10::kLazy);
+  EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
+}
+
+TEST(BackendDeviceTest, ToAten) {
+  auto device = backendDeviceToAtenDevice(BackendDevice());
+  EXPECT_EQ(device.type(), c10::kLazy);
+  EXPECT_TRUE(device.has_index());
+  EXPECT_EQ(device.index(), 0);
 }
 
 }  // namespace lazy

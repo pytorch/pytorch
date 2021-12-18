@@ -16,12 +16,12 @@ using c10d::ProcessGroup;
 template <typename T, typename... Args>
 std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
   std::vector<T> tests;
-  for (const auto i : c10::irange(N)) {
+  for (C10_UNUSED const auto i : c10::irange(N)) {
     tests.push_back(std::move(T(path, std::forward<Args>(args)...)));
   }
 
   std::vector<std::thread> threads;
-  for (const auto i : c10::irange(N)) {
+  for (C10_UNUSED const auto i : c10::irange(N)) {
     threads.push_back(std::thread([i, N, &tests] { tests[i].start(i, N); }));
   }
 
@@ -34,7 +34,7 @@ std::vector<T> initialize(const std::string& path, int N, Args&&... args) {
 
 class AsyncTest {
  public:
-  AsyncTest(const std::string& path) : path_(path) {}
+  AsyncTest(std::string path) : path_(std::move(path)) {}
 
   AsyncTest(AsyncTest&& other) {
     path_ = std::move(other.path_);
@@ -68,9 +68,9 @@ class AsyncInputIsOutputTest : public AsyncTest {
   AsyncInputIsOutputTest(const std::string& path, int numTensors)
       : AsyncTest(path),
         numTensors_(numTensors),
-        numDevices_(cudaNumDevices()),
-        state_(::at::globalContext().lazyInitCUDA()) {
+        numDevices_(cudaNumDevices()) {
     // Allocate inputs on available devices in a round robin fashion.
+    ::at::globalContext().lazyInitCUDA();
     inputs_.resize(numTensors_);
     for (const auto i : c10::irange(numTensors_)) {
       inputs_[i] = at::empty(
@@ -121,7 +121,6 @@ class AsyncInputIsOutputTest : public AsyncTest {
  protected:
   const int numTensors_;
   const int numDevices_;
-  THCState* state_;
   std::vector<at::Tensor> inputs_;
   std::vector<CUDAStream> streams_;
 };
