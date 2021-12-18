@@ -505,7 +505,7 @@ if __name__ == "__main__" :
             lazy_benchmark = benchmark_cls(device='lazy', jit=False)
             # TODO: might be redundant
             gc.collect()
-        
+
             current_name = name
             current_device = device
 
@@ -545,11 +545,11 @@ if __name__ == "__main__" :
                         logging.exception("unhandled error")
                         print(f"ERROR ({name})")
                         continue
-                    
+
                     lazy_overhead_experiment(args, results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, f"amortized {args.inner_loop_repeat}x", results, benchmark, lazy_benchmark)
                     lazy_compute_experiment(args, "unamortized", results, benchmark, lazy_benchmark, sync_every_iter=True)
-            
+
         exit(0)
 
     import subprocess
