@@ -1,0 +1,23 @@
+{% import 'common.yml.j2' as common %}
+
+{%- block name -%}
+# Template is at:    .github/templates/trunk.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: periodic
+{%- endblock %}
+
+on:
+  push:
+    tags:
+      - 'ciflow/periodic/*'
+      - 'ciflow/all/*'
+
+  schedule:
+    - cron: 45 0,4,8,12,16,20 * * *
+
+!{{ common.concurrency("periodic") }}
+
+jobs:
+{% for job in jobs -%}
+    {%- include job.template %}
+{% endfor %}

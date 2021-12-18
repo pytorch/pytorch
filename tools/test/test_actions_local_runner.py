@@ -47,7 +47,7 @@ if sys.version_info >= (3, 8):
 
     class TestEndToEnd(unittest.TestCase):
         expected = [
-            "cmakelint: Run cmakelint",
+            "lint-cmakelint: Run cmakelint",
             "quick-checks: Ensure no direct cub include",
             "quick-checks: Ensure no unqualified type ignore",
             "quick-checks: Ensure no unqualified noqa",

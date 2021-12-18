@@ -1,0 +1,91 @@
+  !{{ job.build_name() }}:
+    runs-on: !{{ job.test_runner_type }}
+    env:
+      JOB_BASE_NAME: !{{ job.build_environment }}
+      # For sccache access (only on non-forked PRs)
+      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      COMPACT_JOB_NAME: !{{ job.build_environment }}
+      IN_CI: 1
+      IS_GHA: 1
+      PYTORCH_RETRY_TEST_CASES: 1
+      !{{- common.set_xcode_version(job.xcode_version) }}
+    steps:
+      !{{ common.checkout_pytorch("recursive") }}
+      !{{ common.setup_miniconda("3.8") }}
+      - name: Install macOS homebrew dependencies
+        shell: bash -e -l {0}
+        run: |
+          # Install dependencies
+          brew install libomp
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash -e -l {0}
+        run: |
+          sudo curl --retry 3 https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+          sudo chmod +x /usr/local/bin/sccache
+          echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+      - name: Build
+        shell: bash -e -l {0}
+        run: |
+          echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
+          .jenkins/pytorch/macos-build.sh
+{%- if job.build_generates_artifacts %}
+      - name: Archive artifacts into zip
+        shell: bash -e -l {0}
+        run: |
+          zip -1 -r artifacts.zip dist/
+      - uses: actions/upload-artifact@v2
+        name: Store PyTorch Build Artifacts on GHA
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          retention-days: 14
+          if-no-files-found: error
+          path:
+            artifacts.zip
+{%- endif %}
+{%- if not job.exclude_test %}
+  {%- for test_job in job.test_jobs() %}
+  !{{ test_job.name }}:
+    needs: [!{{ job.build_name() }}]
+    runs-on: !{{ test_job.runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
+    env:
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      COMPACT_JOB_NAME: !{{ job.build_environment }}
+      IN_CI: 1
+      IS_GHA: 1
+      PYTORCH_RETRY_TEST_CASES: 1
+      JOB_BASE_NAME: !{{ job.build_environment }}-test
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      # TODO{# PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }} #}
+    steps:
+      !{{ common.checkout_pytorch("false") }}
+      - uses: actions/download-artifact@v2
+        name: Download PyTorch Build Artifacts from GHA
+        with:
+          name: ${{ env.BUILD_ENVIRONMENT }}
+          path: .
+      - name: Unzip artifacts
+        run: |
+          unzip -o artifacts.zip
+      !{{ common.setup_miniconda("3.8") }}
+      - name: Install macOS homebrew dependencies
+        run: |
+          # Install dependencies
+          brew install libomp
+      !{{ common.parse_ref() }}
+      - name: Test
+        shell: bash -e -l {0}
+        run: |
+          python3 -mpip install dist/*.whl
+          .jenkins/pytorch/macos-test.sh
+      !{{ common.render_test_results() }}
+      !{{ common.upload_downloaded_files(name='macos', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-jsons", use_s3=False) }}
+      !{{ common.upload_test_reports("macos", config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner, artifact_name="test-reports", use_s3=False) }}
+      !{{ common.upload_test_statistics(job.build_environment) }}
+  {%- endfor %}
+{%- endif %}

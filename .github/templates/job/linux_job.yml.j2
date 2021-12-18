@@ -1,60 +1,29 @@
-{% import 'common.yml.j2' as common %}
-
-{%- block name -%}
-# Template is at:    .github/templates/linux_ci_workflow.yml.j2
-# Generation script: .github/scripts/generate_ci_workflows.py
-name: !{{ build_environment }}
-{%- endblock %}
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{%- if is_scheduled %}
-  schedule:
-    - cron: !{{ is_scheduled }}
-{%- else %}
-  push:
-    branches:
-      - master
-      - release/*
-      - fbsync
-{%- endif %}
-  workflow_dispatch:
-
-env:
-  BUILD_ENVIRONMENT: !{{ build_environment }}
-  DOCKER_IMAGE_BASE: !{{ docker_image_base }}
-  SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-  XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-  TORCH_CUDA_ARCH_LIST: 5.2
-  IN_CI: 1
-  IS_GHA: 1
-  # This is used for the phase of adding wheel tests only, will be removed once completed
-  IN_WHEEL_TEST: 1
-  # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
-  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
-  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  AWS_DEFAULT_REGION: us-east-1
-  PR_NUMBER: ${{ github.event.pull_request.number }}
-  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-  PYTORCH_RETRY_TEST_CASES: 1
-{%- if build_with_debug %}
-  DEBUG: 1
-{%- endif %}
-!{{ common.concurrency(build_environment) }}
-
-jobs:
-!{{ common.ciflow_should_run_job(ciflow_config) }}
-{% block build +%}
-  build:
-    runs-on: linux.2xlarge
-    needs: [!{{ ciflow_config.root_job_name }}]
+  !{{ job.build_name() }}:
+    runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
-      JOB_BASE_NAME: !{{ build_environment }}-build
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      DOCKER_IMAGE_BASE: !{{ job.docker_image_base }}
+      SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+      XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+      TORCH_CUDA_ARCH_LIST: 5.2
+      IN_CI: 1
+      IS_GHA: 1
+      # This is used for the phase of adding wheel tests only, will be removed once completed
+      IN_WHEEL_TEST: 1
+      # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
+      CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      PYTORCH_RETRY_TEST_CASES: 1
+    {%- if job.build_with_debug %}
+      DEBUG: 1
+    {%- endif %}
+      JOB_BASE_NAME: !{{ job.build_environment }}-build
     outputs:
       docker_image: ${{ steps.calculate-tag.outputs.docker_image }}
     steps:
@@ -115,7 +84,7 @@ jobs:
         run: |
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      {%- if build_generates_artifacts %}
+      {%- if job.build_generates_artifacts %}
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/ build/custom_test_artifacts build/lib build/bin .pytorch-test-times.json
@@ -138,70 +107,52 @@ jobs:
         run: |
           # Prune all of the docker images
           docker system prune -af
-{%- endblock %}
-{%- if not exclude_test %}
-{% block test +%}
-  generate-test-matrix:
-    runs-on: ubuntu-18.04
-    needs: [!{{ ciflow_config.root_job_name }}]
+{%- if not job.exclude_test %}
+  {%- for test_job in job.test_jobs() %}
+  !{{ test_job.name }}:
+    needs: [!{{ job.build_name() }}]
+    runs-on: [self-hosted, !{{ test_job.runner }}]
     timeout-minutes: !{{ common.timeout_minutes }}
     env:
-      TEST_RUNNER_TYPE: !{{ test_runner_type }}
-      ENABLE_DISTRIBUTED_TEST: !{{ enable_distributed_test }}
-      ENABLE_JIT_LEGACY_TEST: !{{ enable_jit_legacy_test }}
-      ENABLE_MULTIGPU_TEST: !{{ enable_multigpu_test }}
-      ENABLE_NOGPU_NO_AVX_TEST: !{{ enable_nogpu_no_avx_test }}
-      ENABLE_NOGPU_NO_AVX2_TEST: !{{ enable_nogpu_no_avx2_test }}
-      ENABLE_SLOW_TEST: !{{ enable_slow_test }}
-      ENABLE_DOCS_TEST: !{{ enable_docs_test }}
-      ENABLE_BACKWARDS_COMPAT_TEST: !{{ enable_backwards_compat_test }}
-      ENABLE_XLA_TEST: !{{ enable_xla_test }}
-      ENABLE_NOARCH_TEST: !{{ enable_noarch_test }}
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
-      MULTIGPU_RUNNER_TYPE: linux.16xlarge.nvidia.gpu
-      DISTRIBUTED_GPU_RUNNER_TYPE: linux.8xlarge.nvidia.gpu
-      NOGPU_RUNNER_TYPE: linux.2xlarge
-      PR_BODY: ${{ github.event.pull_request.body }}
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      render-matrix: ${{ steps.set-matrix.outputs.render-matrix }}
-      ignore-disabled-issues: ${{ steps.set-matrix.outputs.ignore-disabled-issues }}
-    container:
-      image: python:3.9
-    steps:
-      - name: Install dependencies
-        run: pip install typing-extensions==3.10
-      - name: Clone pytorch/pytorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-      - name: Generating test matrix
-        id: set-matrix
-        run: .github/scripts/generate_pytorch_test_matrix.py
-
-  test:
-    needs: [build, generate-test-matrix, !{{ ciflow_config.root_job_name }}]
-    strategy:
-      matrix: ${{ fromJson(needs.generate-test-matrix.outputs.matrix) }}
-      fail-fast: false
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: !{{ common.timeout_minutes }}
-    env:
-      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
-      JOB_BASE_NAME: !{{ build_environment }}-test
-      TEST_CONFIG: ${{ matrix.config }}
-      SHARD_NUMBER: ${{ matrix.shard }}
-      NUM_TEST_SHARDS: ${{ matrix.num_shards }}
-      PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }}
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      DOCKER_IMAGE_BASE: !{{ job.docker_image_base }}
+      SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+      XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+      TORCH_CUDA_ARCH_LIST: 5.2
+      IN_CI: 1
+      IS_GHA: 1
+      # This is used for the phase of adding wheel tests only, will be removed once completed
+      IN_WHEEL_TEST: 1
+      # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
+      CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      PYTORCH_RETRY_TEST_CASES: 1
+    {%- if job.build_with_debug %}
+      DEBUG: 1
+    {%- endif %}
+      DOCKER_IMAGE: ${{ needs.!{{ job.build_name() }}.outputs.docker_image }}
+      JOB_BASE_NAME: !{{ job.build_environment }}-test
+      TEST_CONFIG: !{{ test_job.config }}
+      SHARD_NUMBER: !{{ test_job.shard }}
+      NUM_TEST_SHARDS: !{{ test_job.num_shards }}
+      # TODO{# PYTORCH_IGNORE_DISABLED_ISSUES: ${{ needs.generate-test-matrix.outputs.ignore-disabled-issues }} #}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
       - name: Pull Docker image
         run: |
           !{{ common.pull_docker("${DOCKER_IMAGE}") }}
+      {%- if "cuda" in job.build_environment and "nogpu" not in test_job.config %}
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        if: ${{ contains(env.BUILD_ENVIRONMENT, 'cuda') && !contains(matrix.config, 'nogpu') }}
         run: |
           bash .github/scripts/install_nvidia_utils_linux.sh
           echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+      {%- endif %}
       - name: Determine shm-size
         run: |
           shm_size="1g"
@@ -229,8 +180,7 @@ jobs:
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-        # Time out the test phase after !{{ timeout_after }} minutes
-        timeout-minutes: !{{ timeout_after }}
+        timeout-minutes: !{{ job.timeout_after }}
         run: |
           set -x
 
@@ -297,22 +247,26 @@ jobs:
           # Ensure the working directory gets chowned back to the current user
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.render_test_results() }}
-      !{{ common.upload_downloaded_files(name='linux') }}
-      !{{ common.upload_test_reports(name='linux') }}
-      !{{ common.upload_test_statistics(build_environment) }}
+      !{{ common.upload_downloaded_files(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_reports(name='linux', config=test_job.config, shard=test_job.shard, num_shards=test_job.num_shards, runner=test_job.runner) }}
+      !{{ common.upload_test_statistics(job.build_environment) }}
       !{{ common.teardown_ec2_linux() }}
-{% endblock %}
+{%- endfor %}
 {%- endif -%}
-{%- if enable_doc_jobs %}
-  build-docs:
-    runs-on: linux.2xlarge
+
+{%- if job.enable_doc_jobs %}
+  !{{ job.docs_name() }}:
+    runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: !{{ common.timeout_minutes }}
     strategy:
       matrix:
         docs_type: [cpp, python]
-    needs: [build, !{{ ciflow_config.root_job_name }}]
+    needs: [!{{ job.build_name() }}]
     env:
-      DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
+      AWS_DEFAULT_REGION: us-east-1
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      DOCKER_IMAGE: ${{ needs.!{{ job.build_name() }}.outputs.docker_image }}
       DOCS_TYPE: ${{ matrix.docs_type }}
       WITH_PUSH: ${{ github.event_name == 'schedule' }}
     steps:
@@ -328,7 +282,7 @@ jobs:
       - name: Unzip artifacts
         run: |
           unzip -o artifacts.zip
-{%- if is_scheduled %}
+{%- if job.is_scheduled %}
       - name: Generate netrc (only for docs-push)
         if: ${{ github.event_name == 'schedule' }}
         env:
@@ -363,7 +317,7 @@ jobs:
             --tty \
             --detach \
             --user jenkins \
-{%- if is_scheduled %}
+{%- if job.is_scheduled %}
             -v "${RUNNER_TEMP}/.netrc":/var/lib/jenkins/.netrc \
 {%- endif %}
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \

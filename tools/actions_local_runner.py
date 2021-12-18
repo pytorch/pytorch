@@ -236,9 +236,9 @@ class Mypy(Check):
                 sys.executable,
                 "tools/actions_local_runner.py",
                 "--job",
-                "mypy",
+                "lint-mypy",
                 "--file",
-                ".github/workflows/lint.yml",
+                ".github/workflows/pull.yml",
                 "--step",
                 "Run autogen",
             ],
@@ -251,9 +251,9 @@ class Mypy(Check):
                 sys.executable,
                 "tools/actions_local_runner.py",
                 "--job",
-                "mypy",
+                "lint-mypy",
                 "--file",
-                ".github/workflows/lint.yml",
+                ".github/workflows/pull.yml",
                 "--step",
                 "Run mypy",
             ],
@@ -280,9 +280,9 @@ class ShellCheck(Check):
                 sys.executable,
                 "tools/actions_local_runner.py",
                 "--job",
-                "shellcheck",
+                "lint-shellcheck",
                 "--file",
-                ".github/workflows/lint.yml",
+                ".github/workflows/pull.yml",
                 "--step",
                 "Run ShellCheck",
             ],
@@ -427,10 +427,10 @@ def main() -> None:
 # These are run differently locally in order to enable quicklint, so dispatch
 # out to special handlers instead of using lint.yml
 ad_hoc_steps = {
-    "mypy": Mypy,
-    "flake8-py3": Flake8,
-    "shellcheck": ShellCheck,
-    "clang-tidy": ClangTidy,
+    "lint-mypy": Mypy,
+    "lint-flake8-py3": Flake8,
+    "lint-shellcheck": ShellCheck,
+    "lint-clang-tidy": ClangTidy,
 }
 
 if __name__ == "__main__":

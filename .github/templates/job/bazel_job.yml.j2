@@ -1,24 +1,30 @@
-{%- extends "linux_ci_workflow.yml.j2" -%}
-{% import 'common_android.yml.j2' as common_android %}
-{%- set exclude_test = true -%}
-{% block name -%}
-# Template is at:    .github/templates/bazel_ci_workflow.yml.j2
-# Generation script: .github/scripts/generate_ci_workflows.py
-name: !{{ build_environment }}
-{%- endblock %}
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, !{{ ciflow_config.trigger_action }}]
-
-{% block build +%}
   # building and testing in a single job since bazel runs only small subset of tests
-  build-and-test:
-    runs-on: !{{ test_runner_type }}
-    needs: [!{{ ciflow_config.root_job_name }}]
+  !{{ job.normalized_build_environment("-build-and-test") }}:
+    runs-on: [self-hosted, !{{ job.test_runner_type }}]
     env:
-      JOB_BASE_NAME: !{{ build_environment }}-build-and-test
-      NUM_TEST_SHARDS: !{{ num_test_shards }}
+      BUILD_ENVIRONMENT: !{{ job.build_environment }}
+      DOCKER_IMAGE_BASE: !{{ job.docker_image_base }}
+      SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+      XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
+      TORCH_CUDA_ARCH_LIST: 5.2
+      IN_CI: 1
+      IS_GHA: 1
+      # This is used for the phase of adding wheel tests only, will be removed once completed
+      IN_WHEEL_TEST: 1
+      # Used for custom_opertor, jit_hooks, custom_backend, see .jenkins/pytorch/build.sh
+      CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+      PYTORCH_RETRY_TEST_CASES: 1
+      JOB_BASE_NAME: !{{ job.build_environment }}-build-and-test
+      NUM_TEST_SHARDS: !{{ job.num_test_shards }}
+    {%- if job.build_with_debug %}
+      DEBUG: 1
+    {%- endif %}
     steps:
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout_pytorch("recursive") }}
@@ -69,7 +75,7 @@ on:
           )
           docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .jenkins/pytorch/build.sh'
       !{{ common.parse_ref() }}
-      !{{ common_android.upload_androind_binary_size("", "")}}
+      !{{ common.upload_android_binary_size("", "")}}
       - name: Test
         # Time out the test phase after 3.5 hours
         timeout-minutes: 210
@@ -110,6 +116,5 @@ on:
           docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       !{{ common.upload_test_reports(name='bazel') }}
       !{{ common.upload_downloaded_files(name='bazel') }}
-      !{{ common.upload_test_statistics(build_environment) }}
+      !{{ common.upload_test_statistics(job.build_environment) }}
       !{{ common.teardown_ec2_linux() }}
-{%- endblock %}

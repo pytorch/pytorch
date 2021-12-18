@@ -18,12 +18,6 @@
 #     is_ephemeral: true
 
 runner_types:
-  # mainly used for ciflow-should-run, not made to run any serious tests
-  linux.large:
-    instance_type: c5.large
-    os: linux
-    disk_size: 10
-    is_ephemeral: false
   linux.2xlarge:
     instance_type: c5.2xlarge
     os: linux

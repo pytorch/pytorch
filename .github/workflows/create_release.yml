@@ -49,5 +49,5 @@ jobs:
           files: ${{env.PT_RELEASE_FILE}}
 
 concurrency:
-  group: create-release-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: create-release-${{ github.event.pull_request.number || (startsWith(github.ref_name, 'ciflow') && github.ref_name || github.sha) }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

@@ -1,5 +1,4 @@
-# @generated DO NOT EDIT MANUALLY
-# Template is at:    .github/templates/docker_builds_ci_workflow.yml.j2
+# Template is at:    .github/templates/docker_builds.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
 name: docker-builds
 
@@ -9,11 +8,12 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - '.circleci/docker/**'
-      - '.github/workflows/generated-docker-builds.yml'
+      - '.github/workflows/docker_builds.yml'
   schedule:
     - cron: 1 * */7 * *
+
 concurrency:
-  group: docker-builds-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: docker-builds-${{ github.event.pull_request.number || (startsWith(github.ref_name, 'ciflow') && github.ref_name || github.sha) }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 env:
@@ -21,9 +21,8 @@ env:
   AWS_DEFAULT_REGION: us-east-1
 
 jobs:
-
   docker-build:
-    runs-on: linux.2xlarge
+    runs-on: [self-hosted, linux.2xlarge]
     timeout-minutes: 240
     strategy:
       matrix:

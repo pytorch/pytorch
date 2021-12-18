@@ -1,6 +1,6 @@
 name: TorchBench CI (pytorch-linux-py3.7-cu102)
 on:
-  pull_request:
+  workflow_dispatch:
 
 env:
   PYTHON_VERSION: "3.8"

@@ -34,30 +34,30 @@ generate-gha-workflows:
 
 shellcheck:
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'shellcheck' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-shellcheck' \
 		--step "Regenerate workflows"
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'shellcheck' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-shellcheck' \
 		--step "Assert that regenerating the workflows didn't change them"
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'shellcheck' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-shellcheck' \
 		--step 'Extract scripts from GitHub Actions workflows'
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'shellcheck'
+		--job 'lint-shellcheck'
 
 setup_lint:
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'flake8-py3' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'cmakelint' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'mypy' --step 'Install dependencies' --no-quiet
-	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'shellcheck' --step 'Install Jinja2' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/pull.yml \
+		--job 'lint-flake8-py3' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/pull.yml \
+		--job 'lint-cmakelint' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/pull.yml \
+		--job 'lint-mypy' --step 'Install dependencies' --no-quiet
+	$(PYTHON) tools/actions_local_runner.py --file .github/workflows/pull.yml \
+		--job 'lint-shellcheck' --step 'Install Jinja2' --no-quiet
 
 	@if [ "$$(uname)" = "Darwin" ]; then \
 		if [ -z "$$(which brew)" ]; then \
@@ -66,8 +66,8 @@ setup_lint:
 		fi; \
 		brew install shellcheck; \
 	else \
-		$(PYTHON) tools/actions_local_runner.py --file .github/workflows/lint.yml \
-		--job 'shellcheck' --step 'Install ShellCheck' --no-quiet; \
+		$(PYTHON) tools/actions_local_runner.py --file .github/workflows/pull.yml \
+		--job 'lint-shellcheck' --step 'Install ShellCheck' --no-quiet; \
 	fi
 	$(PYTHON) -mpip install jinja2 --user
 	$(PYTHON) -mpip install -r tools/linter/clang_tidy/requirements.txt --user
@@ -77,8 +77,8 @@ quick_checks:
 # TODO: This is broken when 'git config submodule.recurse' is 'true' since the
 # lints will descend into third_party submodules
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'quick-checks' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-quick-checks' \
 		--step 'Ensure no trailing spaces' \
 		--step 'Ensure no tabs' \
 		--step 'Ensure no non-breaking spaces' \
@@ -94,28 +94,28 @@ quick_checks:
 flake8:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'flake8-py3'
+		--job 'lint-flake8-py3'
 
 mypy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'mypy'
+		--job 'lint-mypy'
 
 cmakelint:
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'cmakelint' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-cmakelint' \
 		--step 'Run cmakelint'
 
 clang-tidy:
 	@$(PYTHON) tools/actions_local_runner.py \
 		$(CHANGED_ONLY) \
-		--job 'clang-tidy'
+		--job 'lint-clang-tidy'
 
 toc:
 	@$(PYTHON) tools/actions_local_runner.py \
-		--file .github/workflows/lint.yml \
-		--job 'toc' \
+		--file .github/workflows/pull.yml \
+		--job 'lint-toc' \
 		--step "Regenerate ToCs and check that they didn't change"
 
 lint: flake8 mypy quick_checks cmakelint shellcheck
