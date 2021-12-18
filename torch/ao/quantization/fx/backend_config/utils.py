@@ -44,6 +44,8 @@ def get_pattern_to_input_type_to_index(
 def get_quantized_reference_module_mapping(
         backend_config_dict: Dict[str, Any]) -> Dict[Callable, Callable]:
     mapping: Dict[Callable, Callable] = dict()
+    if "configs" not in backend_config_dict:
+        return mapping
     for config in backend_config_dict["configs"]:
         if "root_module" in config and "reference_quantized_module_for_root" in config:
             mapping[config["root_module"]] = config["reference_quantized_module_for_root"]

@@ -482,6 +482,8 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 (arg_as_input_target_dtype != torch.float)
             )
 
+        act_post_process_ctr = qconfig.activation
+
     if needs_obs:
 
         new_obs_mod = act_post_process_ctr()
@@ -723,7 +725,11 @@ def maybe_insert_observers_before_graph_output(
             # check dtype of this node
             this_node_dtype = get_arg_target_dtype_as_output(
                 maybe_node, modules, node_name_to_target_dtype)
-            if this_node_dtype != target_dtype:
+            if this_node_dtype == torch.float and this_node_dtype != target_dtype:
+                print("this node dtype:", this_node_dtype)
+                print("target dtype:", target_dtype)
+                print("qconfig map:", qconfig_map)
+                print("maybe node:", maybe_node)
                 # insert observer
                 qconfig = qconfig_map.get(maybe_node.name)
                 # TODO(future PR): see if we need to allow specifying qconfig
@@ -1198,7 +1204,11 @@ def run_prepare_fx_on_standalone_modules(
         prepare = \
             torch.ao.quantization.quantize_fx._prepare_standalone_module_fx  # type: ignore[attr-defined]
         observed_standalone_module = \
-            prepare(standalone_module, sm_qconfig_dict, sm_prepare_config_dict, sm_backend_config_dict)
+            prepare(
+                standalone_module,
+                sm_qconfig_dict,
+                sm_prepare_config_dict,
+                backend_config_dict=sm_backend_config_dict)
         preserved_attributes = \
             set(sm_prepare_config_dict.get("preserved_attributes", []))
         observed_standalone_module = ObservedStandaloneGraphModule(
