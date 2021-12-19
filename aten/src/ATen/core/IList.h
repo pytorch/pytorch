@@ -1,7 +1,6 @@
 #pragma once
 
-#include <ATen/core/List.h>
-#include <c10/util/ArrayRef.h>
+#include <ATen/core/ivalue_to.h>
 #include <c10/util/Exception.h>
 
 #include <initializer_list>
@@ -44,10 +43,11 @@
  *    preferable to make the default implementation work for `T = Tensor`
  *    (both `Unboxed` and `Boxed` do it).
  *
- *   template <typename ListT, typename T>
- *   class IListTagImplBase<ListT, T, IListTag::Chest> {
+ *   template <typename T, typename ListElemT>
+ *   class IListTagImplBase<IListTag::Chest, T, ListElemT> {
  *    public:
- *     using list_type = ListT;
+ *     using elem_type = ListElemT;
+ *     using list_type = ChestContainer<elem_type>;
  *
  *     static const list_type& unwrap(const IList<T>& ilist) { ... }
  *
@@ -66,14 +66,8 @@
  *    (see [Note: IListTagImpl Specializations])
  *
  *   template <>
- *   class IListTagImpl<at::Tensor, IListTag::Chest>
- *       : public IListTagImplBase<
- *       LinkedList<at::Tensor>, at::Tensor, IListTag::Chest> {};
- *          |
- *          |
- *         This type don't actually exist, but you will have
- *         to assign one container type (that corresponds to
- *         this tag) for each supported type.
+ *   class IListTagImpl<IListTag::Chest, at::Tensor>
+ *       : public IListTagImplBase<IListTag::Chest, at::Tensor> {};
  *
  * Adding support for a new Type
  * =============================
@@ -81,18 +75,16 @@
  * Here are the steps we would have to go through:
  *
  * 1. Add an specialization for each of the existing tags.
- *    Finally, for consistency, add them to the tracking list.
+ *    For consistency, add them to the tracking list.
  *    (see [Note: IListTagImpl Specializations])
  *
  *   template <>
- *   class IListTagImpl<Matrix, IListTag::Unboxed>
- *       : public IListTagImplBase<
- *       ArrayRef<Matrix>, Matrix, IListTag::Unboxed> {};
+ *   class IListTagImpl<IListTag::Unboxed, Matrix>
+ *       : public IListTagImplBase<IListTag::Unboxed, Matrix> {};
  *
  *   template <>
  *   class IListTagImpl<Matrix, IListTag::Boxed>
- *       : public IListTagImplBase<
- *       List<Matrix>, Matrix, IListTag::Boxed> {};
+ *       : public IListTagImplBase<IListTag::Boxed, Matrix> {};
  *
  * Common Problems
  * ===============
@@ -113,6 +105,8 @@
  */
 
 namespace c10 {
+class IValue;
+
 /*
  * Applies arbitrary macros to each `IListTag`.
  */
@@ -129,7 +123,7 @@ namespace c10 {
  */
 #define TORCH_ILIST_UNWRAP_CASE(TAG, BODY)                     \
   case c10::IListTag::TAG: {                                   \
-    using ImplT = c10::detail::IListTagImpl<T, IListTag::TAG>; \
+    using ImplT = c10::detail::IListTagImpl<IListTag::TAG, T>; \
     auto& this_ = ImplT::unwrap(*this);                        \
     BODY                                                       \
   } break;
@@ -189,12 +183,14 @@ using IListConstRef = typename ivalue_to_const_ref_overload_return<T>::type;
  * 1. defines static methods to be used as dispatch targets by both
  *    `IList<T>` and `IListIterator<T>`.
  *
- * 2. defines the `list_type` alias that will be used in the definition
- *    of `IList<T>`. In general, we should do so by inheriting from
- *    `IListTagImplBase<?, T, TAG>`.
+ * 2. defines the `elem_type` and `list_type` aliases that will be
+ *    used in the definition of `IList<T>`. In general, we should do
+ *    so by inheriting from `IListTagImplBase<TAG, T, ListElemT>`.
  *
  * Here's a list of the required members (note that most of them might
  * be already inherited from `IListTagImplBase`):
+ *
+ * - a type `elem_type`.
  *
  * - a type `list_type`.
  *
@@ -213,18 +209,18 @@ using IListConstRef = typename ivalue_to_const_ref_overload_return<T>::type;
  * [Note: IListTagImpl Specialization]
  *
  * For `IList(Iterator)<at::Tensor>`:
- * - <at::Tensor, IListTag::Unboxed>
- * - <at::Tensor, IListTag::Boxed>
+ * - <IListTag::Unboxed, at::Tensor>
+ * - <IListTag::Boxed, at::Tensor>
  *
  * For `IList(Iterator)<at::OptionalTensorRef>`:
- * - <at::OptionalTensorRef, IListTag::Unboxed>
- * - <at::OptionalTensorRef, IListTag::Boxed>
+ * - <IListTag::Unboxed, at::OptionalTensorRef>
+ * - <IListTag::Boxed, at::OptionalTensorRef>
  */
-template <typename T, IListTag TAG>
+template <IListTag TAG, typename T>
 class IListTagImpl {};
 
 /*
- * Base implementation of `IListTagImpl<T, TAG>` methods.
+ * Base implementation of `IListTagImpl<TAG, T>` methods.
  *
  * What is this for?
  * =================
@@ -238,17 +234,21 @@ class IListTagImpl {};
  *
  * What does it do?
  * ================
- * 1. defines the `list_type` alias to `ListT` that will be used in
- *    the implementation of `IList<T>` when tagged as `TAG`.
+ * 1. defines `elem_type` as an alias to `ListElemT`.
  *
- * 2. defines the default implementation for each of the methods that
+ * 1. defines `list_type` as an alias to the default container type
+ *    that will hold a collection of `elem_type`. The idea being that
+ *    all types tagged as `TAG` will have `list_type` as its container,
+ *    with different `elem_type`.
+ *
+ * 3. defines the default implementation for each of the methods that
  *    are supposed to be defined on `IListTagImpl` specializations.
  *
- * 3. inheriting from `IListTagImplBase<ListT, T, TAG>` also means
- *    that the payload of the type `IList<T>` will be of type `ListT`
+ * 4. inheriting from `IListTagImplBase<TAG, T, ListElemT>` also means
+ *    that the payload of the type `IList<T>` will be of type `list_type`
  *    when it is tagged as `TAG`.
  */
-template <typename ListT, typename T, IListTag TAG>
+template <IListTag TAG, typename T, typename ListElemT = T>
 class IListTagImplBase {};
 
 } // namespace detail
@@ -274,19 +274,20 @@ class IListTagImplBase {};
 template <typename T>
 class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
  private:
-#define DEFINE_FRIEND_CLASS(TAG, ...)                             \
-  friend class detail::IListTagImpl<T, IListTag::TAG>;            \
-  friend class detail::IListTagImplBase<                          \
-      typename detail::IListTagImpl<T, IListTag::TAG>::list_type, \
-      T,                                                          \
-      IListTag::TAG>;
+#define DEFINE_FRIEND_CLASS(TAG, ...)                  \
+  friend class detail::IListTagImpl<IListTag::TAG, T>; \
+  friend class detail::IListTagImplBase<               \
+      IListTag::TAG,                                   \
+      T,                                               \
+      typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
+  friend class IValue;
 
   using unboxed_iterator_type = typename detail::
-      IListTagImpl<T, IListTag::Unboxed>::list_type::const_iterator;
+      IListTagImpl<IListTag::Unboxed, T>::list_type::const_iterator;
   using boxed_iterator_type = typename detail::
-      IListTagImpl<T, IListTag::Boxed>::list_type::const_iterator;
+      IListTagImpl<IListTag::Boxed, T>::list_type::const_iterator;
 
   union Payload {
     boxed_iterator_type boxed_iterator;
@@ -392,19 +393,20 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
 template <typename T>
 class IList {
  private:
-#define DEFINE_FRIEND_CLASS(TAG, ...)                             \
-  friend class detail::IListTagImpl<T, IListTag::TAG>;            \
-  friend class detail::IListTagImplBase<                          \
-      typename detail::IListTagImpl<T, IListTag::TAG>::list_type, \
-      T,                                                          \
-      IListTag::TAG>;
+#define DEFINE_FRIEND_CLASS(TAG, ...)                  \
+  friend class detail::IListTagImpl<IListTag::TAG, T>; \
+  friend class detail::IListTagImplBase<               \
+      IListTag::TAG,                                   \
+      T,                                               \
+      typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
+  friend class IValue;
 
   using unboxed_type =
-      typename detail::IListTagImpl<T, IListTag::Unboxed>::list_type;
+      typename detail::IListTagImpl<IListTag::Unboxed, T>::list_type;
   using boxed_type =
-      typename detail::IListTagImpl<T, IListTag::Boxed>::list_type;
+      typename detail::IListTagImpl<IListTag::Boxed, T>::list_type;
 
   union Payload {
     const boxed_type* boxed;
@@ -473,10 +475,10 @@ class IList {
   }
 
 #define DEFINE_CASTING(TAG, ...)                                              \
-  const typename detail::IListTagImpl<T, IListTag::TAG>::list_type& to##TAG() \
+  const typename detail::IListTagImpl<IListTag::TAG, T>::list_type& to##TAG() \
       const {                                                                 \
     TORCH_INTERNAL_ASSERT(is##TAG());                                         \
-    return detail::IListTagImpl<T, IListTag::TAG>::unwrap(*this);             \
+    return detail::IListTagImpl<IListTag::TAG, T>::unwrap(*this);             \
   }
   TORCH_ILIST_FORALL_TAGS(DEFINE_CASTING);
 #undef DEFINE_CASTING

@@ -256,7 +256,7 @@ static void build_index_op(
       .add_output(result)
       .add_input(info.src);
   for (auto& index : info.indices) {
-    config.add_owned_input(index);
+    config.add_input(index);
   }
   if (!result.defined()) {
     config.declare_static_dtype_and_device(info.src.scalar_type(), info.src.device());
