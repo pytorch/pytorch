@@ -829,7 +829,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.pixel_shuffle: lambda input, upscale_factor: -1,
         torch.pixel_unshuffle: lambda input, downscale_factor: -1,
         torch.poisson: lambda input, generator=None: -1,
-        torch.poisson_nll_loss: lambda input, target, log_input, full, eps, reduction: -1,
         torch.polygamma: lambda input, n, out=None: -1,
         torch.positive: lambda input, out=None: -1,
         torch.prelu: lambda input, weight: -1,
