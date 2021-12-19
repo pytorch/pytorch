@@ -964,7 +964,6 @@ Tensor& linalg_solve_out(const Tensor& input, const Tensor& other, Tensor& resul
 
   // Now check LAPACK/MAGMA error codes
   // batchCheckErrors(Tensor, char*) calls 'infos = infos.to(kCPU)'
-  bool vector_case = linalg_solve_is_vector_rhs(input, other);
   if (input.dim() > 2) {
     batchCheckErrors(infos, "linalg.solve");
   } else {
