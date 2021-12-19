@@ -187,8 +187,20 @@ class Wishart(ExponentialFamily):
         return chol @ chol.transpose(-2, -1)
 
     def rsample(self, sample_shape=torch.Size(), max_try=10):
+        p = self._event_shape[-1]  # has singleton shape
+
         sample_shape = torch.Size(sample_shape)
-        sample = self._bartlett_sampling(sample_shape)
+        # sample = self._bartlett_sampling(sample_shape)
+        # Implemented Sampling using Bartlett decomposition
+        noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
+        i, j = torch.tril_indices(p, p, offset=-1)
+        noise[..., i, j] = torch.randn(
+            torch.Size(sample_shape) + self._batch_shape + (p * (p - 1) // 2,),
+            dtype=noise.dtype,
+            device=noise.device,
+        )
+        chol = self._unbroadcasted_scale_tril @ noise
+        sample = chol @ chol.transpose(-2, -1)
 
         # Below part is to improve numerical stability temporally and should be removed in the future
         is_singular = self.support.check(sample)
@@ -197,17 +209,27 @@ class Wishart(ExponentialFamily):
 
         if is_singular.any():
             warnings.warn("Singular sample detected.")
+            sample_shape_new = is_singular[is_singular].shape
 
             for _ in range(max_try):
-                sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
+                noise = self._dist_chi2.rsample(sample_shape_new).sqrt().diag_embed(dim1=-2, dim2=-1)
+                noise[..., i, j] = torch.randn(
+                    torch.Size(sample_shape_new) + self._batch_shape + (p * (p - 1) // 2,),
+                    dtype=noise.dtype,
+                    device=noise.device,
+                )
+                chol = self._unbroadcasted_scale_tril @ noise
+                sample_new = chol @ chol.transpose(-2, -1)
+                # sample_new = self._bartlett_sampling(sample_shape_new)
                 sample[is_singular] = sample_new
 
                 is_singular_new = ~self.support.check(sample_new)
                 if self._batch_shape:
                     is_singular_new = is_singular_new.amax(self._batch_dims)
                 is_singular[is_singular.clone()] = is_singular_new
+                sample_shape_new = is_singular_new.shape
 
-                if not is_singular.any():
+                if not is_singular_new.any():
                     break
 
         return sample
