@@ -200,7 +200,7 @@ class Wishart(ExponentialFamily):
 
             for _ in range(max_try):
                 new_sample = self._bartlett_sampling(is_singular[is_singular].shape)
-                sample = sample.where(is_singular, new_sample)
+                sample[is_singular] = new_sample
                 is_singular = ~self.support.check(sample)
                 if self._batch_shape:
                     is_singular = is_singular.amax(self._batch_dims)
