@@ -205,7 +205,7 @@ class Wishart(ExponentialFamily):
                 is_singular_new = ~self.support.check(sample_new)
                 if self._batch_shape:
                     is_singular_new = is_singular_new.amax(self._batch_dims)
-                is_singular[is_singular] = is_singular_new
+                is_singular[is_singular.clone()] = is_singular_new
 
                 if not is_singular.any():
                     break
