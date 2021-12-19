@@ -82,7 +82,7 @@ from ..utils import (
     activation_is_int8_quantized,
 )
 
-from .backend_config_dict.utils import (
+from .backend_config.utils import (
     get_pattern_to_quantize_handlers,
     get_pattern_to_dtype_configs,
     get_pattern_to_input_type_to_index,
