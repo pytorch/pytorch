@@ -621,6 +621,7 @@ def maybe_insert_output_observer_for_node(
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[torch.dtype]]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
+    is_qat: bool,
 ) -> Optional[Node]:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
@@ -643,7 +644,7 @@ def maybe_insert_output_observer_for_node(
     dtype = node_name_to_target_dtype[node.name]["output_activation_dtype"]
     should_insert_observer = \
         qhandler.should_insert_observer_for_output(
-            qconfig, model.training) and dtype not in (torch.bool, None, torch.float)
+            qconfig, is_qat) and dtype not in (torch.bool, None, torch.float)
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
     should_insert_observer = should_insert_observer and \
@@ -660,7 +661,7 @@ def maybe_insert_output_observer_for_node(
             act_post_process_ctr = qhandler.get_activation_ctr(
                 qconfig,
                 matched_pattern,
-                model.training)
+                is_qat)
         observer = act_post_process_ctr()
         new_obs = insert_observer(node, node, observer, model, modules, graph)
         return new_obs
@@ -941,6 +942,7 @@ def insert_observers_for_model(
     output_quantized_idxs: List[int],
     backend_config_dict: Optional[Dict[str, Any]],
     observed_node_names: Set[str],
+    is_qat: bool,
 ) -> Optional[Node]:
     """
     Inserts observers, using the following high level algorithm:
@@ -1118,7 +1120,7 @@ def insert_observers_for_model(
                         # this returns the new observer node if it was needed
                         maybe_output_obs_node = maybe_insert_output_observer_for_node(
                             node, model, modules, graph, matches,
-                            node_name_to_target_dtype, pattern, qhandler)
+                            node_name_to_target_dtype, pattern, qhandler, is_qat)
                         if maybe_output_obs_node is not None:
                             # Update users of original node to use the output observer
                             # instead. For example, change
@@ -1219,7 +1221,7 @@ def save_state(
     prepare_custom_config_dict: Dict[str, Any],
     equalization_qconfig_map: Dict[str, Any],
     qconfig_dict: Dict[str, Dict[Any, Any]],
-    is_training: bool,
+    is_qat: bool,
     observed_node_names: Set[str],
 ) -> None:
     observed._patterns = patterns  # type: ignore[assignment]
@@ -1229,7 +1231,7 @@ def save_state(
     observed._node_name_to_scope = node_name_to_scope  # type: ignore[assignment]
     observed._equalization_qconfig_map = equalization_qconfig_map  # type: ignore[assignment]
     observed._qconfig_dict = qconfig_dict  # type: ignore[assignment]
-    observed._is_training = is_training  # type: ignore[assignment]
+    observed._is_qat = is_qat  # type: ignore[assignment]
     observed._observed_node_names = observed_node_names  # type: ignore[assignment]
 
 def prepare(
@@ -1239,7 +1241,8 @@ def prepare(
         prepare_custom_config_dict: Optional[Dict[str, Any]] = None,
         equalization_qconfig_dict: Optional[Dict[str, Any]] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
-        is_standalone_module: bool = False) -> ObservedGraphModule:
+        is_standalone_module: bool = False,
+        is_qat: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
     parent module, and will be quantized separately as one unit.
 
@@ -1309,7 +1312,7 @@ def prepare(
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict)
 
-    if model.training:
+    if is_qat:
         additional_qat_module_mapping = prepare_custom_config_dict.get(
             "additional_qat_module_mapping", {})
         qat_swap_modules(model, additional_qat_module_mapping)
@@ -1365,10 +1368,11 @@ def prepare(
         input_quantized_idxs,
         output_quantized_idxs,
         backend_config_dict,
-        observed_node_names)
+        observed_node_names,
+        is_qat)
 
     save_state(model, qconfig_map, node_name_to_scope, patterns,
-               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, model.training, observed_node_names)
+               prepare_custom_config_dict, equalization_qconfig_map, qconfig_dict, is_qat, observed_node_names)
 
     preserved_attributes = set(prepare_custom_config_dict.get("preserved_attributes", []))
     model = ObservedGraphModule(model, model.graph, preserved_attributes)
