@@ -398,12 +398,19 @@ Tensor _convolution_jvp(
   bool benchmark, bool deterministic, bool cudnn_enabled, bool allow_tf32
 );
 
+Tensor convolution_backward_jvp_grad_bias(const Tensor& grad_out_t, const Tensor& grad_bias, const Tensor& weight_p);
+
 Tensor cat_jvp(at::TensorList tensors, int64_t dim);
 Tensor stack_jvp(at::TensorList tensors, int64_t dim);
 Tensor cumprod_jvp(Tensor self_t, Tensor self_p, Tensor result, int dim);
 Tensor gather_with_keepdimed_indices(const Tensor& input, int64_t dim, const Tensor& indices, bool keepdim);
 Tensor evenly_read_jvp(const Tensor& fw_grad, const Tensor & input, const Tensor & value);
 Tensor warn_backwards(const Tensor &grad_output);
+
+std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
+    ::std::array<bool,2> output_mask);
 
 } // namespace details
 } // namespace generated

@@ -746,6 +746,30 @@ Tensor _convolution_jvp(
         groups, benchmark, deterministic, cudnn_enabled, allow_tf32));
 }
 
+Tensor convolution_backward_jvp_grad_bias(
+    const Tensor& grad_out_t,
+    const Tensor& grad_bias,
+    const Tensor& weight_p) {  // weight_p is only used to infer size only
+  if (!grad_bias.defined()) {
+    return Tensor();
+  }
+  int64_t dim = weight_p.dim() - 2;
+  if (dim == 1) {
+    // Cannot pass initializer list due to overload ambiguity
+    auto dimlist = std::vector<int64_t>{0, 2};
+    return grad_out_t.sum(dimlist);
+  } else if (dim == 2) {
+    return grad_out_t.sum({0, 2, 3});
+  } else if (dim == 3) {
+    return grad_out_t.sum({0, 2, 3, 4});
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "convolution_backward_jvp_grad_bias expected dim of weigh to be 3, 4, or 4, but got: ",
+        weight_p.dim());
+  }
+}
+
 // This function is used by load_derivatives.py to replace tensor.strides()
 // calls that appear in derivative formulas. If the tensor has requires_grad
 // set, this function returns its strides or throws an error if the tensor
@@ -4786,6 +4810,25 @@ Tensor _lu_with_info_jvp(
 Tensor warn_backwards(const Tensor &grad_output) {
   TORCH_WARN("Warn from backward");
   return grad_output;
+}
+
+// This function only exists because cuDNN does not support bias gradient computation and it's not easy
+// to slice a std::tuple to return only grad_input / grad_weight from convolution_backward. It will
+// be removed when the cudnn_convolution and cudnn_convolution_transpose go away.
+std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
+    const at::Tensor & self, const at::Tensor & grad_output, const at::Tensor & weight, at::IntArrayRef padding,
+    at::IntArrayRef output_padding, at::IntArrayRef stride, at::IntArrayRef dilation, bool transposed, int64_t groups,
+    ::std::array<bool,2> output_mask) {
+  if (!grad_output.defined()) {
+    return std::tuple<Tensor, Tensor>();
+  }
+
+  // Just call the general backward and ignore the bias gradient part.
+  std::tuple<Tensor, Tensor, Tensor> grad_inputs = at::convolution_backward(
+      grad_output, self, weight, c10::nullopt, stride, padding, dilation, transposed,
+      output_padding, groups, {output_mask[0], output_mask[1], false});
+  std::tuple<Tensor, Tensor> result = std::make_tuple(std::get<0>(grad_inputs), std::get<1>(grad_inputs));
+  return result;
 }
 
 } // namespace details
