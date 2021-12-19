@@ -5,23 +5,22 @@
 #include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
+#include <torch/csrc/jit/mobile/code.h>
 
 namespace torch {
 namespace jit {
-using Stack = std::vector<c10::IValue>;
 enum OpCode : uint8_t;
 struct Instruction;
 struct OperatorString;
 
 namespace mobile {
-struct Code;
 
 class TORCH_API Function : public torch::jit::Function {
  public:
   explicit Function(c10::QualifiedName name);
   Function(
       c10::QualifiedName name,
-      std::shared_ptr<Code> code,
+      Code code,
       at::optional<c10::FunctionSchema> schema);
   void run(Stack& stack) override;
   at::IValue operator()(Stack& stack);
@@ -48,7 +47,8 @@ class TORCH_API Function : public torch::jit::Function {
   void set_register_size(size_t size);
 
   int64_t get_debug_handle(size_t pc) const;
-  const std::shared_ptr<Code> get_code() const;
+  const Code& get_code() const;
+  Code& get_code();
 
   torch::jit::Function& setSchema(c10::FunctionSchema schema) override;
   bool hasSchema() const;
@@ -67,7 +67,7 @@ class TORCH_API Function : public torch::jit::Function {
 
  private:
   c10::QualifiedName name_;
-  std::shared_ptr<Code> code_;
+  Code code_;
   at::optional<c10::FunctionSchema> schema_; // (byte-code version 4+)
 };
 
