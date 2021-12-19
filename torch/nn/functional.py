@@ -2702,7 +2702,7 @@ def poisson_nll_loss(
         ret = input
         raise ValueError(reduction + " is not valid")
 
-    return torch._C.nn.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
+    return torch._C._nn.poisson_nll_loss(input, target, log_input, full, eps, _Reduction.get_enum(reduction))
 
 
 def gaussian_nll_loss(
