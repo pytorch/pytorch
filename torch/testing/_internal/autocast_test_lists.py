@@ -157,7 +157,6 @@ class AutocastTestLists(object):
             ("norm", pointwise0_fp16, {"p": 1}),
             ("norm", pointwise0_fp16, {"p": 1, "dim": 0}),
             ("cosine_similarity", mat0_fp16 + mat1_fp16),
-            ("poisson_nll_loss", mat0_fp16 + mat1_fp16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),
             ("cosine_embedding_loss", (torch.tensor([[1, 2, 3]], device=dev, dtype=torch.float16),
                                        torch.tensor([[1, 3, 4]], device=dev, dtype=torch.float16),
                                        torch.tensor([1], device=dev, dtype=torch.int))),
@@ -219,6 +218,7 @@ class AutocastTestLists(object):
             ("smooth_l1_loss", mat0_fp16 + mat1_fp16),
             ("mse_loss", mat0_fp16 + mat1_fp16),
             ("multilabel_margin_loss", mat0_fp16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
+            ("poisson_nll_loss", mat0_fp16 + mat1_fp16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),
             ("soft_margin_loss", mat0_fp16 + (torch.ones((n, n), device=dev, dtype=torch.long),)),
             ("multi_margin_loss", mat0_fp16 + (torch.ones((n,), device=dev, dtype=torch.long),)),
         ]
