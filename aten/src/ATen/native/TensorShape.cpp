@@ -153,6 +153,11 @@ TORCH_PRECOMPUTE_META_FUNC(cat)(ITensorList tensors, int64_t dim) {
         .memory_format(memory_format);
   }
 
+
+  if (is_out_defined && !result.sizes().equals(sizes) && result.numel() != 0) {
+    TORCH_CHECK(false, "cat_out(): bad output sizes raises warning");
+  }
+
   set_output(0, sizes, {}, options, maybe_outnames);
   // Checks for overlaps between the inputs and the output tensor.
   if (is_out_defined && found_valid_tensor) {
