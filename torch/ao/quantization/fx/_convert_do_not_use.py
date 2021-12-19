@@ -13,7 +13,7 @@ from ..utils import (
     weight_is_statically_quantized,
     get_qparam_dict,
 )
-from .backend_config_dict.utils import get_quantized_reference_module_mapping
+from .backend_config.utils import get_quantized_reference_module_mapping
 
 from .graph_module import (
     QuantizedGraphModule,
