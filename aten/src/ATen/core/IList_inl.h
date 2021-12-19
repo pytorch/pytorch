@@ -1,10 +1,11 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
+#include <ATen/core/List.h>
 #include <ATen/core/IList.h>
 
 namespace at {
 class Tensor;
+class OptionalTensorRef;
 }
 
 namespace c10 {
@@ -14,10 +15,11 @@ namespace detail {
  * Specializations of `IListTagImplBase` that implement the default
  * implementation for `IListTag::Unboxed`.
  */
-template <typename ListT, typename T>
-class IListTagImplBase<ListT, T, IListTag::Unboxed> {
+template <typename T, typename ListElemT>
+class IListTagImplBase<IListTag::Unboxed, T, ListElemT> {
  public:
-  using list_type = ListT;
+  using elem_type = ListElemT;
+  using list_type = ArrayRef<elem_type>;
 
   static const list_type& unwrap(const IList<T>& ilist) {
     return ilist.payload_.unboxed;
@@ -47,10 +49,11 @@ class IListTagImplBase<ListT, T, IListTag::Unboxed> {
  * Specializations of `IListTagImplBase` that implement the default
  * implementation for `IListTag::Boxed`.
  */
-template <typename ListT, typename T>
-class IListTagImplBase<ListT, T, IListTag::Boxed> {
+template <typename T, typename ListElemT>
+class IListTagImplBase<IListTag::Boxed, T, ListElemT> {
  public:
-  using list_type = ListT;
+  using elem_type = ListElemT;
+  using list_type = List<elem_type>;
 
   static const list_type& unwrap(const IList<T>& ilist) {
     return *ilist.payload_.boxed;
@@ -79,14 +82,12 @@ class IListTagImplBase<ListT, T, IListTag::Boxed> {
  * `Tensor` in mind, we only have to inherit from the base implementations.
  */
 template <>
-class IListTagImpl<at::Tensor, IListTag::Unboxed>
-    : public IListTagImplBase<
-    ArrayRef<at::Tensor>, at::Tensor, IListTag::Unboxed> {};
+class IListTagImpl<IListTag::Unboxed, at::Tensor>
+    : public IListTagImplBase<IListTag::Unboxed, at::Tensor> {};
 
 template <>
-class IListTagImpl<at::Tensor, IListTag::Boxed>
-    : public IListTagImplBase<
-    List<at::Tensor>, at::Tensor, IListTag::Boxed> {};
+class IListTagImpl<IListTag::Boxed, at::Tensor>
+    : public IListTagImplBase<IListTag::Boxed, at::Tensor> {};
 
 /*
  * [Note: IOptTensorRefList]
@@ -99,14 +100,12 @@ class IListTagImpl<at::Tensor, IListTag::Boxed>
  * this method ourselves.
  */
 template <>
-class IListTagImpl<at::OptionalTensorRef, IListTag::Unboxed>
-    : public IListTagImplBase<
-    ArrayRef<at::OptionalTensorRef>, at::OptionalTensorRef, IListTag::Unboxed> {};
+class IListTagImpl<IListTag::Unboxed, at::OptionalTensorRef>
+    : public IListTagImplBase<IListTag::Unboxed, at::OptionalTensorRef> {};
 
 template <>
-class IListTagImpl<at::OptionalTensorRef, IListTag::Boxed>
-    : public IListTagImplBase<
-    List<optional<at::Tensor>>, at::OptionalTensorRef, IListTag::Boxed> {
+class IListTagImpl<IListTag::Boxed, at::OptionalTensorRef>
+    : public IListTagImplBase<IListTag::Boxed, at::OptionalTensorRef, optional<at::Tensor>> {
 
  public:
   /*
@@ -114,11 +113,7 @@ class IListTagImpl<at::OptionalTensorRef, IListTag::Boxed>
    * the default implementation, so that we can return a `at::OptionalTensorRef`.
    */
   static IListConstRef<at::OptionalTensorRef> iterator_get(
-      const typename list_type::const_iterator& it) {
-    const auto& ivalue = (*it).get();
-    return (ivalue.isNone()) ? at::OptionalTensorRef{} : ivalue.toTensor();
-  }
-
+      const typename list_type::const_iterator& it);
 };
 
 } // namespace detail
