@@ -198,7 +198,7 @@ class Wishart(ExponentialFamily):
         if is_singular.any():
             warnings.warn("Singular sample detected.")
 
-            if torch._C.get_tracing_state():
+            if torch._C._get_tracing_state():
                 # Less optimized version for JIT
                 for _ in range(max_try):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
