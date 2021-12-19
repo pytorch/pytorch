@@ -1855,7 +1855,7 @@ template <typename scalar_t>
 static void apply_lu_factor_looped_magma(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
 #if !AT_MAGMA_ENABLED()
   // This should never be thrown if the calling functions are correct.
-  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.")
+  AT_ERROR("linalg.lu_factor: PyTorch was not compiled with MAGMA support.");
 #else
   // magmaLu and magmaLuNoPiv require infos and pivots tensor to be on CPU
   // the data is later copied back to the appropriate output tensor
