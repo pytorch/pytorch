@@ -141,6 +141,8 @@ struct alignas(2) BFloat16 {
   inline __host__ __device__ BFloat16(float value){
   #if __CUDA_ARCH__ >= 800
   asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  )ESCAPE"
+  R"ESCAPE(
   #else
   unsigned int sign;
   unsigned int remainder;
