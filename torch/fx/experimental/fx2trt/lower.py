@@ -120,7 +120,7 @@ class LowerTrtInterpreter:
         return interp_result
 
 
-class LowerFunc(t.Protocol):
+class LowerFunc:
     """Signature for fx2trt lower functions"""
 
     def __call__(
