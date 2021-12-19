@@ -105,7 +105,7 @@
  */
 
 namespace c10 {
-class IValue;
+struct IValue;
 
 /*
  * Applies arbitrary macros to each `IListTag`.

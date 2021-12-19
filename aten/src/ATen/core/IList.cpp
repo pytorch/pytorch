@@ -5,7 +5,7 @@ namespace c10 {
 namespace detail {
 
 IListConstRef<at::OptionalTensorRef>
-IListTagImpl<at::OptionalTensorRef, IListTag::Boxed>::iterator_get(
+IListTagImpl<IListTag::Boxed, at::OptionalTensorRef>::iterator_get(
     const typename list_type::const_iterator& it
 ) {
   const auto& ivalue = (*it).get();
