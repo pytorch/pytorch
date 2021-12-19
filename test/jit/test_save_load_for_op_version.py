@@ -445,9 +445,9 @@ class TestSaveLoadForOpVersion(JitTestCase):
             v3_module_float = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_float_v3.pt")
             v3_module_int = torch.jit.load(pytorch_test_dir + "/jit/fixtures/test_versioned_div_scalar_inplace_int_v3.pt")
 
-            v3_module_mobile_float = _load_for_lite_interpreter(
+            v3_mobile_module_float = _load_for_lite_interpreter(
                 pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl")
-            v3_module_mobile_int = _load_for_lite_interpreter(
+            v3_mobile_module_int = _load_for_lite_interpreter(
                 pytorch_test_dir + "/cpp/jit/upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl")
         except Exception as e:
             self.skipTest("Failed to load fixture!")
@@ -485,13 +485,11 @@ class TestSaveLoadForOpVersion(JitTestCase):
             if isinstance(b, float):
                 _helper(v3_module_float, historic_div_scalar_float_inplace)
                 _helper(current_module_float, torch.Tensor.div_)
-                _helper(v3_module_mobile_float, historic_div_scalar_float_inplace)
-                _helper(current_module_float, torch.Tensor.div_)
+                _helper(current_mobile_module_float, torch.Tensor.div_)
             else:
                 _helper(v3_module_int, historic_div_scalar_int_inplace)
                 _helper(current_module_int, torch.Tensor.div_)
-                _helper(v3_module_mobile_int, historic_div_scalar_int_inplace)
-                _helper(current_module_int, torch.Tensor.div_)
+                _helper(current_mobile_module_int, torch.Tensor.div_)
 
     # NOTE: Scalar division was already true division in op version 3,
     #   so this test verifies the behavior is unchanged.
