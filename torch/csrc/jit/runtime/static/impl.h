@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/ivalue.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
