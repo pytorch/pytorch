@@ -7,7 +7,7 @@ from .utils import _parent_name
 from .quantization_types import QuantizerCls, NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, Optional, Union, List
 from .match_utils import MatchAllNode
 
 # ----------------------------
@@ -80,10 +80,10 @@ class DefaultFuseHandler(FuseHandler):
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
                 get_modules(n, modules)
-                arg_modules = []
+                arg_modules: List[torch.nn.Module] = []
                 for a in args:
                     get_modules(a, arg_modules)
-                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]
+                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]  # type: ignore[assignment]
                 modules.append(arg_modules)
             else:
                 n = pattern
