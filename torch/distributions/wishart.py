@@ -201,8 +201,8 @@ class Wishart(ExponentialFamily):
             if torch._C._get_tracing_state():
                 # Less optimized version for JIT
                 for _ in range(max_try):
-                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
-                    sample[is_singular] = sample_new
+                    sample_new = self._bartlett_sampling(sample_shape)
+                    sample = torch.where(is_singular, sample_new, sample)
 
                     is_singular = ~self.support.check(sample)
                     if self._batch_shape:
