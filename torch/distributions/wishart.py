@@ -198,17 +198,31 @@ class Wishart(ExponentialFamily):
         if is_singular.any():
             warnings.warn("Singular sample detected.")
 
-            for _ in range(max_try):
-                sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
-                sample[is_singular] = sample_new
+            if torch._C.get_tracing_state():
+                # Less optimized version for JIT
+                for _ in range(max_try):
+                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
+                    sample[is_singular] = sample_new
 
-                is_singular_new = ~self.support.check(sample_new)
-                if self._batch_shape:
-                    is_singular_new = is_singular_new.amax(self._batch_dims)
-                is_singular[is_singular.clone()] = is_singular_new
+                    is_singular = ~self.support.check(sample)
+                    if self._batch_shape:
+                        is_singular = is_singular.amax(self._batch_dims)
 
-                if not is_singular.any():
-                    break
+                    if not is_singular.any():
+                        break
+            else:
+                # More optimized version with data-dependent control flow.
+                for _ in range(max_try):
+                    sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
+                    sample[is_singular] = sample_new
+
+                    is_singular_new = ~self.support.check(sample_new)
+                    if self._batch_shape:
+                        is_singular_new = is_singular_new.amax(self._batch_dims)
+                    is_singular[is_singular.clone()] = is_singular_new
+
+                    if not is_singular.any():
+                        break
 
         return sample
 
