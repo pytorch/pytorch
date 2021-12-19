@@ -282,7 +282,7 @@ class IListIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
       typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
-  friend class IValue;
+  friend struct IValue;
 
   using unboxed_iterator_type = typename detail::
       IListTagImpl<IListTag::Unboxed, T>::list_type::const_iterator;
@@ -401,7 +401,7 @@ class IList {
       typename detail::IListTagImpl<IListTag::TAG, T>::elem_type>;
   TORCH_ILIST_FORALL_TAGS(DEFINE_FRIEND_CLASS);
 #undef DEFINE_FRIEND_CLASS
-  friend class IValue;
+  friend struct IValue;
 
   using unboxed_type =
       typename detail::IListTagImpl<IListTag::Unboxed, T>::list_type;
