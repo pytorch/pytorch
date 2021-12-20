@@ -28,7 +28,7 @@ class _CheckpointWrapper(torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
-        with offload_mgr:
+        with offload_mgr:  # type: ignore[attr-defined]
             return checkpoint(
                 self.mod,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
