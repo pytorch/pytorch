@@ -151,6 +151,7 @@ struct DeviceTypePropagationPass {
       case prim::If:
         return processIf(n);
       case prim::Loop:
+        return processLoop(n);
       case prim::CallMethod:
       case prim::CallFunction:
         return; // Not handled for now
@@ -228,11 +229,48 @@ struct DeviceTypePropagationPass {
     return changed;
   }
 
-  /*
-  bool processLoop(Node* n) {
-    GRAPH_DEBUG("processLoop");
+  bool applyTensorProps(
+      const at::ArrayRef<Value*>& src,
+      const at::ArrayRef<Value*>& dst) {
+    TORCH_INTERNAL_ASSERT(src.size() == dst.size());
+    bool changed = false;
+    for (int i = 0; i < dst.size(); i++) {
+      auto src_type = src[i]->type()->cast<TensorType>();
+      changed |= copy_tensor_prop(dst[i], *src_type);
+    }
+    return changed;
   }
-  */
+
+  void processLoop(Node* node) {
+    GRAPH_DEBUG("processLoop");
+    auto blocks = node->blocks();
+    auto loop_inner = blocks.at(0); // Need to check this is correct
+
+    // The first two vars are number of iterations, and loop stop condition
+    auto node_var_in = node->inputs().slice(2);
+    // First var is iter_num
+    auto loop_inner_in = loop_inner->inputs().slice(1);
+    // First var is loop stop bool
+    auto loop_inner_out = loop_inner->outputs().slice(1);
+
+    // Apply the inputs to the inside block
+    applyTensorProps(node_var_in, loop_inner_in);
+
+    int iter = 0;
+    for (; iter < 4; iter++) {
+      processBlock(loop_inner);
+      bool inputs_changed =
+          mergeAndApplyTensorProps(node_var_in, loop_inner_out, loop_inner_in);
+      if (!inputs_changed) {
+        break;
+      }
+    }
+    TORCH_INTERNAL_ASSERT(
+        iter < 4, "Failed to apply tensor props to loop due to changing types");
+
+    // Note that the types of loop_inner_in is not the same as loop_inner_out
+    applyTensorProps(loop_inner_in, node->outputs());
+  }
 
   void processIf(Node* node) {
     GRAPH_DEBUG("processIf");

@@ -173,3 +173,23 @@ class TestDeviceAnalysis(JitTestCase):
         self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
         self.assert_device_equal(test_fn, [self.mkldnn, self.mkldnn, None], self.mkldnn)
         self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+
+    def test_loop_simple(self):
+        def test_fn(x, y, z: int):
+            for _ in range(z):
+                y = x
+            return y
+
+        self.assert_device_equal(test_fn, [self.cpu, self.cpu, None], self.cpu)
+        self.assert_device_equal(test_fn, [self.cpu, self.cuda, None], None)
+        self.assert_device_equal(test_fn, [self.cpu, None, None], None)
+
+    def test_loop_device_change(self):
+        def test_fn(x, z: int):
+            for _ in range(z):
+                x = x.cuda()
+            return x
+
+        self.assert_device_equal(test_fn, [self.cpu, None], None)
+        self.assert_device_equal(test_fn, [self.cuda, None], self.cuda)
+        self.assert_device_equal(test_fn, [None, None], None)
