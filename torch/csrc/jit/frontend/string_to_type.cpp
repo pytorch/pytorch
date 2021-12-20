@@ -3,7 +3,7 @@
 namespace torch {
 namespace jit {
 using namespace c10;
-const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
+TORCH_API const std::unordered_map<std::string, TypePtr>& string_to_type_lut() {
   static std::unordered_map<std::string, TypePtr> map = {
       {"Tensor", TensorType::get()},
       // Dtype constraints are not constrained in compilation. Therefore, we map

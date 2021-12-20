@@ -18,6 +18,11 @@ bool contains(DynamicType::Tag lhs, DynamicType::Tag rhs) {
 }
 } // namespace
 
+#define DYNAMIC_TYPE_TAG_VALUE(NAME, _) \
+constexpr DynamicType::Tag DynamicTypeTrait<NAME##Type>::tagValue;
+FORALL_DYNAMIC_TYPES(DYNAMIC_TYPE_TAG_VALUE)
+#undef DYNAMIC_TYPE_TAG_VALUE
+
 std::string DynamicType::str() const {
   if (name_) {
     return *name_;
