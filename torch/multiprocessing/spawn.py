@@ -14,11 +14,12 @@ class ProcessException(Exception):
 
     def __init__(self, msg: str, error_index: int, pid: int):
         super().__init__(msg)
+        self.msg = msg
         self.error_index = error_index
         self.pid = pid
 
     def __reduce__(self):
-        return type(self), self.args + (self.error_index, self.pid)
+        return type(self), (self.msg, self.error_index, self.pid)
 
 
 class ProcessRaisedException(ProcessException):
@@ -53,7 +54,7 @@ class ProcessExitedException(ProcessException):
     def __reduce__(self):
         return (
             type(self),
-            self.args + (self.error_index, self.pid, self.exit_code, self.signal_name),
+            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
         )
 
 
