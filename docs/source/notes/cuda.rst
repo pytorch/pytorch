@@ -346,29 +346,45 @@ complete snapshot of the memory allocator state via
 :meth:`~torch.cuda.memory_snapshot`, which can help you understand the
 underlying allocation patterns produced by your code.
 
+.. _cuda-memory-envvars:
+
+Environment variables
+^^^^^^^^^^^^^^^^^^^^^
+
 Use of a caching allocator can interfere with memory checking tools such as
 ``cuda-memcheck``.  To debug memory errors using ``cuda-memcheck``, set
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
-The behavior of caching allocator can be controlled via environment variable
+The behavior of the caching allocator can be controlled via the environment variable
 ``PYTORCH_CUDA_ALLOC_CONF``.
 The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
-* ``max_split_size_mb`` prevents the allocator from splitting blocks larger
-  than this size (in MB). This can help prevent fragmentation and may allow
-  some borderline workloads to complete without running out of memory.
-  Performance cost can range from 'zero' to 'substatial' depending on
-  allocation patterns.  Default value is unlimited, i.e. all blocks can be
-  split. The :meth:`~torch.cuda.memory_stats` and
-  :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
-  option should be used as a last resort for a workload that is aborting
-  due to 'out of memory' and showing a large amount of inactive split blocks.
 * ``backend`` allows selecting the underlying allocator implementation.
   Currently, valid options are ``native``, which uses Pytorch's native
   implementation, and ``cudaMallocAsync``, which uses
   `CUDA's built-in asynchronous allocator`_.
   ``cudaMallocAsync`` requires CUDA 11.4 or newer. The default is ``native``.
+* ``max_split_size_mb`` prevents the native allocator
+  from splitting blocks larger than this size (in MB). This can reduce
+  fragmentation and may allow some borderline workloads to complete without
+  running out of memory. Performance cost can range from 'zero' to 'substatial'
+  depending on allocation patterns.  Default value is unlimited, i.e. all blocks
+  can be split. The
+  :meth:`~torch.cuda.memory_stats` and
+  :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
+  option should be used as a last resort for a workload that is aborting
+  due to 'out of memory' and showing a large amount of inactive split blocks.
+  ``max_split_size_mb`` is only meaningful with ``backend:native``.
+  With ``backend:cudaMallocAsync``, ``max_split_size_mb`` is ignored.
+
+.. note::
+
+    Some stats reported by the
+    :ref:`CUDA memory management API<cuda-memory-management-api>`
+    are specific to ``backend:native``, and are not meaningful with
+    ``backend:cudaMallocAsync``.
+    See each function's docstring for details.
 
 .. _CUDA's built-in asynchronous allocator:
     https://developer.nvidia.com/blog/using-cuda-stream-ordered-memory-allocator-part-1/

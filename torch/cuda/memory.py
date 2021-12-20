@@ -183,6 +183,10 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
+
+    .. note::
+        With :ref:`backend:cudaMallocAsync<cuda-memory-envvars>`, some stats are not
+        meaningful, and are always reported as zero.
     """
     result = []
 

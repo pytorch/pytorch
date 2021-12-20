@@ -84,6 +84,8 @@ Graphs (beta)
     graph
     make_graphed_callables
 
+.. _cuda-memory-management-api:
+
 Memory management
 -----------------
 .. autosummary::
