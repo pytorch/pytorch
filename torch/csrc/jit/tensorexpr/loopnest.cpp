@@ -3490,6 +3490,14 @@ std::string indexOf(const std::vector<T>& objects, const T object) {
 } // namespace randomization_helper
 
 void LoopNest::randomTransform(int64_t seed) {
+  // This is to help with determinstic testing of randomized infrastructure.
+  // When seed value is 1, we perform preset loop transformations. This allows
+  // testing of interface.
+  if (seed == 1) {
+    simplify();
+    return;
+  }
+
   std::default_random_engine random_engine(seed);
   std::srand(seed);
   int n_transforms =
