@@ -5,7 +5,7 @@
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/functional.h>
-#include <ATen/core/interned_strings.h>
+#include <ATen/core/symbol.h>
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/class_type.h>
 #include <c10/util/TypeList.h>
