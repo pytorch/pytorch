@@ -145,8 +145,12 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 class CollatorIterDataPipe(MapperIterDataPipe):
     r""":class:`CollatorIterDataPipe`.
 
-    Iterable DataPipe to collate samples from datapipe to Tensor(s) by `util_.collate.default_collate`,
-    or customized Data Structure by collate_fn.
+    Iterable DataPipe to collate samples from DataPipe to Tensor(s) by a custom collate function,
+    which defaults to `torch.utils.data.default_collate` if it is not specified.
+
+    .. note::
+        While writing a custom collate function, you can import `torch.utils.data.default_collate` for the
+        default behavior and `functools.partial` to specify any additional arguments.
 
     Args:
         datapipe: Iterable DataPipe being collated
