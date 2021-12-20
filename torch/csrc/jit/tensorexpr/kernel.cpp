@@ -75,6 +75,15 @@ bool fallbackEnforced() {
   return false;
 }
 
+int64_t randomTransformsRequested() {
+  static const char* enable_c_str =
+      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_c_str) {
+    return 0;
+  }
+  return std::stoi(std::string(enable_c_str));
+}
+
 bool dontUseLLVMFlag() {
   static const char* enable_c_str =
       std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
@@ -660,6 +669,14 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(st, bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
   GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  int64_t random_tr_seed = randomTransformsRequested();
+  if (random_tr_seed) {
+    if (random_tr_seed == -1)
+      random_tr_seed = std::time(nullptr);
+    l.randomTransform(random_tr_seed);
+    GRAPH_DEBUG(
+        "After random transform:\n", std::to_string(l.root_stmt()), "\n");
+  }
 
   bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
 

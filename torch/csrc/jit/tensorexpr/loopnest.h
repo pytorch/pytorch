@@ -558,6 +558,8 @@ class TORCH_API LoopNest {
   }
   std::vector<BufPtr> getIntermediateBufs() const;
 
+  void randomTransform(int64_t seed);
+
  private:
   void initialize(
       const std::vector<Tensor>& output_tensors,
