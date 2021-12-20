@@ -41,6 +41,10 @@ Dispatcher::Dispatcher()
 , listeners_(std::make_unique<detail::RegistrationListenerList>())
 , mutex_() {}
 
+// Adding explicit destructor definition in the cpp to over linker error in Windows builds.
+// Windows build doesn't produce the destructor symbol in PyTorch libs
+// causing a linker failure in downstream projects.
+// x-ref https://github.com/pytorch/pytorch/issues/70032
 Dispatcher::~Dispatcher() = default;
 
 C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
