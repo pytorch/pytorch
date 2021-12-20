@@ -83,7 +83,7 @@ class Wishart(ExponentialFamily):
         self.df = df.expand(batch_shape)
         self.arg_constraints['df'] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
-            warnings.warn("Low df values detected. Singular samples are highly likely occured for ndim - 1 < df < ndim.")
+            warnings.warn("Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.")
 
         super(Wishart, self).__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
@@ -179,14 +179,17 @@ class Wishart(ExponentialFamily):
         noise = self._dist_chi2.rsample(sample_shape).sqrt().diag_embed(dim1=-2, dim2=-1)
         i, j = torch.tril_indices(p, p, offset=-1)
         noise[..., i, j] = torch.randn(
-            torch.Size(sample_shape) + self._batch_shape + (p * (p - 1) // 2,),
+            torch.Size(sample_shape) + self._batch_shape + ((p * (p - 1)).div(2),),
             dtype=noise.dtype,
             device=noise.device,
         )
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try=10):
+    def rsample(self, sample_shape=torch.Size(), max_try=None):
+        if max_try is None:
+            max_try = 3 if torch._C._get_tracing_state() else 10
+
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)
 
@@ -195,23 +198,21 @@ class Wishart(ExponentialFamily):
         if self._batch_shape:
             is_singular = is_singular.amax(self._batch_dims)
 
-        if is_singular.any():
-            warnings.warn("Singular sample detected.")
+        if torch._C._get_tracing_state():
+            # Less optimized version for JIT
+            for _ in range(max_try):
+                sample_new = self._bartlett_sampling(sample_shape)
+                sample = torch.where(is_singular, sample_new, sample)
 
-            if torch._C._get_tracing_state():
-                # Less optimized version for JIT
-                for _ in range(max_try):
-                    sample_new = self._bartlett_sampling(sample_shape)
-                    sample = torch.where(is_singular, sample_new, sample)
+                is_singular = ~self.support.check(sample)
+                if self._batch_shape:
+                    is_singular = is_singular.amax(self._batch_dims)
 
-                    is_singular = ~self.support.check(sample)
-                    if self._batch_shape:
-                        is_singular = is_singular.amax(self._batch_dims)
+        else:
+            # More optimized version with data-dependent control flow.
+            if is_singular.any():
+                warnings.warn("Singular sample detected.")
 
-                    if not is_singular.any():
-                        break
-            else:
-                # More optimized version with data-dependent control flow.
                 for _ in range(max_try):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
                     sample[is_singular] = sample_new
