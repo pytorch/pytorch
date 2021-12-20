@@ -82,7 +82,33 @@ def diff_arg(arg, requires_grad=True):
 def normalize_op_input_output2(f, args, kwargs, output_process_fn_grad=None, requires_grad=True):
     flat_args, args_spec = tree_flatten(args)
     diff_argnums = tuple(i for i, arg in enumerate(flat_args) if diff_arg(arg, requires_grad=requires_grad))
+    assert len(diff_argnums) > 0
+    primals = tuple(flat_args[i] for i in diff_argnums)
 
+    @functools.wraps(f)
+    def wrapped(*primals):
+        _args = list(flat_args)
+        for num, arg in zip(diff_argnums, primals):
+            _args[num] = arg
+        _args = tree_unflatten(_args, args_spec)
+        result = f(*_args, **kwargs)
+        if output_process_fn_grad is not None:
+            result = output_process_fn_grad(result)
+        if isinstance(result, tuple):
+            # TODO: Remove the following hack for namedtuples
+            result = tuple(result)
+            result = tuple(r for r in result if torch.is_floating_point(r))
+            assert len(result) > 0
+        return result
+    return wrapped, primals
+
+
+# TODO: consolidate with normalize_op_input_output2
+def normalize_op_input_output3(f, args, kwargs, sample_args, output_process_fn_grad=None):
+    flat_args, args_spec = tree_flatten(args)
+    flat_sample_args, _ = tree_flatten(sample_args)
+    diff_argnums = tuple(i for i, (arg, sample) in enumerate(zip(flat_args, flat_sample_args))
+                         if diff_arg(sample, requires_grad=True))
     assert len(diff_argnums) > 0
     primals = tuple(flat_args[i] for i in diff_argnums)
 
@@ -128,10 +154,43 @@ def ref_jvp(f, primals, tangents):
         primals_out, tangents_out = zip(*(fwAD.unpack_dual(d) for d in result_duals))
         return tree_unflatten(primals_out, spec), tree_unflatten(tangents_out, spec)
 
+
+def get_sample_cotangents(f, sample):
+    fn, primals = normalize_op_input_output(f, sample)
+    output = fn(*primals)
+    if isinstance(output, tuple):
+        # TODO: Remove the following hack for torch.return_types
+        output = tuple(output)
+    return tree_map(torch.randn_like, output)
+
+
+# returns a new function g(*args, *cotangents)
+# that computes vjps and (*args, cotangents)
+def get_vjp_fn_and_args_with_cotangents(f, sample, cotangents):
+    args = tuple([sample.input] + list(sample.args))
+    kwargs = sample.kwargs
+    flat_args, args_spec = tree_flatten(args)
+    flat_cotangents, cotangents_spec = tree_flatten(cotangents)
+
+    @functools.wraps(f)
+    def wrapped(*args):
+        assert len(args) == len(flat_args) + len(flat_cotangents)
+        actual_args = args[:len(flat_args)]
+        cotangents = args[len(flat_args):]
+        actual_args = tree_unflatten(actual_args, args_spec)
+        cotangents = tree_unflatten(cotangents, cotangents_spec)
+
+        fn, primals = normalize_op_input_output3(f, actual_args, kwargs,
+                                                 flat_args,
+                                                 sample.output_process_fn_grad)
+        _, vjp_fn = vjp(fn, *primals)
+        return vjp_fn(cotangents)
+
+    return wrapped, tuple(flat_args + flat_cotangents)
+
+
 # Returns a new function g(*args, *cotangents) that computes vjps and
 # sample (*args, *cotangents)
-
-
 def get_vjpfull_variant(f, sample):
     fn, primals = normalize_op_input_output(f, sample)
     result = fn(*primals)
@@ -438,6 +497,10 @@ class TestOperators(TestCase):
                     get_fallback_and_vmap_exhaustive(vjp_of_vjp, args_and_cotangents, {}):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
     vmapvjp_fail = vjp_fail.union({
+        # The following are not bugs and are expected behavior
+        xfail('fill_'),  # Not possible, wontfix
+        xfail('masked_select'),  # Not possible due to dynamic shapes
+
         # All of the following are bugs and need to be fixed
         xfail('diag_embed'),
         xfail('eig'),
@@ -447,7 +510,6 @@ class TestOperators(TestCase):
         xfail('fft.rfft'),
         xfail('fft.rfft'),
         xfail('fft.rfftn'),
-        xfail('cdist'),
         xfail('fmax'),
         xfail('fmin'),
         xfail('index_copy'),
@@ -487,6 +549,9 @@ class TestOperators(TestCase):
         xfail('nn.functional.fractional_max_pool3d'),
         xfail('as_strided'),
         xfail('nn.functional.fractional_max_pool2d'),
+        xfail('__getitem__'),
+        xfail('index_put'),
+        xfail('lu_solve'),
     })
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -504,7 +569,8 @@ class TestOperators(TestCase):
             return
 
         for sample in samples:
-            fn, args = get_vjpfull_variant(op, sample)
+            cotangents = get_sample_cotangents(op, sample)
+            fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
             for loop_out, batched_out in get_fallback_and_vmap_exhaustive(fn, args, {}):
                 self.assertEqual(loop_out, batched_out, atol=1e-4, rtol=1e-4)
 
@@ -796,13 +862,17 @@ class TestOperators(TestCase):
 
         def test():
             for sample in samples:
-                fn, args = get_vjpfull_variant(op, sample)
-                for _ in get_fallback_and_vmap_exhaustive(fn, args, {}, compute_loop_out=False):
+                cotangents = get_sample_cotangents(op, sample)
+                fn, args = get_vjp_fn_and_args_with_cotangents(op, sample, cotangents)
+                for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                        fn, args, {}, compute_loop_out=False):
                     pass
                 for a_op in op.aliases:
-                    fn, args = get_vjpfull_variant(a_op, sample)
-                    for _ in get_fallback_and_vmap_exhaustive(fn, args, {}, compute_loop_out=False):
+                    fn, args = get_vjp_fn_and_args_with_cotangents(a_op, sample, cotangents)
+                    for loop_out, batched_out in get_fallback_and_vmap_exhaustive(
+                            fn, args, {}, compute_loop_out=False):
                         pass
+
         check_vmap_fallback(self, test, op, dry_run=False)
 
     @ops(functorch_lagging_op_db + additional_op_db, allowed_dtypes=(torch.float,))
@@ -823,7 +893,6 @@ class TestOperators(TestCase):
         xfail('linalg.multi_dot'),
         xfail('vstack'),
         xfail('nn.functional.batch_norm'),
-        xfail('cdist'),
         xfail('lu_solve'),
         xfail('lu_unpack'),
         xfail('matrix_exp'),
