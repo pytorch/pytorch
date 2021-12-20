@@ -359,10 +359,13 @@ def to_device(tensors, device):
 def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
     timings = np.zeros((args.repeat, 2), np.float64)
     ref_sync = CudaSync if current_device == 'cuda' else NoOpSync
+    warmup0 = time.perf_counter()
     for rep in range(args.warmup):
         # interleave the runs to handle frequency scaling and load changes
         timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
         timed(args, lazy_benchmark, sync=LazySync(sync_every_iter=True))
+    warmup_time = time.perf_counter() - warmup0
+    bench0 = time.perf_counter()
     for rep in range(args.repeat):
         # interleave the runs to handle frequency scaling and load changes
         _, timings[rep, 0] = timed(args, benchmark, sync=ref_sync(sync_every_iter=True))
@@ -370,7 +373,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         ltm.wait_device_ops()
         if current_device == 'cuda':
             torch.cuda.synchronize()
-
+    bench_time = time.perf_counter() - bench0
     pvalue = ttest_ind(timings[:, 0], timings[:, 1]).pvalue
     median = np.median(timings, axis=0)
     overhead = median[1] / median[0]
@@ -380,6 +383,7 @@ def lazy_overhead_experiment(args, results, benchmark, lazy_benchmark):
         ("dev", "name", "overhead", "pvalue"),
     ).writerow([current_device, current_name, f"{overhead:.4f}", f"{pvalue:.4e}"])
     print(f"{short_name(name, limit=30):<30} {current_device:<4} {args.test:<5} {'trace overheads':<20} overhead: {overhead:.3f} pvalue: {pvalue:.2e}")
+    print(f"CIDEBUGOUTPUT,lazy_overhead_experiment,{current_name},{current_device},{overhead:.4f},{pvalue:.4e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (overhead, pvalue)
 
 def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark, sync_every_iter=False, to_dev_sync=None):
@@ -392,17 +396,21 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         lazy_sync = LazySync(sync_every_iter=sync_every_iter)
 
     # interleave the runs to handle frequency scaling and load changes
+    warmup0 = time.perf_counter()
     for rep in range(args.warmup):
         # warmup
         timed(args, benchmark, sync=ref_sync)
         timed(args, lazy_benchmark, sync=lazy_sync)
+    warmup_time = time.perf_counter() - warmup0
 
     # fresh metrics for each timed run
     dump_lazy_metrics(reset=True)
+    bench0 = time.perf_counter()
     for rep in range(args.repeat):
         # measure
         _, timings[rep, 0] = timed(args, benchmark, times=args.inner_loop_repeat, sync=ref_sync)
         _, timings[rep, 1] = timed(args, lazy_benchmark, times=args.inner_loop_repeat, sync=lazy_sync)
+    bench_time = time.perf_counter() - bench0
     lazy_metrics = dump_lazy_metrics(reset=True)
     if 'CachedCompile' not in lazy_metrics or lazy_metrics['CachedCompile'] != args.repeat * args.inner_loop_repeat:
         print("WARNING: lazy cached compile count indicates fallbacks, or something else")
@@ -420,6 +428,7 @@ def lazy_compute_experiment(args, experiment, results, benchmark, lazy_benchmark
         ("name", "dev", "experiment", "speedup", "pvalue"),
     ).writerow([current_name, current_device, experiment, f"{speedup:.4f}", f"{pvalue:.2e}"])
     print(f"{short_name(current_name, limit=30):<30} {current_device:<4} {args.test:<5} {experiment:<20} speedup:  {speedup:.3f} pvalue: {pvalue:.2e}")
+    print(f"CIDEBUGOUTPUT,lazy_compute_experiment,{current_name},{current_device},{experiment},{speedup:.4f},{pvalue:.2e},{args.warmup},{args.repeat},{warmup_time:.2f},{bench_time:.2f}")
     return (speedup, pvalue)
 
 def check_results(name, correct_result, lazy_result, device):
