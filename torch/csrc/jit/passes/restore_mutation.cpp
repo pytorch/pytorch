@@ -1,5 +1,5 @@
-#include <ATen/core/symbol.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/symbol.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 
