@@ -186,18 +186,18 @@ class Wishart(ExponentialFamily):
         chol = self._unbroadcasted_scale_tril @ noise
         return chol @ chol.transpose(-2, -1)
 
-    def rsample(self, sample_shape=torch.Size(), max_try=None):
+    def rsample(self, sample_shape=torch.Size(), max_try_correction=None):
         r"""
         .. warning::
             In some cases, Bartlett decomposition sampling may return singular matrix samples.
             Several tries to correction are performed by default, but it may end up returning
             Singular matrix samples. Sigular samples may return `nan` values in `.log_prob()`.
             In those cases, the user should validate the samples and either fix the value of `df`
-            or adjust `max_try` value for argument in `.rsample` accordingly.
+            or adjust `max_try_correction` value for argument in `.rsample` accordingly.
         """
 
-        if max_try is None:
-            max_try = 3 if torch._C._get_tracing_state() else 10
+        if max_try_correction is None:
+            max_try_correction = 3 if torch._C._get_tracing_state() else 10
 
         sample_shape = torch.Size(sample_shape)
         sample = self._bartlett_sampling(sample_shape)
@@ -209,7 +209,7 @@ class Wishart(ExponentialFamily):
 
         if torch._C._get_tracing_state():
             # Less optimized version for JIT
-            for _ in range(max_try):
+            for _ in range(max_try_correction):
                 sample_new = self._bartlett_sampling(sample_shape)
                 sample = torch.where(is_singular, sample_new, sample)
 
@@ -222,7 +222,7 @@ class Wishart(ExponentialFamily):
             if is_singular.any():
                 warnings.warn("Singular sample detected.")
 
-                for _ in range(max_try):
+                for _ in range(max_try_correction):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
                     sample[is_singular] = sample_new
 
