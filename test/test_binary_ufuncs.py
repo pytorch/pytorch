@@ -15,7 +15,7 @@ from functools import partial
 
 from torch._six import inf, nan
 from torch.testing._internal.common_utils import (
-    TestCase, iter_indices, TEST_WITH_ASAN, run_tests, gradcheck,
+    TestCase, slowTest, iter_indices, TEST_WITH_ASAN, run_tests, gradcheck,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, TEST_SCIPY, set_default_dtype)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, onlyCUDA, onlyCPU, dtypes, dtypesIfCUDA,
@@ -562,7 +562,6 @@ class TestBinaryUfuncs(TestCase):
     # NOTE: because the cross-product of all possible type promotion tests is huge, this
     #   just spot checks some handwritten cases.
     # NOTE: It may be possible to refactor this test into something simpler
-    @skipCUDAIfRocm
     @ops(binary_ufuncs, dtypes=OpDTypes.none)
     def test_type_promotion(self, device, op):
         supported_dtypes = op.supported_dtypes(torch.device(device).type)
@@ -714,21 +713,6 @@ class TestBinaryUfuncs(TestCase):
                     out = torch.empty_like(lhs_f64, dtype=torch.int64)
                     self.assertEqual(op(lhs_f32, rhs_f64, out=out).dtype, torch.int64)
                     self.assertEqual(op(lhs_f32, rhs_f64), out, exact_dtype=False)
-
-    # Verifies that gcd throws an error when given an out of float16, bfloat16, or complex dtype
-    #   because the jiterator does not support casting to these datatypes
-    # TODO: FIXME: the jiterator should be updated to support these datatypes
-    @skipCUDAIfRocm
-    @onlyCUDA
-    def test_jiterator_unsupported(self, device):
-        lhs = torch.tensor((1, 2, 3), device=device)
-        rhs = torch.tensor((4, 2, 1), device=device)
-
-        unsupported_dtypes = (torch.float16, torch.bfloat16, torch.complex64, torch.complex128)
-        for dtype in unsupported_dtypes:
-            out = torch.empty_like(lhs, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "Encountered an unsupported dtype"):
-                torch.gcd(lhs, rhs, out=out)
 
     # TODO: move to error input test
     @ops(binary_ufuncs, allowed_dtypes=(torch.float32,))
@@ -3661,6 +3645,7 @@ class TestBinaryUfuncs(TestCase):
                      get_all_dtypes(include_complex=False,
                                     include_half=False, include_bfloat16=False)))
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
+    @slowTest
     def test_zeta(self, device, dtypes):
         x_dtype, q_dtype = dtypes
 
