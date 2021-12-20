@@ -34,14 +34,17 @@ const std::string jit_common_types = R"ESCAPE(
   _(int16_t, Short) /* 2 */                              \
   _(int, Int) /* 3 */                                    \
   _(int64_t, Long) /* 4 */                               \
-  _(void, Half) /* 5 */                                  \
+  _(at::Half, Half) /* 5 */                                  \
   _(float, Float) /* 6 */                                \
   _(double, Double) /* 7 */                              \
   _(c10::complex<c10::Half>, ComplexHalf) /* 8 */        \
-  _(void, ComplexFloat) /* 9 */                          \
-  _(void, ComplexDouble) /* 10 */                         \
+  _(c10::complex<float>, ComplexFloat) /* 9 */                          \
+  _(c10::complex<double>, ComplexDouble) /* 10 */                         \
   _(bool, Bool) /* 11 */                                 \
-  _(void, BFloat16) /* 12 */                             \
+  _(void, QInt8) /* 12 */                          \
+  _(void, QUInt8) /* 13 */                        \
+  _(void, QInt32) /* 14 */                        \
+  _(at::BFloat16, BFloat16) /* 15 */                             \
 
   #define AT_FORALL_SCALAR_TYPES(_) \
   _(uint8_t, Byte)                \
@@ -50,8 +53,13 @@ const std::string jit_common_types = R"ESCAPE(
   _(int, Int)                     \
   _(int64_t, Long)                \
   _(float, Float)                 \
+  _(at::Half, Half)               \
+  _(at::BFloat16, BFloat16)       \
   _(double, Double)               \
-  _(bool, Bool)
+  _(bool, Bool)                   \
+  _(c10::complex<float>, ComplexFloat)   \
+  _(c10::complex<double>, ComplexDouble)
+
 
   enum class ScalarType : int8_t {
   #define DEFINE_ENUM(_1, n) n,
@@ -76,8 +84,111 @@ const std::string jit_common_types = R"ESCAPE(
   Array& operator=(const Array&) = default;
   };
 
+  ${half_string}
+  ${bfloat16_string}
+  ${complex_string}
+
 
 )ESCAPE";
+
+//we need to include half, bfloat16 and complex strings to all kernels with half arguments and to all kernels with type casting
+//regardless of whether they have half arguments (because fetch_and_cast and cast_and_store loop over all types)
+const std::string jiterator_half_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) Half {
+  unsigned short x;
+
+  Half() = default;
+  inline __host__ __device__ Half(float value){
+    asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  }
+  inline __host__ __device__ operator float() const{
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(x)); // do we need const cast here?
+      //asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(x)));
+      return val;
+  }
+
+};
+}
+)ESCAPE";
+
+const std::string jiterator_bfloat16_support_literal = R"ESCAPE(
+namespace at {
+struct alignas(2) BFloat16 {
+  unsigned short x;
+
+  __device__ unsigned short __internal_float2bfloat16(
+      const float f,
+      unsigned int& sign,
+      unsigned int& remainder) {
+    unsigned int x;
+
+    x = __float_as_uint(f);
+
+    if ((x & 0x7fffffffU) > 0x7f800000U) {
+      sign = 0U;
+      remainder = 0U;
+      return static_cast<unsigned short>(0x7fffU);
+    }
+    sign = x >> 31;
+    remainder = x << 16;
+    return static_cast<unsigned short>(x >> 16);
+  }
+
+
+  BFloat16() = default;
+  inline __host__ __device__ BFloat16(float value){
+  #if __CUDA_ARCH__ >= 800
+  asm("{  cvt.rn.bf16.f32 %0, %1;}\n" : "=h"(x) : "f"(value));
+  )ESCAPE"
+  R"ESCAPE(
+  #else
+  unsigned int sign;
+  unsigned int remainder;
+  x = __internal_float2bfloat16(value, sign, remainder);
+  if ((remainder > 0x80000000U) ||
+      ((remainder == 0x80000000U) && ((x & 0x1U) != 0U))) {
+    x++;
+  }
+  #endif
+  }
+
+  inline __host__ __device__ operator float() const{
+    float val;
+    asm("{ mov.b32 %0, {0,%1};}\n" : "=f"(val) : "h"(x)); //do we need const cast here?
+    return val;
+  }
+
+};
+}
+)ESCAPE";
+
+//copy-pasted from util/complex.h
+const std::string jiterator_complex_support_literal = R"ESCAPE(
+//a very limited complex class, the only thing it currently allows is implicit conversion
+//to complex, and complex -> real that is unused
+namespace c10 {
+  template<typename T>
+  struct alignas(sizeof(T) * 2) complex {
+    using value_type = T;
+
+    T real_ = T(0);
+    T imag_ = T(0);
+    constexpr complex() = default;
+    inline __host__ __device__ constexpr complex(const T& re, const T& im = T())
+      : real_(re), imag_(im) {}
+
+    //FIXME I didn't find how complex -> real conversion is done in eager
+    //we are not going to use it, but it's needed for compilation
+    inline __host__ __device__ operator T() const{
+      return real_;
+    }
+
+  };
+}
+)ESCAPE";
+
 
 const std::string jit_code_template = R"ESCAPE(
 
@@ -287,7 +398,6 @@ const std::string jit_code_template = R"ESCAPE(
 )ESCAPE";
 
 const std::string jit_vectorized_code_template = R"ESCAPE(
-
 
   template <typename scalar_t>
   __device__ __inline__ scalar_t load(char* base_ptr, uint32_t offset) {
@@ -503,6 +613,21 @@ std::string generate_code(
     functor_args << "arg0[j], scalar_val";
   }
   env.s("args", functor_args.str());
+  if (f_inputs_type == "at::Half" || result_type == "at::Half" || dynamic_casting) {
+    env.s("half_string", jiterator_half_support_literal);
+  } else {
+    env.s("half_string", "");
+  }
+  if (f_inputs_type == "at::BFloat16" || result_type == "at::BFloat16" || dynamic_casting) {
+    env.s("bfloat16_string", jiterator_bfloat16_support_literal);
+  } else {
+    env.s("bfloat16_string", "");
+  }
+  if (dynamic_casting) {
+    env.s("complex_string", jiterator_complex_support_literal);
+  } else {
+    env.s("complex_string", "");
+  }
 
   if (!vectorized) {
     if (!dynamic_casting) {
@@ -532,7 +657,7 @@ std::string generate_code(
     store_outputs << "s.store<" << result_type
                   << ">(out[j], data[0], output_offsets[0]);\n";
     env.s("store_outputs", store_outputs.str());
-      static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
+    static auto cuda_template = CodeTemplate(jit_common_types + jit_code_template);
     return cuda_template.format(env);
   }
 
@@ -610,6 +735,7 @@ NvrtcFunction jit_pwise_function(
   args.push_back("-DNDEBUG");
 #endif
   // compiles and validates result
+  initializeCudaContext();
   const auto compilation_result =
       nvrtc.nvrtcCompileProgram(program, args.size(), args.data());
   if (compilation_result != NVRTC_SUCCESS) {
@@ -645,7 +771,6 @@ NvrtcFunction jit_pwise_function(
     std::string name = kernel_name + "_kernel";
     AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-
     // TODO: use guards to avoid leaking
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcDestroyProgram(&program));
 
