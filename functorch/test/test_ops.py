@@ -818,7 +818,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfft2'),
         xfail('fft.ihfftn'),
         xfail('fft.rfft2'),
-        xfail('nn.functional.embedding'),
         xfail('cross'),
         xfail('double', 'channels_last'),
         xfail('linalg.cross'),
