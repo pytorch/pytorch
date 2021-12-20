@@ -21,48 +21,6 @@ namespace c10 {
 // key.)
 //
 //
-// Note [Categorization of Dispatch Keys]
-// Internally, dispatch keys are packed into 64-bit DispatchKeySet objects
-// that get passed around at runtime.
-// However, there isn't necessarily a 1-to-1 mapping between bits in the keyset
-// and individual dispatch keys.
-//
-// First: why do we have this distinction, and why not map every dispatch key directly to a bit?
-// This is mostly because we have several types of functionalities
-// that different backends would like to customize.
-// For example, we have:
-// - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
-// - "Sparse":    SparseCPU, SparseCUDA, ...
-// - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
-// - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
-// The problem is that total number of keys grows quadratically with [# backends] x [# functionalities],
-// making it very difficult to map each key directly to a bit in a bitset without dramatically increasing
-// the size of the bitset over time.
-//
-// Dispatch keys can roughly be divided into 3 broad categories.
-//
-// (1) "Building block" keys
-//    (a) Backend-bit keys (e.g. CPUBit, CUDABIt)
-//    (b) (per-backend) functionality-bit keys (e.g. AutogradFunctionality, Sparse, Dense)
-// Building block keys always correspond to individual bits in a DispatchKeySet.
-// Building block keys can be combined in a DispatchKeySet to form actual runtime keys.
-// For example,
-// DispatchKeySet({
-//   DispatchKey::CPUBit, DispatchKey::AutogradFunctionality
-// }).has(DispatchKey::AutogradCPU); <-- True.
-//
-// (2) "Runtime" keys
-//    (a) Per-backend functionality "instances" (AutogradCUDA, SparseCUDA, CUDA)
-//    (b) backend-agnostic functionalities (e.g. FuncTorchBatched)
-//    (c) non-customizeable backends (e.g. FPGA)
-// Runtime keys are the keys that correspond to actual kernels in the operator table at runtime.
-//
-//
-// (3) "Alias" keys
-//    e.g. CompositeImplicitAutograd
-//
-// ~~~~~ "Building block" keys ~~~~~
-//
 
 // NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
 enum class DispatchKey : uint8_t {
@@ -432,6 +390,7 @@ enum class DispatchKey : uint8_t {
   EndOfAutogradBackends = AutogradPrivateUse3,
 
   // ~~~~~~~~~~~~~~~~~~~~~~ Alias Dispatch Keys ~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+  // Note [Alias Dispatch Keys]
   // Alias dispatch keys are synthetic dispatch keys which map to multiple
   // runtime dispatch keys. Alisa keys have precedence, but they are always
   // lower precedence than runtime keys. You can register a kernel to an
@@ -596,9 +555,7 @@ constexpr DispatchKey toBackendKey(DispatchKey k) {
 }
 
 constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
-  if (C10_UNLIKELY(k <= DispatchKey::EndOfBackendKeys)) {
-    throw std::invalid_argument("invalid key");
-  } else if (k <= DispatchKey::EndOfFunctionalityKeys) {
+  if (k > DispatchKey::EndOfBackendKeys && k <= DispatchKey::EndOfFunctionalityKeys) {
     return k;
   } else if (k <= DispatchKey::EndOfDenseBackends) {
     return DispatchKey::Dense;
@@ -616,7 +573,9 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
 // Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
 constexpr DispatchKey toRuntimePerBackendFunctionalityKey(DispatchKey functionality_k, DispatchKey backend_k) {
   auto backend_idx = static_cast<uint8_t>(backend_k);
-  TORCH_INTERNAL_ASSERT(backend_idx <= static_cast<uint8_t>(DispatchKey::EndOfBackendKeys));
+  if (backend_idx > static_cast<uint8_t>(DispatchKey::EndOfBackendKeys)) {
+    throw std::invalid_argument("invalid key");
+  }
   if (functionality_k == DispatchKey::Dense) {
       return static_cast<DispatchKey>(static_cast<uint8_t>(DispatchKey::StartOfDenseBackends) + backend_idx);
   } else if (functionality_k == DispatchKey::Quantized) {

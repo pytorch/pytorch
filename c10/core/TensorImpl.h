@@ -1561,20 +1561,20 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {
       constexpr auto dense_backends = DispatchKeySet({
-        DispatchKey::CPU,
-        DispatchKey::CUDA,
-        DispatchKey::HIP,
-        DispatchKey::XPU
+        DispatchKey::CPUBit,
+        DispatchKey::CUDABit,
+        DispatchKey::HIPBit,
+        DispatchKey::XPUBit
       });
       constexpr auto dense_k = DispatchKeySet(DispatchKey::Dense);
       return ts.has_any(dense_k) && ts.has_any(dense_backends);
     };
     auto is_sparse = [](DispatchKeySet ts) {
       constexpr auto sparse_backends = DispatchKeySet({
-        DispatchKey::CPU,
-        DispatchKey::CUDA,
-        DispatchKey::HIP,
-        DispatchKey::XPU
+        DispatchKey::CPUBit,
+        DispatchKey::CUDABit,
+        DispatchKey::HIPBit,
+        DispatchKey::XPUBit
       });
       constexpr auto sparse_k = DispatchKeySet(DispatchKey::Sparse);
       return ts.has_any(sparse_k) && ts.has_any(sparse_backends);

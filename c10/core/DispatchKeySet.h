@@ -60,6 +60,7 @@ offsetsAndMasks() {
 //
 // Dispatch keys can be divided into 3 broad categories.
 //
+//
 // (1) "Building block" keys
 //    (a) Backend-bit keys (e.g. CPUBit, CUDABIt)
 //    (b) (per-backend) functionality-bit keys (e.g. AutogradFunctionality, Sparse, Dense)
@@ -82,6 +83,9 @@ offsetsAndMasks() {
 // For example, right now we have at least 12 "backend" building blocks (CPU, CUDA, XLA, ...)
 // and at least 4 "functionality" building blocks (Dense, Sparse, Quantized, AutogradFunctionality, ...).
 // These keys together allow every dispatcher operator to be customized in up to 12*4 different ways.
+// Each of those requires a slot in the operator table of every dispatcher operator.
+// Not every piece of functionality necessarily needs to be customizeable per-backend,
+// and not every backend necessarily needs to be able to customize every type of functionality.
 //
 //
 // (2) "Runtime" keys
@@ -89,18 +93,25 @@ offsetsAndMasks() {
 //    (b) backend-agnostic functionalities (e.g. FuncTorchBatched)
 //    (c) non-customizeable backends (e.g. FPGA)
 //
+// Every runtime key corresponds directly to a slot in an operator's runtime dispatch table,
+// and you can directly register kernels to a runtime dispatch key.
 //
+// For per-backend functionalities like "Dense" or "AutogradFunctionality",
+// you can think of the corresponding runtime dispatch keys as "instances" of that functionality, per backend.
+// E.g. "CPU", "CUDA", "XLA", etc. are all runtime instances of the "Dense" building block key.
+
+// (2a) and (2b) are represented identically:
+// - backend-agnostic functionalities (e.g. FuncTorchBatched) are NOT customizeable per backend.
+//   In order to do so, we'd need to promote it to a per-backend functionality "building block" key.
+// - non-customizeable backends (e.g. FPGA) can NOT customize existing functionality like Sparse, Autograd, etc.
+//   In order to do so, we'd need to promote it to a backend "building block" key.
 //
-// Runtime keys are the keys that correspond to actual function slots in the operator table at runtime.
-//
+// In both cases, these keys directly correspond to runtime slots in the operator table.
 //
 //
 // (3) "Alias" keys
-//    e.g. CompositeImplicitAutograd
-//
-// ~~~~~ "Building block" keys ~~~~~
-//
-//
+// See Note [Alias Dispatch Keys]
+
 // An undefined tensor is one with an empty tensor type set.
 class C10_API DispatchKeySet final {
  public:
@@ -214,7 +225,7 @@ class C10_API DispatchKeySet final {
           DispatchKey::Dense,
           DispatchKey::Quantized,
           DispatchKey::Sparse,
-          DispatchKey::Autograd,
+          DispatchKey::AutogradFunctionality,
         }).repr_) == 0));
     return static_cast<bool>((repr_ & ks.repr_) != 0);
   }
