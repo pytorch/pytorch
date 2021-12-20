@@ -14,7 +14,7 @@ torch._C._jit_set_profiling_executor(True)
 torch._C._jit_set_profiling_mode(True)
 
 
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestRandomized(TestCase):
