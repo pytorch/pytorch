@@ -107,6 +107,7 @@ class DynamicType : public Type {
  public:
   // TODO Change Ptr to DynamicTypePtr when all migrations are done.
   using Ptr = TypePtr;
+  using ElementType = DynamicType;
   ~DynamicType() override;
 
   struct Arguments {
@@ -129,10 +130,17 @@ class DynamicType : public Type {
   static TORCH_API DynamicTypePtr create(Type& ty);
 
   explicit DynamicType(Tag, Arguments);
+  explicit DynamicType(Tag, c10::string_view, Arguments);
 
   TypePtr containedType(size_t) const override;
   Tag tag() const {
     return tag_;
+  }
+  const c10::optional<std::string>& name() const {
+    return name_;
+  }
+  const Arguments& arguments() const {
+    return arguments_;
   }
 
  private:
@@ -155,6 +163,7 @@ class DynamicType : public Type {
   }
 
   Tag tag_;
+  c10::optional<std::string> name_;
   union {
     Arguments arguments_;
     ClassTypePtr class_;
@@ -174,6 +183,12 @@ static constexpr auto tagValue = DynamicType::Tag::NAME; \
 template <>
 struct IValue::TagType<c10::DynamicType> {
   static DynamicType::Ptr get(const c10::IValue& v);
+};
+
+template <>
+struct ivalue::TupleTypeFactory<c10::DynamicType> {
+  static DynamicTypePtr create(std::vector<TypePtr> elemTypes);
+  static DynamicTypePtr fallback(const Type&);
 };
 
 } // namespace c10

@@ -80,6 +80,7 @@ struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
  public:
   using Ptr = TypePtr;
+  using ElementType = Type;
   virtual bool operator==(const Type& rhs) const = 0;
 
   // subtyping relation. By default, we return true for the case

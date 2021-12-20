@@ -22,7 +22,15 @@ class TypeParser {
   std::unordered_set<std::string> getContainedTypes();
 
  private:
+  // Torchbind custom class always starts with the follow prefix, so use it as
+  // an identifier for torchbind custom class type
+  static constexpr const char* kTypeTorchbindCustomClass =
+      "__torch__.torch.classes";
+  static constexpr const char* kTypeNamedTuple = "NamedTuple";
+
+  template <typename T>
   TypePtr parseNamedTuple(const std::string& qualified_name);
+  template <typename T>
   TypePtr parseCustomType();
   TypePtr parseTorchbindClassType();
   template <typename T>
@@ -37,6 +45,7 @@ class TypeParser {
   void lex();
 
   std::string next();
+  c10::string_view nextView();
   void advance();
   C10_NODISCARD c10::string_view cur() const;
 

@@ -12,12 +12,6 @@ namespace c10 {
 
 namespace {
 
-// Torchbind custom class always starts with the follow prefix, so use it as an
-// identifier for torchbind custom class type
-static constexpr const char* kTypeTorchbindCustomClass =
-    "__torch__.torch.classes";
-static constexpr const char* kTypeNamedTuple = "NamedTuple";
-
 bool isSpecialChar(char a) {
   for (const char* c = valid_single_char_tokens; *c; c++) {
     if (a == *c)
@@ -88,92 +82,6 @@ std::unordered_set<std::string> TypeParser::getCustomType() {
 // contained type is: [Dict, int, Tuple, Tensor]
 std::unordered_set<std::string> TypeParser::getContainedTypes() {
   return contained_types_;
-}
-
-// NamedTuple custom type will be following structure:
-// "qualified_named[
-//   NamedTuple, [
-//       [filed_name_1, field_type_1],
-//       [filed_name_2, field_type_2]
-//   ]
-// ]"
-//  Example NamedTuple type:
-//  "__torch__.base_models.sparse_nn.pytorch_preproc_types.PreprocOutputType[
-//     NamedTuple, [
-//         [float_features, Tensor],
-//         [id_list_features, List[Tensor]],
-//         [label,  Tensor],
-//         [weight, Tensor],
-//         ]
-//     ]"
-TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
-  std::vector<std::string> field_names;
-  std::vector<TypePtr> field_types;
-  std::string ns;
-  expect(",");
-  expect("[");
-  while (cur() != "]") {
-    expect("[");
-    std::string field_name = next();
-    expect(",");
-    TypePtr field_type = parse<c10::Type>();
-    field_names.emplace_back(field_name);
-    field_types.emplace_back(field_type);
-    expect("]");
-    if (cur() == ",") {
-      next();
-    }
-  }
-  return TupleType::createNamed(qualified_name, field_names, field_types);
-}
-
-// Custom type will be following structure:
-// "qualified_named[
-//   custom_type, [
-//       [filed_name_1, field_type_1],
-//       [filed_name_2, field_type_2]
-//   ]
-// ]"
-TypePtr TypeParser::parseCustomType() {
-  c10::string_view token = cur();
-  std::string qualified_name = "__torch__.";
-  qualified_name.reserve(qualified_name.size() + token.size());
-  qualified_name.append(token.begin(), token.end());
-  next();
-  while (cur() == ".") {
-    qualified_name.append(next());
-    qualified_name.append(next());
-  }
-  // After cur() moves to the next token after qualified name, if it's "[", it
-  // means this custom type follow by it's class definition. Otherwise, it's a
-  // barebone qualified name and needs to look up str_type_ptr_map_ to find
-  // the typeptr.
-  if (cur() == "[") {
-    next();
-    std::string type_name = next();
-    // Currently only supports NamedTuple custom type, if more types need to
-    // be supported, extend them here.
-    if (type_name == kTypeNamedTuple) {
-      contained_types_.insert(kTypeNamedTuple);
-      return parseNamedTuple(qualified_name);
-    } else {
-      TORCH_CHECK(
-          false, "Custom Type ", type_name, " is not supported in the parser.");
-    }
-  } else {
-    auto find_type = str_type_ptr_map_.find(qualified_name);
-    if (find_type != str_type_ptr_map_.end()) {
-      return find_type->second;
-    } else {
-      // When the type definition can't be found, likely two reasons
-      // 1. The type list in bytecode.pkl is not in the correct order
-      // 2. This custom type definition doesn't exist in bytecode.pkl type
-      // table
-      TORCH_CHECK(
-          false, "Can't find definition for the type: ", qualified_name);
-    }
-    return nullptr;
-  }
 }
 
 TypePtr TypeParser::parseTorchbindClassType() {
@@ -257,15 +165,19 @@ void TypeParser::lex() {
   }
 }
 
-std::string TypeParser::next() {
+c10::string_view TypeParser::nextView() {
   TORCH_CHECK(
       !next_token_.empty(),
       "Empty token queue in mobile type parser.",
       "Check the format of the type string and make sure it's correct.");
   c10::string_view token = cur();
-  std::string ret(token.begin(), token.end());
   advance();
-  return ret;
+  return token;
+}
+
+std::string TypeParser::next() {
+  auto token = nextView();
+  return std::string(token.begin(), token.end());
 }
 
 void TypeParser::advance() {
