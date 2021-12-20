@@ -3561,7 +3561,7 @@ void LoopNest::randomTransform(int64_t seed) {
     ELIMINATE_DEAD_STORES,
     MAX_TRANSFORM,
   };
-  bool no_more_inlining = false;
+  bool can_inline = true;
   try {
     // n_transforms = 1;
     for (int i = 0; i < n_transforms; i++) {
@@ -3575,7 +3575,7 @@ void LoopNest::randomTransform(int64_t seed) {
           break;
         }
         case COMPUTE_INLINE: {
-          if (!no_more_inlining) {
+          if (can_inline) {
             auto bufs = NodeFinder<Buf>::find(root_stmt_);
             if (bufs.size() > 0) {
               int buf_number = std::rand() % (int)bufs.size();
@@ -3588,13 +3588,13 @@ void LoopNest::randomTransform(int64_t seed) {
           break;
         }
         case INLINE_ALL: {
-          if (!no_more_inlining) {
+          if (can_inline) {
             int allow_dup = std::rand() % 2;
             message =
                 "inlineIntermediateBufs(" + std::to_string(allow_dup) + ");\n";
             randomization_helper::printHistory(i, message);
             inlineIntermediateBufs(allow_dup);
-            no_more_inlining = true;
+            can_inline = false;
           }
           break;
         }
