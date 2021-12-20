@@ -1223,19 +1223,42 @@ class TestSparseCSR(TestCase):
         # Fail early to prevent silent success with this test
         assert inp.ndim == 2, "Expected 2D input tensor for Sparse CSR"
 
-        with self.assertRaisesRegex(RuntimeError, "Exponent must be greater than 0 for Sparse CSR Layout."):
-            # Generate exponent as 0 per the given dtype
-            if dtype.is_complex:
-                exp = 0 + 0j
-            elif dtype.is_floating_point:
+        err_msg = "Exponent must be greater than 0 for Sparse CSR Layout."
+
+        # Generate exponent as 0 per the given dtype
+        if dtype.is_complex:
+            exp = complex(0, 0)
+            with self.assertRaisesRegex(RuntimeError, "Complex Exponent is not supported for Sparse CSR Layout."):
+                if is_out:
+                    func(inp, exp, out=out)
+                else:
+                    func(inp, exp)
+            return
+        else:
+            if dtype.is_floating_point:
                 exp = 0.
             else:
                 exp = 0
 
-            if is_out:
-                func(inp, exp, out=out)
-            else:
-                func(inp, exp)
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                if is_out:
+                    func(inp, exp, out=out)
+                else:
+                    func(inp, exp)
+
+        # Negative exponent is also not supported for Sparse CSR
+        exps = []
+        if dtype.is_floating_point:
+            exps = [-0.0, -2.5]
+        elif dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            exps = [-0, -1]
+
+        for exp in exps:
+            with self.assertRaisesRegex(RuntimeError, err_msg):
+                if is_out:
+                    func(inp, exp, out=out)
+                else:
+                    func(inp, exp)
 
         # Also check for exponent as boolean (False)
         with self.assertRaisesRegex(RuntimeError, "Exponent as False is not supported for Sparse CSR Layout."):
@@ -1243,8 +1266,12 @@ class TestSparseCSR(TestCase):
 
     @ops(sparse_csr_pow)
     def test_pow_scalar(self, device, dtype, op):
-        # Make sure that the op fails for exponent as 0
+        # Make sure that the op fails for exponent as 0 and for complex inputs
         self._test_pow_check_error(op, device, dtype, is_out=False)
+        # _test_pow_check_error already checks for an error if dtype is complex
+        # hence early return since complex isn't supported for Sparse CSR (pow)
+        if dtype.is_complex:
+            return
 
         samples = op.sample_inputs(device, dtype)
 
@@ -1253,6 +1280,8 @@ class TestSparseCSR(TestCase):
 
         for sample in samples:
             assert torch.is_tensor(sample.input)
+            if sample.input.is_complex:
+                continue
 
             # Sparse CSR only supports 2D tensors as inputs
             if sample.input.ndim != 2:
@@ -1279,8 +1308,12 @@ class TestSparseCSR(TestCase):
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
-        # Make sure that the op fails for exponent as 0
+        # Make sure that the op fails for exponent as 0 and for complex inputs
         self._test_pow_check_error(op, device, dtype, is_out=True)
+        # _test_pow_check_error already checks for an error if dtype is complex
+        # hence early return since complex isn't supported for Sparse CSR (pow)
+        if dtype.is_complex:
+            return
 
         for sample in samples:
             assert torch.is_tensor(sample.input)
@@ -1316,7 +1349,12 @@ class TestSparseCSR(TestCase):
         if len(samples) == 0:
             self.skipTest("Skipped! No sample inputs!")
 
+        # Make sure that the op fails for exponent as 0 and for complex inputs
         self._test_pow_check_error(op, device, dtype, is_out=False)
+        # _test_pow_check_error already checks for an error if dtype is complex
+        # hence early return since complex isn't supported for Sparse CSR (pow)
+        if dtype.is_complex:
+            return
 
         for sample in samples:
             assert torch.is_tensor(sample.input)
