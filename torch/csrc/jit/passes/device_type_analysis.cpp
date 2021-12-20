@@ -30,8 +30,10 @@ Returns: Bool indicating if anything was changed
 bool setDeviceType(Value* value, c10::optional<Device> device) {
   auto tensor_type = value->type()->cast<TensorType>();
   TORCH_INTERNAL_ASSERT(tensor_type, "Expecting a tensor type");
-  bool changed = tensor_type->device() != device;
-  value->setType(tensor_type->withDevice(device));
+  bool changed = (tensor_type->device() != device);
+  if (changed) {
+    value->setType(tensor_type->withDevice(device));
+  }
   return changed;
 }
 
