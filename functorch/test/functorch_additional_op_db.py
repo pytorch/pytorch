@@ -201,7 +201,8 @@ for reduction in ['mean', 'sum', 'none']:
                supports_out=True))
 
 
-# TODO: split embedding in pytorch core
+# TODO: PyTorch core has a check for if requires_grad=True or not.
+# We actually want to test more things for backward here which is why we have our own
 def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
     def make_input(shape):
         return make_tensor(shape, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -225,27 +226,22 @@ def sample_inputs_embedding(op_info, device, dtype, requires_grad, **kwargs):
         idx = make_long_input((S, S), low=0, high=M)
         yield SampleInput(make_input((M, S)), args=(idx,),)
 
-        if not requires_grad:
-            # Following inputs return different gradient from the numerical gradient.
-            # This is expected and relevant tests are present in `test_nn.py`.
+        idx = make_long_input((2, 2), low=0, high=S)
+        idx[0, 0] = 2
+        idx[1, 1] = 2
+        yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': 2},)
 
-            # The gradient vector at `padding_idx` is not updated.
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 2
-            idx[1, 1] = 2
-            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': 2},)
+        idx = make_long_input((2, 2), low=0, high=S)
+        idx[0, 0] = 4
+        idx[1, 1] = 4
+        yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': -1},)
 
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 4
-            idx[1, 1] = 4
-            yield SampleInput(make_input((S, S)), args=(idx,), kwargs={'padding_idx': -1},)
-
-            # Scale the gradient based on the inverse frequency of a particular index.
-            idx = make_long_input((2, 2), low=0, high=S)
-            idx[0, 0] = 1
-            idx[0, 1] = 1
-            weights = make_input((S, S))
-            yield SampleInput(weights, args=(idx,), kwargs={'scale_grad_by_freq': True},)
+        # Scale the gradient based on the inverse frequency of a particular index.
+        idx = make_long_input((2, 2), low=0, high=S)
+        idx[0, 0] = 1
+        idx[0, 1] = 1
+        weights = make_input((S, S))
+        yield SampleInput(weights, args=(idx,), kwargs={'scale_grad_by_freq': True},)
 
     return list(generator())
 
