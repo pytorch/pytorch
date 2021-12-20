@@ -93,9 +93,9 @@
  *     That may be happening because the container type you added
  *     is not compatible with the code written for that method. If
  *     that's true, then you might have to transform that code into
- *     a static method call (see `ListIterator::operator*` method).
+ *     a static method call (see `List::operator[]` method).
  *
- * 2. Can't make `IListIterator<T>::operator*` return a const-reference.
+ * 2. Can't make `IList<T>::operator[]` return a const-reference.
  *
  *    First, keep in mind that we assume that boxed containers will
  *    have to deal with `IValue` (e.g. `c10::List`). In this context,
@@ -141,6 +141,7 @@ struct IValue;
 #define TORCH_ILIST_UNWRAP(TAG, BODY)                      \
   switch (TAG) {                                           \
     TORCH_ILIST_FORALL_TAGS(TORCH_ILIST_UNWRAP_CASE, BODY) \
+    break;                                                 \
     default:                                               \
       TORCH_INTERNAL_ASSERT(false, "invalid IList tag.");  \
   }
@@ -460,7 +461,7 @@ class IList {
   }
 
   detail::IListConstRef<T> operator[](size_t i) const {
-    TORCH_ILIST_UNWRAP(tag_, { return this_[i]; });
+    TORCH_ILIST_UNWRAP(tag_, { return ImplT::get(this_, i); });
   }
 
 #define DEFINE_CHECK(TAG, ...)    \
