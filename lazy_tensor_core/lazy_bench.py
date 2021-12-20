@@ -54,6 +54,7 @@ log = logging.getLogger(__name__)
 # Models that are known to crash or otherwise not work with lazy tensor are
 # disabled, but should be removed from these lists once fixed
 SKIP = {
+    # out of memory test
     "fastNLP_Bert",
     "vision_maskrcnn",
     "speech_trasformer",
@@ -64,10 +65,13 @@ SKIP = {
     "vision_maskrcnn",
     "drq",
     "moco",
+    # slow tests
+    "maml",
 }
 SKIP_TRAIN_ONLY = {
+    # out of memory test
     "squeezenet1_1",
-    "mobilenet_v2_quantized_qat"
+    "mobilenet_v2_quantized_qat",
     "hf_Reformer",
     "hf_GPT2",
     "hf_BigBird",
@@ -77,11 +81,16 @@ SKIP_TRAIN_ONLY = {
     "resnet50_quantized_qat",
     "Background_Matting",
     "hf_Bart",
-    "timm_efficientnet", # slow
-    "Super_SloMo", # slow
-    "dcgan", # slow
-    "BERT_pytorch", # slow
-    "demucs", # . slow
+    "hf_Longformer",
+    # slow tests
+    "timm_efficientnet",
+    "Super_SloMo",
+    "dcgan",
+    "BERT_pytorch",
+    "demucs",
+    "opacus_cifar10",
+    # others
+    "hf_DistilBert",
 }
 
 current_name = ""
@@ -482,7 +491,7 @@ if __name__ == "__main__" :
     parser.add_argument("--exclude", "-x", action="append", default=[], help="filter benchmarks")
     parser.add_argument("--device", "-d", default='cuda', help="cpu or cuda")
     parser.add_argument("--warmup", type=int, default=4, help="number of warmup runs")
-    parser.add_argument("--repeat", "-n", type=int, default=6, help="number of timing runs (samples)")
+    parser.add_argument("--repeat", "-n", type=int, default=4, help="number of timing runs (samples)")
     parser.add_argument("--inner_loop_repeat", type=int, default=10, help="repeat the computation this many times per sample")
     parser.add_argument("--fuser", type=str, choices=['noopt', 'fuser0', 'fuser1', 'fuser2'], help="0=legacy, 1=nnc, 2=nvfuser")
     parser.add_argument("--test", type=str, choices=['eval', 'train'], default='eval')
