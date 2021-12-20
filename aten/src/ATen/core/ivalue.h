@@ -311,6 +311,9 @@ private:
     return a.is_alias_of(b);
   }
 
+  template <typename T>
+  bool isListOf() const;
+
 public:
   /// @private [doxygen private]
   bool isAliasOf(const IValue& rhs) const {

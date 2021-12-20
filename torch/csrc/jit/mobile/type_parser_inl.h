@@ -52,11 +52,9 @@ struct TypeParser::TypeFactory<c10::Type> {
 template <typename T>
 TypePtr TypeParser::parseNonSimple(const std::string& token) {
   if (token == "List") {
-    return CreateSingleElementType<ListType>();
+    return parseSingleElementType<T, ListType>();
   } else if (token == "Optional") {
-    return parseSingleElementType(DynamicType::Tag::Optional);
-  } else if (token == "Future") {
-    return CreateSingleElementType<FutureType>();
+    return parseSingleElementType<T, OptionalType>();
   } else if (token == "Dict") {
     expectChar('[');
     auto key = parse<T>();
@@ -201,6 +199,14 @@ TypePtr TypeParser::parseNamedTuple(const std::string& qualified_name) {
   }
   return TypeFactory<T>::createNamedTuple(
       qualified_name, field_names, field_types);
+}
+
+template <typename M, typename T>
+TypePtr TypeParser::parseSingleElementType() {
+  expectChar('[');
+  auto result = TypeFactory<M>::template create<T>(parse<M>());
+  expectChar(']');
+  return result;
 }
 
 } // namespace c10

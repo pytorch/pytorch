@@ -130,22 +130,6 @@ void TypeParser::expectChar(char c) {
   advance();
 }
 
-template <class T>
-TypePtr TypeParser::CreateSingleElementType() {
-  expectChar('[');
-  auto result = T::create(parse<c10::Type>());
-  expectChar(']');
-  return result;
-}
-
-TypePtr TypeParser::parseSingleElementType(DynamicType::Tag tag) {
-  expectChar('[');
-  auto result = std::make_shared<DynamicType>(
-      tag, DynamicType::Arguments(parse<c10::DynamicType>()));
-  expectChar(']');
-  return result;
-}
-
 void TypeParser::lex() {
   // skip white spaces
   while (start_ < pythonStr_.size() && pythonStr_[start_] == ' ')

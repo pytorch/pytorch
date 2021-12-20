@@ -198,8 +198,8 @@ void createTensorFromList(Stack& stack) {
     pop(stack, data, dtype, device);
   }
   auto elem_type = data.type();
-  while (auto list_type = elem_type->cast<ListType>()) {
-    elem_type = list_type->getElementType();
+  while (elem_type->isSubtypeOf(AnyListType::get())) {
+    elem_type = elem_type->containedType(0);
   }
   auto sizes = compute_sizes(data);
   checkListInputType(elem_type, sizes.size() == 1 && sizes[0] == 0);
