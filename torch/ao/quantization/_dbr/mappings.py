@@ -2,10 +2,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.quantized as nnq
-import torch.nn.intrinsic as nni
-import torch.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
-from torch.quantization.quantization_mappings import (
+from torch.ao.quantization.quantization_mappings import (
     DEFAULT_STATIC_QUANT_MODULE_MAPPINGS,
 )
 
@@ -53,39 +51,25 @@ functions_supported_by_quantization = set([
     toq.linear,
 ])
 
-module_types_supported_by_quantization = set([
-    nn.Conv2d,
-    nnq.Conv2d,
-    nn.intrinsic.modules.fused.ConvReLU2d,
-    nn.intrinsic.quantized.modules.conv_relu.ConvReLU2d,
-    nn.BatchNorm2d,
-    nnq.BatchNorm2d,
+module_types_supported_by_quantization = set()
+module_types_supported_by_quantization |= \
+    set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.keys())
+module_types_supported_by_quantization |= \
+    set(DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.values())
+module_types_supported_by_quantization |= set([
+    # these are quantizeable modules which do not need swaps
     nn.ReLU,
-    # TODO(future PR): detect inplace modifications by torch functions
-    nn.ReLU6,
-    nnq.ReLU6,
-    nn.Linear,
-    nnq.Linear,
     nn.Dropout,
     nn.Identity,
-    nn.LeakyReLU,
-    nnq.LeakyReLU,
-    nn.LayerNorm,
-    nnq.LayerNorm,
-    nn.Hardswish,
-    nnq.Hardswish,
-    nn.GroupNorm,
-    nnq.GroupNorm,
-    nn.InstanceNorm1d,
-    nnq.InstanceNorm1d,
-    nn.InstanceNorm2d,
-    nnq.InstanceNorm2d,
-    nn.InstanceNorm3d,
-    nnq.InstanceNorm3d,
-    nn.ConvTranspose2d,
-    nnq.ConvTranspose2d,
 ])
-# TODO verify that if nn in above, nnq also is
+module_types_supported_by_quantization -= set([
+    # TODO(future PR): enable DBR quantization for embeddings
+    nn.Embedding,
+    nnq.Embedding,
+    nn.EmbeddingBag,
+    nnq.EmbeddingBag,
+])
+
 
 # These can work in either fp32 or quint8, without the need for observation
 # TODO: better name
@@ -97,23 +81,6 @@ module_types_supported_by_quantization_preserves_dtype = set([
 functions_supported_by_quantization_preserves_dtype = set([
     F.dropout,
 ])
-
-# TODO(future PR): reuse existing mapping
-q_mod_to_float_mod_mapping = {
-    nnq.Conv2d: nn.Conv2d,
-    nniq.ConvReLU2d: nni.ConvReLU2d,
-    nnq.ReLU6: nn.ReLU6,
-    nnq.Linear: nn.Linear,
-    nnq.LeakyReLU: nn.LeakyReLU,
-    nnq.LayerNorm: nn.LayerNorm,
-    nnq.Hardswish: nn.Hardswish,
-    nnq.GroupNorm: nn.GroupNorm,
-    nnq.InstanceNorm1d: nn.InstanceNorm1d,
-    nnq.InstanceNorm2d: nn.InstanceNorm2d,
-    nnq.InstanceNorm3d: nn.InstanceNorm3d,
-    nnq.ConvTranspose2d: nn.ConvTranspose2d,
-    nnq.BatchNorm2d: nn.BatchNorm2d,
-}
 
 add_and_mul_ops = set([
     torch.add,
@@ -143,7 +110,7 @@ a_related_to_b = set()
 for a, b in binary_related_ops:
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
-for a, b in q_mod_to_float_mod_mapping.items():  # type: ignore[assignment]
+for a, b in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
     a_related_to_b.add((a, b))
     a_related_to_b.add((b, a))
 for a, b in fp32_to_int8_fun_mapping.items():
@@ -170,12 +137,3 @@ for m in module_types_supported_by_quantization_preserves_dtype:
 for f in functions_supported_by_quantization_preserves_dtype:
     assert f in functions_supported_by_quantization, \
         f"{f} needs to be added to functions_supported_by_quantization"
-
-for k, v in DEFAULT_STATIC_QUANT_MODULE_MAPPINGS.items():
-    if k in module_types_supported_by_quantization:
-        assert v in module_types_supported_by_quantization, \
-            f"{k} is in module_types_supported_by_quantization but {v} is not"
-
-for k, v in q_mod_to_float_mod_mapping.items():
-    assert k in module_types_supported_by_quantization, \
-        f"{k} is in q_mod_to_float_mod_mapping but not in module_types_supported_by_quantization"
