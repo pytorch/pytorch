@@ -146,8 +146,7 @@ void OptimizeGraph(
 }
 
 bool IsSelfInGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
-  return !graph->inputs().empty() &&
-      graph->inputs().at(0)->type()->is_module();
+  return !graph->inputs().empty() && graph->inputs().at(0)->type()->is_module();
 }
 
 // remove unused input 0 from graph
@@ -188,7 +187,7 @@ void PrepareGraphForStaticModule(
     const StaticModuleOptions& opts,
     std::vector<IValue> sample_inputs) {
   TORCH_CHECK(canEnableStaticRuntime(graph));
-  OptimizeGraph(graph, opts, sample_inputs);
+  OptimizeGraph(graph, opts, std::move(sample_inputs));
 }
 
 std::pair<std::shared_ptr<Graph>, c10::optional<Module>> PrepareForStaticModule(
