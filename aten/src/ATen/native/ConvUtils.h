@@ -1,9 +1,31 @@
 #pragma once
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/native/DispatchStub.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 namespace at { namespace native {
+
+using cudnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
+DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub);
+using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
+DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub);
+using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub);
+using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub);
+using miopen_depthwise_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
+    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
+    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
+DECLARE_DISPATCH(miopen_depthwise_convolution_backward_fn, miopen_depthwise_convolution_backward_stub);
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct ConvParams {
@@ -26,14 +48,15 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
   bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight, const at::Tensor& bias) const;
+  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
+                   const c10::optional<IntArrayRef> bias_sizes_opt) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
 
@@ -62,10 +85,14 @@ enum class ConvBackend {
 
 // Function to select the convolution backend based on the inputs and params.
 // This overload is used within the convolution internals but not exposed to python.
+// NB: The forward pass provides a bias tensor while the backward pass provides
+// a bool indicating whether the bias is defined. This is done to save memory by
+// avoiding saving the full bias tensor for backward.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
-    const Tensor& bias,
+    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const bool need_backward,
     const ConvParams& params);
 
 // Overload for selecting the convolution backend from the full set of convolution inputs.
