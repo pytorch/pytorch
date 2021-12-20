@@ -603,11 +603,11 @@ class TestSparseCSR(TestCase):
             ),
             shape=a.shape,
         )
-        expected = alpha * (a_bsr * b.cpu().numpy()) + beta * c.cpu().numpy()
+        expected = alpha * (a_bsr * b.cpu().resolve_conj().numpy()) + beta * c.cpu().numpy()
         self.assertEqual(actual, out)
         self.assertEqual(actual, expected)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmm(self, device, dtype):
@@ -623,7 +623,7 @@ class TestSparseCSR(TestCase):
                 for op_b, op_out in itertools.product([True, False], repeat=2):
                     self.run_test_block_addmm_addmv(torch.addmm, c, a, b, op_b, op_out, dtype=dtype, device=device)
 
-    @onlyCUDA
+    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype):
@@ -641,6 +641,56 @@ class TestSparseCSR(TestCase):
                 c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
                 self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
 
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_block_triangular_solve(self, device, dtype):
+        def run_test(a, b, upper, transpose, unitriangular, op_out):
+            actual = torch.triangular_solve(b, a, upper=upper, unitriangular=unitriangular, transpose=transpose)
+            actual_X = actual.solution
+            actual_A_clone = actual.cloned_coefficient
+            self.assertTrue(actual_A_clone.numel() == 0)
+            if a._nnz() == 0:
+                self.assertTrue(actual_X.isnan().all())
+                return
+
+            # TODO: replace with torch method when implemented to_dense() on block sparse tensor
+            a_bsr = sp.bsr_matrix(
+                (
+                    a.values().cpu().numpy(),
+                    a.col_indices().cpu().numpy(),
+                    a.crow_indices().cpu().numpy(),
+                ),
+                shape=a.shape,
+            )
+            expected_X, _ = torch.triangular_solve(
+                b,
+                torch.tensor(a_bsr.todense(), device=device),
+                transpose=transpose,
+                upper=upper,
+                unitriangular=unitriangular)
+            self.assertEqual(actual_X, expected_X)
+
+            out = torch.empty_like(b.mH if op_out and a.shape == b.shape else b)
+            torch.triangular_solve(
+                b, a,
+                upper=upper, unitriangular=unitriangular, transpose=transpose, out=(out, actual_A_clone)
+            )
+            self.assertEqual(out, actual_X)
+            self.assertEqual(out, expected_X)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for (m, k), block_size, noncontiguous in zip(itertools.product([1, 5], repeat=2), [2, 3], [True, False]):
+                nnz = random.randint(0, m * m)
+                a = self.genSparseCSRTensor((m, m), nnz, dtype=dtype, device=device, index_dtype=index_dtype)
+                a_data = make_tensor((nnz, block_size, block_size), dtype=dtype, device=device)
+                a_data = a_data.mT if noncontiguous else a_data  # Test column-major blocks
+                a = torch._sparse_csr_tensor_unsafe(a.crow_indices(), a.col_indices(), a_data, (m * block_size, m * block_size))
+                b = make_tensor((m * block_size, k), dtype=dtype, device=device, noncontiguous=noncontiguous)
+
+                for (upper, unitriangular, transpose, op_out) in itertools.product([True, False], repeat=4):
+                    run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
     @dtypes(torch.double)
